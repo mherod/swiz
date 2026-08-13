@@ -10,12 +10,15 @@ When `swiz idea` and `swiz continue` are used together, the system can enter a *
 
 ## Install
 
+Requirements: [Bun](https://bun.sh/) and Git. GitHub-backed features (`issue`, `ci-wait`, PR/issue hooks) also require an authenticated `gh` CLI. Install only the coding agents you actually use; swiz detects the available providers.
+
 ```bash
 bun install
 bun link
+swiz help
 ```
 
-Then use `swiz` from anywhere.
+Run these commands from a checkout. `bun link` installs the `swiz` executable from that checkout. `swiz help` should print the command list; `swiz status` then shows which supported agents are installed and whether their hook configuration is current.
 
 ## How It Works
 
@@ -387,26 +390,122 @@ swiz status
 swiz status --no-health      # skip project health checks
 ```
 
-### `swiz settings [show | enable | disable]`
+### `swiz settings [show | enable | disable | set]`
 
-View and modify global swiz behavior flags stored at `~/.swiz/settings.json`.
+View and modify effective settings. Global values live in `~/.swiz/settings.json`, project overrides in `<repo>/.swiz/config.json`, and supported session overrides are keyed by session ID. Resolution is session → project → global → default for settings available at those scopes.
 
 ```bash
-swiz settings                         # show effective settings
-swiz settings disable auto-continue  # disable stop auto-continue blocker
-swiz settings enable auto-continue   # re-enable it
-swiz settings show --session --dir <path>                    # show effective setting for latest session in dir
-swiz settings disable auto-continue --session --dir <path>   # set override for latest session in dir
-swiz settings enable auto-continue --session <id> --dir <path> # set override for matching session
+swiz settings show --json                              # inspect effective settings
+swiz settings enable quality-checks-gate --project     # project override
+swiz settings set collaboration-mode team --project   # string/numeric values use set
+swiz settings disable auto-continue --session --dir <path>
 ```
 
-Session overrides are keyed by session ID. If no override exists, that session inherits the global setting.
+Writes create a backup first. Use the CLI rather than editing JSON directly so scope validation, conflicts, and typed values are checked. Omit a scope for global settings; project-only settings such as `trunk-mode` and `default-branch` select project scope automatically.
 
-**Daemon Settings:**
+<details>
+<summary>All 52 CLI settings</summary>
 
-| Setting | Default | Description |
-|---------|---------|-------------|
-| `transcriptMonitorMaxConcurrentDispatches` | 0 (unlimited) | Limits concurrent transcript dispatch operations in the daemon. When set to a positive value (e.g., 2), at most that many dispatch handlers run in parallel; additional dispatches queue until slots free up. Useful for throttling daemon load when many sessions are active. Configure via `swiz settings set transcriptMonitorMaxConcurrentDispatches <N>`. Set to 0 to disable limiting. |
+<!-- settings-table:start -->
+| Setting / CLI name | Default | Required? | Scopes | Description | Example value |
+|---|---:|:---:|---|---|---|
+| `autoContinue` / `auto-continue` | `false` | No | global, project, session | Continue automatically after a stop event | `true` |
+| `prMergeMode` / `pr-merge-mode` | `true` | No | global, session | Guide PRs through rebase, CI, review resolution, and merge | `false` |
+| `critiquesEnabled` / `critiques-enabled` | `true` | No | global | Include process/product critiques in auto-continue output | `false` |
+| `pushGate` / `push-gate` | `false` | No | global, project | Require explicit approval before push | `true` |
+| `skipSecretScan` / `skip-secret-scan` | `false` | No | global | Skip outgoing secret scanning; leave disabled for normal use | `false` |
+| `ignoreMcpTools` / `ignore-mcp-tools` | `true` | No | global | Skip hooks for `mcp__*` tool calls | `false` |
+| `relaxSubagentHooks` / `relax-subagent-hooks` | `true` | No | global | Relax enforcement for orchestrated subagent sessions | `false` |
+| `mcpChannels` / `mcp-channels` | `false` | No | global | Enable Claude channel capabilities in `swiz mcp` | `true` |
+| `sandboxedEdits` / `sandboxed-edits` | `true` | No | global | Restrict edits to the cwd and temporary directories | `true` |
+| `speak` / `speak` | `false` | No | global, project | Read agent output aloud | `true` |
+| `suggestWebSearch` / `suggest-web-search` | `true` | No | global, project | Inject a web-search reminder at session start | `false` |
+| `autoSteer` / `auto-steer` | `false` | No | global | Type scheduled continuation text into the terminal on macOS | `true` |
+| `humaniseAutoSteer` / `humanise-auto-steer` | `false` | No | global | Rewrite scheduled steer messages into natural prose | `true` |
+| `swizNotifyHooks` / `pseudo-hooks` | `false` | No | global | Let daemon monitoring synthesize pseudo-hook dispatches | `true` |
+| `autoSteerTranscriptWatching` / `auto-steer-transcript-watching` | `false` | No | global, project | Drive auto-steer from transcript monitoring | `true` |
+| `transcriptMonitorMaxConcurrentDispatches` / `transcript-monitor-max-concurrent-dispatches` | `0` | No | global, project | Cap concurrent transcript dispatches; `0` is unlimited | `2` |
+| `updateMemoryFooter` / `update-memory-footer` | `false` | No | global | Add memory-update guidance to stop footers | `true` |
+| `gitStatusGate` / `git-status-gate` | `true` | No | global | Block stop while the worktree is dirty | `true` |
+| `nonDefaultBranchGate` / `non-default-branch-gate` | `true` | No | global | Block stop with unmerged work on a non-default branch | `true` |
+| `githubCiGate` / `github-ci-gate` | `true` | No | global, project | Block stop when current GitHub Actions CI is failing | `true` |
+| `ignoreCi` / `ignore-ci` | `false` | No | global, project | Suppress all GitHub Actions integration | `true` |
+| `changesRequestedGate` / `changes-requested-gate` | `true` | No | global | Block stop with unresolved changes-requested reviews | `true` |
+| `personalRepoIssuesGate` / `personal-repo-issues-gate` | `true` | No | global | Block stop on actionable issues in personal repositories | `true` |
+| `issueCloseGate` / `issue-close-gate` | `false` | No | global | Require confirmation before closing issues | `true` |
+| `memoryUpdateReminder` / `memory-update-reminder` | `false` | No | global | Prompt for memory capture at session stop | `true` |
+| `qualityChecksGate` / `quality-checks-gate` | `true` | No | global, project | Run lint and typecheck before stop | `true` |
+| `strictNoDirectMain` / `strict-no-direct-main` | `false` | No | global, project | Require feature branches and PRs for the default branch | `true` |
+| `trunkMode` / `trunk-mode` | `false` | No | project | Work directly on the default branch | `true` |
+| `prAgeGateMinutes` / `pr-age-gate` | `10` | No | global | Minimum PR age before merge | `15` |
+| `pushCooldownMinutes` / `push-cooldown-minutes` | `0` | No | global | Minimum interval between pushes | `1` |
+| `taskDurationWarningMinutes` / `task-duration-warning-minutes` | `10` | No | global, project | Warn when an in-progress task runs too long | `20` |
+| `skillRecencyMaxTurns` / `skill-recency-max-turns` | `30` | No | global, project | Maximum turns searched for recent skill usage | `40` |
+| `skillRecencyMaxAgeMinutes` / `skill-recency-max-age-minutes` | `20` | No | global, project | Maximum age searched for recent skill usage | `30` |
+| `narratorSpeed` / `narrator-speed` | `0` | No | global | Narrator words per minute; `0` uses the system rate | `180` |
+| `memoryLineThreshold` / `memory-line-threshold` | `1400` | No | global, project | Memory-file line warning threshold | `1200` |
+| `memoryWordThreshold` / `memory-word-threshold` | `5000` | No | global, project | Memory-file word warning threshold | `4500` |
+| `dirtyWorktreeThreshold` / `dirty-worktree-threshold` | `15` | No | global, project | Uncommitted-file threshold for edit governance | `20` |
+| `largeFileSizeKb` / `large-file-size-kb` | `500` | No | global, project | Advisory large-file threshold in KB | `750` |
+| `largeFileSizeBlockKb` / `large-file-size-block-kb` | `5120` | No | global | Hard push block threshold in KB | `10240` |
+| `defaultBranch` / `default-branch` | auto-detect | No | project | Override the detected default branch | `main` |
+| `narratorVoice` / `narrator-voice` | system default | No | global | Platform TTS voice name | `Samantha` |
+| `ambitionMode` / `ambition-mode` | `standard` | No | global, project, session | Select `standard`, `aggressive`, `creative`, or `reflective` initiative | `creative` |
+| `collaborationMode` / `collaboration-mode` | `auto` | No | global, project, session | Select `auto`, `solo`, `team`, or `relaxed-collab` workflow | `team` |
+| `autoTransition` / `auto-transition` | `true` | No | global | Advance project state on git/PR lifecycle events | `false` |
+| `taskAutoTransition` / `task-auto-transition` | `true` | No | global | Allow pending tasks to pass through `in_progress` automatically | `false` |
+| `auditStrictness` / `audit-strictness` | `strict` | No | global, project | Select `strict`, `relaxed`, or `local-dev` governance | `relaxed` |
+| `actionPlanMerge` / `action-plan-merge` | `false` | No | global, project | Create tasks from hook and skill action plans | `true` |
+| `enforceEndOfDay` / `enforce-end-of-day` | `true` | No | global | Require the end-of-day workflow when work is unpushed | `false` |
+| `enforceUnblockMyself` / `enforce-unblock-myself` | `true` | No | global | Advise when retry loops make no progress | `false` |
+| `enforceMidSessionCheckin` / `enforce-mid-session-checkin` | `false` | No | global | Suggest a check-in when long sessions drift | `true` |
+| `enforceMorningStandup` / `enforce-morning-standup` | `false` | No | global | Suggest one morning standup per day | `true` |
+| `enforceWeeklyRetro` / `enforce-weekly-retro` | `false` | No | global | Suggest one weekly retro when activity qualifies | `true` |
+<!-- settings-table:end -->
+
+</details>
+
+Advanced project-only fields not exposed as ordinary registry settings are `profile` (`solo` / `team` / `strict`), `trivialMaxFiles` (default `3`), `trivialMaxLines` (default `20`), `disabledHooks`, `plugins`, `hooks`, and `largeFileAllowPatterns`. All are optional; see `ProjectSwizSettings` in `src/settings/types.ts` for their validated shapes. Global settings also support optional `statusLineSegments`, `disabledHooks`, and `githubWebhookSecret`; never commit a real webhook secret.
+
+<details>
+<summary>Runtime environment overrides</summary>
+
+These are optional user-facing and operational overrides. Agent-injected detection variables and test-only fixture variables are intentionally not configuration.
+
+| Variable | Default | Required? | Description | Example |
+|---|---:|:---:|---|---|
+| `AI_PROVIDER` | auto-select | No | Force `openrouter`, `claude`, or `gemini` | `AI_PROVIDER=claude swiz idea` |
+| `OPENROUTER_API_KEY` | unset | No | Enable OpenRouter, the first automatic AI provider | `OPENROUTER_API_KEY=<token>` |
+| `GEMINI_API_KEY` | Keychain/CLI auth | No | Enable Gemini API-key auth | `GEMINI_API_KEY=<token>` |
+| `GEMINI_MODEL` | `gemini-flash-latest` | No | Override and validate the Gemini model at startup | `GEMINI_MODEL=gemini-2.5-pro swiz idea` |
+| `ANTHROPIC_MODEL` | merged Claude setting | No | Override the Claude Code model reported by `swiz model` | `ANTHROPIC_MODEL=sonnet swiz model` |
+| `SWIZ_AGENT_TOOL_CAPABILITIES` | unset | No | Pass an ephemeral JSON inventory to skill conversion | `SWIZ_AGENT_TOOL_CAPABILITIES='{"agentId":"codex","toolNames":["web.run"]}'` |
+| `SWIZ_BYPASS` | unset | No | Bypass shell shims for one command | `SWIZ_BYPASS=1 grep pattern file` |
+| `SWIZ_SHIM` | context-aware | No | Set `strict` to block shimmed commands in interactive shells too | `SWIZ_SHIM=strict` |
+| `SWIZ_DIRECT` | unset | No | Allow direct checkout execution instead of the global link | `SWIZ_DIRECT=1 bun run index.ts help` |
+| `SWIZ_TIMEOUT` | `0` (off) | No | Global CLI timeout in seconds | `SWIZ_TIMEOUT=30 swiz status` |
+| `SWIZ_DAEMON_PORT` | `7943` | No | Change the daemon and dispatch port | `SWIZ_DAEMON_PORT=8080 swiz daemon` |
+| `SWIZ_DAEMON_ORIGIN` | derived localhost URL | No | Override the daemon URL used by `ci-wait` | `SWIZ_DAEMON_ORIGIN=http://127.0.0.1:8080` |
+| `SWIZ_NO_DAEMON` | unset | No | Force direct dispatch/GitHub computation | `SWIZ_NO_DAEMON=1 swiz dispatch stop` |
+| `SWIZ_DEBUG` | unset | No | Enable diagnostic logging | `SWIZ_DEBUG=1 swiz status` |
+| `SWIZ_WORKER_POOL_SIZE` | `2` | No | Set dispatch worker count from `1` to `8` | `SWIZ_WORKER_POOL_SIZE=4 swiz daemon` |
+| `SWIZ_SLOW_HOOK_THRESHOLD_MS` | `3000` | No | Change slow-hook diagnostic threshold | `SWIZ_SLOW_HOOK_THRESHOLD_MS=5000` |
+| `SWIZ_DAEMON_WORKER_HOTPATH` | enabled | No | Set `0` to disable the daemon worker hot path | `SWIZ_DAEMON_WORKER_HOTPATH=0` |
+| `SWIZ_CAPTURE_INCOMING` | enabled | No | Set `0` to disable sanitized incoming captures | `SWIZ_CAPTURE_INCOMING=0` |
+| `SWIZ_CAPTURE_INCOMING_PAYLOADS` | enabled | No | Backward-compatible capture disable switch | `SWIZ_CAPTURE_INCOMING_PAYLOADS=0` |
+| `SWIZ_CAPTURE_INCOMING_RAW` | `0` | No | Opt into exact raw payload companions | `SWIZ_CAPTURE_INCOMING_RAW=1` |
+| `SWIZ_INCOMING_RETENTION_MS` | `600000` | No | Incoming-capture retention age | `SWIZ_INCOMING_RETENTION_MS=1800000` |
+| `SWIZ_INCOMING_MAX_BYTES` | `67108864` | No | Total incoming-capture byte cap | `SWIZ_INCOMING_MAX_BYTES=134217728` |
+| `SWIZ_INCOMING_JSONL_MAX_BYTES` | `4194304` | No | Per-event JSONL segment cap | `SWIZ_INCOMING_JSONL_MAX_BYTES=8388608` |
+| `SWIZ_HOOK_LOG_MAX_BYTES` | `33554432` | No | Hook-log byte cap | `SWIZ_HOOK_LOG_MAX_BYTES=67108864` |
+| `SWIZ_HOOK_LOG_MAX_AGE_DAYS` | `30` | No | Hook-log retention age | `SWIZ_HOOK_LOG_MAX_AGE_DAYS=14` |
+| `SWIZ_HOOK_LOG_MAINTENANCE_INTERVAL_MS` | `300000` | No | Hook-log compaction interval | `SWIZ_HOOK_LOG_MAINTENANCE_INTERVAL_MS=600000` |
+| `SWIZ_PROMPT_CACHE_DIR` | `~/.swiz/prompt-cache` | No | Relocate the humanised-prompt cache | `SWIZ_PROMPT_CACHE_DIR=/tmp/swiz-prompts` |
+| `GH_API_CACHE_DURATION` | `20s` | No | Set the `gh api --cache` duration | `GH_API_CACHE_DURATION=60s` |
+| `GH_FALLBACK_CACHE_TTL_MS` | `300000` | No | Set fallback GitHub cache TTL | `GH_FALLBACK_CACHE_TTL_MS=600000` |
+| `SWIZ_GH_CACHE_DIR` | `/tmp/swiz-gh-cache` | No | Relocate the fallback GitHub cache | `SWIZ_GH_CACHE_DIR=/tmp/my-swiz-gh-cache` |
+
+</details>
 
 ### `swiz memory`
 
@@ -500,6 +599,8 @@ swiz shim uninstall       # remove from all profiles
 - **Bypass**: `SWIZ_BYPASS=1 grep ...` or `command grep ...` to skip the shim.
 - **Force strict mode**: `SWIZ_SHIM=strict` to block even in interactive shells.
 
+Package-manager shims resolve the command's target project, including the directory passed to `npm`/`npx --prefix`. The nearest explicit `package.json#packageManager` declaration wins. Without one, swiz uses lockfiles; mixed npm and non-npm lockfiles are treated as ambiguous and do not trigger a shell-shim block. A parent `pnpm-lock.yaml` therefore cannot override a nearer explicit npm project.
+
 Shimmed commands: `grep`, `egrep`, `fgrep`, `find`, `sed`, `awk`, `npm`, `npx`, `yarn`, `pnpm`, `node`, `ts-node`, `python`, `python3`, `rm`.
 
 This is the primary workaround for **Cursor CLI**, where only `beforeShellExecution`/`afterShellExecution` events fire — the shim catches everything else at the shell layer.
@@ -514,7 +615,7 @@ swiz continue --print     # dry run — print the suggestion without resuming
 swiz continue --session <id>  # select a specific session (Claude/Gemini/Antigravity/Codex) by ID prefix
 ```
 
-Uses the same AI backend detection as `stop-auto-continue` (`agent` → `claude` → `gemini`). Exits gracefully if no backend is available.
+AI generation can be pinned with `--provider gemini|claude|openrouter`. Otherwise swiz tries available providers in order: OpenRouter, Claude Code, then Gemini. If none is configured, `continue` falls back to the available agent CLI and exits cleanly when no backend exists.
 
 Notes:
 
@@ -789,13 +890,14 @@ swiz model opus                            # set the default model (user setting
 swiz model --project sonnet                # set a per-project default
 ```
 
-### `swiz compact`
+### `swiz compact-memory`
 
 Reduce a memory file's word count (`CLAUDE.md`, `MEMORY.md`, `GEMINI.md`, `AGENTS.md`, `.cursorrules`) to lower per-session context overhead, respecting the configured word cap.
 
 ```bash
-swiz compact CLAUDE.md                       # compact to the resolved word cap
-swiz compact CLAUDE.md --dry-run            # preview removals without writing
+swiz compact-memory CLAUDE.md                       # compact to the resolved word cap
+swiz compact-memory CLAUDE.md --threshold 4500     # explicit word cap
+swiz compact-memory CLAUDE.md --dry-run            # preview removals without writing
 ```
 
 ### `swiz plugins`
@@ -827,7 +929,7 @@ swiz mcp                                     # start the MCP stdio server
 
 ### `swiz idea`
 
-Use the configured AI backend (Gemini) to propose a creative next idea for the current project.
+Use the configured AI backend to propose a creative next idea for the current project. Override automatic provider selection with `--provider gemini|claude|openrouter`.
 
 ```bash
 swiz idea                                    # suggest a next idea for the cwd project
@@ -835,7 +937,7 @@ swiz idea                                    # suggest a next idea for the cwd p
 
 ### `swiz reflect`
 
-Use the configured AI backend to reflect on mistakes in a session transcript — the engine behind the `/reflect-on-session-mistakes` workflow.
+Use the configured AI backend to reflect on mistakes in a session transcript — the engine behind the `/reflect-on-session-mistakes` workflow. Override automatic provider selection with `--provider gemini|claude|openrouter`.
 
 ```bash
 swiz reflect                                 # reflect on the latest session
@@ -894,6 +996,19 @@ Display usage information for all registered commands. Automatically available �
 swiz help                                   # list all commands
 swiz help <command>                        # show usage for a specific command
 ```
+
+## Development
+
+Swiz runs on Bun and does not use Node.js package-manager commands for development.
+
+```bash
+bun install
+bun run typecheck
+bun run lint
+bun test --parallel=4 --timeout=5000
+```
+
+Keep command metadata in the command module so `swiz help <command>` stays authoritative. Hook changes must keep `src/manifest.ts`, dispatch routes, agent event maps, and the Bundled Hooks tables in sync; `bun test src/readme-hook-counts.test.ts` verifies the README counts and filenames. Use Conventional Commits, include focused tests, and open a pull request with the behavior change and verification evidence.
 
 ## Architecture
 
