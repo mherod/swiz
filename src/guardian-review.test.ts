@@ -1,9 +1,12 @@
 import { describe, expect, test } from "bun:test"
+import { evaluateGuardianAwareness } from "../hooks/pretooluse-guardian-awareness.ts"
 import {
   detectGuardianReviewRequest,
   enrichPayloadWithGuardianReview,
   GIT_ADD_GUARDIAN_DENIAL_MARKER,
 } from "./guardian-review.ts"
+import type { JsonLike } from "./schemas.ts"
+import { getHookSpecificOutput } from "./utils/hook-specific-output.ts"
 
 const COMMAND = "SWIZ_DIRECT=1 bun run index.ts push-wait origin main"
 const GIT_ADD_COMMAND = "git add -- hooks/shim.sh src/commands/shim.test.ts"
@@ -21,17 +24,25 @@ function wrapperCall(callId: string, command: string, escalated: boolean): strin
   })
 }
 
-function wrapperOutput(callId: string, text: string | string[], timestamp?: string): string {
-  const blocks = Array.isArray(text) ? text : [text]
+function wrapperResult(callId: string, output: JsonLike, timestamp?: string): string {
   return JSON.stringify({
     ...(timestamp ? { timestamp } : {}),
     type: "response_item",
     payload: {
       type: "custom_tool_call_output",
       call_id: callId,
-      output: blocks.map((block) => ({ type: "input_text", text: block })),
+      output,
     },
   })
+}
+
+function wrapperOutput(callId: string, text: string | string[], timestamp?: string): string {
+  const blocks = Array.isArray(text) ? text : [text]
+  return wrapperResult(
+    callId,
+    blocks.map((block) => ({ type: "input_text", text: block })),
+    timestamp
+  )
 }
 
 function guardianDeniedOutput(callId: string, timestamp: string): string {
@@ -124,6 +135,58 @@ describe("guardian review transcript detection", () => {
     )
   })
 
+  test("recognizes a doubly encoded structured sandbox failure", () => {
+    const encodedResult = JSON.stringify(
+      JSON.stringify({ exit_code: 1, output: "Operation not permitted" })
+    )
+    const lines = [
+      wrapperCall("prior", COMMAND, false),
+      wrapperOutput("prior", encodedResult),
+      wrapperCall("current", COMMAND, true),
+    ]
+
+    expect(detectGuardianReviewRequest(lines, COMMAND)?.priorSandboxAttempt).toBe(
+      "permission-failed"
+    )
+  })
+
+  test("classifies typed and encoded structured sandbox failures identically", () => {
+    const typedLines = [
+      wrapperCall("prior", COMMAND, false),
+      wrapperResult("prior", { exit_code: 1, output: "Operation not permitted" }),
+      wrapperCall("current", COMMAND, true),
+    ]
+    const encodedLines = [
+      wrapperCall("prior", COMMAND, false),
+      wrapperOutput(
+        "prior",
+        JSON.stringify(JSON.stringify({ exit_code: 1, output: "Operation not permitted" }))
+      ),
+      wrapperCall("current", COMMAND, true),
+    ]
+
+    expect(detectGuardianReviewRequest(typedLines, COMMAND)?.priorSandboxAttempt).toBe(
+      detectGuardianReviewRequest(encodedLines, COMMAND)?.priorSandboxAttempt
+    )
+  })
+
+  test("recognizes explicit EPERM and EACCES failures", () => {
+    for (const output of [
+      "EPERM: operation not permitted, mkdir '/restricted'",
+      "Error: EACCES, permission denied '/restricted'",
+    ]) {
+      const lines = [
+        wrapperCall("prior", COMMAND, false),
+        wrapperOutput("prior", output),
+        wrapperCall("current", COMMAND, true),
+      ]
+
+      expect(detectGuardianReviewRequest(lines, COMMAND)?.priorSandboxAttempt).toBe(
+        "permission-failed"
+      )
+    }
+  })
+
   test("recognizes an output-only Git permission failure", () => {
     const lines = [
       wrapperCall("prior", GIT_ADD_COMMAND, false),
@@ -179,6 +242,26 @@ describe("guardian review transcript detection", () => {
     expect(detectGuardianReviewRequest(lines, COMMAND)?.priorSandboxAttempt).toBe("unknown")
   })
 
+  test("keeps explicit success ahead of incidental OS permission error codes", () => {
+    const lines = [
+      wrapperCall("prior", COMMAND, false),
+      wrapperOutput("prior", "EPERM: documented platform behavior\nexit=0"),
+      wrapperCall("current", COMMAND, true),
+    ]
+
+    expect(detectGuardianReviewRequest(lines, COMMAND)?.priorSandboxAttempt).toBe("succeeded")
+  })
+
+  test("does not treat OS permission error names in documentation as a failure", () => {
+    const lines = [
+      wrapperCall("prior", COMMAND, false),
+      wrapperOutput("prior", "Documentation lists EPERM, EACCES, and ENOENT error names."),
+      wrapperCall("current", COMMAND, true),
+    ]
+
+    expect(detectGuardianReviewRequest(lines, COMMAND)?.priorSandboxAttempt).toBe("unknown")
+  })
+
   test("does not reuse an older escalation for the current sandboxed retry", () => {
     const lines = [wrapperCall("old", COMMAND, true), wrapperCall("current", COMMAND, false)]
     expect(detectGuardianReviewRequest(lines, COMMAND)).toBeNull()
@@ -219,5 +302,26 @@ describe("guardian review transcript detection", () => {
     })
     expect(context?.priorSandboxAttempt).toBe("not-attempted")
     expect(payload._guardianReview).toEqual(context!)
+  })
+
+  test("allows the hook decision after a doubly encoded sandbox failure", () => {
+    const payload = {
+      tool_name: "Bash",
+      tool_input: { command: COMMAND },
+    }
+    const encodedResult = JSON.stringify(
+      JSON.stringify({ exit_code: 1, output: "Operation not permitted" })
+    )
+    enrichPayloadWithGuardianReview(payload, {
+      sessionLines: [
+        wrapperCall("prior", COMMAND, false),
+        wrapperOutput("prior", encodedResult),
+        wrapperCall("current", COMMAND, true),
+      ],
+    })
+
+    const specific = getHookSpecificOutput(evaluateGuardianAwareness(payload))
+    expect(specific?.permissionDecision).toBe("allow")
+    expect(specific?.additionalContext).toContain("narrowly scoped")
   })
 })
