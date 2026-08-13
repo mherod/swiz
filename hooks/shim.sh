@@ -367,6 +367,10 @@ _swiz_has_function() {
 _swiz_chain_existing() {
   local name="$1" chain="_swiz_chain_${1}"
   if _swiz_has_function "$name"; then
+    # Don't chain if it's already our wrapper
+    if declare -f "$name" | command grep -q "_swiz_run_${name}"; then
+      return 0
+    fi
     eval "$(declare -f "$name" | command sed "1s/^${name} /${chain} /")"
   fi
 }
@@ -458,6 +462,16 @@ git() {
 
   # Block unsafe force pushes while allowing lease-based safety flags.
   if [[ "$git_cmd" == "push" ]]; then
+    local push_cooldown
+    push_cooldown="$(_swiz_get_setting "pushCooldownMinutes")"
+    if [[ -n "$push_cooldown" && "$push_cooldown" -gt 0 ]]; then
+      if _swiz_is_agent_process || _swiz_is_agent_env; then
+        printf 'swiz: git push is blocked by push-cooldown-minutes (%s mins).\n' "$push_cooldown" >&2
+        printf 'Use `swiz push-wait origin <branch>` to safely manage push pacing.\n' >&2
+        return 1
+      fi
+    fi
+
     local is_delete=false
     for arg in "${git_cmd_args[@]}"; do
       [[ "$arg" == "--" ]] && break
@@ -562,6 +576,27 @@ git() {
       ;;
   esac
 
+  # Block adding large files if configured
+  if [[ "$git_cmd" == "add" ]]; then
+    local block_kb
+    block_kb="$(_swiz_get_setting "largeFileSizeBlockKb")"
+    if [[ -n "$block_kb" && "$block_kb" -gt 0 ]]; then
+      local block_bytes=$((block_kb * 1024))
+      for arg in "${git_cmd_args[@]}"; do
+        [[ "$arg" == -* ]] && continue
+        if [[ -e "$arg" ]]; then
+          local oversized
+          oversized="$(command find "$arg" -type f -size +${block_bytes}c -print -quit 2>/dev/null)"
+          if [[ -n "$oversized" ]]; then
+             printf 'swiz: git add is blocked. File exceeds large-file-size-block-kb (%s KB).\n' "$block_kb" >&2
+             printf 'File: %s\n' "$oversized" >&2
+             return 1
+          fi
+        fi
+      done
+    fi
+  fi
+
   # Block git reset --hard
   if [[ "$git_cmd" == "reset" ]]; then
     for arg in "${git_cmd_args[@]}"; do
@@ -652,6 +687,19 @@ git() {
 
 gh() {
   [[ -n "${SWIZ_BYPASS:-}" ]] && { command gh "$@"; return $?; }
+
+  local gh_cmd="$1"
+  local gh_subcmd="$2"
+  
+  if [[ "$gh_cmd" == "issue" && "$gh_subcmd" == "close" ]]; then
+    local issue_close_gate
+    issue_close_gate="$(_swiz_get_setting "issueCloseGate")"
+    if [[ "$issue_close_gate" == "true" ]]; then
+      echo "swiz: gh issue close is blocked by issue-close-gate setting." >&2
+      echo "Use \`swiz issue close <number>\` instead, which handles required confirmations." >&2
+      return 1
+    fi
+  fi
 
   case "$*" in
     *--admin*)
