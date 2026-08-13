@@ -826,3 +826,48 @@ export const SWIZ_TASKS_CLI_DENY_MESSAGE =
 export function buildPendingCompletionTransitionMessage(taskId: string, subject?: string): string {
   return buildTaskGovernanceMessage({ kind: "pending-completion-shortcut", taskId, subject })
 }
+
+const FALLBACK_SUGGESTIONS = [
+  "Run quality checks and fix any warnings",
+  "Verify recent changes work end-to-end",
+  "Check for TODOs or FIXMEs in recently edited files",
+  "Update documentation to reflect recent changes",
+]
+
+async function suggestNextStep(cwd?: string): Promise<string> {
+  if (cwd) {
+    try {
+      const { getRepoSlug } = await import("../git-helpers.ts")
+      const { getIssueStore } = await import("../issue-store.ts")
+      const repoSlug = await getRepoSlug(cwd)
+      if (repoSlug) {
+        const issues = getIssueStore().listIssues<{
+          number: number
+          title?: string
+          state?: string
+        }>(repoSlug)
+        const open = issues.find((i) => i.state === "open" && i.title)
+        if (open) return `Work on issue #${open.number}: "${open.title}"`
+      }
+    } catch {}
+  }
+  return FALLBACK_SUGGESTIONS[Math.floor(Math.random() * FALLBACK_SUGGESTIONS.length)]!
+}
+
+export async function buildLastTaskStandingDenial(taskId: string, cwd?: string): Promise<string> {
+  const taskCreateName = getTaskToolName("TaskCreate")
+  const suggestion = await suggestNextStep(cwd)
+  return (
+    `STOP. Completing task #${taskId} would leave zero incomplete tasks.\n\n` +
+    `You have executive authority to determine the next logical step. ` +
+    `Before completing this task, plan your next steps:\n\n` +
+    formatActionPlan(
+      [
+        `Use ${taskCreateName} to add at least one pending task for the next logical step (e.g. "${suggestion}").`,
+        "Then retry this completion — it will succeed once a pending task exists.",
+      ],
+      { translateToolNames: true }
+    ) +
+    `\nThe task list must never be fully complete — there is always a next step to plan.`
+  )
+}

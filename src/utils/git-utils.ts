@@ -11,6 +11,7 @@ import {
   isGitRepo,
 } from "../git-helpers.ts"
 import { readProjectSettings } from "../settings.ts"
+import { SWIZ_CMD_RE } from "./inline-hook-helpers.ts"
 import {
   GIT_GLOBAL_OPTS,
   gitSubcommandRe,
@@ -916,3 +917,22 @@ export const SOURCE_EXT_RE =
 
 /** Test file pattern — skip these in debug and suppression pattern checks. */
 export const TEST_FILE_RE = /\.test\.|\.spec\.|__tests__|\/test\//
+
+function isExemptGitCommand(command: string): boolean {
+  return GIT_READ_RE.test(command) || GIT_WRITE_RE.test(command)
+}
+
+function isExemptUtilityCommand(command: string): boolean {
+  return (
+    READ_CMD_RE.test(command) ||
+    RECOVERY_CMD_RE.test(command) ||
+    GH_CMD_RE.test(command) ||
+    SWIZ_CMD_RE.test(command) ||
+    SETUP_CMD_RE.test(command)
+  )
+}
+
+/** True when a shell command is exempt from task-tracking enforcement. */
+export function isTaskTrackingExemptShellCommand(command: string): boolean {
+  return isExemptGitCommand(command) || isExemptUtilityCommand(command)
+}

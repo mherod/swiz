@@ -77,7 +77,7 @@ async function runHelperWithUpdateMemoryFooter(
 describe("denyPreToolUse", () => {
   test("emits deny decision with reason", async () => {
     const { exitCode, parsed } = await runHelper(
-      `denyPreToolUse } from "./hook-utils.ts"; denyPreToolUse("blocked for testing")`
+      `denyPreToolUse } from "./hook-response.ts"; denyPreToolUse("blocked for testing")`
     )
     expect(exitCode).toBe(0)
     const hso = parsed.hookSpecificOutput as JsonObject
@@ -92,7 +92,7 @@ describe("denyPreToolUse", () => {
 describe("allowPreToolUseWithUpdatedInput", () => {
   test("emits allow decision with updatedInput", async () => {
     const { exitCode, parsed } = await runHelper(
-      `allowPreToolUseWithUpdatedInput } from "./hook-utils.ts"; ` +
+      `allowPreToolUseWithUpdatedInput } from "./hook-response.ts"; ` +
         `allowPreToolUseWithUpdatedInput({ command: "echo safe" })`
     )
     expect(exitCode).toBe(0)
@@ -105,7 +105,7 @@ describe("allowPreToolUseWithUpdatedInput", () => {
 
   test("includes reason when provided", async () => {
     const { exitCode, parsed } = await runHelper(
-      `allowPreToolUseWithUpdatedInput } from "./hook-utils.ts"; ` +
+      `allowPreToolUseWithUpdatedInput } from "./hook-response.ts"; ` +
         `allowPreToolUseWithUpdatedInput({ file_path: "/tmp/safe.ts" }, "Sanitized path")`
     )
     expect(exitCode).toBe(0)
@@ -117,7 +117,7 @@ describe("allowPreToolUseWithUpdatedInput", () => {
 
   test("omits reason when undefined", async () => {
     const { exitCode, parsed } = await runHelper(
-      `allowPreToolUseWithUpdatedInput } from "./hook-utils.ts"; ` +
+      `allowPreToolUseWithUpdatedInput } from "./hook-response.ts"; ` +
         `allowPreToolUseWithUpdatedInput({ key: "value" }, undefined)`
     )
     expect(exitCode).toBe(0)
@@ -127,7 +127,7 @@ describe("allowPreToolUseWithUpdatedInput", () => {
 
   test("omits reason when empty string", async () => {
     const { exitCode, parsed } = await runHelper(
-      `allowPreToolUseWithUpdatedInput } from "./hook-utils.ts"; ` +
+      `allowPreToolUseWithUpdatedInput } from "./hook-response.ts"; ` +
         `allowPreToolUseWithUpdatedInput({ key: "value" }, "")`
     )
     expect(exitCode).toBe(0)
@@ -137,7 +137,7 @@ describe("allowPreToolUseWithUpdatedInput", () => {
 
   test("handles complex updatedInput objects", async () => {
     const { exitCode, parsed } = await runHelper(
-      `allowPreToolUseWithUpdatedInput } from "./hook-utils.ts"; ` +
+      `allowPreToolUseWithUpdatedInput } from "./hook-response.ts"; ` +
         `allowPreToolUseWithUpdatedInput({ command: "ls -la", timeout: 5000, description: "List files" })`
     )
     expect(exitCode).toBe(0)
@@ -153,7 +153,7 @@ describe("allowPreToolUseWithUpdatedInput", () => {
 describe("allowPreToolUseWithContext", () => {
   test("emits allow decision with both hint and additionalContext", async () => {
     const { exitCode, parsed } = await runHelper(
-      `allowPreToolUseWithContext } from "./hook-utils.ts"; ` +
+      `allowPreToolUseWithContext } from "./hook-response.ts"; ` +
         `allowPreToolUseWithContext("Heads up", "Task #7 has been running for 12m")`
     )
     expect(exitCode).toBe(0)
@@ -167,7 +167,7 @@ describe("allowPreToolUseWithContext", () => {
 
   test("rephrases direct allow reasons", async () => {
     const { exitCode, parsed } = await runHelper(
-      `preToolUseAllow } from "./hook-utils.ts"; ` +
+      `preToolUseAllow } from "../SwizHook.ts"; ` +
         `Date.now = () => 1710000000000; console.log(JSON.stringify(preToolUseAllow("Continue in direct-tool-invocation mode.")))`
     )
     expect(exitCode).toBe(0)
@@ -179,7 +179,7 @@ describe("allowPreToolUseWithContext", () => {
 
   test("rephrases mechanical wording in context", async () => {
     const { exitCode, parsed } = await runHelper(
-      `allowPreToolUseWithContext } from "./hook-utils.ts"; ` +
+      `allowPreToolUseWithContext } from "./hook-response.ts"; ` +
         `Date.now = () => 1710000000000; allowPreToolUseWithContext("Continue", "Continue in good task hygiene mode.")`
     )
     expect(exitCode).toBe(0)
@@ -195,7 +195,7 @@ describe("allowPreToolUseWithContext", () => {
 describe("denyPreToolUse edge cases", () => {
   test("handles empty string reason", async () => {
     const { exitCode, parsed } = await runHelper(
-      `denyPreToolUse } from "./hook-utils.ts"; denyPreToolUse("")`
+      `denyPreToolUse } from "./hook-response.ts"; denyPreToolUse("")`
     )
     expect(exitCode).toBe(0)
     const hso = parsed.hookSpecificOutput as JsonObject
@@ -207,7 +207,7 @@ describe("denyPreToolUse edge cases", () => {
 
   test("handles reason with special characters", async () => {
     const { exitCode, parsed } = await runHelper(
-      `denyPreToolUse } from "./hook-utils.ts"; denyPreToolUse("Line1\\nLine2\\t\\"quoted\\"\\\\backslash")`
+      `denyPreToolUse } from "./hook-response.ts"; denyPreToolUse("Line1\\nLine2\\t\\"quoted\\"\\\\backslash")`
     )
     expect(exitCode).toBe(0)
     const hso = parsed.hookSpecificOutput as JsonObject
@@ -218,7 +218,7 @@ describe("denyPreToolUse edge cases", () => {
 
   test("handles very long reason string", async () => {
     const { exitCode, parsed } = await runHelper(
-      `denyPreToolUse } from "./hook-utils.ts"; denyPreToolUse("x".repeat(10000))`
+      `denyPreToolUse } from "./hook-response.ts"; denyPreToolUse("x".repeat(10000))`
     )
     expect(exitCode).toBe(0)
     const hso = parsed.hookSpecificOutput as JsonObject
@@ -230,7 +230,7 @@ describe("denyPreToolUse edge cases", () => {
 
   test("handles reason with unicode characters", async () => {
     const { exitCode, parsed } = await runHelper(
-      `denyPreToolUse } from "./hook-utils.ts"; denyPreToolUse("Blocked: \u{1F6AB} forbidden \u{2714} checked")`
+      `denyPreToolUse } from "./hook-response.ts"; denyPreToolUse("Blocked: \u{1F6AB} forbidden \u{2714} checked")`
     )
     expect(exitCode).toBe(0)
     const hso = parsed.hookSpecificOutput as JsonObject
@@ -239,7 +239,7 @@ describe("denyPreToolUse edge cases", () => {
 
   test("output is exactly one JSON object (no trailing content)", async () => {
     const { stdout } = await runHelper(
-      `denyPreToolUse } from "./hook-utils.ts"; denyPreToolUse("single output")`
+      `denyPreToolUse } from "./hook-response.ts"; denyPreToolUse("single output")`
     )
     // Verify stdout is a single valid JSON object — no extra lines
     expect(() => JSON.parse(stdout)).not.toThrow()
@@ -250,7 +250,7 @@ describe("denyPreToolUse edge cases", () => {
 describe("allowPreToolUseWithUpdatedInput edge cases", () => {
   test("handles empty updatedInput object", async () => {
     const { exitCode, parsed } = await runHelper(
-      `allowPreToolUseWithUpdatedInput } from "./hook-utils.ts"; ` +
+      `allowPreToolUseWithUpdatedInput } from "./hook-response.ts"; ` +
         `allowPreToolUseWithUpdatedInput({})`
     )
     expect(exitCode).toBe(0)
@@ -261,7 +261,7 @@ describe("allowPreToolUseWithUpdatedInput edge cases", () => {
 
   test("handles updatedInput with null values", async () => {
     const { exitCode, parsed } = await runHelper(
-      `allowPreToolUseWithUpdatedInput } from "./hook-utils.ts"; ` +
+      `allowPreToolUseWithUpdatedInput } from "./hook-response.ts"; ` +
         `allowPreToolUseWithUpdatedInput({ command: null, timeout: null })`
     )
     expect(exitCode).toBe(0)
@@ -271,7 +271,7 @@ describe("allowPreToolUseWithUpdatedInput edge cases", () => {
 
   test("handles updatedInput with nested objects", async () => {
     const { exitCode, parsed } = await runHelper(
-      `allowPreToolUseWithUpdatedInput } from "./hook-utils.ts"; ` +
+      `allowPreToolUseWithUpdatedInput } from "./hook-response.ts"; ` +
         `allowPreToolUseWithUpdatedInput({ options: { verbose: true, nested: { deep: 1 } } })`
     )
     expect(exitCode).toBe(0)
@@ -282,7 +282,7 @@ describe("allowPreToolUseWithUpdatedInput edge cases", () => {
 
   test("handles updatedInput with array values", async () => {
     const { exitCode, parsed } = await runHelper(
-      `allowPreToolUseWithUpdatedInput } from "./hook-utils.ts"; ` +
+      `allowPreToolUseWithUpdatedInput } from "./hook-response.ts"; ` +
         `allowPreToolUseWithUpdatedInput({ args: ["--flag", "-v"], paths: [] })`
     )
     expect(exitCode).toBe(0)
@@ -294,7 +294,7 @@ describe("allowPreToolUseWithUpdatedInput edge cases", () => {
 
   test("handles updatedInput with special string values", async () => {
     const { exitCode, parsed } = await runHelper(
-      `allowPreToolUseWithUpdatedInput } from "./hook-utils.ts"; ` +
+      `allowPreToolUseWithUpdatedInput } from "./hook-response.ts"; ` +
         `allowPreToolUseWithUpdatedInput({ command: "echo \\"hello world\\"\\n" })`
     )
     expect(exitCode).toBe(0)
@@ -305,7 +305,7 @@ describe("allowPreToolUseWithUpdatedInput edge cases", () => {
 
   test("output is exactly one JSON object (no trailing content)", async () => {
     const { stdout } = await runHelper(
-      `allowPreToolUseWithUpdatedInput } from "./hook-utils.ts"; ` +
+      `allowPreToolUseWithUpdatedInput } from "./hook-response.ts"; ` +
         `allowPreToolUseWithUpdatedInput({ key: "value" })`
     )
     expect(() => JSON.parse(stdout)).not.toThrow()
@@ -314,7 +314,7 @@ describe("allowPreToolUseWithUpdatedInput edge cases", () => {
 
   test("omits Codex-unsupported allow and suppressOutput fields", async () => {
     const { exitCode, parsed } = await runHelperWithEnv(
-      `allowPreToolUseWithUpdatedInput } from "./hook-utils.ts"; ` +
+      `allowPreToolUseWithUpdatedInput } from "./hook-response.ts"; ` +
         `allowPreToolUseWithUpdatedInput({ command: "echo safe" }, "Sanitized path")`,
       { CODEX_THREAD_ID: "codex-test-thread" }
     )
@@ -334,7 +334,7 @@ describe("PreToolUse helper isolation (integration)", () => {
     const results: JsonObject[] = []
     for (const reason of ["reason-A", "reason-B", "reason-C"]) {
       const { parsed } = await runHelper(
-        `denyPreToolUse } from "./hook-utils.ts"; denyPreToolUse("${reason}")`
+        `denyPreToolUse } from "./hook-response.ts"; denyPreToolUse("${reason}")`
       )
       results.push(parsed)
     }
@@ -358,7 +358,7 @@ describe("PreToolUse helper isolation (integration)", () => {
     const results: JsonObject[] = []
     for (const input of inputs) {
       const { parsed } = await runHelper(
-        `allowPreToolUseWithUpdatedInput } from "./hook-utils.ts"; ` +
+        `allowPreToolUseWithUpdatedInput } from "./hook-response.ts"; ` +
           `allowPreToolUseWithUpdatedInput(${JSON.stringify(input)})`
       )
       results.push(parsed)
@@ -372,13 +372,13 @@ describe("PreToolUse helper isolation (integration)", () => {
 
   test("deny followed by allow produces clean allow (no deny residue)", async () => {
     const { parsed: denyResult } = await runHelper(
-      `denyPreToolUse } from "./hook-utils.ts"; denyPreToolUse("blocked")`
+      `denyPreToolUse } from "./hook-response.ts"; denyPreToolUse("blocked")`
     )
     const denyHso = denyResult.hookSpecificOutput as JsonObject
     expect(denyHso.permissionDecision).toBe("deny")
 
     const { parsed: allowResult } = await runHelper(
-      `allowPreToolUseWithUpdatedInput } from "./hook-utils.ts"; ` +
+      `allowPreToolUseWithUpdatedInput } from "./hook-response.ts"; ` +
         `allowPreToolUseWithUpdatedInput({ command: "echo clean" })`
     )
     const allowHso = allowResult.hookSpecificOutput as JsonObject
@@ -389,7 +389,7 @@ describe("PreToolUse helper isolation (integration)", () => {
 
   test("allow followed by deny produces clean deny (no allow residue)", async () => {
     const { parsed: allowResult } = await runHelper(
-      `allowPreToolUseWithUpdatedInput } from "./hook-utils.ts"; ` +
+      `allowPreToolUseWithUpdatedInput } from "./hook-response.ts"; ` +
         `allowPreToolUseWithUpdatedInput({ command: "echo first" }, "rewritten")`
     )
     const allowHso = allowResult.hookSpecificOutput as JsonObject
@@ -397,7 +397,7 @@ describe("PreToolUse helper isolation (integration)", () => {
     expect(allowHso.updatedInput).toEqual({ command: "echo first" })
 
     const { parsed: denyResult } = await runHelper(
-      `denyPreToolUse } from "./hook-utils.ts"; denyPreToolUse("now blocked")`
+      `denyPreToolUse } from "./hook-response.ts"; denyPreToolUse("now blocked")`
     )
     const denyHso = denyResult.hookSpecificOutput as JsonObject
     expect(denyHso.permissionDecision).toBe("deny")
@@ -407,12 +407,12 @@ describe("PreToolUse helper isolation (integration)", () => {
 
   test("concurrent invocations are fully isolated", async () => {
     const [denyA, allowB, denyC] = await Promise.all([
-      runHelper(`denyPreToolUse } from "./hook-utils.ts"; denyPreToolUse("concurrent-deny-A")`),
+      runHelper(`denyPreToolUse } from "./hook-response.ts"; denyPreToolUse("concurrent-deny-A")`),
       runHelper(
-        `allowPreToolUseWithUpdatedInput } from "./hook-utils.ts"; ` +
+        `allowPreToolUseWithUpdatedInput } from "./hook-response.ts"; ` +
           `allowPreToolUseWithUpdatedInput({ concurrent: "B" })`
       ),
-      runHelper(`denyPreToolUse } from "./hook-utils.ts"; denyPreToolUse("concurrent-deny-C")`),
+      runHelper(`denyPreToolUse } from "./hook-response.ts"; denyPreToolUse("concurrent-deny-C")`),
     ])
 
     const hsoA = denyA.parsed.hookSpecificOutput as JsonObject
@@ -432,11 +432,11 @@ describe("PreToolUse helper isolation (integration)", () => {
 
   test("same helper called twice with different inputs yields distinct outputs", async () => {
     const { parsed: first } = await runHelper(
-      `allowPreToolUseWithUpdatedInput } from "./hook-utils.ts"; ` +
+      `allowPreToolUseWithUpdatedInput } from "./hook-response.ts"; ` +
         `allowPreToolUseWithUpdatedInput({ version: 1 }, "first call")`
     )
     const { parsed: second } = await runHelper(
-      `allowPreToolUseWithUpdatedInput } from "./hook-utils.ts"; ` +
+      `allowPreToolUseWithUpdatedInput } from "./hook-response.ts"; ` +
         `allowPreToolUseWithUpdatedInput({ version: 2 }, "second call")`
     )
 
@@ -457,7 +457,7 @@ describe("PreToolUse helper isolation (integration)", () => {
 describe("blockStop", () => {
   test("supports opt-out of update-memory advice for triage-only blockers", async () => {
     const { exitCode, parsed } = await runHelperWithUpdateMemoryFooter(
-      `blockStop } from "./hook-utils.ts"; ` +
+      `blockStop } from "./hook-response.ts"; ` +
         `blockStop("Stop due to triage-only blocker.", { includeUpdateMemoryAdvice: false })`,
       true
     )

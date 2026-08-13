@@ -9,44 +9,43 @@ import { dirname, join } from "node:path"
 const REPO_ROOT = dirname(dirname(dirname(import.meta.path)))
 
 import {
-  collectCheckoutNewBranchNames,
-  collectPlainCheckoutSwitchTargets,
-  extractCheckoutNewBranchName,
-} from "./git-utils.ts"
-import {
-  CI_WAIT_RE,
-  computeProjectedContent,
-  createSessionTask,
-  detectPackageManager,
-  detectPkgRunner,
-  detectRuntime,
-  extractToolNamesFromTranscript,
   gh,
-  ghJson,
+  ghJsonViaDaemon as ghJson,
   git,
   hasGhCli,
-  isCodeChangeTool,
-  isDefaultBranch,
-  isEditTool,
-  isFileEditTool,
   isGitHubRemote,
   isGitRepo,
+} from "../git-helpers.ts"
+import { skillAdvice, skillExists } from "../skill-utils.ts"
+import {
+  isCodeChangeTool,
+  isEditTool,
+  isFileEditTool,
   isNotebookTool,
   isShellTool,
   isSkillTool,
-  isSwizCommand,
   isTaskCreateTool,
   isTaskTool,
-  isTaskTrackingExemptShellCommand,
   isWriteTool,
-  parseGitStatus,
-  SOURCE_EXT_RE,
-  skillAdvice,
-  skillExists,
   TASK_CREATE_TOOLS,
   TASK_TOOLS,
+} from "../tool-matchers.ts"
+import { computeProjectedContent } from "./edit-projection.ts"
+import {
+  CI_WAIT_RE,
+  collectCheckoutNewBranchNames,
+  collectPlainCheckoutSwitchTargets,
+  extractCheckoutNewBranchName,
+  isDefaultBranch,
+  isTaskTrackingExemptShellCommand,
+  parseGitStatus,
+  SOURCE_EXT_RE,
   TEST_FILE_RE,
-} from "./hook-utils.ts"
+} from "./git-utils.ts"
+import { isSwizCommand } from "./inline-hook-helpers.ts"
+import { detectPackageManager, detectPkgRunner, detectRuntime } from "./package-detection.ts"
+import { createSessionTask } from "./session-task-io.ts"
+import { extractToolNamesFromTranscript } from "./transcript.ts"
 
 // ─── git() edge cases ───────────────────────────────────────────────────────
 
@@ -825,7 +824,7 @@ describe("mutation guards — Codex toolAliases translateMatcher", () => {
 
 describe("getGitAheadBehind() with malformed inputs", () => {
   // Import dynamically to avoid import issues
-  const { getGitAheadBehind } = require("./hook-utils.ts")
+  const { getGitAheadBehind } = require("./git-utils.ts")
 
   it("returns null for nonexistent path", async () => {
     const result = await getGitAheadBehind("/nonexistent/path/xyz")

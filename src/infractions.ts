@@ -22,7 +22,7 @@ import { tryParseJsonLine } from "./utils/jsonl.ts"
 
 /**
  * Substrings that appear in the footer of every PreToolUse/Stop denial emitted by
- * `denyPreToolUse` / `blockStop` (see src/utils/hook-utils.ts, blockingStrategy.ts).
+ * `denyPreToolUse` / `blockStop` (see src/utils/hook-response.ts, blockingStrategy.ts).
  * A tool_result containing one of these was a block, not a normal tool error.
  */
 export const DENY_FOOTER_MARKERS = ["You must act on this now", "Resolve this block"] as const

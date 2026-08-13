@@ -503,6 +503,19 @@ export const toolHookInputSchema = z.union([
 
 export type ToolHookInput = z.infer<typeof toolHookInputSchema>
 
+/** ToolHookInput extended with typed task tool_input fields. */
+export type TaskToolInput = ToolHookInput & {
+  tool_input?: {
+    taskId?: string | number
+    status?: string
+    subject?: string
+    description?: string
+    activeForm?: string
+    metadata?: Record<string, unknown>
+    [key: string]: unknown
+  }
+}
+
 /**
  * Skill tool_input payload — used by hooks that process Skill tool invocations.
  * Validates skill name and optional arguments with NFKC normalization.
