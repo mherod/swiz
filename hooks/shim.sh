@@ -209,6 +209,30 @@ awk() {
   command awk "$@"
 }
 
+vim() {
+  _swiz_guard vim "Edit tool" \
+    "Terminal editors are non-interactive in agent subshells and will hang. Use the Edit/StrReplace tool instead." "$@" && return 1
+  command vim "$@"
+}
+
+vi() {
+  _swiz_guard vi "Edit tool" \
+    "Terminal editors are non-interactive in agent subshells and will hang. Use the Edit/StrReplace tool instead." "$@" && return 1
+  command vi "$@"
+}
+
+nano() {
+  _swiz_guard nano "Edit tool" \
+    "Terminal editors are non-interactive in agent subshells and will hang. Use the Edit/StrReplace tool instead." "$@" && return 1
+  command nano "$@"
+}
+
+emacs() {
+  _swiz_guard emacs "Edit tool" \
+    "Terminal editors are non-interactive in agent subshells and will hang. Use the Edit/StrReplace tool instead." "$@" && return 1
+  command emacs "$@"
+}
+
 # ── Package managers (project-aware) ─────────────────────────────────────────
 # Detect the project's PM from lockfiles. If you're already using the right
 # one, it passes through. If not, you're told what this project uses.
@@ -419,6 +443,28 @@ git() {
         printf 'swiz: git push --force is blocked.\n' >&2
         printf 'Use --force-with-lease to avoid overwriting unseen remote work.\n' >&2
         return 1
+      fi
+      if [[ "$arg" == "--delete" || "$arg" == "-d" ]]; then
+        for target in "${git_cmd_args[@]}"; do
+          if [[ "$target" == "main" || "$target" == "master" ]]; then
+            printf 'swiz: Deleting the primary remote branch (%s) is blocked.\n' "$target" >&2
+            return 1
+          fi
+        done
+      fi
+    done
+  fi
+
+  # Block deleting primary local branches
+  if [[ "$git_cmd" == "branch" ]]; then
+    for arg in "${git_cmd_args[@]}"; do
+      if [[ "$arg" == "-d" || "$arg" == "-D" || "$arg" == "--delete" ]]; then
+        for target in "${git_cmd_args[@]}"; do
+          if [[ "$target" == "main" || "$target" == "master" ]]; then
+            printf 'swiz: Deleting the primary branch (%s) is blocked.\n' "$target" >&2
+            return 1
+          fi
+        done
       fi
     done
   fi
