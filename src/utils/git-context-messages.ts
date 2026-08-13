@@ -13,7 +13,7 @@ export interface GitContextMessageStatus {
   upstreamGone: boolean
 }
 
-export interface BranchStateSettings {
+interface BranchStateSettings {
   trunkMode: boolean
   strictNoDirectMain: boolean
   collaborationMode: string

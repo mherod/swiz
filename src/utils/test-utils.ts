@@ -114,7 +114,7 @@ export function buildEffectiveTestSettings(
  * extract from subprocess stdout, so converting from `Bun.spawn([...dispatch])`
  * to `dispatchInProcess()` is a mechanical rename of the destructure.
  */
-export interface DispatchInProcessResult {
+interface DispatchInProcessResult {
   /** Raw response object returned by the dispatch engine. */
   response: Record<string, any>
   /** Alias for `response` — matches the `parsed` field from the old subprocess helper. */
@@ -446,7 +446,7 @@ export async function createEnforcementProjectDir(makeDir: () => Promise<string>
   return dir
 }
 
-export type BashHookRunOpts = {
+type BashHookRunOpts = {
   toolName?: string
   cwd?: string
   transcript_path?: string
@@ -502,7 +502,7 @@ export async function runBashHook(
   return { ...parsed, stdout }
 }
 
-export interface FileEditHookResult {
+interface FileEditHookResult {
   decision?: string
   reason?: string
   rawOutput: string
@@ -576,7 +576,7 @@ export async function writeTranscript(path: string, lines: string[]): Promise<vo
   await writeFile(path, `${lines.filter(Boolean).join("\n")}\n`)
 }
 
-export interface WorkflowHookResult {
+interface WorkflowHookResult {
   decision?: string
   reason?: string
   raw: string
