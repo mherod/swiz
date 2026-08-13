@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "bun:test"
-import { mkdtemp, writeFile } from "node:fs/promises"
+import { mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { LRUCache } from "lru-cache"
@@ -559,13 +559,19 @@ describe("FileWatcherRegistry", () => {
 
   it("close stops all watchers", async () => {
     const dir = await mkdtemp(join(tmpdir(), "fwr-close-"))
-    const reg = new FileWatcherRegistry()
-    registries.push(reg)
-    reg.register(dir, "tmp", () => {})
-    await reg.start()
-    expect(reg.status()[0]?.watching).toBeTrue()
-    reg.close()
-    expect(reg.status()[0]?.watching).toBeFalse()
+    try {
+      const reg = new FileWatcherRegistry()
+      registries.push(reg)
+      reg.register(dir, "tmp", () => {})
+      await reg.start()
+      expect(reg.status()[0]?.watching).toBeTrue()
+      reg.close()
+      expect(reg.status()[0]?.watching).toBeFalse()
+    } finally {
+      try {
+        await rm(dir, { recursive: true, force: true })
+      } catch {}
+    }
   })
 
   it("start ignores non-existent paths gracefully", async () => {
