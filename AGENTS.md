@@ -7,21 +7,21 @@ alwaysApply: false
 ## Runtime
 - Use Bun only. DO NOT use Node.js, npm, pnpm, vite, dotenv, or Node-specific tooling.
 - Use `bun <file>`, `bun test`, `bun install`, `bun run index.ts`, `bun --hot index.ts`, `bun link`.
-- Prefer `swiz <command>` for CLI usage.
-- Use `bun run index.ts <command>` when you must guarantee execution against the checkout (avoid PATH `swiz` version drift).
+- Prefer `swiz <command>`.
+- Use `bun run index.ts <command>` to guarantee checkout execution and avoid PATH `swiz` version drift.
 - Use `Bun.file()` and `Bun.write()` for file I/O.
-- Use `node:fs/promises` only for directory operations (`readdir`, `mkdir`, `stat`).
+- Use `node:fs/promises` only for directories (`readdir`, `mkdir`, `stat`).
 ## CLI Architecture
-- Entry: `index.ts`; register commands in `src/cli.ts` via `Command` interface (`src/types.ts`). Keep manual `process.argv` parsing.
-- Interacting with Claude: Use `@anthropic-ai/claude-agent-sdk` `query()`, not spawning `claude` CLI.
-- Keep complexity low by extracting helpers and consolidating multiple functions into single canonical modules (e.g. `agent-paths.ts`).
+- Entry: `index.ts`; register `src/cli.ts` commands through `Command` (`src/types.ts`); keep manual `process.argv` parsing.
+- Use `@anthropic-ai/claude-agent-sdk` `query()` for Claude; don't spawn the `claude` CLI.
+- Extract helpers into canonical modules (e.g. `agent-paths.ts`) to limit complexity.
 ## Project Root Resolution
 - Resolve project root with `dirname(Bun.main)`.
 - DO NOT use `join(dirname(Bun.main), "..")`; it breaks `bun link` execution.
 ## Hook System
 - Hooks live in `hooks/`; `manifest` lives in `src/manifest.ts`.
 - CamelCase events: `stop`, `preToolUse`, `postToolUse`, `sessionStart`, `userPromptSubmit`, `preCommit`.
-- Translation: `EVENT_MAP` maps events; `TOOL_ALIASES` maps per-agent tools. Claude uses nested `settings.json` matchers; Cursor uses flat `hooks.json` lists.
+- `EVENT_MAP` maps events; `TOOL_ALIASES` maps agent tools. Claude uses nested `settings.json` matchers; Cursor uses flat `hooks.json` lists.
 - Add hook flow (agent events):
   1. Add `hooks/<name>.ts`.
   2. Add entry to `manifest` in `src/manifest.ts`.
@@ -38,7 +38,7 @@ alwaysApply: false
 - Synchronize `DISPATCH_ROUTES`, `manifest`, and agent `eventMap`.
 - `validateDispatchRoutes()` in `src/manifest.ts` must pass from both `swiz dispatch` and `swiz install`.
 - Keep `src/dispatch-routing.test.ts` passing.
-- DO NOT duplicate preToolUse matcher strings across groups — `manifest.find()` returns the first match, shadowing the original. Add hooks to the existing group.
+- Add hooks to existing preToolUse matcher groups; duplicates are shadowed because `manifest.find()` returns the first match.
 - DO NOT add sync hooks to unmatchered preToolUse groups — `manifest.test.ts` requires `matcher` for groups with sync hooks; async-only groups are exempt.
 - DON'T hard-code agent event or tool names in hook scripts.
 - `classifyHookOutput` (`src/dispatch/worker-types.ts`) validates subprocess stdout with `hookOutputSchema`; failures return `"invalid-schema"`. Rejected silent output requires `systemMessage`, `reason`, `stopReason`, or `additionalContext`; `{}` is valid. **Stop/SubagentStop** responses use `stopHookOutputSchema` (`src/dispatch/stop-response.ts`); see `hooks/schemas.ts` for event stdout fields.
@@ -75,7 +75,7 @@ alwaysApply: false
 - Skill helpers: `skillExists` (checks `.skills/` and `~/.claude/skills/` for `SKILL.md`), `skillAdvice`.
 - Cross-agent tool checks: `isShellTool`, `isEditTool`, `isFileEditTool`, `isCodeChangeTool`, `isTaskTool`, `isTaskCreateTool`.
 - Task-tracking exemptions: `isTaskTrackingExemptShellCommand()` exempts read-only git, `gh`, `swiz`, setup, recovery (`RECOVERY_CMD_RE`: `ps`, `lsof`, `trash`, `wc`). **DON'T** add broad patterns to `RECOVERY_CMD_RE`.
-- Package manager helpers: `detectPackageManager()`, `detectPkgRunner()`.
+- **DO** align `hooks/shim.sh` package-manager decisions with `src/utils/package-detection.ts`: honour `package.json#packageManager`, allow npm when npm and non-npm lockfiles coexist, resolve npm/npx `--prefix` targets, and test sourced-shell behaviour in `src/commands/shim.test.ts`. **DON'T** let an ancestor `pnpm-lock.yaml` override nearer explicit npm signals.
 - Typed inputs: `StopHookInput`, `ToolHookInput`, `SessionHookInput` — parse with `stopHookInputSchema`, `toolHookInputSchema`, `fileEditHookInputSchema`, `shellHookInputSchema`, or `sessionHookInputSchema`, or annotate directly; **DO NOT** cast stdin with `as { ... }`.
 - Hook schemas (`hooks/schemas.ts`, `z.looseObject`): `fileEditHookInputSchema`, `shellHookInputSchema`, `toolHookInputSchema`, `stopHookInputSchema`, `sessionHookInputSchema`, `hookOutputSchema`, `stopHookOutputSchema`, `taskUpdateInputSchema` — module doc = stdout fields by event. Settings (`src/settings.ts`): `swizSettingsSchema`, `projectSettingsSchema`, `sessionSwizSettingsSchema`, `projectStateSchema`. State (`src/state-machine.ts`): `workflowIntentSchema`, `statePrioritySchema`, `stateMetadataSchema`.
 - **DO**: Inspect runtime type predicate definitions (e.g. `isCurrentSessionUsageEvent` in `src/transcript-summary.ts`) before constructing mock test event objects to ensure correct property types (e.g. `timestamp` ISO string).
