@@ -82,14 +82,23 @@ _swiz_detect_runner() {
 # The TypeScript version is used by hooks and commands (src/commands/status.ts).
 # This bash version is for shell-level enforcement before tools are invoked.
 
-_swiz_is_agent() {
+_swiz_is_agent_process() {
   # Non-interactive shell is almost certainly an agent
   [[ $- != *i* ]] && return 0
+  # Force via env var
+  [[ "${SWIZ_SHIM:-}" == "strict" ]] && return 0
+  return 1
+}
+
+_swiz_is_agent_env() {
   # Known agent environment indicators (from AGENTS array in src/agents.ts)
   [[ -n "${CURSOR_TRACE_ID:-}" ]] && return 0
   [[ -n "${CLAUDE_CODE:-}" ]] && return 0
-  # Force via env var
-  [[ "${SWIZ_SHIM:-}" == "strict" ]] && return 0
+  local parent_cmd
+  parent_cmd="$(command ps -p $PPID -o command= 2>/dev/null || true)"
+  case "$parent_cmd" in
+    *claude*|*cursor*|*gemini*|*codex*|*agy*|*antigravity*) return 0 ;;
+  esac
   return 1
 }
 
@@ -100,13 +109,15 @@ _swiz_guard() {
   local cmd="$1" alt="$2" msg="$3"
   shift 3
 
-  if _swiz_is_agent; then
+  if _swiz_is_agent_process; then
     # shellcheck disable=SC2016
     printf 'swiz: Do not use `%s`. %s\n' "$cmd" "$msg" >&2
     return 0
-  else
+  elif _swiz_is_agent_env; then
     # shellcheck disable=SC2016
     printf '\033[33mswiz: consider `%s` instead of `%s`\033[0m\n' "$alt" "$cmd" >&2
+    return 1
+  else
     return 1
   fi
 }
