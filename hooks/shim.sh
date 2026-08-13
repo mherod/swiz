@@ -467,6 +467,17 @@ git() {
             shift
           fi
           ;;
+        -F|--file|-C|--reuse-message|-c|--reedit-message)
+          if [[ $# -gt 0 ]]; then
+            local val="$1"
+            shift
+            if [[ -f "$val" ]] && [[ "$arg" == "-F" || "$arg" == "--file" ]]; then
+              message_value="$(command cat "$val" 2>/dev/null)"
+            else
+              message_value="[EXTERNAL_MSG_SOURCE]"
+            fi
+          fi
+          ;;
       esac
       if [[ -n "$message_value" ]]; then
         commit_msg="${commit_msg}${commit_msg:+$'\n\n'}${message_value}"
@@ -484,11 +495,34 @@ git() {
         printf 'Write your own commit messages.\n' >&2
         return 1
       fi
+    else
+      printf 'swiz: Warning: Co-authored commits are not allowed. Please ensure your commit message doesn'\''t contain '\''Co-authored-by:'\'' lines.\n' >&2
     fi
   fi
 
   # Delegate to chained wrapper or raw git
   _swiz_run_git "${args[@]}"
+  local git_exit_code=$?
+  
+  if [[ -d .git ]] || command git rev-parse --git-dir > /dev/null 2>&1; then
+    local git_dir
+    git_dir=$(command git rev-parse --git-dir 2>/dev/null)
+    if [[ -n "$git_dir" ]]; then
+      if [[ -f "$git_dir/index.lock" ]]; then
+        if ! command pgrep -q git 2> /dev/null; then
+          command rm -f "$git_dir/index.lock" 2> /dev/null
+        fi
+      fi
+      if [[ -d "$git_dir/refs/heads" ]]; then
+        command find "$git_dir/refs/heads" -maxdepth 1 -name "*.lock" -type f -exec rm -f {} \; 2> /dev/null
+      fi
+      if [[ -d "$git_dir/refs/remotes" ]]; then
+        command find "$git_dir/refs/remotes" -maxdepth 1 -name "*.lock" -type f -exec rm -f {} \; 2> /dev/null
+      fi
+    fi
+  fi
+  
+  return $git_exit_code
 }
 
 # ── GitHub CLI security ──────────────────────────────────────────────────────
