@@ -18,7 +18,8 @@
 builtin unalias \
   cd grep egrep fgrep find cp perl sed awk vim vi nano emacs \
   npm npx yarn pnpm bun node ts-node python python3 touch rm git gh \
-  _swiz_ensure_bun_path _swiz_declared_pm _swiz_package_dir _swiz_detect_pm \
+  _swiz_ensure_bun_path _swiz_declared_pm _swiz_is_global_pm_operation \
+  _swiz_package_dir _swiz_detect_pm \
   _swiz_detect_runtime _swiz_detect_runner \
   _swiz_is_agent_process _swiz_is_agent_env _swiz_get_setting _swiz_guard \
   _swiz_pm_guard _swiz_has_function _swiz_chain_existing _swiz_run_git _swiz_run_gh \
@@ -100,6 +101,83 @@ _swiz_package_dir() {
     *) dir="$PWD/$dir" ;;
   esac
   echo "$dir"
+}
+
+_swiz_is_global_pm_operation() {
+  local invoked="$1"
+  shift
+
+  local arg subcommand="" secondary="" location=""
+  local has_global_flag=false
+  local expect_location=false
+  while [[ $# -gt 0 ]]; do
+    arg="$1"
+    shift
+
+    if $expect_location; then
+      location="$arg"
+      expect_location=false
+      continue
+    fi
+
+    case "$arg" in
+      --)
+        break
+        ;;
+      -g|--global)
+        has_global_flag=true
+        ;;
+      --location)
+        expect_location=true
+        ;;
+      --location=*)
+        location="${arg#--location=}"
+        ;;
+      -*)
+        ;;
+      *)
+        if [[ -z "$subcommand" ]]; then
+          subcommand="$arg"
+        elif [[ -z "$secondary" ]]; then
+          secondary="$arg"
+        fi
+        ;;
+    esac
+  done
+
+  [[ "$location" == "project" ]] && return 1
+
+  if [[ "$subcommand" == "config" && "$location" == "global" ]]; then
+    return 0
+  fi
+
+  # Yarn Classic exposes global administration through `yarn global ...`.
+  [[ "$invoked" == "yarn" && "$subcommand" == "global" ]] && return 0
+
+  # pnpm config defaults to the global location unless project is explicit.
+  [[ "$invoked" == "pnpm" && "$subcommand" == "config" ]] && return 0
+
+  $has_global_flag || return 1
+
+  case "$invoked:$subcommand" in
+    npm:install|npm:i|npm:add|npm:uninstall|npm:remove|npm:rm|npm:update|npm:up|npm:list|npm:ls|npm:outdated|npm:root|npm:bin|npm:prefix|npm:link|npm:unlink|npm:config)
+      return 0
+      ;;
+    pnpm:install|pnpm:i|pnpm:add|pnpm:uninstall|pnpm:remove|pnpm:rm|pnpm:update|pnpm:up|pnpm:list|pnpm:ls|pnpm:outdated|pnpm:root|pnpm:bin|pnpm:link|pnpm:unlink)
+      return 0
+      ;;
+    yarn:config)
+      return 0
+      ;;
+    bun:add|bun:install|bun:remove)
+      return 0
+      ;;
+    bun:pm)
+      [[ "$secondary" == "bin" ]] && return 0
+      ;;
+  esac
+
+  return 1
 }
 
 _swiz_detect_pm() {
@@ -333,6 +411,11 @@ emacs() {
 
 _swiz_pm_guard() {
   local invoked="$1"; shift
+
+  # Explicitly global administration does not inspect or mutate this project's
+  # dependency graph, so the cwd's package-manager policy does not apply.
+  _swiz_is_global_pm_operation "$invoked" "$@" && return 1
+
   local pm target_dir
   target_dir="$(_swiz_package_dir "$@")"
   pm="$(_swiz_detect_pm "$target_dir")"

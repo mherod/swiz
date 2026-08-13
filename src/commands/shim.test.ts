@@ -101,6 +101,102 @@ describe("shell shim runtime", () => {
     )
   })
 
+  testWithZsh("allows explicit global administration for each package manager", async () => {
+    const bunProject = await tmp.create("swiz-shim-pm-global-bun-")
+    const pnpmProject = await tmp.create("swiz-shim-pm-global-pnpm-")
+    await Bun.write(join(bunProject, "bun.lock"), "")
+    await Bun.write(join(pnpmProject, "pnpm-lock.yaml"), "lockfileVersion: '9.0'\n")
+
+    const cases = [
+      { cwd: bunProject, invoked: "pnpm", args: ["list", "-g"] },
+      { cwd: bunProject, invoked: "pnpm", args: ["list", "--global"] },
+      { cwd: bunProject, invoked: "pnpm", args: ["config", "get", "globalconfig"] },
+      { cwd: bunProject, invoked: "npm", args: ["config", "get", "prefix", "--location=global"] },
+      { cwd: bunProject, invoked: "yarn", args: ["global", "list"] },
+      { cwd: pnpmProject, invoked: "bun", args: ["pm", "bin", "-g"] },
+    ]
+
+    for (const entry of cases) {
+      const result = await runPackageManagerGuard(entry.cwd, entry.invoked, entry.args)
+      expect(result.exitCode, `${entry.invoked} ${entry.args.join(" ")}`).toBe(0)
+      expect(result.stderr).not.toContain(`Do not use \`${entry.invoked}\``)
+    }
+  })
+
+  testWithZsh("passes global administration arguments through unchanged", async () => {
+    const bunProject = await tmp.create("swiz-shim-pm-passthrough-bun-")
+    const pnpmProject = await tmp.create("swiz-shim-pm-passthrough-pnpm-")
+    const binDir = await tmp.create("swiz-shim-pm-passthrough-bin-")
+    await Bun.write(join(bunProject, "bun.lock"), "")
+    await Bun.write(join(pnpmProject, "pnpm-lock.yaml"), "lockfileVersion: '9.0'\n")
+
+    const executablePaths = ["pnpm", "npm", "yarn", "bun"].map((name) => join(binDir, name))
+    for (const executablePath of executablePaths) {
+      await Bun.write(executablePath, '#!/bin/sh\nprintf "%s\\n" "$@"\n')
+    }
+    const chmod = Bun.spawn(["chmod", "+x", ...executablePaths], {
+      stdout: "pipe",
+      stderr: "pipe",
+    })
+    const [, chmodStderr, chmodExitCode] = await Promise.all([
+      new Response(chmod.stdout).text(),
+      new Response(chmod.stderr).text(),
+      chmod.exited,
+    ])
+    expect(chmodExitCode, chmodStderr).toBe(0)
+
+    const cases = [
+      { cwd: bunProject, invoked: "pnpm", args: ["list", "--global"] },
+      { cwd: bunProject, invoked: "npm", args: ["config", "get", "prefix", "--location=global"] },
+      { cwd: bunProject, invoked: "yarn", args: ["global", "list"] },
+      { cwd: pnpmProject, invoked: "bun", args: ["pm", "bin", "-g"] },
+    ]
+
+    for (const entry of cases) {
+      const result = await runShell(
+        ZSH_PATH ?? "zsh",
+        [
+          "-f",
+          "-c",
+          'source "$1"; invoked="$2"; shift 2; "$invoked" "$@"',
+          "swiz",
+          SHIM_PATH,
+          entry.invoked,
+          ...entry.args,
+        ],
+        {
+          cwd: entry.cwd,
+          env: { PATH: `${binDir}:${process.env.PATH}`, SWIZ_SHIM: "strict" },
+        }
+      )
+      expect(result.exitCode, `${entry.invoked} ${entry.args.join(" ")}`).toBe(0)
+      expect(result.stdout).toBe(`${entry.args.join("\n")}\n`)
+      expect(result.stderr).not.toContain(`Do not use \`${entry.invoked}\``)
+    }
+  })
+
+  testWithZsh("keeps project-scoped commands and inert global text guarded", async () => {
+    const project = await tmp.create("swiz-shim-pm-global-negative-")
+    await Bun.write(join(project, "bun.lock"), "")
+
+    const cases = [
+      ["pnpm", ["install"]],
+      ["pnpm", ["run", "build", "-g"]],
+      ["pnpm", ["run", "global"]],
+      ["pnpm", ["add", "global-tool"]],
+      ["pnpm", ["list", "--", "--global"]],
+      ["pnpm", ["config", "get", "nodeVersion", "--location=project"]],
+      ["npm", ["config", "get", "prefix"]],
+      ["yarn", ["run", "global"]],
+    ] as const
+
+    for (const [invoked, args] of cases) {
+      const result = await runPackageManagerGuard(project, invoked, [...args])
+      expect(result.exitCode, `${invoked} ${args.join(" ")}`).toBe(1)
+      expect(result.stderr).toContain(`Do not use \`${invoked}\``)
+    }
+  })
+
   testWithZsh("finds Bun before login PATH setup runs", async () => {
     const home = await tmp.create("swiz-shim-home-bun-path-")
     const bunInstall = join(home, ".bun")
