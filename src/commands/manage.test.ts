@@ -50,6 +50,15 @@ describe("parseManageArgs", () => {
     expect(parsed.targetAgents).toEqual(["claude-desktop"])
   })
 
+  it.each([
+    "constructor",
+    "__proto__",
+  ])("treats Object prototype name %s as an MCP server name", (name) => {
+    const parsed = parseManageArgs(["mcp", "show", name, "--cursor"])
+    expect(parsed.name).toBe(name)
+    expect(parsed.targetAgents).toEqual(["cursor"])
+  })
+
   it("parses merge action with --from flag", () => {
     const parsed = parseManageArgs(["mcp", "merge", "--from", "ai", "--junie"])
     expect(parsed.action).toBe("merge")

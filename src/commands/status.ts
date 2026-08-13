@@ -360,6 +360,29 @@ async function getOpenTaskCount(cwd: string): Promise<number | null> {
   }
 }
 
+async function resolveProjectCi(
+  cwd: string,
+  branch: string | null,
+  refreshCi: boolean | undefined
+): Promise<{ ciStatus: string | null; ciConclusion: string | null }> {
+  if (!branch || process.env.SWIZ_STATUS_SKIP_CI === "1") {
+    return { ciStatus: null, ciConclusion: null }
+  }
+  const ci = refreshCi ? await getLiveCiStatus(branch) : await getCachedCiStatus(cwd, branch)
+  return { ciStatus: ci.status, ciConclusion: ci.conclusion }
+}
+
+function resolveProjectState(state: string | null): {
+  isTerminal: boolean
+  allowedTransitions: string[]
+} {
+  if (!state) return { isTerminal: false, allowedTransitions: [] }
+  return {
+    isTerminal: TERMINAL_STATES.includes(state as never),
+    allowedTransitions: STATE_TRANSITIONS[state as never] ?? [],
+  }
+}
+
 async function getProjectHealth(
   cwd: string,
   options: ProjectHealthOptions = {}
@@ -384,20 +407,9 @@ async function getProjectHealth(
   const uncommittedFiles = statusOut ? statusOut.split("\n").filter(Boolean).length : 0
   const aheadBehindResult = parseAheadBehind(aheadBehind)
 
-  // CI: get latest run on this branch (best-effort, no block on failure)
-  let ciStatus: string | null = null
-  let ciConclusion: string | null = null
-  if (branch && process.env.SWIZ_STATUS_SKIP_CI !== "1") {
-    const ci = options.refreshCi
-      ? await getLiveCiStatus(branch)
-      : await getCachedCiStatus(cwd, branch)
-    ciStatus = ci.status
-    ciConclusion = ci.conclusion
-  }
-
   const state = stateData?.state ?? null
-  const isTerminal = state ? TERMINAL_STATES.includes(state as never) : false
-  const allowedTransitions = state ? (STATE_TRANSITIONS[state as never] ?? []) : []
+  const { isTerminal, allowedTransitions } = resolveProjectState(state)
+  const { ciStatus, ciConclusion } = await resolveProjectCi(cwd, branch, options.refreshCi)
 
   const projectRoot = repoRoot || cwd
   const [testStats, lintStats] = await Promise.all([
@@ -444,18 +456,39 @@ function formatCiLine(status: string | null, conclusion: string | null): string 
   return `${DIM}${status}${conclusion ? ` / ${conclusion}` : ""}${RESET}`
 }
 
+function renderProjectState(health: ProjectHealth, write: (line?: string) => void): void {
+  if (!health.state) {
+    write(`    State:     ${DIM}not set${RESET}`)
+    return
+  }
+  const termTag = health.isTerminal ? ` ${DIM}(terminal)${RESET}` : ""
+  write(`    State:     ${CYAN}${health.state}${RESET}${termTag}`)
+  if (health.allowedTransitions.length > 0) {
+    write(`    Nexts:     ${DIM}${health.allowedTransitions.join(", ")}${RESET}`)
+  }
+}
+
+function renderOpenTasks(openTasks: number | null, write: (line?: string) => void): void {
+  if (openTasks === null) return
+  const taskLine =
+    openTasks === 0 ? `${GREEN}none open${RESET}` : `${YELLOW}${openTasks} open${RESET}`
+  write(`    Tasks:     ${taskLine}`)
+}
+
+function formatExecutionStatsLine(label: string, stats: ExecutionStatsSummary | null): string {
+  if (!stats) return `    Avg ${label}:  ${DIM}no runs recorded${RESET}`
+  const avgSec = (stats.averageMs / 1000).toFixed(2)
+  const assessmentColor = stats.assessment === "negligible" ? GREEN : RED
+  const assessmentText = `${assessmentColor}${stats.assessment}${RESET}`
+  return (
+    `    Avg ${label}:  ${avgSec}s (based on ${stats.count} run${stats.count === 1 ? "" : "s"}) ` +
+    `[${assessmentText}]`
+  )
+}
+
 function renderHealthPanel(health: ProjectHealth, write: (line?: string) => void): void {
   write(`  ${BOLD}Project Health${RESET}\n`)
-
-  if (health.state) {
-    const termTag = health.isTerminal ? ` ${DIM}(terminal)${RESET}` : ""
-    write(`    State:     ${CYAN}${health.state}${RESET}${termTag}`)
-    if (health.allowedTransitions.length > 0) {
-      write(`    Nexts:     ${DIM}${health.allowedTransitions.join(", ")}${RESET}`)
-    }
-  } else {
-    write(`    State:     ${DIM}not set${RESET}`)
-  }
+  renderProjectState(health, write)
 
   write(`    Branch:    ${GREEN}${health.branch ?? `${DIM}unknown${RESET}`}${RESET}`)
   const changesLine =
@@ -465,39 +498,11 @@ function renderHealthPanel(health: ProjectHealth, write: (line?: string) => void
   write(`    Changes:   ${changesLine}`)
   renderRemoteLine(health.aheadBehind, write)
 
-  if (health.openTasks !== null) {
-    const taskLine =
-      health.openTasks === 0
-        ? `${GREEN}none open${RESET}`
-        : `${YELLOW}${health.openTasks} open${RESET}`
-    write(`    Tasks:     ${taskLine}`)
-  }
+  renderOpenTasks(health.openTasks, write)
 
   write(`    CI:        ${formatCiLine(health.ciStatus, health.ciConclusion)}`)
-
-  if (health.testStats) {
-    const avgSec = (health.testStats.averageMs / 1000).toFixed(2)
-    const runs = health.testStats.count
-    const assessmentColor = health.testStats.assessment === "negligible" ? GREEN : RED
-    const assessmentText = `${assessmentColor}${health.testStats.assessment}${RESET}`
-    write(
-      `    Avg Test:  ${avgSec}s (based on ${runs} run${runs === 1 ? "" : "s"}) [${assessmentText}]`
-    )
-  } else {
-    write(`    Avg Test:  ${DIM}no runs recorded${RESET}`)
-  }
-
-  if (health.lintStats) {
-    const avgSec = (health.lintStats.averageMs / 1000).toFixed(2)
-    const runs = health.lintStats.count
-    const assessmentColor = health.lintStats.assessment === "negligible" ? GREEN : RED
-    const assessmentText = `${assessmentColor}${health.lintStats.assessment}${RESET}`
-    write(
-      `    Avg Lint:  ${avgSec}s (based on ${runs} run${runs === 1 ? "" : "s"}) [${assessmentText}]`
-    )
-  } else {
-    write(`    Avg Lint:  ${DIM}no runs recorded${RESET}`)
-  }
+  write(formatExecutionStatsLine("Test", health.testStats))
+  write(formatExecutionStatsLine("Lint", health.lintStats))
 
   write()
 }

@@ -176,34 +176,40 @@ function consumeManageValueFlag(
   next: string | undefined,
   state: ManageParseState
 ): number | null {
-  if (token === "--command") {
-    if (!next) throw new Error(`Missing value for --command\n${usage()}`)
-    state.command = next
-    return 1
+  const consumers = new Map<string, (value: string) => void>([
+    [
+      "--command",
+      (value) => {
+        state.command = value
+      },
+    ],
+    ["--arg", (value) => state.actionArgs.push(value)],
+    [
+      "--env",
+      (value) => {
+        const { key, val } = parseEnvAssignment(value)
+        state.env[key] = val
+      },
+    ],
+    ["--from", (value) => consumeSourceAgent(value, state)],
+  ])
+  const consume = consumers.get(token)
+  if (!consume) return null
+  if (!next) throw new Error(`Missing value for ${token}\n${usage()}`)
+  consume(next)
+  return 1
+}
+
+function consumeSourceAgent(value: string, state: ManageParseState): void {
+  if (value === "all") {
+    state.sourceAgentFlags.add("all")
+    return
   }
-  if (token === "--arg") {
-    if (!next) throw new Error(`Missing value for --arg\n${usage()}`)
-    state.actionArgs.push(next)
-    return 1
-  }
-  if (token === "--env") {
-    if (!next) throw new Error(`Missing value for --env\n${usage()}`)
-    const { key, val } = parseEnvAssignment(next)
-    state.env[key] = val
-    return 1
-  }
-  if (token === "--from") {
-    if (!next) throw new Error(`Missing value for --from\n${usage()}`)
-    if (next === "all") {
-      state.sourceAgentFlags.add("all")
-    } else {
-      const agent = GLOBAL_AGENTS.find((a) => a.id === next || a.flag === `--${next}`)
-      if (!agent) throw new Error(`Unknown source agent: ${next}\n${usage()}`)
-      state.sourceAgentFlags.add(agent.id)
-    }
-    return 1
-  }
-  return null
+  const agent = GLOBAL_AGENTS.find(
+    (candidate) => candidate.id === value || candidate.flag === `--${value}`
+  )
+  if (!agent) throw new Error(`Unknown source agent: ${value}\n${usage()}`)
+  state.sourceAgentFlags.add(agent.id)
 }
 
 function consumeManageFlag(
@@ -284,13 +290,7 @@ export function parseManageArgs(args: string[]): ParsedManageArgs {
     i += consumeManageFlag(token, args[i + 1], state)
   }
 
-  if (ACTIONS_REQUIRING_NAME.has(action) && !state.name)
-    throw new Error(`"${action}" requires a server name\n${usage()}`)
-  if (action === "add" && !state.command)
-    throw new Error(`"add" requires --command <cmd>\n${usage()}`)
-  if (action === "merge" && state.sourceAgentFlags.size === 0) {
-    throw new Error(`"merge" requires --from <agent|all>\n${usage()}`)
-  }
+  validateManageParseState(action, state)
 
   return {
     subject: "mcp",
@@ -302,6 +302,18 @@ export function parseManageArgs(args: string[]): ParsedManageArgs {
     targetAgents: resolveTargetAgents(state),
     sourceAgents: resolveSourceAgents(state),
     project: state.project,
+  }
+}
+
+function validateManageParseState(action: ManageAction, state: ManageParseState): void {
+  if (ACTIONS_REQUIRING_NAME.has(action) && !state.name) {
+    throw new Error(`"${action}" requires a server name\n${usage()}`)
+  }
+  if (action === "add" && !state.command) {
+    throw new Error(`"add" requires --command <cmd>\n${usage()}`)
+  }
+  if (action === "merge" && state.sourceAgentFlags.size === 0) {
+    throw new Error(`"merge" requires --from <agent|all>\n${usage()}`)
   }
 }
 
@@ -498,9 +510,21 @@ async function validateMcpServers(
 }
 
 async function mergeMcpServers(parsed: ParsedManageArgs, base: string): Promise<void> {
-  const sourceServers: Record<string, McpServerDef> = {}
+  const sourceServers = await readSourceMcpServers(parsed, base)
+  if (Object.keys(sourceServers).length === 0) {
+    console.log("No MCP servers found in source agents to merge.")
+    return
+  }
+  for (const agentId of parsed.targetAgents) {
+    await mergeMcpServersIntoAgent(parsed, base, agentId, sourceServers)
+  }
+}
 
-  // 1. Gather all unique servers from source agents
+async function readSourceMcpServers(
+  parsed: ParsedManageArgs,
+  base: string
+): Promise<Record<string, McpServerDef>> {
+  const sourceServers: Record<string, McpServerDef> = {}
   for (const agentId of parsed.sourceAgents) {
     const agent = getAgentConfig(agentId, parsed.project)
     const path = agent.resolvePath(base)
@@ -519,49 +543,43 @@ async function mergeMcpServers(parsed: ParsedManageArgs, base: string): Promise<
       )
     }
   }
+  return sourceServers
+}
 
-  if (Object.keys(sourceServers).length === 0) {
-    console.log("No MCP servers found in source agents to merge.")
-    return
+function mergeServerDefinitions(
+  mcpServers: Record<string, McpServerDef>,
+  sourceServers: Record<string, McpServerDef>
+): { addedCount: number; updatedCount: number } {
+  let addedCount = 0
+  let updatedCount = 0
+  for (const [name, server] of Object.entries(sourceServers)) {
+    const existing = mcpServers[name]
+    if (existing && mcpServersEqual(existing, server)) continue
+    if (existing) updatedCount++
+    else addedCount++
+    mcpServers[name] = server
   }
+  return { addedCount, updatedCount }
+}
 
-  // 2. Merge into target agents
-  for (const agentId of parsed.targetAgents) {
-    // Skip if target is one of the sources (unless it's the only target and we want to consolidate)
-    // Actually, usually we merge into a specific target.
-    // If user didn't specify target agents, it defaults to all.
-    // We should probably only merge into targets that weren't the ONLY source.
-
-    const agent = getAgentConfig(agentId, parsed.project)
-    const path = agent.resolvePath(base)
-    const json = await readMcpFile(path)
-    const mcpServers = { ...(json.mcpServers ?? {}) }
-
-    let addedCount = 0
-    let updatedCount = 0
-
-    for (const [name, server] of Object.entries(sourceServers)) {
-      if (mcpServers[name]) {
-        // Check if it's actually different
-        if (JSON.stringify(mcpServers[name]) !== JSON.stringify(server)) {
-          updatedCount++
-        } else {
-          continue
-        }
-      } else {
-        addedCount++
-      }
-      mcpServers[name] = server
-    }
-
-    if (addedCount > 0 || updatedCount > 0) {
-      await writeMcpFile(path, { ...json, mcpServers })
-      console.log(
-        `Merged ${addedCount} new and ${updatedCount} updated servers into ${agent.displayName} (${path})`
-      )
-    } else {
-      console.log(`${agent.displayName} (${path}) is already up to date.`)
-    }
+async function mergeMcpServersIntoAgent(
+  parsed: ParsedManageArgs,
+  base: string,
+  agentId: AgentId,
+  sourceServers: Record<string, McpServerDef>
+): Promise<void> {
+  const agent = getAgentConfig(agentId, parsed.project)
+  const path = agent.resolvePath(base)
+  const json = await readMcpFile(path)
+  const mcpServers = { ...(json.mcpServers ?? {}) }
+  const { addedCount, updatedCount } = mergeServerDefinitions(mcpServers, sourceServers)
+  if (addedCount > 0 || updatedCount > 0) {
+    await writeMcpFile(path, { ...json, mcpServers })
+    console.log(
+      `Merged ${addedCount} new and ${updatedCount} updated servers into ${agent.displayName} (${path})`
+    )
+  } else {
+    console.log(`${agent.displayName} (${path}) is already up to date.`)
   }
 }
 
@@ -632,6 +650,22 @@ export interface ManageCommandOptions {
   which?: (command: string) => string | null
 }
 
+async function runManageAction(
+  parsed: ParsedManageArgs,
+  base: string,
+  which: (command: string) => string | null
+): Promise<void> {
+  const actions: Record<ManageAction, () => Promise<void>> = {
+    list: () => listMcpServers(parsed.targetAgents, base, parsed.project),
+    show: () => showMcpServer(parsed.targetAgents, base, parsed.project, parsed.name!),
+    add: () => addMcpServer(parsed, base),
+    remove: () => removeMcpServer(parsed, base),
+    validate: () => validateMcpServers(parsed, base, which),
+    merge: () => mergeMcpServers(parsed, base),
+  }
+  await actions[parsed.action]()
+}
+
 export const manageCommand: Command<ManageCommandOptions> = {
   name: "manage",
   description: "Manage shared swiz resources (MCP, etc.)",
@@ -675,19 +709,6 @@ export const manageCommand: Command<ManageCommandOptions> = {
     // Project-scoped actions resolve paths relative to cwd; global actions use home.
     const base = parsed.project ? (options?.cwd ?? process.cwd()) : home
 
-    switch (parsed.action) {
-      case "list":
-        return listMcpServers(parsed.targetAgents, base, parsed.project)
-      case "show":
-        return showMcpServer(parsed.targetAgents, base, parsed.project, parsed.name!)
-      case "add":
-        return addMcpServer(parsed, base)
-      case "remove":
-        return removeMcpServer(parsed, base)
-      case "validate":
-        return validateMcpServers(parsed, base, options?.which ?? Bun.which)
-      case "merge":
-        return mergeMcpServers(parsed, base)
-    }
+    await runManageAction(parsed, base, options?.which ?? Bun.which)
   },
 }

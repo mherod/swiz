@@ -155,12 +155,15 @@ function yamlScalar(value: string): string {
 
 async function convertSupplementaryEntry(
   entry: import("node:fs").Dirent,
-  srcDir: string,
-  destDir: string,
-  fromAgent: AgentDef,
-  toAgent: AgentDef,
-  dryRun: boolean
+  options: {
+    srcDir: string
+    destDir: string
+    fromAgent: AgentDef
+    toAgent: AgentDef
+    dryRun: boolean
+  }
 ): Promise<void> {
+  const { srcDir, destDir, fromAgent, toAgent, dryRun } = options
   if (entry.name === "SKILL.md" || entry.name.startsWith(".")) return
   const srcPath = join(srcDir, entry.name)
   const destPath = join(destDir, entry.name)
@@ -199,7 +202,7 @@ async function convertSupplementaryFiles(
   }
 
   for (const entry of entries) {
-    await convertSupplementaryEntry(entry, srcDir, destDir, fromAgent, toAgent, dryRun)
+    await convertSupplementaryEntry(entry, { srcDir, destDir, fromAgent, toAgent, dryRun })
   }
 }
 
@@ -701,6 +704,29 @@ async function exportSingleSkillToCommand(opts: {
   return action === "overwrite" ? "overwritten" : "exported"
 }
 
+async function prepareCommandExport(options: {
+  commandsDir: string
+  dryRun: boolean
+  fromAgent: AgentDef
+  fromSkillsDir: string
+  orderedSkillNames: string[]
+  toAgent: AgentDef
+}): Promise<boolean> {
+  if (options.orderedSkillNames.length === 0) {
+    console.log(
+      `No ${options.fromAgent.name} skills found at ${displayPath(options.fromSkillsDir)}..`
+    )
+    return false
+  }
+  console.log(
+    options.dryRun
+      ? `Dry run: exporting ${options.fromAgent.name} skills to ${options.toAgent.name} commands (no files will be written).`
+      : `Exporting ${options.fromAgent.name} skills to ${options.toAgent.name} commands.`
+  )
+  if (!options.dryRun) await mkdir(options.commandsDir, { recursive: true })
+  return true
+}
+
 async function exportCommand(options: {
   from: string
   to: string
@@ -717,17 +743,15 @@ async function exportCommand(options: {
     ? [await requireSkillName(fromSkillsDir, name)]
     : await discoverSkillNames(fromSkillsDir)
 
-  if (orderedSkillNames.length === 0) {
-    console.log(`No ${fromAgent.name} skills found at ${displayPath(fromSkillsDir)}..`)
-    return
-  }
-
-  console.log(
-    dryRun
-      ? `Dry run: exporting ${fromAgent.name} skills to ${toAgent.name} commands (no files will be written).`
-      : `Exporting ${fromAgent.name} skills to ${toAgent.name} commands.`
-  )
-  if (!dryRun) await mkdir(commandsDir, { recursive: true })
+  const ready = await prepareCommandExport({
+    commandsDir,
+    dryRun,
+    fromAgent,
+    fromSkillsDir,
+    orderedSkillNames,
+    toAgent,
+  })
+  if (!ready) return
 
   let exported = 0,
     overwritten = 0,
@@ -735,34 +759,19 @@ async function exportCommand(options: {
   const allUnmapped = new Set<string>()
 
   for (const skillName of orderedSkillNames) {
-    const targetFile = join(commandsDir, `${skillName}.md`)
-    const targetExists = existsSync(targetFile)
-
-    if (targetExists && !overwrite) {
-      skipped++
-      console.log(`  - skipped ${skillName} (already exists)`)
-      continue
-    }
-
-    try {
-      const action = await exportSingleSkillToCommand({
-        fromSkillsDir,
-        skillName,
-        targetFile,
-        targetExists,
-        fromAgent,
-        toAgent,
-        dryRun,
-        allUnmapped,
-      })
-      if (action === "overwritten") {
-        overwritten++
-      } else {
-        exported++
-      }
-    } catch (e) {
-      console.log(`  - failed to export ${skillName}: ${messageFromUnknownError(e)}`)
-    }
+    const action = await exportSkillName({
+      allUnmapped,
+      commandsDir,
+      dryRun,
+      fromAgent,
+      fromSkillsDir,
+      overwrite,
+      skillName,
+      toAgent,
+    })
+    if (action === "skipped") skipped++
+    else if (action === "overwritten") overwritten++
+    else if (action === "exported") exported++
   }
 
   console.log(
@@ -770,6 +779,39 @@ async function exportCommand(options: {
       (!overwrite && skipped > 0 ? " (use --overwrite to replace existing targets)" : "")
   )
   printUnmappedWarning(allUnmapped, toAgent.name)
+}
+
+async function exportSkillName(options: {
+  allUnmapped: Set<string>
+  commandsDir: string
+  dryRun: boolean
+  fromAgent: AgentDef
+  fromSkillsDir: string
+  overwrite: boolean
+  skillName: string
+  toAgent: AgentDef
+}): Promise<"exported" | "failed" | "overwritten" | "skipped"> {
+  const targetFile = join(options.commandsDir, `${options.skillName}.md`)
+  const targetExists = existsSync(targetFile)
+  if (targetExists && !options.overwrite) {
+    console.log(`  - skipped ${options.skillName} (already exists)`)
+    return "skipped"
+  }
+  try {
+    return await exportSingleSkillToCommand({
+      fromSkillsDir: options.fromSkillsDir,
+      skillName: options.skillName,
+      targetFile,
+      targetExists,
+      fromAgent: options.fromAgent,
+      toAgent: options.toAgent,
+      dryRun: options.dryRun,
+      allUnmapped: options.allUnmapped,
+    })
+  } catch (error) {
+    console.log(`  - failed to export ${options.skillName}: ${messageFromUnknownError(error)}`)
+    return "failed"
+  }
 }
 
 function extractFlagValue(args: string[], flag: string): string | null {

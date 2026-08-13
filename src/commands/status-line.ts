@@ -375,20 +375,23 @@ function isNewerCiRun(candidate: GitHubCiRun, existing: GitHubCiRun): boolean {
   return (candidate.databaseId ?? 0) > (existing.databaseId ?? 0)
 }
 
+function allCiRunsSucceeded(runs: GitHubCiRun[]): boolean {
+  return (
+    runs.length > 0 &&
+    runs.every((run) => run.status === "completed" && run.conclusion === "success")
+  )
+}
+
 function classifyLatestRuns(
   latestRuns: GitHubCiRun[]
 ): { state: GitHubCiState; label: string } | null {
-  let activeCount = 0
-  let failingCount = 0
-  let allSucceeded = latestRuns.length > 0
-  let latestRun: GitHubCiRun | null = null
-
-  for (const run of latestRuns) {
-    if (isActiveCiRun(run)) activeCount++
-    if (isFailingCiRun(run)) failingCount++
-    if (run.status !== "completed" || run.conclusion !== "success") allSucceeded = false
-    if (!latestRun || isNewerCiRun(run, latestRun)) latestRun = run
-  }
+  const activeCount = latestRuns.filter(isActiveCiRun).length
+  const failingCount = latestRuns.filter(isFailingCiRun).length
+  const allSucceeded = allCiRunsSucceeded(latestRuns)
+  const latestRun = latestRuns.reduce<GitHubCiRun | null>(
+    (latest, run) => (!latest || isNewerCiRun(run, latest) ? run : latest),
+    null
+  )
 
   if (activeCount > 0) {
     return { state: "pending", label: activeCount === 1 ? "running" : `${activeCount} running` }
@@ -407,6 +410,14 @@ function classifyLatestRuns(
   return { state: "neutral", label }
 }
 
+function shouldIgnoreCiRun(run: GitHubCiRun): boolean {
+  return run.event === "dynamic" || run.event === "workflow_run"
+}
+
+function ciWorkflowKey(run: GitHubCiRun, index: number): string {
+  return run.workflowName || `\0run-${run.databaseId ?? index}`
+}
+
 export function summarizeGitHubCiRuns(
   runs: GitHubCiRun[] | null | undefined
 ): { state: GitHubCiState; label: string } | null {
@@ -414,11 +425,11 @@ export function summarizeGitHubCiRuns(
   const latest = new Map<string, GitHubCiRun>()
   for (let i = 0; i < runs.length; i++) {
     const run = runs[i]!
-    if (run.event === "dynamic" || run.event === "workflow_run") continue
+    if (shouldIgnoreCiRun(run)) continue
     // The store-served shape blanks workflowName; keying every empty-name run
     // under "" collapses distinct runs into one slot (oldest wins). Fall back to
     // a per-run key so each run is kept and recency is decided by isNewerCiRun.
-    const key = run.workflowName || ` run-${run.databaseId ?? i}`
+    const key = ciWorkflowKey(run, i)
     const existing = latest.get(key)
     if (!existing || isNewerCiRun(run, existing)) {
       latest.set(key, run)
@@ -751,17 +762,28 @@ async function readExecStatsForCwd(cwd: string): Promise<ProjectExecutionStats |
   return readProjectExecutionStats(repoRoot || cwd).catch(() => null)
 }
 
-function assembleSnapshot(
-  shortCwd: string,
-  gitResult: { branch: string; info: string },
-  activeSegments: string[],
-  gh: GhFetchResults,
-  effective: EffectiveSwizSettings | null,
-  taskCounts: TaskCounts | null,
-  activeSkills: string[] | null,
-  execStats: ProjectExecutionStats | null,
+function assembleSnapshot(options: {
+  shortCwd: string
+  gitResult: { branch: string; info: string }
+  activeSegments: string[]
+  gh: GhFetchResults
+  effective: EffectiveSwizSettings | null
+  taskCounts: TaskCounts | null
+  activeSkills: string[] | null
+  execStats: ProjectExecutionStats | null
   queuedSteers: QueuedSteerCounts | null
-): WarmStatusLineSnapshot {
+}): WarmStatusLineSnapshot {
+  const {
+    shortCwd,
+    gitResult,
+    activeSegments,
+    gh,
+    effective,
+    taskCounts,
+    activeSkills,
+    execStats,
+    queuedSteers,
+  } = options
   const suppressCi = Boolean(effective?.ignoreCi)
   const ciSummary = suppressCi ? null : summarizeGitHubCiRuns(gh.ciData)
   return {
@@ -828,7 +850,7 @@ export async function computeWarmStatusLineSnapshot(
   if (effective?.ignoreCi) needs.ci = false
   const gh = await fetchGhData(cwd, gitResult.branch, needs)
   const taskCounts = sessionTasks.length > 0 ? buildTaskCountsFromTasks(sessionTasks) : null
-  return assembleSnapshot(
+  return assembleSnapshot({
     shortCwd,
     gitResult,
     activeSegments,
@@ -837,8 +859,8 @@ export async function computeWarmStatusLineSnapshot(
     taskCounts,
     activeSkills,
     execStats,
-    queuedSteers
-  )
+    queuedSteers,
+  })
 }
 
 async function readWarmSnapshotFromDaemon(
@@ -1008,6 +1030,11 @@ export function renderWantedStars(wantedLevel: number | null | undefined): strin
   return `${BOLD}\x1b[91m🚨 ${stars}${R}`
 }
 
+function taskGovernanceIndicator(counts: TaskCounts, durationSeconds?: number | null): string {
+  if (!isTaskGovernanceHealthy(counts)) return "⚠️"
+  return typeof durationSeconds === "number" && durationSeconds >= 120 ? "👏" : "👍"
+}
+
 export function formatTaskCountSegment(
   counts: TaskCounts | null | undefined,
   durationLabel?: string | null,
@@ -1023,12 +1050,7 @@ export function formatTaskCountSegment(
   const pendingSeg = renderCappedTicks(counts.pending, "◻", "\x1b[96m")
   if (pendingSeg) parts.push(pendingSeg)
   if (counts.incomplete > 0) {
-    let indicator: string
-    if (isTaskGovernanceHealthy(counts)) {
-      indicator = typeof durationSeconds === "number" && durationSeconds >= 120 ? "👏" : "👍"
-    } else {
-      indicator = "⚠️"
-    }
+    const indicator = taskGovernanceIndicator(counts, durationSeconds)
     parts.push(durationLabel ? `${indicator} ${DIM}${durationLabel}${R}` : indicator)
   }
   return parts.join(" ")
@@ -1059,6 +1081,10 @@ function buildDaemonMetricsSegment(metrics: StatusLineDaemonMetrics | null | und
 }
 
 type SegChecker = (name: string) => boolean
+
+function labeledSegment(enabled: boolean, label: string, value: string | null | undefined): string {
+  return enabled && value ? `${DIM}${label}${R} ${value}` : ""
+}
 
 function buildLine1(
   seg: SegChecker,
@@ -1106,17 +1132,17 @@ export function formatActiveSkillsSegment(skills: string[] | null | undefined): 
   return `${shownStr} ${DIM}⋯${R}\x1b[95m+${overflow}${R}`
 }
 
-function buildLine3(
-  seg: SegChecker,
-  snapshot: WarmStatusLineSnapshot,
-  daemonMetrics: StatusLineDaemonMetrics | null | undefined,
-  a4: string,
-  agentName: string | undefined,
-  vimMode: string | undefined,
-  taskCounts: TaskCounts | null | undefined,
+function buildLine3(options: {
+  seg: SegChecker
+  snapshot: WarmStatusLineSnapshot
+  daemonMetrics: StatusLineDaemonMetrics | null | undefined
+  a4: string
+  agentName: string | undefined
+  vimMode: string | undefined
+  taskCounts: TaskCounts | null | undefined
   activeSkills: string[] | null | undefined
-): string {
-  const lbl = (s: string) => `${DIM}${s}${R}`
+}): string {
+  const { seg, snapshot, daemonMetrics, a4, agentName, vimMode, taskCounts, activeSkills } = options
   const stateSeg = formatProjectState(snapshot.projectState)
   const ghCountSeg = buildBacklogSegment(snapshot)
   const daemonMetricsSeg = buildDaemonMetricsSegment(daemonMetrics)
@@ -1131,16 +1157,16 @@ function buildLine3(
   const modeSeg = buildModeSeg(a4, agentName, vimMode)
   const flagsStr = snapshot.settingsParts.join(" ")
   return joinGroups([
-    seg("state") && stateSeg ? `${lbl("state")} ${stateSeg}` : "",
-    seg("tasks") && taskSeg ? `${lbl("tasks")} ${taskSeg}` : "",
-    seg("skills") && skillsSeg ? `${lbl("skills")} ${skillsSeg}` : "",
-    seg("steers") && steersSeg ? `${lbl("steers")} ${steersSeg}` : "",
-    seg("backlog") && ghCountSeg ? `${lbl("backlog")} ${ghCountSeg}` : "",
-    seg("checks") && checksSeg ? `${lbl("checks")} ${checksSeg}` : "",
-    seg("metrics") && daemonMetricsSeg ? `${lbl("metrics")} ${daemonMetricsSeg}` : "",
-    seg("mode") && modeSeg ? `${lbl("mode")} ${modeSeg}` : "",
-    seg("flags") && flagsStr ? `${lbl("flags")} ${flagsStr}` : "",
-    seg("time") ? `${lbl("time")} ${DIM}${formatTime()}${R}` : "",
+    labeledSegment(seg("state"), "state", stateSeg),
+    labeledSegment(seg("tasks"), "tasks", taskSeg),
+    labeledSegment(seg("skills"), "skills", skillsSeg),
+    labeledSegment(seg("steers"), "steers", steersSeg),
+    labeledSegment(seg("backlog"), "backlog", ghCountSeg),
+    labeledSegment(seg("checks"), "checks", checksSeg),
+    labeledSegment(seg("metrics"), "metrics", daemonMetricsSeg),
+    labeledSegment(seg("mode"), "mode", modeSeg),
+    labeledSegment(seg("flags"), "flags", flagsStr),
+    labeledSegment(seg("time"), "time", `${DIM}${formatTime()}${R}`),
   ])
 }
 
@@ -1161,7 +1187,7 @@ function buildLine2(opts: {
   ])
 }
 
-export function renderStatusLineFromSnapshot(opts: {
+interface StatusLineRenderOptions {
   input: StatusLineInput
   snapshot: WarmStatusLineSnapshot
   daemonMetrics?: StatusLineDaemonMetrics | null
@@ -1172,42 +1198,51 @@ export function renderStatusLineFromSnapshot(opts: {
   ctxTokens: number
   ctxStats: ContextStats | null
   timeOffset: number
-}): string {
-  const {
-    input,
-    snapshot,
-    daemonMetrics = null,
-    taskCounts: explicitTaskCounts,
-    activeSkills: explicitActiveSkills,
-    wantedLevel = 0,
-    ctxPct,
-    ctxTokens,
-    ctxStats,
-    timeOffset,
-  } = opts
-  const taskCounts = explicitTaskCounts ?? snapshot.taskCounts ?? null
-  const activeSkills = explicitActiveSkills ?? snapshot.activeSkills ?? null
-  const activeSegmentSet =
-    snapshot.activeSegments.length > 0 ? new Set(snapshot.activeSegments) : null
-  const seg: SegChecker = (name) => activeSegmentSet?.has(name) ?? true
+}
+
+function createSegmentChecker(activeSegments: string[]): SegChecker {
+  if (activeSegments.length === 0) return () => true
+  const activeSegmentSet = new Set(activeSegments)
+  return (name) => activeSegmentSet.has(name)
+}
+
+function selectedTaskCounts(opts: StatusLineRenderOptions): TaskCounts | null {
+  return opts.taskCounts ?? opts.snapshot.taskCounts ?? null
+}
+
+function selectedActiveSkills(opts: StatusLineRenderOptions): string[] | null {
+  return opts.activeSkills ?? opts.snapshot.activeSkills ?? null
+}
+
+function selectedWantedLevel(opts: StatusLineRenderOptions): number {
+  const explicitWantedLevel = opts.wantedLevel ?? 0
+  return explicitWantedLevel || (opts.snapshot.wantedLevel ?? 0)
+}
+
+export function renderStatusLineFromSnapshot(opts: StatusLineRenderOptions): string {
+  const { input, snapshot, ctxPct, ctxTokens, ctxStats, timeOffset } = opts
+  const daemonMetrics = opts.daemonMetrics ?? null
+  const taskCounts = selectedTaskCounts(opts)
+  const activeSkills = selectedActiveSkills(opts)
+  const seg = createSegmentChecker(snapshot.activeSegments)
 
   const a2 = fg256(RAINBOW[(timeOffset + 6) % RL]!)
   const a4 = fg256(RAINBOW[(timeOffset + 18) % RL]!)
   const rb = (s: string, idx = 0) => rainbowStr(s, idx, timeOffset)
   const model = input.model?.display_name ?? "claude"
 
-  const line1 = buildLine1(seg, snapshot, a2, wantedLevel || (snapshot.wantedLevel ?? 0))
+  const line1 = buildLine1(seg, snapshot, a2, selectedWantedLevel(opts))
   const line2 = buildLine2({ seg, ctxPct, ctxTokens, ctxStats, model, rb })
-  const line3 = buildLine3(
+  const line3 = buildLine3({
     seg,
     snapshot,
     daemonMetrics,
     a4,
-    input.agent?.name,
-    input.vim?.mode,
+    agentName: input.agent?.name,
+    vimMode: input.vim?.mode,
     taskCounts,
-    activeSkills
-  )
+    activeSkills,
+  })
 
   const fill = `${DIM}─${R}`
   return [
@@ -1217,96 +1252,117 @@ export function renderStatusLineFromSnapshot(opts: {
   ].join("\n")
 }
 
+async function resolveStatusSessionPath(
+  cwd: string,
+  sessionId: string | null
+): Promise<string | null> {
+  try {
+    const sessions = await findAllProviderSessions(cwd)
+    const session = sessionId
+      ? sessions.find((candidate) => candidate.id === sessionId)
+      : sessions[0]
+    return session?.path ?? null
+  } catch {
+    return null
+  }
+}
+
+async function applySnapshotFallbacks(
+  snapshot: WarmStatusLineSnapshot,
+  cwd: string,
+  sessionId: string | null,
+  sessionPath: string | null
+): Promise<string[] | null | undefined> {
+  let activeSkills = snapshot.activeSkills
+  if (activeSkills == null && sessionPath) {
+    activeSkills = await getRecentlyInvokedSkillsForCurrentSession(sessionPath).catch(() => null)
+  }
+  if (snapshot.execStats === undefined) snapshot.execStats = await readExecStatsForCwd(cwd)
+  if (snapshot.queuedSteers === undefined) {
+    snapshot.queuedSteers = await readQueuedSteerCounts(sessionId)
+  }
+  return activeSkills
+}
+
+async function computeWantedLevel(
+  snapshot: WarmStatusLineSnapshot,
+  taskCounts: TaskCounts | null,
+  sessionPath: string | null
+): Promise<number> {
+  let wantedLevel = Math.max(snapshot.wantedLevel ?? 0, complianceBaselineWantedLevel(taskCounts))
+  if (!sessionPath) return wantedLevel
+  try {
+    const lines = await readSessionLines(sessionPath)
+    wantedLevel = Math.max(wantedLevel, standingWantedLevel(lines).wantedLevel)
+  } catch {
+    // Leave the compliance-derived baseline in place
+  }
+  return wantedLevel
+}
+
+function statusLineInputContext(input: StatusLineInput): {
+  cwd: string
+  ctxPct: number
+  ctxTokens: number
+  sessionId: string | null
+} {
+  return {
+    cwd: input.workspace?.current_dir ?? process.cwd(),
+    ctxPct: input.context_window?.used_percentage ?? 0,
+    ctxTokens: input.context_window?.current_usage ?? 0,
+    sessionId: input.session_id ?? null,
+  }
+}
+
+function resolveStatusTaskCounts(
+  snapshot: WarmStatusLineSnapshot,
+  sessionTasks: ReadonlyArray<{ status: string }>
+): TaskCounts | null {
+  return (
+    snapshot.taskCounts ?? (sessionTasks.length > 0 ? buildTaskCountsFromTasks(sessionTasks) : null)
+  )
+}
+
+async function runStatusLine(input: StatusLineInput): Promise<void> {
+  const { cwd, ctxPct, ctxTokens, sessionId } = statusLineInputContext(input)
+  const timeOffset = Math.floor(Date.now() / 1667) % RL
+  const [ctxStats, warmSnapshot, daemonMetrics, renderSettings, sessionTasks] = await Promise.all([
+    updateContextStats(cwd, ctxPct),
+    readWarmSnapshotFromDaemon(cwd, sessionId),
+    readProjectMetricsFromDaemon(cwd),
+    resolveStatusLineRenderSettings(cwd, sessionId),
+    sessionId ? readStatusLineSessionTasks(sessionId) : Promise.resolve([]),
+  ])
+  const snapshot = applyRenderSettingsToSnapshot(
+    warmSnapshot ?? (await computeWarmStatusLineSnapshot(cwd, sessionId)),
+    renderSettings
+  )
+  const taskCounts = resolveStatusTaskCounts(snapshot, sessionTasks)
+  const sessionPath = await resolveStatusSessionPath(cwd, sessionId)
+  const activeSkills = await applySnapshotFallbacks(snapshot, cwd, sessionId, sessionPath)
+  const wantedLevel = await computeWantedLevel(snapshot, taskCounts, sessionPath)
+  console.log(
+    renderStatusLineFromSnapshot({
+      input,
+      snapshot,
+      daemonMetrics,
+      taskCounts,
+      activeSkills,
+      wantedLevel,
+      ctxPct,
+      ctxTokens,
+      ctxStats,
+      timeOffset,
+    })
+  )
+}
+
 export const statusLineCommand: Command = {
   name: "status-line",
   description: "Output a rich ANSI status bar for Claude Code's statusLine hook",
   usage: "swiz status-line  # reads JSON from stdin",
   async run() {
     const input: StatusLineInput = await Bun.stdin.json().catch(() => ({}))
-
-    const cwd = input.workspace?.current_dir ?? process.cwd()
-    const ctxPct = input.context_window?.used_percentage ?? 0
-    const ctxTokens = input.context_window?.current_usage ?? 0
-
-    // Time-based offset: cycles through full rainbow every ~1 minute (~1.7s per step)
-    const timeOffset = Math.floor(Date.now() / 1667) % RL
-
-    const sessionId = input.session_id ?? null
-    const [ctxStats, warmSnapshot, daemonMetrics, renderSettings, sessionTasks] = await Promise.all(
-      [
-        updateContextStats(cwd, ctxPct),
-        readWarmSnapshotFromDaemon(cwd, sessionId),
-        readProjectMetricsFromDaemon(cwd),
-        resolveStatusLineRenderSettings(cwd, sessionId),
-        sessionId ? readStatusLineSessionTasks(sessionId) : Promise.resolve([]),
-      ]
-    )
-    const snapshot = applyRenderSettingsToSnapshot(
-      warmSnapshot ?? (await computeWarmStatusLineSnapshot(cwd, sessionId)),
-      renderSettings
-    )
-    // Fallback: if the daemon snapshot doesn't include taskCounts (old daemon),
-    // compute from the locally-read session tasks.
-    const taskCounts =
-      snapshot.taskCounts ??
-      (sessionTasks.length > 0 ? buildTaskCountsFromTasks(sessionTasks) : null)
-
-    // Resolve the session transcript once for both the active-skills fallback and
-    // the GTA wanted level computed from retry-after-block infractions.
-    let sessionPath: string | null = null
-    try {
-      const sessions = await findAllProviderSessions(cwd)
-      sessionPath =
-        (sessionId ? sessions.find((s) => s.id === sessionId) : sessions[0])?.path ?? null
-    } catch {
-      // Fall back to null
-    }
-
-    // Fallback: if the daemon snapshot doesn't include activeSkills (old daemon),
-    // compute from the locally-read session transcript.
-    let activeSkills = snapshot.activeSkills
-    if ((activeSkills === undefined || activeSkills === null) && sessionPath) {
-      activeSkills = await getRecentlyInvokedSkillsForCurrentSession(sessionPath).catch(() => null)
-    }
-
-    // Fallback: if the daemon snapshot doesn't include execStats (old daemon),
-    // read the per-project stats files directly.
-    if (snapshot.execStats === undefined) {
-      snapshot.execStats = await readExecStatsForCwd(cwd)
-    }
-
-    // Fallback: if the daemon snapshot doesn't include queuedSteers (old daemon),
-    // read the local auto-steer queue directly.
-    if (snapshot.queuedSteers === undefined) {
-      snapshot.queuedSteers = await readQueuedSteerCounts(sessionId)
-    }
-
-    // Wanted level: unhealthy task compliance contributes a baseline ★1 (preferring
-    // the daemon-computed value when present), and retry-after-block infractions in
-    // the transcript raise it further.
-    let wantedLevel = Math.max(snapshot.wantedLevel ?? 0, complianceBaselineWantedLevel(taskCounts))
-    if (sessionPath) {
-      try {
-        const lines = await readSessionLines(sessionPath)
-        wantedLevel = Math.max(wantedLevel, standingWantedLevel(lines).wantedLevel)
-      } catch {
-        // Leave the compliance-derived baseline in place
-      }
-    }
-
-    console.log(
-      renderStatusLineFromSnapshot({
-        input,
-        snapshot,
-        daemonMetrics,
-        taskCounts,
-        activeSkills,
-        wantedLevel,
-        ctxPct,
-        ctxTokens,
-        ctxStats,
-        timeOffset,
-      })
-    )
+    await runStatusLine(input)
   },
 }

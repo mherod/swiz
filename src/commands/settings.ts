@@ -560,6 +560,27 @@ function resolveAmbitionSource(
   return "global"
 }
 
+function resolveAuditStrictness(
+  settings: SwizSettings,
+  projectSettings: ProjectSwizSettings | null
+): Pick<ProjectPolicyInfo, "auditStrictness" | "auditStrictnessSource"> {
+  if (projectSettings?.auditStrictness !== undefined) {
+    return { auditStrictness: projectSettings.auditStrictness, auditStrictnessSource: "project" }
+  }
+  if (settings.auditStrictness !== undefined) {
+    return { auditStrictness: settings.auditStrictness, auditStrictnessSource: "user" }
+  }
+  return { auditStrictness: "strict", auditStrictnessSource: "default" }
+}
+
+function resolveDefaultBranch(
+  projectSettings: ProjectSwizSettings | null
+): Pick<ProjectPolicyInfo, "defaultBranch" | "defaultBranchSource"> {
+  return projectSettings?.defaultBranch
+    ? { defaultBranch: projectSettings.defaultBranch, defaultBranchSource: "project" }
+    : { defaultBranch: "auto-detect", defaultBranchSource: "auto" }
+}
+
 function buildProjectPolicyInfo(
   targetDir: string,
   settings: SwizSettings,
@@ -582,20 +603,13 @@ function buildProjectPolicyInfo(
     profile: policy.profile,
     trivialMaxFiles: policy.trivialMaxFiles,
     trivialMaxLines: policy.trivialMaxLines,
-    defaultBranch: projectSettings?.defaultBranch ?? "auto-detect",
-    defaultBranchSource: projectSettings?.defaultBranch ? ("project" as const) : ("auto" as const),
+    ...resolveDefaultBranch(projectSettings),
     memoryLineThreshold: memoryThresholds.memoryLineThreshold,
     memoryLineSource: memoryThresholds.memoryLineSource,
     memoryWordThreshold: memoryThresholds.memoryWordThreshold,
     memoryWordSource: memoryThresholds.memoryWordSource,
     trunkMode: projectSettings?.trunkMode ?? false,
-    auditStrictness: projectSettings?.auditStrictness ?? settings.auditStrictness ?? "strict",
-    auditStrictnessSource:
-      projectSettings?.auditStrictness !== undefined
-        ? "project"
-        : settings.auditStrictness !== undefined
-          ? "user"
-          : "default",
+    ...resolveAuditStrictness(settings, projectSettings),
     source: policy.source,
     autoSteerTranscriptWatching:
       projectSettings?.autoSteerTranscriptWatching ?? settings.autoSteerTranscriptWatching,

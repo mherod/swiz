@@ -361,6 +361,10 @@ function skipCharClass(text: string, start: number): number {
   return index
 }
 
+function isQuantifierCharacter(char: string | undefined): boolean {
+  return char === "*" || char === "+" || char === "?" || char === "{"
+}
+
 function hasQuantifier(text: string): boolean {
   let index = 0
   while (index < text.length) {
@@ -369,7 +373,7 @@ function hasQuantifier(text: string): boolean {
       index = skipCharClass(text, index + 1)
       continue
     }
-    if ((char === "*" || char === "+" || char === "?" || char === "{") && !isEscaped(text, index)) {
+    if (isQuantifierCharacter(char) && !isEscaped(text, index)) {
       return true
     }
     if (char === "\\" && index + 1 < text.length) {
@@ -378,6 +382,12 @@ function hasQuantifier(text: string): boolean {
     index += 1
   }
   return false
+}
+
+function quantifiedGroupBody(pattern: string, start: number, closeIndex: number): string | null {
+  let lookahead = closeIndex + 1
+  while (/\s/.test(pattern[lookahead] ?? "")) lookahead += 1
+  return isQuantifierCharacter(pattern[lookahead]) ? pattern.slice(start + 1, closeIndex) : null
 }
 
 function hasUnsafeNestedQuantifier(pattern: string): boolean {
@@ -392,44 +402,21 @@ function hasUnsafeNestedQuantifier(pattern: string): boolean {
       continue
     }
 
-    if (char === "[" && !isEscaped(pattern, index)) {
+    if (char === "[") {
       index = skipCharClass(pattern, index + 1) + 1
       continue
     }
 
-    if (char === "(" && !isEscaped(pattern, index)) {
+    if (char === "(") {
       stack.push(index)
       index += 1
       continue
     }
 
-    if (char === ")" && stack.length > 0) {
+    if (char === ")") {
       const start = stack.pop()
-      if (start === undefined) {
-        index += 1
-        continue
-      }
-
-      let lookahead = index + 1
-      while (lookahead < pattern.length) {
-        const lookaheadChar = pattern[lookahead]
-        if (lookaheadChar === undefined || !/\s/.test(lookaheadChar)) {
-          break
-        }
-        lookahead += 1
-      }
-      if (
-        lookahead < pattern.length &&
-        (pattern[lookahead] === "*" ||
-          pattern[lookahead] === "+" ||
-          pattern[lookahead] === "?" ||
-          pattern[lookahead] === "{")
-      ) {
-        const body = pattern.slice(start + 1, index)
-        if (hasQuantifier(body)) {
-          return true
-        }
-      }
+      const body = start === undefined ? null : quantifiedGroupBody(pattern, start, index)
+      if (body !== null && hasQuantifier(body)) return true
       index += 1
       continue
     }
@@ -610,22 +597,15 @@ export async function appendReplyToSink(
 
 // ─── Server entry point ─────────────────────────────────────────────────────
 
-async function serve(): Promise<void> {
-  const { McpServer } = await import("@modelcontextprotocol/sdk/server/mcp.js")
-  const { StdioServerTransport } = await import("@modelcontextprotocol/sdk/server/stdio.js")
+type McpToolServer = {
+  registerTool: (
+    name: string,
+    definition: Record<string, any>,
+    handler: (input: any) => any
+  ) => void
+}
 
-  const cwd = process.cwd()
-  const settings = await readSwizSettings()
-  const mcpChannels = settings.mcpChannels
-
-  const server = new McpServer(
-    { name: SERVER_NAME, version: SERVER_VERSION },
-    {
-      capabilities: buildMcpCapabilities(mcpChannels),
-      instructions: buildMcpInstructions(mcpChannels),
-    }
-  )
-
+function registerReplyTool(server: McpToolServer, cwd: string): void {
   server.registerTool(
     "reply",
     {
@@ -638,20 +618,23 @@ async function serve(): Promise<void> {
         kind: z.string().optional().describe('Reply kind, e.g. "note" or "status"'),
       },
     },
-    async ({ content, kind }) => {
+    async ({ content, kind }: { content: string; kind?: string }) => {
       try {
         await appendReplyToSink(cwd, { content, kind: kind ?? "note" })
-      } catch (err) {
-        const message = messageFromUnknownError(err)
+        return { content: [{ type: "text" as const, text: "ok" }] }
+      } catch (error) {
         return {
-          content: [{ type: "text" as const, text: `reply failed: ${message}` }],
+          content: [
+            { type: "text" as const, text: `reply failed: ${messageFromUnknownError(error)}` },
+          ],
           isError: true,
         }
       }
-      return { content: [{ type: "text" as const, text: "ok" }] }
     }
   )
+}
 
+function registerTaskCreateTool(server: McpToolServer, cwd: string): void {
   server.registerTool(
     "TaskCreate",
     {
@@ -669,38 +652,118 @@ async function serve(): Promise<void> {
           .describe("Present continuous form for spinner display (e.g., 'Fixing login bug')"),
       },
     },
-    async ({ subject, description, activeForm }) => {
+    async (input: { subject: string; description: string; activeForm?: string }) => {
       try {
         const projectKey = projectKeyFromCwd(cwd)
-        const task = await createTaskInProcess({
-          sessionId: projectKey,
-          subject,
-          description,
-          activeForm,
-          cwd,
-        })
+        const task = await createTaskInProcess({ sessionId: projectKey, ...input, cwd })
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: true, task }) }] }
+      } catch (error) {
+        const name = getTaskToolName("TaskCreate")
         return {
           content: [
-            {
-              type: "text" as const,
-              text: JSON.stringify({
-                ok: true,
-                task,
-              }),
-            },
+            { type: "text" as const, text: `${name} failed: ${messageFromUnknownError(error)}` },
           ],
-        }
-      } catch (err) {
-        const message = messageFromUnknownError(err)
-        const taskCreateName = getTaskToolName("TaskCreate")
-        return {
-          content: [{ type: "text" as const, text: `${taskCreateName} failed: ${message}` }],
           isError: true,
         }
       }
     }
   )
+}
 
+interface TaskUpdateToolInput {
+  taskId: string
+  status?: "pending" | "in_progress" | "completed" | "cancelled"
+  subject?: string
+  description?: string
+  addBlocks?: string[]
+  removeBlocks?: string[]
+  addBlockedBy?: string[]
+  removeBlockedBy?: string[]
+}
+
+function applyTaskFieldUpdates(
+  task: Awaited<ReturnType<typeof readTasks>>[number],
+  input: TaskUpdateToolInput
+): boolean {
+  if (input.subject !== undefined) task.subject = input.subject
+  if (input.description !== undefined) task.description = input.description
+  if (input.addBlocks) task.blocks = [...new Set([...task.blocks, ...input.addBlocks])]
+  if (input.removeBlocks)
+    task.blocks = task.blocks.filter((id) => !input.removeBlocks!.includes(id))
+  if (input.addBlockedBy) task.blockedBy = [...new Set([...task.blockedBy, ...input.addBlockedBy])]
+  if (input.removeBlockedBy) {
+    task.blockedBy = task.blockedBy.filter((id) => !input.removeBlockedBy!.includes(id))
+  }
+  return [
+    input.subject,
+    input.description,
+    input.addBlocks,
+    input.removeBlocks,
+    input.addBlockedBy,
+    input.removeBlockedBy,
+  ].some((value) => value !== undefined)
+}
+
+async function persistTaskUpdate(
+  projectKey: string,
+  cwd: string,
+  task: Awaited<ReturnType<typeof readTasks>>[number],
+  input: TaskUpdateToolInput,
+  fieldsUpdated: boolean
+): Promise<void> {
+  if (input.status === undefined || input.status === task.status) {
+    if (fieldsUpdated) await writeTaskUpdate(projectKey, input.taskId, task)
+    return
+  }
+  if (fieldsUpdated) await writeTaskUpdate(projectKey, input.taskId, task)
+  if (input.status === "completed") {
+    await completeTaskWithAutoTransition(projectKey, input.taskId, {
+      filterCwd: cwd,
+      evidence: input.description,
+    })
+  } else {
+    await updateStatus(projectKey, input.taskId, input.status, { filterCwd: cwd })
+  }
+}
+
+async function handleTaskUpdate(input: TaskUpdateToolInput, cwd: string) {
+  const taskUpdateName = getTaskToolName("TaskUpdate")
+  try {
+    const projectKey = projectKeyFromCwd(cwd)
+    const task = (await readTasks(projectKey)).find((candidate) => candidate.id === input.taskId)
+    if (!task) {
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: `${taskUpdateName} failed: task ${input.taskId} not found`,
+          },
+        ],
+        isError: true,
+      }
+    }
+    const fieldsUpdated = applyTaskFieldUpdates(task, input)
+    await persistTaskUpdate(projectKey, cwd, task, input, fieldsUpdated)
+    const finalTask = (await readTasks(projectKey)).find(
+      (candidate) => candidate.id === input.taskId
+    )
+    return {
+      content: [{ type: "text" as const, text: JSON.stringify({ ok: true, task: finalTask }) }],
+    }
+  } catch (error) {
+    return {
+      content: [
+        {
+          type: "text" as const,
+          text: `${taskUpdateName} failed: ${messageFromUnknownError(error)}`,
+        },
+      ],
+      isError: true,
+    }
+  }
+}
+
+function registerTaskUpdateTool(server: McpToolServer, cwd: string): void {
   server.registerTool(
     "TaskUpdate",
     {
@@ -735,104 +798,11 @@ async function serve(): Promise<void> {
           .describe("List of task IDs to remove from blockedBy"),
       },
     },
-    async ({
-      taskId,
-      status,
-      subject,
-      description,
-      addBlocks,
-      removeBlocks,
-      addBlockedBy,
-      removeBlockedBy,
-    }) => {
-      try {
-        const projectKey = projectKeyFromCwd(cwd)
-        const allTasks = await readTasks(projectKey)
-        const task = allTasks.find((t) => t.id === taskId)
-        const taskUpdateName = getTaskToolName("TaskUpdate")
-        if (!task) {
-          return {
-            content: [
-              { type: "text" as const, text: `${taskUpdateName} failed: task ${taskId} not found` },
-            ],
-            isError: true,
-          }
-        }
-
-        // Update field values
-        if (subject !== undefined) task.subject = subject
-        if (description !== undefined) task.description = description
-        if (addBlocks) {
-          task.blocks = [...new Set([...task.blocks, ...addBlocks])]
-        }
-        if (removeBlocks) {
-          task.blocks = task.blocks.filter((b) => !removeBlocks.includes(b))
-        }
-        if (addBlockedBy) {
-          task.blockedBy = [...new Set([...task.blockedBy, ...addBlockedBy])]
-        }
-        if (removeBlockedBy) {
-          task.blockedBy = task.blockedBy.filter((b) => !removeBlockedBy.includes(b))
-        }
-
-        const fieldsUpdated =
-          subject !== undefined ||
-          description !== undefined ||
-          addBlocks ||
-          removeBlocks ||
-          addBlockedBy ||
-          removeBlockedBy
-
-        // Update status
-        if (status !== undefined && status !== task.status) {
-          // If fields were also updated, persist them first so status update (which re-reads) sees them.
-          if (fieldsUpdated) {
-            await writeTaskUpdate(projectKey, taskId, task)
-          }
-
-          if (status === "completed") {
-            // The agent's description is its completion evidence (native parity:
-            // evidence lives in the TaskUpdate description). Forwarding it lets a
-            // pending → completed jump satisfy the auto-transition evidence gate;
-            // a bare jump with no description is refused.
-            await completeTaskWithAutoTransition(projectKey, taskId, {
-              filterCwd: cwd,
-              evidence: description,
-            })
-          } else {
-            await updateStatus(projectKey, taskId, status, { filterCwd: cwd })
-          }
-        } else if (fieldsUpdated) {
-          // Field update without status change
-          await writeTaskUpdate(projectKey, taskId, task)
-        }
-
-        // Re-read to get the final state after all service side-effects (e.g. auto-transitions, timestamps)
-        const finalTasks = await readTasks(projectKey)
-        const finalTask = finalTasks.find((t) => t.id === taskId)
-
-        return {
-          content: [
-            {
-              type: "text" as const,
-              text: JSON.stringify({
-                ok: true,
-                task: finalTask,
-              }),
-            },
-          ],
-        }
-      } catch (err) {
-        const message = messageFromUnknownError(err)
-        const taskUpdateName = getTaskToolName("TaskUpdate")
-        return {
-          content: [{ type: "text" as const, text: `${taskUpdateName} failed: ${message}` }],
-          isError: true,
-        }
-      }
-    }
+    (input: TaskUpdateToolInput) => handleTaskUpdate(input, cwd)
   )
+}
 
+function registerTaskListTool(server: McpToolServer, cwd: string): void {
   server.registerTool(
     "TaskList",
     {
@@ -841,41 +811,57 @@ async function serve(): Promise<void> {
         "Retrieve all tasks in the current session. Returns task metadata including " +
         "IDs, subjects, statuses, and blocking relationships. Useful for understanding " +
         "the current task state without native tool support.",
-      inputSchema: {
-        // No required input parameters
-      },
+      inputSchema: {},
     },
     async () => {
       try {
-        const projectKey = projectKeyFromCwd(cwd)
-        const allTasks = await readTasks(projectKey)
-
+        const allTasks = await readTasks(projectKeyFromCwd(cwd))
+        const summary = {
+          total: allTasks.length,
+          pending: allTasks.filter((task) => task.status === "pending").length,
+          inProgress: allTasks.filter((task) => task.status === "in_progress").length,
+          completed: allTasks.filter((task) => task.status === "completed").length,
+        }
         return {
           content: [
-            {
-              type: "text" as const,
-              text: JSON.stringify({
-                ok: true,
-                tasks: allTasks,
-                summary: {
-                  total: allTasks.length,
-                  pending: allTasks.filter((t) => t.status === "pending").length,
-                  inProgress: allTasks.filter((t) => t.status === "in_progress").length,
-                  completed: allTasks.filter((t) => t.status === "completed").length,
-                },
-              }),
-            },
+            { type: "text" as const, text: JSON.stringify({ ok: true, tasks: allTasks, summary }) },
           ],
         }
-      } catch (err) {
-        const message = messageFromUnknownError(err)
+      } catch (error) {
         return {
-          content: [{ type: "text" as const, text: `TaskList failed: ${message}` }],
+          content: [
+            { type: "text" as const, text: `TaskList failed: ${messageFromUnknownError(error)}` },
+          ],
           isError: true,
         }
       }
     }
   )
+}
+
+async function serve(): Promise<void> {
+  const { McpServer } = await import("@modelcontextprotocol/sdk/server/mcp.js")
+  const { StdioServerTransport } = await import("@modelcontextprotocol/sdk/server/stdio.js")
+
+  const cwd = process.cwd()
+  const settings = await readSwizSettings()
+  const mcpChannels = settings.mcpChannels
+
+  const server = new McpServer(
+    { name: SERVER_NAME, version: SERVER_VERSION },
+    {
+      capabilities: buildMcpCapabilities(mcpChannels),
+      instructions: buildMcpInstructions(mcpChannels),
+    }
+  )
+
+  registerReplyTool(server, cwd)
+
+  registerTaskCreateTool(server, cwd)
+
+  registerTaskUpdateTool(server, cwd)
+
+  registerTaskListTool(server, cwd)
 
   const transport = new StdioServerTransport()
   await server.connect(transport)
