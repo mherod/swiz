@@ -102,6 +102,27 @@ _swiz_is_agent_env() {
   return 1
 }
 
+_swiz_get_setting() {
+  local key="$1"
+  local val=""
+  local conf_file
+  
+  for conf_file in "$PWD/.swiz/config.json" "${HOME:-}/.swiz/settings.json"; do
+    if [[ -f "$conf_file" ]]; then
+      if command -v jq >/dev/null 2>&1; then
+        val="$(command jq -r ".$key // empty" "$conf_file" 2>/dev/null)"
+      else
+        val="$(command grep -Eo "\"$key\"\s*:\s*[^,}]*" "$conf_file" 2>/dev/null | command sed 's/.*:[[:space:]]*//' | tr -d '\" ')"
+      fi
+      if [[ -n "$val" && "$val" != "null" ]]; then
+        echo "$val"
+        return 0
+      fi
+    fi
+  done
+  echo ""
+}
+
 # Core guard function. Returns 0 (true) if the command should be blocked.
 _swiz_guard() {
   [[ -n "${SWIZ_BYPASS:-}" ]] && return 1
@@ -437,6 +458,7 @@ git() {
 
   # Block unsafe force pushes while allowing lease-based safety flags.
   if [[ "$git_cmd" == "push" ]]; then
+    local is_delete=false
     for arg in "${git_cmd_args[@]}"; do
       [[ "$arg" == "--" ]] && break
       if [[ "$arg" == "--force" || ( "$arg" == -[^-]* && "${arg#-}" == *f* ) ]]; then
@@ -445,14 +467,53 @@ git() {
         return 1
       fi
       if [[ "$arg" == "--delete" || "$arg" == "-d" ]]; then
-        for target in "${git_cmd_args[@]}"; do
-          if [[ "$target" == "main" || "$target" == "master" ]]; then
-            printf 'swiz: Deleting the primary remote branch (%s) is blocked.\n' "$target" >&2
-            return 1
-          fi
-        done
+        is_delete=true
       fi
     done
+
+    local default_branch
+    default_branch="$(_swiz_get_setting "defaultBranch")"
+    : "${default_branch:=main}"
+
+    if $is_delete; then
+      for target in "${git_cmd_args[@]}"; do
+        if [[ "$target" == "main" || "$target" == "master" || "$target" == "$default_branch" ]]; then
+          printf 'swiz: Deleting the primary remote branch (%s) is blocked.\n' "$target" >&2
+          return 1
+        fi
+      done
+    fi
+
+    local strict_mode
+    strict_mode="$(_swiz_get_setting "strictNoDirectMain")"
+    if [[ "$strict_mode" == "true" && "$is_delete" != "true" ]]; then
+      local current_branch
+      current_branch="$(command git branch --show-current 2>/dev/null)"
+      local pushed_to_default=false
+      local has_refspec=false
+      
+      for arg in "${git_cmd_args[@]}"; do
+        [[ "$arg" == -* ]] && continue
+        if [[ "$arg" == "$default_branch" || "$arg" == *:$default_branch ]]; then
+          pushed_to_default=true
+          has_refspec=true
+        elif [[ "$arg" != "origin" && "$arg" != "upstream" ]]; then
+          has_refspec=true
+        fi
+      done
+      
+      if ! $has_refspec; then
+         if [[ "$current_branch" == "$default_branch" ]]; then
+           pushed_to_default=true
+         fi
+      fi
+
+      if $pushed_to_default; then
+        printf 'swiz: Direct pushes to the default branch (%s) are blocked by settings.\n' "$default_branch" >&2
+        printf 'strict-no-direct-main is enabled. Use feature branches and PRs instead.\n' >&2
+        return 1
+      fi
+    fi
   fi
 
   # Block deleting primary local branches
@@ -600,10 +661,14 @@ gh() {
       return 1
       ;;
     *--skip-status-check*)
-      echo "Error: gh --skip-status-check is blocked for security reasons" >&2
-      echo "This flag bypasses required CI/CD status checks" >&2
-      echo "Please wait for all required checks to pass before merging" >&2
-      return 1
+      local ignore_ci
+      ignore_ci="$(_swiz_get_setting "ignoreCi")"
+      if [[ "$ignore_ci" != "true" ]]; then
+        echo "Error: gh --skip-status-check is blocked for security reasons" >&2
+        echo "This flag bypasses required CI/CD status checks" >&2
+        echo "Please wait for all required checks to pass before merging" >&2
+        return 1
+      fi
       ;;
   esac
 
