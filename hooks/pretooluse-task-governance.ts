@@ -358,6 +358,30 @@ function isBlockedTaskFilesEdit(input: Record<string, any>, toolName: string): b
   return isBlockedTaskFilePath(filePath)
 }
 
+function evaluateTaskFileAccess(
+  input: Record<string, any>,
+  toolName: string,
+  sessionId?: string
+): SwizHookOutput | null {
+  if (!isBlockedTool(toolName)) return null
+  if (isBlockedTaskFilesEdit(input, toolName)) {
+    const filePath = String((input.tool_input as Record<string, any> | undefined)?.file_path ?? "")
+    return preToolUseDenyTaskFileAccess(SWIZ_TASKS_FILES_DENY_MESSAGE, {
+      toolName,
+      blockedPath: filePath,
+      sessionId,
+    })
+  }
+
+  const command = String((input.tool_input as Record<string, any> | undefined)?.command ?? "")
+  if (!isBlockedSwizTaskFilesCommand(command)) return null
+  return preToolUseDenyTaskFileAccess(SWIZ_TASKS_FILES_DENY_MESSAGE, {
+    toolName,
+    blockedPath: command,
+    sessionId,
+  })
+}
+
 function buildIncompleteTaskSummary(
   allTasks: Array<{ id: string; status: string; subject: string }>
 ): {
@@ -790,22 +814,28 @@ function checkDuplicateSubjectResolution(
   const groups = findDuplicateSubjectGroups(allTasks)
   if (groups.length === 0 || isTaskListTool(toolName)) return undefined
 
-  if (toolName === "TaskUpdate") {
-    const toolInput = (input.tool_input ?? {}) as Record<string, any>
-    const taskId = String(toolInput.taskId ?? "")
-    const beforeSeverity = duplicateSubjectSeverity(groups)
-    const preview = applyTaskUpdatePreview(allTasks, taskId, {
-      status: toolInput.status ? String(toolInput.status) : undefined,
-      subject: typeof toolInput.subject === "string" ? toolInput.subject : undefined,
-    })
-    const afterGroups = findDuplicateSubjectGroups(preview)
-    const afterSeverity = duplicateSubjectSeverity(afterGroups)
-    const touchesDuplicate = taskIdIsInDuplicateGroups(taskId, groups)
-    if (afterGroups.length === 0) return undefined
-    if (touchesDuplicate && afterSeverity < beforeSeverity) return undefined
+  if (toolName === "TaskUpdate" && taskUpdateImprovesDuplicateState(input, allTasks, groups)) {
+    return undefined
   }
 
   return buildDuplicateSubjectStateBlock(toolName, groups)
+}
+
+function taskUpdateImprovesDuplicateState(
+  input: Record<string, any>,
+  allTasks: ReadonlyArray<TaskSubjectEntry>,
+  groups: ReturnType<typeof findDuplicateSubjectGroups>
+): boolean {
+  const toolInput = (input.tool_input ?? {}) as Record<string, any>
+  const taskId = String(toolInput.taskId ?? "")
+  const preview = applyTaskUpdatePreview(allTasks, taskId, {
+    status: toolInput.status ? String(toolInput.status) : undefined,
+    subject: typeof toolInput.subject === "string" ? toolInput.subject : undefined,
+  })
+  const afterGroups = findDuplicateSubjectGroups(preview)
+  if (afterGroups.length === 0) return true
+  if (!taskIdIsInDuplicateGroups(taskId, groups)) return false
+  return duplicateSubjectSeverity(afterGroups) < duplicateSubjectSeverity(groups)
 }
 
 async function readTaskSubjectEntries(
@@ -857,89 +887,102 @@ async function checkTaskUpdateSubjectGovernance(
   return buildTaskUpdateDuplicateSubjectBlock(taskId, groups)
 }
 
-async function runTaskStateChecks(
-  toolName: string,
-  sessionId: string,
-  cwd: string,
-  allTasks: Array<{ id: string; status: string; subject: string }>,
-  activeTasks: string[],
-  thresholds: GovernanceThresholds,
-  input: Record<string, any>,
-  transcriptPath: string
-): Promise<SwizHookOutput> {
-  if (
-    needsReconciliation(sessionId) &&
-    isBlockedTool(toolName) &&
-    !isTaskListTool(toolName) &&
-    agentHasTaskListToolForHookPayload(input)
-  ) {
-    return preToolUseDeny(
-      taskGovernanceMessage(input, { kind: "reconciliation-required", toolName })
-    )
-  }
+interface TaskStateCheckContext extends ParsedInput {
+  allTasks: Array<{ id: string; status: string; subject: string }>
+  activeTasks: string[]
+  thresholds: GovernanceThresholds
+}
 
-  const taskListSyncOutcome = await checkCanonicalTaskListSync(toolName, sessionId, input)
+function checkReconciliationRequired(context: TaskStateCheckContext): SwizHookOutput | undefined {
+  if (
+    !needsReconciliation(context.sessionId) ||
+    !isBlockedTool(context.toolName) ||
+    isTaskListTool(context.toolName) ||
+    !agentHasTaskListToolForHookPayload(context.input)
+  ) {
+    return undefined
+  }
+  return preToolUseDeny(
+    taskGovernanceMessage(context.input, {
+      kind: "reconciliation-required",
+      toolName: context.toolName,
+    })
+  )
+}
+
+function runImmediateTaskStateChecks(context: TaskStateCheckContext): SwizHookOutput | undefined {
+  const pendingOverflow = checkPendingOverflow(context.toolName, context.allTasks)
+  if (pendingOverflow) return pendingOverflow
+
+  const deletion = checkTaskDeletion(
+    context.toolName,
+    context.allTasks,
+    context.thresholds,
+    context.input
+  )
+  if (deletion) return deletion
+
+  const noTasks = checkNoTasks(context.toolName, context.thresholds)(context.allTasks)
+  if (noTasks) return noTasks
+
+  return checkTaskMinimums(
+    context.toolName,
+    buildIncompleteTaskSummary(context.allTasks),
+    context.thresholds
+  )
+}
+
+async function runTaskStateChecks(context: TaskStateCheckContext): Promise<SwizHookOutput> {
+  const reconciliation = checkReconciliationRequired(context)
+  if (reconciliation) return reconciliation
+
+  const taskListSyncOutcome = await checkCanonicalTaskListSync(
+    context.toolName,
+    context.sessionId,
+    context.input
+  )
   if (taskListSyncOutcome) return taskListSyncOutcome
 
-  const pendingOverflowOutcome = checkPendingOverflow(toolName, allTasks)
-  if (pendingOverflowOutcome) return pendingOverflowOutcome
+  const immediateOutcome = runImmediateTaskStateChecks(context)
+  if (immediateOutcome) return immediateOutcome
 
-  const deletionOutcome = checkTaskDeletion(toolName, allTasks, thresholds, input)
-  if (deletionOutcome) return deletionOutcome
-
-  const noTasksOutcome = checkNoTasks(toolName, thresholds)(allTasks)
-  if (noTasksOutcome) return noTasksOutcome
-
-  const summary = buildIncompleteTaskSummary(allTasks)
-  const minOutcome = checkTaskMinimums(toolName, summary, thresholds)
-  if (minOutcome) return minOutcome
-
-  const capOutcome = await checkInProgressCap(toolName, sessionId, cwd, allTasks)
+  const capOutcome = await checkInProgressCap(
+    context.toolName,
+    context.sessionId,
+    context.cwd,
+    context.allTasks
+  )
   if (capOutcome) return capOutcome
 
+  const summary = buildIncompleteTaskSummary(context.allTasks)
   const mergeOutcome = await checkDirectMergeIntent(
-    toolName,
-    sessionId,
-    cwd,
+    context.toolName,
+    context.sessionId,
+    context.cwd,
     summary.incompleteTasks
   )
   if (mergeOutcome) return mergeOutcome
 
   const staleOutcome = await checkTaskStaleness({
-    toolName,
-    input,
-    transcriptPath,
-    allTasks,
-    activeTasks,
+    toolName: context.toolName,
+    input: context.input,
+    transcriptPath: context.transcriptPath,
+    allTasks: context.allTasks,
+    activeTasks: context.activeTasks,
     allTasksDone: summary.allTasksDone,
-    cwd,
-    sessionId,
+    cwd: context.cwd,
+    sessionId: context.sessionId,
   })
   if (staleOutcome) return staleOutcome
 
-  return (await emitSlowTaskWarning(allTasks, sessionId, cwd)) ?? {}
+  return (await emitSlowTaskWarning(context.allTasks, context.sessionId, context.cwd)) ?? {}
 }
 
 async function runRequireTasksChecks(parsed: ParsedInput): Promise<SwizHookOutput> {
   const { input, toolName, sessionId, transcriptPath, cwd } = parsed
   // Layer 1: Edit/Write file-path guard (see task-cli-governance.ts)
-  if (isBlockedTaskFilesEdit(input, toolName)) {
-    const filePath = String((input.tool_input as Record<string, any> | undefined)?.file_path ?? "")
-    return preToolUseDenyTaskFileAccess(SWIZ_TASKS_FILES_DENY_MESSAGE, {
-      toolName,
-      blockedPath: filePath,
-      sessionId,
-    })
-  }
-  const command = String(input.tool_input?.command ?? "")
-  // Layer 2: Shell command guard — catches cat, jq, pipes, redirects, subshells
-  if (isBlockedSwizTaskFilesCommand(command)) {
-    return preToolUseDenyTaskFileAccess(SWIZ_TASKS_FILES_DENY_MESSAGE, {
-      toolName,
-      blockedPath: command,
-      sessionId,
-    })
-  }
+  const taskFileAccess = evaluateTaskFileAccess(input, toolName, sessionId)
+  if (taskFileAccess) return taskFileAccess
 
   let thresholds: GovernanceThresholds = GOVERNANCE_THRESHOLDS.strict
   try {
@@ -966,16 +1009,16 @@ async function runRequireTasksChecks(parsed: ParsedInput): Promise<SwizHookOutpu
   const duplicateSubjectOutcome = checkDuplicateSubjectResolution(toolName, input, allTasks)
   if (duplicateSubjectOutcome) return duplicateSubjectOutcome
 
-  return await runTaskStateChecks(
+  return await runTaskStateChecks({
+    input,
     toolName,
     sessionId,
+    transcriptPath,
     cwd,
     allTasks,
     activeTasks,
     thresholds,
-    input,
-    transcriptPath
-  )
+  })
 }
 
 function unexpectedHookFailureOutput(err: unknown): SwizHookOutput {
@@ -999,20 +1042,8 @@ export async function evaluatePretooluseRequireTasks(
   if (!agentHasTaskToolsForHookPayload(input)) return {}
 
   const toolName = String(input.tool_name ?? "")
-  if (isBlockedTool(toolName) && isBlockedTaskFilesEdit(input, toolName)) {
-    const filePath = String((input.tool_input as Record<string, any> | undefined)?.file_path ?? "")
-    return preToolUseDenyTaskFileAccess(SWIZ_TASKS_FILES_DENY_MESSAGE, {
-      toolName,
-      blockedPath: filePath,
-    })
-  }
-  const command = String((input.tool_input as Record<string, any> | undefined)?.command ?? "")
-  if (isBlockedTool(toolName) && isBlockedSwizTaskFilesCommand(command)) {
-    return preToolUseDenyTaskFileAccess(SWIZ_TASKS_FILES_DENY_MESSAGE, {
-      toolName,
-      blockedPath: command,
-    })
-  }
+  const taskFileAccess = evaluateTaskFileAccess(input, toolName)
+  if (taskFileAccess) return taskFileAccess
 
   const parsed = await tryParseAndGuard(input)
   if (!parsed) return {}
@@ -1186,6 +1217,59 @@ async function handleTaskDeletionCompletion(
   return await checkNativeTaskDeletionGovernance(input, taskId, sessionId, cwd)
 }
 
+async function resolveGovernanceThresholdsForSession(
+  input: Record<string, any>,
+  sessionId: string,
+  cwd: string | undefined
+): Promise<GovernanceThresholds> {
+  try {
+    const [settings, projectSettings] = await Promise.all([
+      readSwizSettings({ strict: true }),
+      cwd ? readProjectSettings(cwd).catch(() => null) : Promise.resolve(null),
+    ])
+    const effective =
+      (input._effectiveSettings as ReturnType<typeof getEffectiveSwizSettings> | undefined) ??
+      getEffectiveSwizSettings(settings, sessionId, projectSettings ?? undefined)
+    return resolveGovernanceThresholds(effective.auditStrictness, effective.autoContinue)
+  } catch {
+    return GOVERNANCE_THRESHOLDS.strict
+  }
+}
+
+async function enforceTaskCompletionThreshold(
+  input: Record<string, any>,
+  taskId: string,
+  sessionId: string,
+  cwd: string | undefined,
+  allTasks: Awaited<ReturnType<typeof readTasksForInput>>
+): Promise<SwizHookOutput | null> {
+  const taskBeingCompleted = allTasks.find((task) => task.id === taskId)
+  if (!taskBeingCompleted || !isIncompleteTaskStatus(taskBeingCompleted.status)) return null
+
+  const thresholds = await resolveGovernanceThresholdsForSession(input, sessionId, cwd)
+  const incompleteTasks = allTasks.filter((task) => isIncompleteTaskStatus(task.status))
+  const pendingTasks = incompleteTasks.filter((task) => task.status === "pending")
+  const incompleteAfter = incompleteTasks.length - 1
+  const pendingAfter =
+    taskBeingCompleted.status === "pending" ? pendingTasks.length - 1 : pendingTasks.length
+
+  // Allow early completion if at least 2 pending tasks remain (sufficient planning buffer)
+  // or if auto-continue is disabled (minPending === 0).
+  const allowEarlyCompletion =
+    pendingAfter >= 2 || (thresholds.minPending === 0 && incompleteAfter >= 0)
+  const violatesThresholds =
+    !allowEarlyCompletion &&
+    (incompleteAfter < thresholds.minIncomplete || pendingAfter < thresholds.minPending)
+  if (violatesThresholds) {
+    return denyTaskGovernance({ kind: "completion-threshold", taskId }, input)
+  }
+
+  // Optimistically record in event state + cache for parallel TOCTOU safety.
+  applyTaskUpdateEvent(sessionId, taskId, { status: "completed" })
+  applyCacheTaskUpdate(sessionId, { ...taskBeingCompleted, status: "completed" })
+  return null
+}
+
 async function handleTaskCompletion(
   input: Record<string, any>,
   taskId: string,
@@ -1207,53 +1291,7 @@ async function handleTaskCompletion(
 
   // Check governance thresholds: completing this task must not drop
   // pending count below 2, even if it drops incomplete below the minimum.
-  const taskBeingCompleted = allTasks.find((t) => t.id === taskId)
-
-  if (taskBeingCompleted && isIncompleteTaskStatus(taskBeingCompleted.status)) {
-    let thresholds: GovernanceThresholds = GOVERNANCE_THRESHOLDS.strict
-    try {
-      const [settings, projectSettings] = await Promise.all([
-        readSwizSettings({ strict: true }),
-        cwd ? readProjectSettings(cwd).catch(() => null) : Promise.resolve(null),
-      ])
-      const effective =
-        (input._effectiveSettings as ReturnType<typeof getEffectiveSwizSettings> | undefined) ??
-        getEffectiveSwizSettings(settings, sessionId, projectSettings ?? undefined)
-      thresholds = resolveGovernanceThresholds(effective.auditStrictness, effective.autoContinue)
-    } catch {
-      // Fall through with strict defaults
-    }
-
-    const incompleteTasks = allTasks.filter((t) => isIncompleteTaskStatus(t.status))
-    const pendingTasks = incompleteTasks.filter((t) => t.status === "pending")
-    const incompleteAfter = incompleteTasks.length - 1
-    const pendingAfter =
-      taskBeingCompleted.status === "pending" ? pendingTasks.length - 1 : pendingTasks.length
-
-    // Allow early completion if at least 2 pending tasks remain (sufficient planning buffer)
-    // or if auto-continue is disabled (minPending === 0).
-    const allowEarlyCompletion =
-      pendingAfter >= 2 || (thresholds.minPending === 0 && incompleteAfter >= 0)
-    const violatesThresholds =
-      !allowEarlyCompletion &&
-      (incompleteAfter < thresholds.minIncomplete || pendingAfter < thresholds.minPending)
-
-    if (violatesThresholds) {
-      return denyTaskGovernance(
-        {
-          kind: "completion-threshold",
-          taskId,
-        },
-        input
-      )
-    }
-
-    // Optimistically record in event state + cache for parallel TOCTOU safety.
-    applyTaskUpdateEvent(sessionId, taskId, { status: "completed" })
-    applyCacheTaskUpdate(sessionId, { ...taskBeingCompleted, status: "completed" })
-  }
-
-  return null
+  return await enforceTaskCompletionThreshold(input, taskId, sessionId, cwd, allTasks)
 }
 
 async function checkInProgressTransitionCap(
@@ -1512,6 +1550,37 @@ function checkUpdatePlanFinalTaskState(
   return checkTaskMinimums("update_plan", summary, thresholds) ?? null
 }
 
+function findDeferralPlanItem(plan: UpdatePlanTaskInput[]): UpdatePlanTaskInput | undefined {
+  return plan.find(
+    (item) =>
+      isIncompleteTaskStatus(item.status) &&
+      (isTaskSubjectWorkDeferral(item.step) || isTaskSubjectCarryoverDeferral(item.step))
+  )
+}
+
+async function checkUpdatePlanDirectMerge(
+  projection: UpdatePlanProjection,
+  sessionId: string,
+  cwd: string
+): Promise<SwizHookOutput | undefined> {
+  const summary = buildIncompleteTaskSummary(projection.finalTasks)
+  return await checkDirectMergeIntent("update_plan", sessionId, cwd, summary.incompleteTasks)
+}
+
+function checkUpdatePlanCompletionRate(
+  projection: UpdatePlanProjection,
+  sessionId: string
+): SwizHookOutput | null {
+  const finalSummary = buildIncompleteTaskSummary(projection.finalTasks)
+  if (finalSummary.allTasksDone) return null
+
+  const beforeSummary = buildIncompleteTaskSummary(projection.existingTasks)
+  return checkCompletionRateLimitForCount(sessionId, findCompletedTransitions(projection).length, {
+    pending: beforeSummary.pendingTasks.length,
+    inProgress: beforeSummary.inProgressTasks.length,
+  })
+}
+
 async function evaluateUpdatePlanGovernance(
   input: Record<string, any>,
   toolInput: Record<string, any>
@@ -1524,18 +1593,15 @@ async function evaluateUpdatePlanGovernance(
 
   const cwd = (input.cwd as string) ?? process.cwd()
   const plan = parseUpdatePlanTasks(toolInput)
-  for (const item of plan) {
-    if (
-      isIncompleteTaskStatus(item.status) &&
-      (isTaskSubjectWorkDeferral(item.step) || isTaskSubjectCarryoverDeferral(item.step))
-    ) {
-      return preToolUseDeny(
-        `Deferral tactic detected: task subject "${item.step}" uses deferral framing. ` +
-          "All work is to be completed in this session. There is no follow-up session. " +
-          "Replace it with concrete current-session work, start it now, or record a real blocker with evidence."
-      )
-    }
+  const deferralItem = findDeferralPlanItem(plan)
+  if (deferralItem) {
+    return preToolUseDeny(
+      `Deferral tactic detected: task subject "${deferralItem.step}" uses deferral framing. ` +
+        "All work is to be completed in this session. There is no follow-up session. " +
+        "Replace it with concrete current-session work, start it now, or record a real blocker with evidence."
+    )
   }
+
   const projection = await readUpdatePlanProjection(input, sessionId, plan)
   const pendingCompletionShortcut = findPendingCompletionShortcut(projection)
   if (pendingCompletionShortcut) {
@@ -1549,42 +1615,16 @@ async function evaluateUpdatePlanGovernance(
     )
   }
 
-  let thresholds: GovernanceThresholds = GOVERNANCE_THRESHOLDS.strict
-  try {
-    const [settings, projectSettings] = await Promise.all([
-      readSwizSettings({ strict: true }),
-      readProjectSettings(cwd).catch(() => null),
-    ])
-    const effective =
-      (input._effectiveSettings as ReturnType<typeof getEffectiveSwizSettings> | undefined) ??
-      getEffectiveSwizSettings(settings, sessionId, projectSettings ?? undefined)
-    thresholds = resolveGovernanceThresholds(effective.auditStrictness, effective.autoContinue)
-  } catch {
-    // Fall through with strict defaults.
-  }
+  const thresholds = await resolveGovernanceThresholdsForSession(input, sessionId, cwd)
 
   const stateDenied = checkUpdatePlanFinalTaskState(projection, thresholds)
   if (stateDenied) return stateDenied
 
-  const summary = buildIncompleteTaskSummary(projection.finalTasks)
-  const directMergeDenied = await checkDirectMergeIntent(
-    "update_plan",
-    sessionId,
-    cwd,
-    summary.incompleteTasks
-  )
+  const directMergeDenied = await checkUpdatePlanDirectMerge(projection, sessionId, cwd)
   if (directMergeDenied) return directMergeDenied
 
-  const completedTransitions = findCompletedTransitions(projection)
-  const beforeSummary = buildIncompleteTaskSummary(projection.existingTasks)
-  const finalSummary = buildIncompleteTaskSummary(projection.finalTasks)
-  if (!finalSummary.allTasksDone) {
-    const rateLimited = checkCompletionRateLimitForCount(sessionId, completedTransitions.length, {
-      pending: beforeSummary.pendingTasks.length,
-      inProgress: beforeSummary.inProgressTasks.length,
-    })
-    if (rateLimited) return rateLimited
-  }
+  const rateLimited = checkUpdatePlanCompletionRate(projection, sessionId)
+  if (rateLimited) return rateLimited
 
   return "continue"
 }
@@ -1606,6 +1646,56 @@ async function handleNativeInProgressUpdate(
   return "continue"
 }
 
+interface NativeTaskUpdateContext {
+  input: Record<string, any>
+  toolInput: Record<string, any>
+  taskId: string
+  sessionId: string
+  cwd: string | undefined
+}
+
+async function handleNativeTaskUpdateStatus(
+  context: NativeTaskUpdateContext
+): Promise<NativeTaskUpdateResult> {
+  if (context.toolInput.status === "deleted") {
+    const deletionDenied = await handleTaskDeletionCompletion(
+      context.input,
+      context.taskId,
+      context.sessionId,
+      context.cwd
+    )
+    return deletionDenied ?? "continue"
+  }
+  if (context.toolInput.status === "in_progress") {
+    return await handleNativeInProgressUpdate(context.taskId, context.sessionId, context.input)
+  }
+  if (context.toolInput.status !== "completed") return "early_exit"
+
+  // Reject shortcut completion from a merely planned task. The user-facing
+  // message deliberately describes the behavior being prevented rather than
+  // handing over a mechanical transition recipe.
+  const allTasks = await readTasksForInput(context.input, context.sessionId)
+  const currentTask = allTasks.find((task) => task.id === context.taskId)
+  if (currentTask?.status === "pending") {
+    return denyTaskGovernance(
+      {
+        kind: "pending-completion-shortcut",
+        taskId: context.taskId,
+        subject: currentTask.subject,
+      },
+      context.input
+    )
+  }
+
+  const completionDenied = await handleTaskCompletion(
+    context.input,
+    context.taskId,
+    context.sessionId,
+    context.cwd
+  )
+  return completionDenied ?? "continue"
+}
+
 async function checkNativeTaskUpdateCompletion(
   input: Record<string, any>
 ): Promise<NativeTaskUpdateResult> {
@@ -1625,37 +1715,7 @@ async function checkNativeTaskUpdateCompletion(
   const duplicateSubjectDenied = await checkTaskUpdateSubjectGovernance(input, sessionId)
   if (duplicateSubjectDenied) return duplicateSubjectDenied
 
-  if (toolInput.status === "deleted") {
-    const deletionDenied = await handleTaskDeletionCompletion(input, taskId, sessionId, cwd)
-    if (deletionDenied) return deletionDenied
-    return "continue"
-  }
-
-  if (toolInput.status === "in_progress") {
-    return await handleNativeInProgressUpdate(taskId, sessionId, input)
-  }
-
-  if (toolInput.status !== "completed") return "early_exit"
-
-  // Reject shortcut completion from a merely planned task. The user-facing
-  // message deliberately describes the behavior being prevented rather than
-  // handing over a mechanical transition recipe.
-  const allTasks = await readTasksForInput(input, sessionId)
-  const currentTask = allTasks.find((t) => t.id === taskId)
-  if (currentTask && currentTask.status === "pending") {
-    return denyTaskGovernance(
-      {
-        kind: "pending-completion-shortcut",
-        taskId,
-        subject: currentTask.subject,
-      },
-      input
-    )
-  }
-
-  const completionDenied = await handleTaskCompletion(input, taskId, sessionId, cwd)
-  if (completionDenied) return completionDenied
-  return "continue"
+  return await handleNativeTaskUpdateStatus({ input, toolInput, taskId, sessionId, cwd })
 }
 
 export async function runSwizTasksEnforcement(input: Record<string, any>): Promise<SwizHookOutput> {
@@ -1725,6 +1785,50 @@ export const enforceTaskupdateHook: SwizToolHook = {
 
 type ParsedGovernanceInput = ReturnType<typeof toolHookInputSchema.parse>
 
+function validateNativeTaskUpdateInput(toolInput: Record<string, any>): SwizHookOutput | null {
+  if (
+    typeof toolInput.subject === "string" &&
+    (isTaskSubjectWorkDeferral(toolInput.subject) ||
+      isTaskSubjectCarryoverDeferral(toolInput.subject))
+  ) {
+    return preToolUseDeny(
+      `Deferral tactic detected: task subject "${toolInput.subject}" uses deferral framing. ` +
+        "All work is to be completed in this session. There is no follow-up session. " +
+        "Replace it with concrete current-session work, start it now, or record a real blocker with evidence."
+    )
+  }
+
+  const unsupported = Object.keys(toolInput).filter((key) => !TASK_UPDATE_ALLOWED_FIELDS.has(key))
+  if (unsupported.length === 0) return null
+  const allowed = [...TASK_UPDATE_ALLOWED_FIELDS].join(", ")
+  return preToolUseDeny(
+    `${taskUpdateToolName()} received unsupported field(s): ${unsupported.map((field) => `\`${field}\``).join(", ")}.
+
+` + `Allowed fields: ${allowed}.`
+  )
+}
+
+async function completeNativeTaskUpdatePath(
+  input: Record<string, any>,
+  parsed: ParsedGovernanceInput
+): Promise<SwizHookOutput> {
+  const outcome = await checkNativeTaskUpdateCompletion(input)
+  if (outcome === "early_exit") return {}
+  if (outcome !== "continue") return outcome
+  return shouldInspectShellInput(parsed) ? await runSwizTasksEnforcement(input) : {}
+}
+
+async function completeUpdatePlanPath(
+  input: Record<string, any>,
+  toolInput: Record<string, any>,
+  parsed: ParsedGovernanceInput
+): Promise<SwizHookOutput> {
+  const outcome = await evaluateUpdatePlanGovernance(input, toolInput)
+  if (outcome === "early_exit") return {}
+  if (outcome !== "continue") return outcome
+  return shouldInspectShellInput(parsed) ? await runSwizTasksEnforcement(input) : {}
+}
+
 /**
  * Pre-screen: reject any blocked-tool attempt to edit swiz task files or
  * run a swiz CLI command that mutates task files. Applies even outside a
@@ -1735,22 +1839,7 @@ export function evaluateBlockedTaskFilesPrecheck(
   toolName: string,
   toolInput: Record<string, any>
 ): SwizHookOutput | null {
-  if (!isBlockedTool(toolName)) return null
-  if (isBlockedTaskFilesEdit(input, toolName)) {
-    const filePath = String(toolInput.file_path ?? "")
-    return preToolUseDenyTaskFileAccess(SWIZ_TASKS_FILES_DENY_MESSAGE, {
-      toolName,
-      blockedPath: filePath,
-    })
-  }
-  const command = String(toolInput.command ?? "")
-  if (isBlockedSwizTaskFilesCommand(command)) {
-    return preToolUseDenyTaskFileAccess(SWIZ_TASKS_FILES_DENY_MESSAGE, {
-      toolName,
-      blockedPath: command,
-    })
-  }
-  return null
+  return evaluateTaskFileAccess({ ...input, tool_input: toolInput }, toolName)
 }
 
 /**
@@ -1788,45 +1877,13 @@ export async function evaluateNativeTaskUpdatePath(
 ): Promise<SwizHookOutput> {
   const toolName = String(input.tool_name ?? "")
   if (isUpdatePlanTool(toolName)) {
-    const n = await evaluateUpdatePlanGovernance(input, toolInput)
-    if (n === "early_exit") return {}
-    if (n !== "continue") return n
-
-    if (shouldInspectShellInput(parsed)) {
-      return await runSwizTasksEnforcement(input)
-    }
-    return {}
+    return await completeUpdatePlanPath(input, toolInput, parsed)
   }
 
-  if (
-    typeof toolInput.subject === "string" &&
-    (isTaskSubjectWorkDeferral(toolInput.subject) ||
-      isTaskSubjectCarryoverDeferral(toolInput.subject))
-  ) {
-    return preToolUseDeny(
-      `Deferral tactic detected: task subject "${toolInput.subject}" uses deferral framing. ` +
-        "All work is to be completed in this session. There is no follow-up session. " +
-        "Replace it with concrete current-session work, start it now, or record a real blocker with evidence."
-    )
-  }
+  const invalidInput = validateNativeTaskUpdateInput(toolInput)
+  if (invalidInput) return invalidInput
 
-  const unsupported = Object.keys(toolInput).filter((k) => !TASK_UPDATE_ALLOWED_FIELDS.has(k))
-  if (unsupported.length > 0) {
-    const allowed = [...TASK_UPDATE_ALLOWED_FIELDS].join(", ")
-    return preToolUseDeny(
-      `${taskUpdateToolName()} received unsupported field(s): ${unsupported.map((f) => `\`${f}\``).join(", ")}.\n\n` +
-        `Allowed fields: ${allowed}.`
-    )
-  }
-
-  const n = await checkNativeTaskUpdateCompletion(input)
-  if (n === "early_exit") return {}
-  if (n !== "continue") return n
-
-  if (shouldInspectShellInput(parsed)) {
-    return await runSwizTasksEnforcement(input)
-  }
-  return {}
+  return await completeNativeTaskUpdatePath(input, parsed)
 }
 
 /**
@@ -1857,6 +1914,20 @@ export async function evaluateTaskCreatePath(
   return preToolUseAllow()
 }
 
+async function evaluateBlockedToolCliInput(
+  input: Record<string, any>,
+  parsed: ParsedGovernanceInput
+): Promise<SwizHookOutput | null> {
+  if (!shouldInspectShellInput(parsed)) return null
+
+  const cliResult = await runSwizTasksEnforcement(input)
+  if (!cliResult || Object.keys(cliResult).length === 0) return null
+  const hookOutput = (cliResult as Record<string, any>).hookSpecificOutput as
+    | Record<string, any>
+    | undefined
+  return hookOutput?.permissionDecision === "deny" ? cliResult : null
+}
+
 /**
  * Edit / Write / Bash branch. Applies project-scope guard conditions,
  * blocked-task-file deny, CLI enforcement when applicable, and the full
@@ -1875,24 +1946,11 @@ export async function evaluateBlockedToolPath(
 
   const transcriptPath: string = (input.transcript_path as string) ?? ""
 
-  if (isBlockedTaskFilesEdit(input, toolName)) {
-    const filePath = String((input.tool_input as Record<string, any> | undefined)?.file_path ?? "")
-    return preToolUseDenyTaskFileAccess(SWIZ_TASKS_FILES_DENY_MESSAGE, {
-      toolName,
-      blockedPath: filePath,
-      sessionId: sessionId ?? undefined,
-    })
-  }
+  const taskFileAccess = evaluateTaskFileAccess(input, toolName, sessionId ?? undefined)
+  if (taskFileAccess) return taskFileAccess
 
-  if (shouldInspectShellInput(parsed)) {
-    const cliResult = await runSwizTasksEnforcement(input)
-    if (cliResult && Object.keys(cliResult).length > 0) {
-      const hso = (cliResult as Record<string, any>).hookSpecificOutput as
-        | Record<string, any>
-        | undefined
-      if (hso?.permissionDecision === "deny") return cliResult
-    }
-  }
+  const cliDenied = await evaluateBlockedToolCliInput(input, parsed)
+  if (cliDenied) return cliDenied
 
   return await runRequireTasksChecks({
     input,
@@ -1918,6 +1976,20 @@ export async function evaluateOtherShellToolPath(
   return {}
 }
 
+async function dispatchTaskGovernancePath(
+  input: Record<string, any>,
+  parsed: ParsedGovernanceInput,
+  toolName: string,
+  toolInput: Record<string, any>
+): Promise<SwizHookOutput> {
+  if (isNativeTaskTool(toolName)) {
+    return await evaluateNativeTaskUpdatePath(input, toolInput, parsed)
+  }
+  if (isTaskCreateTool(toolName)) return await evaluateTaskCreatePath(input, toolInput)
+  if (isBlockedTool(toolName)) return await evaluateBlockedToolPath(input, parsed, toolName)
+  return await evaluateOtherShellToolPath(input, parsed)
+}
+
 async function evaluatePretooluseTaskGovernance(rawInput: unknown): Promise<SwizHookOutput> {
   const parsed = toolHookInputSchema.parse(rawInput)
   const input = parsed as unknown as Record<string, any>
@@ -1941,16 +2013,7 @@ async function evaluatePretooluseTaskGovernance(rawInput: unknown): Promise<Swiz
   const overflow = await evaluatePendingOverflowGuard(input, toolName)
   if (overflow) return overflow
 
-  if (isNativeTaskTool(toolName)) {
-    return await evaluateNativeTaskUpdatePath(input, toolInput, parsed)
-  }
-  if (isTaskCreateTool(toolName)) {
-    return await evaluateTaskCreatePath(input, toolInput)
-  }
-  if (isBlockedTool(toolName)) {
-    return await evaluateBlockedToolPath(input, parsed, toolName)
-  }
-  return await evaluateOtherShellToolPath(input, parsed)
+  return await dispatchTaskGovernancePath(input, parsed, toolName, toolInput)
 }
 
 function isDenyOutput(out: SwizHookOutput | null | undefined): boolean {
@@ -2000,54 +2063,69 @@ async function readTaskCountsForTrace(
   return { allTasks, pending, inProgress, total: allTasks.length }
 }
 
+type TaskTraceCounts = Awaited<ReturnType<typeof readTaskCountsForTrace>>
+
+async function buildLowPendingTrace(
+  input: Record<string, any>,
+  stateLead: string,
+  pending: number,
+  deferralContext: string | null
+): Promise<string> {
+  const hints = await fetchIssueHints(input.cwd as string | undefined)
+  const hintSuffix =
+    !deferralContext && hints.length > 0 ? ` Open issues to consider: ${hints.join("; ")}.` : ""
+  const bufferMessage =
+    pending === 0
+      ? `${stateLead} What should we do next? Add a pending task to keep the planning buffer stable.`
+      : `${stateLead} What should we do next? Add one more pending task to keep the buffer stable.`
+  return withDeferralTaskContext(
+    replaceTaskGovernanceSynonyms(`${bufferMessage}${hintSuffix}`),
+    deferralContext
+  )
+}
+
+async function formatTaskTraceContext(
+  input: Record<string, any>,
+  counts: TaskTraceCounts
+): Promise<string> {
+  const stateLead = formatTaskStateLead({
+    total: counts.total,
+    incomplete: counts.pending + counts.inProgress,
+    pending: counts.pending,
+    inProgress: counts.inProgress,
+  })
+  const deferralContext = buildDeferralTaskContext(counts.allTasks)
+
+  if (counts.total === 0 || (counts.pending === 0 && counts.inProgress === 0)) {
+    return withDeferralTaskContext(
+      replaceTaskGovernanceSynonyms(
+        `${stateLead} What are we working on? Create tasks before starting implementation.`
+      ),
+      deferralContext
+    )
+  }
+  if (counts.inProgress === 0) {
+    return withDeferralTaskContext(
+      replaceTaskGovernanceSynonyms(
+        `${stateLead} What are we currently working on? Claim a pending task with TaskUpdate before starting.`
+      ),
+      deferralContext
+    )
+  }
+  if (counts.pending <= 1) {
+    return await buildLowPendingTrace(input, stateLead, counts.pending, deferralContext)
+  }
+  return withDeferralTaskContext(
+    replaceTaskGovernanceSynonyms(`${stateLead} On track — good task hygiene.`),
+    deferralContext
+  )
+}
+
 async function buildTraceContext(rawInput: unknown): Promise<string> {
   try {
     const input = rawInput as Record<string, any>
     const sessionId = resolveSafeSessionId(input?.session_id as string | undefined)
-    const { allTasks, pending, inProgress, total } = await readTaskCountsForTrace(sessionId, input)
-
-    const stateLead = formatTaskStateLead({
-      total,
-      incomplete: pending + inProgress,
-      pending,
-      inProgress,
-    })
-    const deferralContext = buildDeferralTaskContext(allTasks)
-
-    if (total === 0 || (pending === 0 && inProgress === 0)) {
-      return withDeferralTaskContext(
-        replaceTaskGovernanceSynonyms(
-          `${stateLead} What are we working on? Create tasks before starting implementation.`
-        ),
-        deferralContext
-      )
-    }
-    if (inProgress === 0) {
-      return withDeferralTaskContext(
-        replaceTaskGovernanceSynonyms(
-          `${stateLead} What are we currently working on? Claim a pending task with TaskUpdate before starting.`
-        ),
-        deferralContext
-      )
-    }
-    if (pending <= 1) {
-      const cwd = input?.cwd as string | undefined
-      const hints = await fetchIssueHints(cwd)
-      const hintSuffix =
-        !deferralContext && hints.length > 0 ? ` Open issues to consider: ${hints.join("; ")}.` : ""
-      const bufferMsg =
-        pending === 0
-          ? `${stateLead} What should we do next? Add a pending task to keep the planning buffer stable.`
-          : `${stateLead} What should we do next? Add one more pending task to keep the buffer stable.`
-      return withDeferralTaskContext(
-        replaceTaskGovernanceSynonyms(`${bufferMsg}${hintSuffix}`),
-        deferralContext
-      )
-    }
-    return withDeferralTaskContext(
-      replaceTaskGovernanceSynonyms(`${stateLead} On track — good task hygiene.`),
-      deferralContext
-    )
+    return await formatTaskTraceContext(input, await readTaskCountsForTrace(sessionId, input))
   } catch (err) {
     return `Task state unavailable: ${(err as Error)?.message ?? err}`
   }

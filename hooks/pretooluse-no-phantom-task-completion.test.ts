@@ -32,15 +32,14 @@ async function runHook(
   home: string,
   sessionId: string,
   toolInput: any,
-  transcriptPath?: string,
-  toolName = "TaskUpdate"
+  options: { transcriptPath?: string; toolName?: string } = {}
 ): Promise<{ decision?: string; reason?: string }> {
   const payload = {
-    tool_name: toolName,
+    tool_name: options.toolName ?? "TaskUpdate",
     tool_input: toolInput,
     cwd,
     session_id: sessionId,
-    transcript_path: transcriptPath || "",
+    transcript_path: options.transcriptPath || "",
   }
   const result = await runHookInProcess("hooks/pretooluse-no-phantom-task-completion.ts", payload, {
     cwd,
@@ -83,7 +82,7 @@ describe("pretooluse-no-phantom-task-completion", () => {
     await writeTask(home, sessionId, "3", "in_progress")
 
     const toolInput = { taskId: "1", status: "completed", description: "done" }
-    const result = await runHook(dir, home, sessionId, toolInput, transcriptPath)
+    const result = await runHook(dir, home, sessionId, toolInput, { transcriptPath })
 
     expect(result.decision).toBe("allow")
     expect(result.reason).toContain("active-task-buffer")
@@ -104,7 +103,7 @@ describe("pretooluse-no-phantom-task-completion", () => {
     await writeTask(home, sessionId, "3", "pending")
 
     const toolInput = { taskId: "1", status: "completed", description: "done" }
-    const result = await runHook(dir, home, sessionId, toolInput, transcriptPath)
+    const result = await runHook(dir, home, sessionId, toolInput, { transcriptPath })
 
     expect(result.decision).toBe("allow")
     expect(result.reason).toContain("planned-task-buffer")
@@ -127,7 +126,7 @@ describe("pretooluse-no-phantom-task-completion", () => {
     await writeFile(transcriptPath, transcript)
 
     const toolInput = { taskId: "1", status: "completed", description: "done" }
-    const result = await runHook(dir, home, sessionId, toolInput, transcriptPath)
+    const result = await runHook(dir, home, sessionId, toolInput, { transcriptPath })
 
     expect(result.decision).toBe("deny")
     expect(result.reason).toContain("needs substantive work before it can close")
@@ -155,7 +154,7 @@ describe("pretooluse-no-phantom-task-completion", () => {
     await writeFile(transcriptPath, transcript)
 
     const toolInput = { taskId: "1", status: "completed", description: "done" }
-    const result = await runHook(dir, home, sessionId, toolInput, transcriptPath)
+    const result = await runHook(dir, home, sessionId, toolInput, { transcriptPath })
 
     expect(result.decision).toBe("allow")
     expect(result.reason).toContain("work tool call(s) after in_progress")
@@ -172,7 +171,10 @@ describe("pretooluse-no-phantom-task-completion", () => {
     const toolInput = {
       plan: [{ step: "Implement model", status: "completed" }],
     }
-    const result = await runHook(dir, home, sessionId, toolInput, transcriptPath, "update_plan")
+    const result = await runHook(dir, home, sessionId, toolInput, {
+      transcriptPath,
+      toolName: "update_plan",
+    })
 
     expect(result).toEqual({})
   })

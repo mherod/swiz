@@ -151,6 +151,76 @@ function buildDenialMessage(
   )
 }
 
+async function evaluateTaskBufferAllowance(
+  sessionId: string | undefined,
+  taskId: string
+): Promise<SwizHookOutput | null> {
+  if (!sessionId) return null
+
+  const { tasksDir } = createDefaultTaskStore()
+  const tasks = await readTasks(sessionId, tasksDir)
+  const otherInProgress = tasks.filter(
+    (task) => task.id !== taskId && task.status === "in_progress"
+  )
+  if (otherInProgress.length >= 2) {
+    return preToolUseAllow(
+      `Continue in active-task-buffer mode: Task #${taskId} can complete while ${otherInProgress.length} other tasks remain in_progress.`
+    )
+  }
+
+  const otherPending = tasks.filter((task) => task.id !== taskId && task.status === "pending")
+  if (otherPending.length >= 2) {
+    return preToolUseAllow(
+      `Continue in planned-task-buffer mode: Task #${taskId} can complete while ${otherPending.length} pending tasks stay queued.`
+    )
+  }
+  return null
+}
+
+interface TranscriptAuditContext {
+  raw: Record<string, any>
+  transcriptPath: string
+  taskId: string
+  safeSessionId: string | undefined
+}
+
+async function evaluateTranscriptAudit(context: TranscriptAuditContext): Promise<SwizHookOutput> {
+  if (!context.transcriptPath) {
+    return preToolUseAllow(
+      "Continue in transcript-unavailable task mode: completion cannot be mechanically audited."
+    )
+  }
+
+  const lines = (await resolveSessionLines(context.raw, context.transcriptPath)).filter((line) =>
+    line.trim()
+  )
+  if (lines.length === 0) {
+    return preToolUseAllow(
+      "Continue in empty-transcript task mode: completion cannot be mechanically audited."
+    )
+  }
+
+  const { workCallCount, anchorFound } = scanTranscript(lines, context.taskId)
+  if (!anchorFound) {
+    return preToolUseAllow(
+      `Continue in unauditable task mode: no active-work adoption event for #${context.taskId} appears in this transcript.`
+    )
+  }
+  if (workCallCount >= 1) {
+    return preToolUseAllow(
+      `Continue in tool-backed task-completion mode: Task #${context.taskId} has ${workCallCount} work tool call(s) after in_progress.`
+    )
+  }
+
+  if (await isWithinUserMessageGrace(context.raw)) {
+    return preToolUseAllow(
+      "Continue in post-user-message grace mode: task-governance blocks are relaxed briefly after a user message."
+    )
+  }
+
+  return preToolUseDeny(buildDenialMessage(context.raw, context.taskId, context.safeSessionId))
+}
+
 export async function evaluatePretooluseNoPhantomTaskCompletion(
   input: unknown
 ): Promise<SwizHookOutput> {
@@ -168,22 +238,8 @@ export async function evaluatePretooluseNoPhantomTaskCompletion(
   // OR the session has at least 2 pending tasks queued, we assume the session
   // has enough real work in flight or planned to allow a potentially
   // phantom/cleanup task without strict transcript evidence.
-  if (sessionId) {
-    const { tasksDir } = createDefaultTaskStore()
-    const tasks = await readTasks(sessionId, tasksDir)
-    const otherInProgress = tasks.filter((t) => t.id !== taskId && t.status === "in_progress")
-    if (otherInProgress.length >= 2) {
-      return preToolUseAllow(
-        `Continue in active-task-buffer mode: Task #${taskId} can complete while ${otherInProgress.length} other tasks remain in_progress.`
-      )
-    }
-    const otherPending = tasks.filter((t) => t.id !== taskId && t.status === "pending")
-    if (otherPending.length >= 2) {
-      return preToolUseAllow(
-        `Continue in planned-task-buffer mode: Task #${taskId} can complete while ${otherPending.length} pending tasks stay queued.`
-      )
-    }
-  }
+  const bufferAllowance = await evaluateTaskBufferAllowance(sessionId, taskId)
+  if (bufferAllowance) return bufferAllowance
 
   if (!(await isGitRepoForHookPayload(raw as Record<string, unknown>, cwd))) {
     return preToolUseAllow(
@@ -197,42 +253,12 @@ export async function evaluatePretooluseNoPhantomTaskCompletion(
     )
   }
 
-  if (!transcriptPath) {
-    return preToolUseAllow(
-      "Continue in transcript-unavailable task mode: completion cannot be mechanically audited."
-    )
-  }
-
-  const lines = (await resolveSessionLines(raw as Record<string, any>, transcriptPath)).filter(
-    (l) => l.trim()
-  )
-  if (lines.length === 0) {
-    return preToolUseAllow(
-      "Continue in empty-transcript task mode: completion cannot be mechanically audited."
-    )
-  }
-
-  const { workCallCount, anchorFound } = scanTranscript(lines, taskId)
-
-  if (!anchorFound)
-    return preToolUseAllow(
-      `Continue in unauditable task mode: no active-work adoption event for #${taskId} appears in this transcript.`
-    )
-
-  if (workCallCount >= 1) {
-    return preToolUseAllow(
-      `Continue in tool-backed task-completion mode: Task #${taskId} has ${workCallCount} work tool call(s) after in_progress.`
-    )
-  }
-
-  // Relax phantom-completion blocking within the post-user-message grace window.
-  if (await isWithinUserMessageGrace(raw as Record<string, any>)) {
-    return preToolUseAllow(
-      "Continue in post-user-message grace mode: task-governance blocks are relaxed briefly after a user message."
-    )
-  }
-
-  return preToolUseDeny(buildDenialMessage(raw as Record<string, any>, taskId, safeSessionId))
+  return await evaluateTranscriptAudit({
+    raw: raw as Record<string, any>,
+    transcriptPath,
+    taskId,
+    safeSessionId,
+  })
 }
 
 const pretooluseNoPhantomTaskCompletion: SwizToolHook = {

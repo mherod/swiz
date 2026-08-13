@@ -28,12 +28,7 @@ import {
   type StopIncompleteTasksDependencies,
 } from "./stop-incomplete-tasks/evaluate.ts"
 
-export async function evaluateStopIncompleteTasksHook(
-  input: StopHookInput,
-  dependencies: StopIncompleteTasksDependencies = {}
-): Promise<SwizHookOutput> {
-  if (!shouldEnforceIncompleteTasksForHookPayload(input as Record<string, any>)) return {}
-  if (!agentHasTaskToolsForHookPayload(input as Record<string, any>)) return {}
+async function isAutoContinueDisabled(input: StopHookInput): Promise<boolean> {
   try {
     const { getEffectiveSwizSettings, readSwizSettings, readProjectSettings } = await import(
       "../src/settings.ts"
@@ -45,27 +40,37 @@ export async function evaluateStopIncompleteTasksHook(
     const effective =
       (rawInput._effectiveSettings as ReturnType<typeof getEffectiveSwizSettings> | undefined) ??
       getEffectiveSwizSettings(rawSettings, input.session_id, projectSettings ?? undefined)
-    if (effective.autoContinue === false) return {}
+    return effective.autoContinue === false
   } catch {
     // Fail open on settings error
+    return false
   }
+}
+
+async function shouldRequireTaskListBeforeStop(input: StopHookInput): Promise<boolean> {
+  const rawInput = input as Record<string, any>
+  const agent = detectCurrentAgentFromHookPayload(rawInput)
+  if (agent?.id !== "claude" || !agentHasTaskListToolForHookPayload(rawInput)) return false
+
+  const toolNames = await getRecentlyUsedToolsForCurrentSession(rawInput)
+  const hasTaskActivity = toolNames.some((toolName) => isTaskTool(toolName))
+  const hasTaskList = toolNames.some((toolName) => isTaskListTool(toolName))
+  return hasTaskActivity && !hasTaskList
+}
+
+export async function evaluateStopIncompleteTasksHook(
+  input: StopHookInput,
+  dependencies: StopIncompleteTasksDependencies = {}
+): Promise<SwizHookOutput> {
+  if (!shouldEnforceIncompleteTasksForHookPayload(input as Record<string, any>)) return {}
+  if (!agentHasTaskToolsForHookPayload(input as Record<string, any>)) return {}
+  if (await isAutoContinueDisabled(input)) return {}
   const parsed = stopHookInputSchema.parse(input)
 
   // Require TaskList before stop when the session has used task tools and is running inside Claude.
   // This ensures the task-state-cache is synced via posttooluse-task-list-sync.
-  const transcriptSource = (input as Record<string, any>) ?? parsed.transcript_path ?? ""
-  const agent = detectCurrentAgentFromHookPayload(input as Record<string, any>)
-  if (
-    agent?.id === "claude" &&
-    transcriptSource &&
-    agentHasTaskListToolForHookPayload(input as Record<string, any>)
-  ) {
-    const toolNames = await getRecentlyUsedToolsForCurrentSession(transcriptSource)
-    const hasTaskActivity = toolNames.some((n) => isTaskTool(n))
-    const hasTaskList = toolNames.some((n) => isTaskListTool(n))
-    if (hasTaskActivity && !hasTaskList) {
-      return blockStopObj(buildTaskListBeforeStopMessage())
-    }
+  if (await shouldRequireTaskListBeforeStop(input)) {
+    return blockStopObj(buildTaskListBeforeStopMessage())
   }
 
   return await evaluateStopIncompleteTasks(parsed, dependencies)

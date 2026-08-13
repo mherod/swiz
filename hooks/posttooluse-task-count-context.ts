@@ -35,6 +35,8 @@ type TimedTask = {
   statusChangedAt?: string | null
 }
 
+type TaskState = { id: string; status: string }
+
 function recordComplianceFromTasks(
   sessionId: string,
   tasks: ReadonlyArray<{ id: string; status: string }>,
@@ -71,27 +73,85 @@ export { buildCountSummary, buildCountSummaryFromTasks }
  * mutation from tool_input ensures accurate counts.
  */
 export function applyMutationOverlay(
-  tasks: Array<{ id: string; status: string }>,
+  tasks: TaskState[],
   toolName: string,
   toolInput: Record<string, unknown>
-): Array<{ id: string; status: string }> {
+): TaskState[] {
   if (toolName === "TaskUpdate" || toolName === "TodoWrite") {
-    const taskId = String(toolInput.taskId ?? toolInput.id ?? "")
-    const newStatus = String(toolInput.status ?? "")
-    if (taskId && newStatus) {
-      const idx = tasks.findIndex((t) => t.id === taskId)
-      if (idx >= 0) {
-        tasks[idx] = { ...tasks[idx]!, status: newStatus }
-      }
-    }
+    applyTaskUpdateOverlay(tasks, toolInput)
   } else if (toolName === "TaskCreate") {
-    // TaskCreate adds a new pending task — if disk read missed it, add a placeholder
-    const subject = String(toolInput.subject ?? "")
-    if (subject && !tasks.some((t) => t.status === "pending")) {
-      tasks.push({ id: "new", status: "pending" })
-    }
+    applyTaskCreateOverlay(tasks, toolInput)
   }
   return tasks
+}
+
+function applyTaskUpdateOverlay(tasks: TaskState[], toolInput: Record<string, unknown>): void {
+  const taskId = String(toolInput.taskId ?? toolInput.id ?? "")
+  const newStatus = String(toolInput.status ?? "")
+  if (!taskId || !newStatus) return
+
+  const index = tasks.findIndex((task) => task.id === taskId)
+  if (index < 0) return
+  tasks[index] = { ...tasks[index]!, status: newStatus }
+}
+
+function applyTaskCreateOverlay(tasks: TaskState[], toolInput: Record<string, unknown>): void {
+  // TaskCreate adds a new pending task — if disk read missed it, add a placeholder
+  const subject = String(toolInput.subject ?? "")
+  if (!subject || tasks.some((task) => task.status === "pending")) return
+  tasks.push({ id: "new", status: "pending" })
+}
+
+interface BuildTaskContextOptions {
+  sessionId: string
+  tasks: ReadonlyArray<TaskState>
+  timedTasks?: ReadonlyArray<TimedTask>
+  toolName: string | undefined
+  hintsPromise: ReturnType<typeof fetchIssueHints>
+}
+
+async function buildTaskContext(options: BuildTaskContextOptions): Promise<SwizHookOutput> {
+  const hints = await options.hintsPromise
+  recordComplianceFromTasks(options.sessionId, options.tasks, options.timedTasks).catch(() => {})
+  if (options.toolName === "TaskUpdate" && hasHealthyTaskBuffer(options.tasks)) return {}
+  return buildContextHookOutput("PostToolUse", buildCountSummaryFromTasks(options.tasks, hints))
+}
+
+async function evaluateEventStateContext(
+  sessionId: string,
+  toolName: string | undefined,
+  hintsPromise: ReturnType<typeof fetchIssueHints>
+): Promise<SwizHookOutput | null> {
+  const eventState = getSessionEventState(sessionId)
+  if (!eventState || eventState.length === 0) return null
+  return await buildTaskContext({ sessionId, tasks: eventState, toolName, hintsPromise })
+}
+
+async function evaluateDiskTaskContext(
+  sessionId: string,
+  toolName: string | undefined,
+  toolInput: Record<string, unknown>,
+  hintsPromise: ReturnType<typeof fetchIssueHints>
+): Promise<SwizHookOutput> {
+  if (!getSessionTasksDir(sessionId)) return {}
+
+  const diskTasks = await readSessionTasksFresh(sessionId)
+  if (diskTasks.length === 0 && toolName !== "TaskCreate") return {}
+
+  const tasks = applyMutationOverlay(
+    diskTasks.map((task) => ({ id: task.id, status: task.status })),
+    toolName ?? "",
+    toolInput
+  )
+  if (tasks.length === 0) return {}
+
+  return await buildTaskContext({
+    sessionId,
+    tasks,
+    timedTasks: diskTasks,
+    toolName,
+    hintsPromise,
+  })
 }
 
 export async function evaluatePosttooluseTaskCountContext(input: unknown): Promise<SwizHookOutput> {
@@ -107,39 +167,21 @@ export async function evaluatePosttooluseTaskCountContext(input: unknown): Promi
 
   // Primary path: in-memory event state maintained by upstream hooks
   // (audit-sync, list-sync) in the same dispatch process. Zero disk I/O.
-  const eventState = getSessionEventState(sessionId)
-  if (eventState && eventState.length > 0) {
-    const hints = await hintsPromise
-    recordComplianceFromTasks(sessionId, eventState).catch(() => {})
-    if (parsed.tool_name === "TaskUpdate" && hasHealthyTaskBuffer(eventState)) {
-      return {}
-    }
-    return buildContextHookOutput("PostToolUse", buildCountSummaryFromTasks(eventState, hints))
-  }
+  const eventStateContext = await evaluateEventStateContext(
+    sessionId,
+    parsed.tool_name,
+    hintsPromise
+  )
+  if (eventStateContext) return eventStateContext
 
   // Fallback: disk read + mutation overlay for subprocess execution
   // (when no event state exists, e.g. first tool call or standalone mode)
-  const tasksDir = getSessionTasksDir(sessionId)
-  if (!tasksDir) return {}
-
-  const diskTasks = await readSessionTasksFresh(sessionId)
-  if (diskTasks.length === 0 && parsed.tool_name !== "TaskCreate") return {}
-
-  const toolInput = (parsed.tool_input ?? {}) as Record<string, unknown>
-  const tasks = applyMutationOverlay(
-    diskTasks.map((t) => ({ id: t.id, status: t.status })),
-    parsed.tool_name ?? "",
-    toolInput
+  return await evaluateDiskTaskContext(
+    sessionId,
+    parsed.tool_name,
+    (parsed.tool_input ?? {}) as Record<string, unknown>,
+    hintsPromise
   )
-
-  if (tasks.length === 0) return {}
-
-  const hints = await hintsPromise
-  recordComplianceFromTasks(sessionId, tasks, diskTasks).catch(() => {})
-  if (parsed.tool_name === "TaskUpdate" && hasHealthyTaskBuffer(tasks)) {
-    return {}
-  }
-  return buildContextHookOutput("PostToolUse", buildCountSummaryFromTasks(tasks, hints))
 }
 
 const posttooluseTaskCountContext: SwizHook<Record<string, any>> = {
