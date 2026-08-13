@@ -334,6 +334,38 @@ export interface InstallCommandOptions {
   homeDir?: string | null
 }
 
+function assertBunAvailable(bunAvailable: () => boolean): void {
+  if (bunAvailable()) return
+  throw new Error(
+    `\n  ${RED}✗ bun is not installed or not on PATH.${RESET}\n` +
+      `  swiz hooks require bun to run. Install it first:\n\n` +
+      `    curl -fsSL https://bun.sh/install | bash`
+  )
+}
+
+async function runUninstallMode(args: string[], opts: InstallRunOptions): Promise<void> {
+  console.log(`\n  swiz install --uninstall${opts.dryRun ? " (dry run)" : ""}\n`)
+  await runOptionalUninstallSteps(args, opts)
+  await uninstallSwizMcpServerStep(args, opts)
+  await uninstallShellShimStep(args, opts)
+  await uninstallHooksForTargets(args, opts)
+  const fullUninstall = isFullUninstall(args, opts)
+  if (fullUninstall) await uninstallProjectHooks(opts.dryRun)
+  if (!opts.dryRun && fullUninstall) await pauseSessionstartSelfHeal()
+  if (opts.dryRun) console.log("  No changes written.\n")
+}
+
+async function runInstallMode(args: string[], opts: InstallRunOptions): Promise<void> {
+  console.log(`\n  swiz install${opts.dryRun ? " (dry run)" : ""}\n`)
+  await runOptionalInstallSteps(opts)
+  await installProjectHooks(opts.dryRun)
+  await installSwizMcpServerStep(args, opts)
+  await installShellShimStep(args, opts)
+  if (await installHooksForTargets(args, opts)) return
+  if (opts.dryRun) console.log("  No changes written.\n")
+  else if (shouldInstallHooks(args, opts)) await verifyInstallation(opts.dryRun)
+}
+
 export const installCommand: Command<InstallCommandOptions> = {
   name: "install",
   description: "Install swiz hooks into agent settings",
@@ -355,39 +387,12 @@ export const installCommand: Command<InstallCommandOptions> = {
   ],
   async run(args, dependencies = {}) {
     const opts = parseInstallRunOptions(args, dependencies.homeDir ?? getHomeDirOrNull())
-
-    if (!(dependencies.bunAvailable ?? checkBunAvailable)()) {
-      throw new Error(
-        `\n  ${RED}✗ bun is not installed or not on PATH.${RESET}\n` +
-          `  swiz hooks require bun to run. Install it first:\n\n` +
-          `    curl -fsSL https://bun.sh/install | bash`
-      )
-    }
+    assertBunAvailable(dependencies.bunAvailable ?? checkBunAvailable)
 
     if (opts.uninstall) {
-      console.log(`\n  swiz install --uninstall${opts.dryRun ? " (dry run)" : ""}\n`)
-      await runOptionalUninstallSteps(args, opts)
-      await uninstallSwizMcpServerStep(args, opts)
-      await uninstallShellShimStep(args, opts)
-      await uninstallHooksForTargets(args, opts)
-      if (isFullUninstall(args, opts)) await uninstallProjectHooks(opts.dryRun)
-      if (!opts.dryRun && isFullUninstall(args, opts)) await pauseSessionstartSelfHeal()
-      if (opts.dryRun) {
-        console.log("  No changes written.\n")
-      }
+      await runUninstallMode(args, opts)
       return
     }
-
-    console.log(`\n  swiz install${opts.dryRun ? " (dry run)" : ""}\n`)
-    await runOptionalInstallSteps(opts)
-    await installProjectHooks(opts.dryRun)
-    await installSwizMcpServerStep(args, opts)
-    await installShellShimStep(args, opts)
-    if (await installHooksForTargets(args, opts)) return
-    if (opts.dryRun) {
-      console.log("  No changes written.\n")
-    } else if (shouldInstallHooks(args, opts)) {
-      await verifyInstallation(opts.dryRun)
-    }
+    await runInstallMode(args, opts)
   },
 }

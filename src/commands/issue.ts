@@ -49,6 +49,34 @@ export interface IssueCommandOptions {
   operationDependencies?: IssueOperationDependencies
 }
 
+async function runReadOrCacheSubcommand(sub: string | undefined, args: string[]): Promise<boolean> {
+  if (sub === "cache-bust") await handleCacheBust(args)
+  else if (sub === "sync") await handleSync(args)
+  else if (sub === "list") await handleList(args)
+  else return false
+  return true
+}
+
+async function runMutationSubcommand(
+  sub: string,
+  number: string,
+  args: string[],
+  dependencies: IssueOperationDependencies | undefined
+): Promise<void> {
+  if (sub === "close") return closeIssue(number, dependencies)
+
+  const body = parseBodyArg(args)
+  if (sub === "comment") {
+    if (!body) throw new Error(`--body is required for the comment subcommand.\n${usage()}`)
+    return commentOnIssue(number, body, dependencies)
+  }
+  if (sub === "resolve") {
+    await resolveIssue(number, body, dependencies)
+    return
+  }
+  throw new Error(`Unknown subcommand: ${sub}\n${usage()}`)
+}
+
 export const issueCommand: Command<IssueCommandOptions> = {
   name: "issue",
   description: "Interact with GitHub issues and store (guards against operating on closed issues)",
@@ -86,24 +114,10 @@ export const issueCommand: Command<IssueCommandOptions> = {
   ],
   async run(args: string[], options = {}) {
     const sub = args[0]
-    if (sub === "cache-bust") return handleCacheBust(args)
-    if (sub === "sync") return handleSync(args)
-    if (sub === "list") return handleList(args)
+    if (await runReadOrCacheSubcommand(sub, args)) return
 
     const number = args[1]
     if (!sub || !number) throw new Error(`Missing arguments.\n${usage()}`)
-    if (sub === "close") return closeIssue(number, options.operationDependencies)
-
-    const body = parseBodyArg(args)
-    if (sub === "comment") {
-      if (!body) throw new Error(`--body is required for the comment subcommand.\n${usage()}`)
-      return commentOnIssue(number, body, options.operationDependencies)
-    }
-    if (sub === "resolve") {
-      await resolveIssue(number, body, options.operationDependencies)
-      return
-    }
-
-    throw new Error(`Unknown subcommand: ${sub}\n${usage()}`)
+    await runMutationSubcommand(sub, number, args, options.operationDependencies)
   },
 }

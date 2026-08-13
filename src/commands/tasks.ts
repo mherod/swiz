@@ -473,6 +473,106 @@ interface RepairResult {
   actions: RepairAction[]
 }
 
+type ReconstructedTaskState = { subject: string; status: string }
+type AuditEntries = Awaited<ReturnType<typeof readAuditLog>>
+
+function reconstructTaskStates(auditEntries: AuditEntries): Map<string, ReconstructedTaskState> {
+  const reconstructed = new Map<string, ReconstructedTaskState>()
+  for (const entry of auditEntries) {
+    const existing = reconstructed.get(entry.taskId)
+    reconstructed.set(entry.taskId, {
+      subject: entry.subject ?? existing?.subject ?? `Task ${entry.taskId}`,
+      status: entry.newStatus ?? existing?.status ?? "pending",
+    })
+  }
+  return reconstructed
+}
+
+interface RepairTaskContext {
+  currentById: Map<string, Task>
+  sessionDir: string
+  dryRun: boolean
+  jsonOutput: boolean
+  actions: RepairAction[]
+}
+
+async function repairAuditTask(
+  taskId: string,
+  auditState: ReconstructedTaskState,
+  context: RepairTaskContext
+): Promise<"repaired" | "verified"> {
+  const fileTask = context.currentById.get(taskId)
+  if (!fileTask) {
+    if (!context.dryRun) {
+      const task: Task = {
+        id: taskId,
+        subject: auditState.subject,
+        description: "Reconstructed from audit trail.",
+        status: auditState.status as Task["status"],
+        blocks: [],
+        blockedBy: [],
+      }
+      await atomicWriteJson(join(context.sessionDir, `${taskId}.json`), task)
+    }
+    context.actions.push({
+      taskId,
+      type: "reconstructed",
+      subject: auditState.subject,
+      newStatus: auditState.status,
+    })
+    if (!context.jsonOutput) {
+      const prefix = context.dryRun ? "[dry-run] would reconstruct" : "Reconstructed"
+      console.log(`  ✏️  ${prefix} #${taskId}: ${auditState.subject} [${auditState.status}]`)
+    }
+    return "repaired"
+  }
+
+  if (fileTask.status === auditState.status) return "verified"
+  const oldStatus = fileTask.status
+  if (!context.dryRun) {
+    fileTask.status = auditState.status as Task["status"]
+    await atomicWriteJson(join(context.sessionDir, `${taskId}.json`), fileTask)
+  }
+  context.actions.push({
+    taskId,
+    type: "status_fixed",
+    subject: auditState.subject,
+    oldStatus,
+    newStatus: auditState.status,
+  })
+  if (!context.jsonOutput) {
+    const prefix = context.dryRun ? "[dry-run] would fix" : "Fixed"
+    console.log(`  🔧 ${prefix} #${taskId} status: "${oldStatus}" → "${auditState.status}"`)
+  }
+  return "repaired"
+}
+
+function collectOrphanActions(
+  currentTasks: Task[],
+  reconstructed: Map<string, ReconstructedTaskState>,
+  actions: RepairAction[],
+  jsonOutput: boolean
+): void {
+  for (const task of currentTasks) {
+    if (reconstructed.has(task.id)) continue
+    actions.push({ taskId: task.id, type: "orphaned", subject: task.subject })
+    if (!jsonOutput) {
+      console.log(`  ⚠️  #${task.id} "${task.subject}" — on disk but absent from audit log`)
+    }
+  }
+}
+
+function printRepairResult(result: RepairResult): void {
+  const verb = result.dryRun ? "would fix" : "fixed"
+  console.log(
+    `\n  Repair ${result.dryRun ? "(dry-run) " : ""}complete: ${result.repaired} ${verb}, ${result.verified} verified, ${result.total} total.`
+  )
+  const orphanCount = result.actions.filter((action) => action.type === "orphaned").length
+  if (orphanCount > 0) {
+    console.log(`  ${orphanCount} orphaned task(s) found on disk with no audit trail.`)
+  }
+}
+
 async function runRepairTasks(rest: string[]): Promise<void> {
   const dryRun = rest.includes("--dry-run")
   const jsonOutput = rest.includes("--json")
@@ -495,83 +595,25 @@ async function runRepairTasks(rest: string[]): Promise<void> {
 
   if (!jsonOutput && dryRun) console.log("  [dry-run] No files will be modified.\n")
 
-  // Reconstruct authoritative task state from audit trail
-  const reconstructed = new Map<string, { subject: string; status: string }>()
-  for (const entry of auditEntries) {
-    const existing = reconstructed.get(entry.taskId)
-    reconstructed.set(entry.taskId, {
-      subject: entry.subject ?? existing?.subject ?? `Task ${entry.taskId}`,
-      status: entry.newStatus ?? existing?.status ?? "pending",
-    })
-  }
-
-  // Compare against current task files
+  const reconstructed = reconstructTaskStates(auditEntries)
   const currentTasks = await readTasks(sessionId, tasksDir)
   const currentById = new Map(currentTasks.map((t) => [t.id, t]))
   const sessionDir = join(tasksDir, sessionId)
-
   let repaired = 0
   let verified = 0
   const actions: RepairAction[] = []
-
   for (const [taskId, auditState] of reconstructed) {
-    const fileTask = currentById.get(taskId)
-
-    if (!fileTask) {
-      if (!dryRun) {
-        const task: Task = {
-          id: taskId,
-          subject: auditState.subject,
-          description: "Reconstructed from audit trail.",
-          status: auditState.status as Task["status"],
-          blocks: [],
-          blockedBy: [],
-        }
-        await atomicWriteJson(join(sessionDir, `${taskId}.json`), task)
-      }
-      actions.push({
-        taskId,
-        type: "reconstructed",
-        subject: auditState.subject,
-        newStatus: auditState.status,
-      })
-      if (!jsonOutput) {
-        const prefix = dryRun ? "[dry-run] would reconstruct" : "Reconstructed"
-        console.log(`  ✏️  ${prefix} #${taskId}: ${auditState.subject} [${auditState.status}]`)
-      }
-      repaired++
-    } else if (fileTask.status !== auditState.status) {
-      const oldStatus = fileTask.status
-      if (!dryRun) {
-        fileTask.status = auditState.status as Task["status"]
-        await atomicWriteJson(join(sessionDir, `${taskId}.json`), fileTask)
-      }
-      actions.push({
-        taskId,
-        type: "status_fixed",
-        subject: auditState.subject,
-        oldStatus,
-        newStatus: auditState.status,
-      })
-      if (!jsonOutput) {
-        const prefix = dryRun ? "[dry-run] would fix" : "Fixed"
-        console.log(`  🔧 ${prefix} #${taskId} status: "${oldStatus}" → "${auditState.status}"`)
-      }
-      repaired++
-    } else {
-      verified++
-    }
+    const outcome = await repairAuditTask(taskId, auditState, {
+      currentById,
+      sessionDir,
+      dryRun,
+      jsonOutput,
+      actions,
+    })
+    if (outcome === "repaired") repaired++
+    else verified++
   }
-
-  // Post-repair validation: tasks on disk with no audit trail entry
-  for (const task of currentTasks) {
-    if (!reconstructed.has(task.id)) {
-      actions.push({ taskId: task.id, type: "orphaned", subject: task.subject })
-      if (!jsonOutput) {
-        console.log(`  ⚠️  #${task.id} "${task.subject}" — on disk but absent from audit log`)
-      }
-    }
-  }
+  collectOrphanActions(currentTasks, reconstructed, actions, jsonOutput)
 
   const result: RepairResult = {
     sessionId,
@@ -585,14 +627,7 @@ async function runRepairTasks(rest: string[]): Promise<void> {
   if (jsonOutput) {
     console.log(JSON.stringify(result, null, 2))
   } else {
-    const verb = dryRun ? "would fix" : "fixed"
-    console.log(
-      `\n  Repair ${dryRun ? "(dry-run) " : ""}complete: ${repaired} ${verb}, ${verified} verified, ${reconstructed.size} total.`
-    )
-    if (actions.some((a) => a.type === "orphaned")) {
-      const orphanCount = actions.filter((a) => a.type === "orphaned").length
-      console.log(`  ${orphanCount} orphaned task(s) found on disk with no audit trail.`)
-    }
+    printRepairResult(result)
   }
 
   if (!dryRun && !jsonOutput) {

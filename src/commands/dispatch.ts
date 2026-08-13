@@ -481,6 +481,142 @@ async function tryAutoContinueDisabledFastPath(
 
 // ─── Dispatch callback ─────────────────────────────────────────────────────
 
+function captureParsedPayload(
+  canonicalEvent: string,
+  hookEventName: string,
+  payloadStr: string,
+  payload: Record<string, any>,
+  parseError: boolean
+): void {
+  if (!shouldCaptureIncomingPayloads()) return
+  scheduleIncomingDispatchCapture({
+    canonicalEvent,
+    hookEventName,
+    parseError,
+    payloadStr,
+    incomingBeforeNormalize: parseError ? null : structuredClone(payload),
+    normalizedPayload: parseError ? {} : structuredClone(payload),
+  })
+}
+
+function enrichDispatchPayload(payload: Record<string, any>, agentId: string | undefined): void {
+  if (!payload._terminal) {
+    const terminal = detectTerminal()
+    payload._terminal = { app: terminal.app, name: terminal.name }
+  }
+  if (!payload._env) payload._env = buildAllowlistedEnv()
+  if (agentId && !payload._agent) payload._agent = agentId
+}
+
+interface PreparedDispatch {
+  payload: Record<string, any>
+  payloadStr: string
+  timing: DispatchTiming
+}
+
+async function prepareDispatch(
+  canonicalEvent: string,
+  hookEventName: string,
+  agentId: string | undefined,
+  t0: number
+): Promise<PreparedDispatch> {
+  const inboundPayloadStr = await readStdinPayloadWithTimeout()
+  const stdinMs = Math.round(performance.now() - t0)
+  log(`   ⏱ cli:stdin: ${stdinMs}ms`)
+  const { payload, parseError } = parsePayload(inboundPayloadStr)
+  if (parseError) {
+    captureParsedPayload(canonicalEvent, hookEventName, inboundPayloadStr, payload, true)
+  }
+  assertDispatchInboundNotParseError(canonicalEvent, parseError)
+  const dispatchId = ensureDispatchId(payload)
+  const incomingBeforeNormalize = structuredClone(payload)
+  normalizeAgentHookPayload(payload)
+  await backfillPayloadDefaults(payload)
+  if (shouldCaptureIncomingPayloads()) {
+    scheduleIncomingDispatchCapture({
+      canonicalEvent,
+      hookEventName,
+      parseError: false,
+      payloadStr: inboundPayloadStr,
+      incomingBeforeNormalize,
+      normalizedPayload: structuredClone(payload),
+    })
+  }
+  enrichDispatchPayload(payload, agentId)
+  const timing: DispatchTiming = {
+    canonicalEvent,
+    hookEventName,
+    sessionId: typeof payload.session_id === "string" ? payload.session_id : undefined,
+    cwd: payload.cwd as string,
+    toolName: (payload.tool_name ?? payload.toolName) as string | undefined,
+    dispatchId,
+    toolUseId: dispatchToolUseId(payload),
+    t0,
+    stdinMs,
+  }
+  return { payload, payloadStr: JSON.stringify(payload), timing }
+}
+
+async function handleFastDispatchPaths(
+  timing: DispatchTiming,
+  payload: Record<string, any>,
+  hookEventName: string
+): Promise<boolean> {
+  if (await tryAutoContinueDisabledFastPath(timing, payload, hookEventName)) return true
+  if (await tryStopFastPath(timing, payload)) return true
+  if (isStopLikeEvent(timing.canonicalEvent) && timing.sessionId) {
+    payload._fastPathTaskScanComplete = true
+  }
+  return false
+}
+
+async function executeLocalDispatch(
+  timing: DispatchTiming,
+  payload: Record<string, any>,
+  payloadStr: string,
+  daemonMs: number
+): Promise<void> {
+  const tLocal = performance.now()
+  const { executeDispatch } = await import("../dispatch/execute.ts")
+  const { response } = await executeDispatch({
+    canonicalEvent: timing.canonicalEvent,
+    hookEventName: timing.hookEventName,
+    payloadStr,
+    preParsedPayload: payload,
+  })
+  const localMs = Math.round(performance.now() - tLocal)
+  const totalMs = Math.round(performance.now() - timing.t0)
+  log(`   ⏱ cli:local-execute: ${localMs}ms`)
+  log(`   ⏱ cli:total: ${totalMs}ms`)
+  void appendCliTimingLog({ ...timing, totalMs, daemonMs, localMs, route: "local" })
+  void response
+  process.exit(0)
+}
+
+async function dispatchPreparedRequest(prepared: PreparedDispatch): Promise<void> {
+  const { timing, payload, payloadStr } = prepared
+  const tDaemon = performance.now()
+  const daemonResponse = await tryDaemonDispatch(
+    timing.canonicalEvent,
+    timing.hookEventName,
+    payloadStr
+  )
+  const daemonMs = Math.round(performance.now() - tDaemon)
+  log(
+    `   ⏱ cli:daemon-attempt: ${daemonMs}ms (${daemonResponse === null ? "fallback" : "forwarded"})`
+  )
+  if (daemonResponse === null) {
+    await executeLocalDispatch(timing, payload, payloadStr, daemonMs)
+    return
+  }
+  const agentResponse = sanitizeHookOutputForCurrentAgent(daemonResponse)
+  markDispatchResponseWritten()
+  process.stdout.write(`${JSON.stringify(agentResponse)}\n`)
+  const totalMs = Math.round(performance.now() - timing.t0)
+  log(`   ⏱ cli:total: ${totalMs}ms`)
+  void appendCliTimingLog({ ...timing, totalMs, daemonMs, route: "daemon" })
+}
+
 async function runDispatch(
   canonicalEvent: string,
   hookEventName: string,
@@ -488,128 +624,144 @@ async function runDispatch(
 ): Promise<void> {
   const t0 = performance.now()
   maybeForceDispatchFailureForTesting()
-  const payloadStr = await readStdinPayloadWithTimeout()
-  const stdinMs = Math.round(performance.now() - t0)
-  log(`   ⏱ cli:stdin: ${stdinMs}ms`)
-
-  const { payload, parseError } = parsePayload(payloadStr)
-  if (parseError && shouldCaptureIncomingPayloads()) {
-    scheduleIncomingDispatchCapture({
-      canonicalEvent,
-      hookEventName,
-      parseError: true,
-      payloadStr,
-      incomingBeforeNormalize: null,
-      normalizedPayload: {},
-    })
-  }
-  assertDispatchInboundNotParseError(canonicalEvent, parseError)
-  const dispatchId = ensureDispatchId(payload)
-  const incomingBeforeNormalize = structuredClone(payload)
-  normalizeAgentHookPayload(payload)
-  // Recover/infer missing required fields from env vars, the dispatch route,
-  // and camelCase→snake_case aliases. The CLI runs in the project directory
-  // (Cursor/Claude launch it there), so `process.cwd()` is the correct project
-  // path. The daemon's own `process.cwd()` is the swiz installation root —
-  // without this step, hooks would operate on the wrong repository.
-  await backfillPayloadDefaults(payload)
-  const sessionId = typeof payload.session_id === "string" ? payload.session_id : undefined
-  const cwd = payload.cwd as string
-  const toolName = (payload.tool_name ?? payload.toolName) as string | undefined
-  const toolUseId = dispatchToolUseId(payload)
-  const normalizedPayloadForCapture = structuredClone(payload)
-
-  if (shouldCaptureIncomingPayloads()) {
-    scheduleIncomingDispatchCapture({
-      canonicalEvent,
-      hookEventName,
-      parseError: false,
-      payloadStr,
-      incomingBeforeNormalize,
-      normalizedPayload: normalizedPayloadForCapture,
-    })
-  }
-
-  // Inject terminal info from the CLI process environment (daemon doesn't have these env vars)
-  if (!payload._terminal) {
-    const terminal = detectTerminal()
-    payload._terminal = { app: terminal.app, name: terminal.name }
-  }
-  // Inject caller's environment so daemon-spawned hooks inherit necessary
-  // env vars (LaunchAgent only gets a minimal set of env vars).
-  // Use an allowlist to avoid cloning ~50-200KB per dispatch in LaunchAgent mode.
-  if (!payload._env) {
-    payload._env = buildAllowlistedEnv()
-  }
-  // Fast path: when the caller already knows the agent (--agent flag), skip
-  // env-based detection in daemon hooks by propagating the resolved agent id.
-  if (agentId && !payload._agent) {
-    payload._agent = agentId
-  }
-  const enrichedPayloadStr = JSON.stringify(payload)
-
-  const timing: DispatchTiming = {
-    canonicalEvent,
-    hookEventName,
-    sessionId,
-    cwd,
-    toolName,
-    dispatchId,
-    toolUseId,
-    t0,
-    stdinMs,
-  }
-
-  // ── Fast path: an explicit stop is final when auto-continue is disabled ──
-  if (await tryAutoContinueDisabledFastPath(timing, payload, hookEventName)) return
-  // ── Fast path: in-process incomplete-tasks check for stop events ──
-  if (await tryStopFastPath(timing, payload)) return
-  // Signal to hooks that the fast path already scanned tasks (no blockers found)
-  if (isStopLikeEvent(canonicalEvent) && sessionId) {
-    payload._fastPathTaskScanComplete = true
-  }
-
-  // ── Try daemon first, fall back to local execution ──
-  const tDaemon = performance.now()
-  const daemonResponse = await tryDaemonDispatch(canonicalEvent, hookEventName, enrichedPayloadStr)
-  const daemonMs = Math.round(performance.now() - tDaemon)
-  const forwarded = daemonResponse !== null
-  log(`   ⏱ cli:daemon-attempt: ${daemonMs}ms (${forwarded ? "forwarded" : "fallback"})`)
-
-  if (daemonResponse !== null) {
-    // Mirror engine `writeResponse`: always emit one JSON line (even `{}`).
-    const agentResponse = sanitizeHookOutputForCurrentAgent(daemonResponse)
-    markDispatchResponseWritten()
-    process.stdout.write(`${JSON.stringify(agentResponse)}\n`)
-    const totalMs = Math.round(performance.now() - t0)
-    log(`   ⏱ cli:total: ${totalMs}ms`)
-    void appendCliTimingLog({ ...timing, totalMs, daemonMs, route: "daemon" })
-    return
-  }
-
-  // ── Local execution fallback ──
-  const tLocal = performance.now()
-  const { executeDispatch } = await import("../dispatch/execute.ts")
-  const { response } = await executeDispatch({
-    canonicalEvent,
-    hookEventName,
-    payloadStr: enrichedPayloadStr,
-    preParsedPayload: payload,
-  })
-  const localMs = Math.round(performance.now() - tLocal)
-  const totalMs = Math.round(performance.now() - t0)
-  log(`   ⏱ cli:local-execute: ${localMs}ms`)
-  log(`   ⏱ cli:total: ${totalMs}ms`)
-  void appendCliTimingLog({ ...timing, totalMs, daemonMs, localMs, route: "local" })
-  // Response already written to stdout by engine strategy functions.
-  // The returned response is used only by the daemon path above.
-  void response
-  // In CLI mode, exit immediately — open resources (SQLite handles,
-  // fire-and-forget hook subprocesses) would otherwise keep Bun alive.
-  process.exit(0)
+  const prepared = await prepareDispatch(canonicalEvent, hookEventName, agentId, t0)
+  if (await handleFastDispatchPaths(prepared.timing, prepared.payload, hookEventName)) return
+  await dispatchPreparedRequest(prepared)
 }
 
 // ─── Command ────────────────────────────────────────────────────────────────
+
+async function runReplayMode(args: string[]): Promise<boolean> {
+  if (args[0] !== "replay") return false
+  const canonicalEvent = args[1]
+  const jsonMode = args.includes("--json")
+  if (!canonicalEvent) throw new Error("Usage: swiz dispatch replay <event> [--json]")
+
+  const t0 = performance.now()
+  const payloadStr = await readStdinPayloadWithTimeout()
+  log(`   ⏱ cli:stdin: ${Math.round(performance.now() - t0)}ms`)
+  const { payload, parseError } = parsePayload(payloadStr)
+  if (parseError) throw new Error("Replay requires valid JSON object stdin payload")
+  normalizeAgentHookPayload(payload)
+  await backfillPayloadDefaults(payload)
+  const validated = assertNormalizedDispatchPayload(canonicalEvent, payload)
+  for (const key of Object.keys(payload)) delete payload[key]
+  Object.assign(payload, validated)
+  const { toolName, trigger } = getHookContext(canonicalEvent, payload)
+  const matchingGroups =
+    canonicalEvent === "preToolUse" && isSkillMdOnlyFileEditPayload(toolName, payload)
+      ? []
+      : manifest.filter(
+          (group) => group.event === canonicalEvent && groupMatches(group, toolName, trigger)
+        )
+  const filteredGroups = await applyHookSettingFilters(matchingGroups, payload)
+  const tReplay = performance.now()
+  const strategy = DISPATCH_ROUTES[canonicalEvent] ?? "blocking"
+  const traces =
+    strategy === "preToolUse"
+      ? await replayPreToolUse(filteredGroups, payloadStr)
+      : strategy === "blocking"
+        ? await replayBlocking(filteredGroups, payloadStr, canonicalEvent)
+        : await replayContext(filteredGroups, payloadStr)
+  log(`   ⏱ cli:replay: ${Math.round(performance.now() - tReplay)}ms`)
+  formatTrace(canonicalEvent, strategy, filteredGroups.length, traces, jsonMode)
+  log(`   ⏱ cli:total: ${Math.round(performance.now() - t0)}ms`)
+  return true
+}
+
+interface DispatchInvocation {
+  agentId?: string
+  canonicalEvent: string
+  hookEventName: string
+}
+
+function parseDispatchInvocation(args: string[]): DispatchInvocation {
+  let agentId: string | undefined
+  const filteredArgs: string[] = []
+  for (let index = 0; index < args.length; index++) {
+    if (args[index] === "--agent" && index + 1 < args.length) agentId = args[++index]
+    else filteredArgs.push(args[index]!)
+  }
+  const canonicalEvent = filteredArgs[0]
+  if (!canonicalEvent) throw new Error("Usage: swiz dispatch <event> [agentEventName]")
+  return {
+    agentId,
+    canonicalEvent,
+    hookEventName: filteredArgs[1] ?? canonicalEvent,
+  }
+}
+
+interface DispatchFailureContext {
+  isReplay: boolean
+  canonicalEvent: string
+  hookEventName?: string
+  scope: string
+}
+
+function resolveDispatchFailureContext(args: string[]): DispatchFailureContext {
+  const isReplay = args[0] === "replay"
+  const canonicalEvent = isReplay ? (args[1] ?? "(missing-event)") : (args[0] ?? "(missing-event)")
+  const hookEventName =
+    !isReplay && canonicalEvent !== "(missing-event)" ? (args[1] ?? canonicalEvent) : undefined
+  const suffix = hookEventName && hookEventName !== canonicalEvent ? ` (${hookEventName})` : ""
+  return {
+    isReplay,
+    canonicalEvent,
+    hookEventName,
+    scope: isReplay ? `dispatch replay ${canonicalEvent}` : `dispatch ${canonicalEvent}${suffix}`,
+  }
+}
+
+function writeDispatchFailureResponse(
+  context: DispatchFailureContext,
+  err: unknown,
+  logPath: string
+): void {
+  if (didWriteDispatchResponse() || !context.hookEventName) return
+  try {
+    const fallback = buildDispatchFailureFallback(
+      context.canonicalEvent,
+      context.hookEventName,
+      err,
+      logPath
+    )
+    process.stdout.write(`${JSON.stringify(fallback)}\n`)
+  } catch {
+    const emergencyFallback = buildDispatchFailureFallback(
+      context.canonicalEvent,
+      context.hookEventName,
+      "dispatch fallback generation failed",
+      logPath
+    )
+    process.stdout.write(`${JSON.stringify(emergencyFallback)}\n`)
+  }
+  markDispatchResponseWritten()
+}
+
+async function handleDispatchCommandFailure(args: string[], err: unknown): Promise<void> {
+  const context = resolveDispatchFailureContext(args)
+  const message = messageFromUnknownError(err)
+  if (context.isReplay || context.canonicalEvent === "(missing-event)") {
+    stderrLog(
+      "dispatch command last-resort failure reporting",
+      `Dispatch failed for ${context.scope}: ${message}`
+    )
+    process.exitCode = 1
+    return
+  }
+  const logPath = await captureDispatchFailure(
+    context.scope,
+    context.canonicalEvent,
+    context.hookEventName,
+    err
+  )
+  stderrLog(
+    "dispatch command fail-open reporting",
+    `Dispatch failed for ${context.scope}: ${message}. Falling back to allow and capturing details in ${logPath}`
+  )
+  writeDispatchFailureResponse(context, err, logPath)
+  process.exitCode = 0
+}
 
 export const dispatchCommand: Command = {
   name: "dispatch",
@@ -642,120 +794,13 @@ export const dispatchCommand: Command = {
   async run(args) {
     try {
       resetDispatchResponseWriteState()
-      // ─── Replay mode ─────────────────────────────────────────────────────
-      if (args[0] === "replay") {
-        const canonicalEvent = args[1]
-        const jsonMode = args.includes("--json")
-        if (!canonicalEvent) {
-          throw new Error("Usage: swiz dispatch replay <event> [--json]")
-        }
-
-        const t0 = performance.now()
-        const payloadStr = await readStdinPayloadWithTimeout()
-        log(`   ⏱ cli:stdin: ${Math.round(performance.now() - t0)}ms`)
-
-        const { payload, parseError } = parsePayload(payloadStr)
-        if (parseError) {
-          throw new Error("Replay requires valid JSON object stdin payload")
-        }
-        normalizeAgentHookPayload(payload)
-        await backfillPayloadDefaults(payload)
-        const validated = assertNormalizedDispatchPayload(canonicalEvent, payload)
-        for (const k of Object.keys(payload)) delete payload[k]
-        Object.assign(payload, validated)
-        const { toolName, trigger } = getHookContext(canonicalEvent, payload)
-
-        const matchingGroups =
-          canonicalEvent === "preToolUse" && isSkillMdOnlyFileEditPayload(toolName, payload)
-            ? []
-            : manifest.filter(
-                (g) => g.event === canonicalEvent && groupMatches(g, toolName, trigger)
-              )
-        const filteredGroups = await applyHookSettingFilters(matchingGroups, payload)
-
-        const tReplay = performance.now()
-        const strategy = DISPATCH_ROUTES[canonicalEvent] ?? "blocking"
-        const traces =
-          strategy === "preToolUse"
-            ? await replayPreToolUse(filteredGroups, payloadStr)
-            : strategy === "blocking"
-              ? await replayBlocking(filteredGroups, payloadStr, canonicalEvent)
-              : await replayContext(filteredGroups, payloadStr)
-        log(`   ⏱ cli:replay: ${Math.round(performance.now() - tReplay)}ms`)
-
-        formatTrace(canonicalEvent, strategy, filteredGroups.length, traces, jsonMode)
-        log(`   ⏱ cli:total: ${Math.round(performance.now() - t0)}ms`)
-        return
-      }
-
-      // Parse --agent <name> flag before positional args
-      let agentId: string | undefined
-      const filteredArgs: string[] = []
-      for (let i = 0; i < args.length; i++) {
-        if (args[i] === "--agent" && i + 1 < args.length) {
-          agentId = args[++i]
-        } else {
-          filteredArgs.push(args[i]!)
-        }
-      }
-
-      const canonicalEvent = filteredArgs[0]
-      if (!canonicalEvent) {
-        throw new Error("Usage: swiz dispatch <event> [agentEventName]")
-      }
-      const hookEventName = filteredArgs[1] ?? canonicalEvent
-
-      await withLogBuffer(() => runDispatch(canonicalEvent, hookEventName, agentId))
-    } catch (err) {
-      const isReplay = args[0] === "replay"
-      const canonicalEvent = isReplay
-        ? (args[1] ?? "(missing-event)")
-        : (args[0] ?? "(missing-event)")
-      const hookEventName =
-        !isReplay && canonicalEvent !== "(missing-event)" ? (args[1] ?? canonicalEvent) : undefined
-      const message = messageFromUnknownError(err)
-      const scope = isReplay
-        ? `dispatch replay ${canonicalEvent}`
-        : `dispatch ${canonicalEvent}${hookEventName && hookEventName !== canonicalEvent ? ` (${hookEventName})` : ""}`
-
-      if (isReplay || canonicalEvent === "(missing-event)") {
-        stderrLog(
-          "dispatch command last-resort failure reporting",
-          `Dispatch failed for ${scope}: ${message}`
-        )
-        process.exitCode = 1
-        return
-      }
-
-      const logPath = await captureDispatchFailure(scope, canonicalEvent, hookEventName, err)
-      stderrLog(
-        "dispatch command fail-open reporting",
-        `Dispatch failed for ${scope}: ${message}. Falling back to allow and capturing details in ${logPath}`
+      if (await runReplayMode(args)) return
+      const invocation = parseDispatchInvocation(args)
+      await withLogBuffer(() =>
+        runDispatch(invocation.canonicalEvent, invocation.hookEventName, invocation.agentId)
       )
-
-      if (!didWriteDispatchResponse()) {
-        try {
-          const fallback = buildDispatchFailureFallback(
-            canonicalEvent,
-            hookEventName!,
-            err,
-            logPath
-          )
-          process.stdout.write(`${JSON.stringify(fallback)}\n`)
-          markDispatchResponseWritten()
-        } catch {
-          const emergencyFallback = buildDispatchFailureFallback(
-            canonicalEvent,
-            hookEventName!,
-            "dispatch fallback generation failed",
-            logPath
-          )
-          process.stdout.write(`${JSON.stringify(emergencyFallback)}\n`)
-          markDispatchResponseWritten()
-        }
-      }
-
-      process.exitCode = 0
+    } catch (err) {
+      await handleDispatchCommandFailure(args, err)
     }
   },
 }

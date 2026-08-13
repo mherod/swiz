@@ -241,6 +241,68 @@ async function failOpen(
   process.exitCode = 0
 }
 
+function captureInvalidPayload(
+  canonicalEvent: string,
+  hookEventName: string,
+  rawPayloadStr: string
+): void {
+  if (!shouldCaptureIncomingPayloads()) return
+  scheduleIncomingDispatchCapture({
+    canonicalEvent,
+    hookEventName,
+    parseError: true,
+    payloadStr: rawPayloadStr,
+    incomingBeforeNormalize: null,
+    normalizedPayload: {},
+  })
+}
+
+async function preparePayload(
+  rawPayloadStr: string,
+  canonicalEvent: string,
+  hookEventName: string
+): Promise<Record<string, any>> {
+  let payload: Record<string, any>
+  try {
+    payload = parsePayload(rawPayloadStr, canonicalEvent)
+  } catch (error) {
+    captureInvalidPayload(canonicalEvent, hookEventName, rawPayloadStr)
+    throw error
+  }
+
+  ensureDispatchId(payload)
+  const incomingBeforeNormalize = structuredClone(payload)
+  normalizeAgentHookPayload(payload)
+  await backfillPayload(payload)
+  if (shouldCaptureIncomingPayloads()) {
+    scheduleIncomingDispatchCapture({
+      canonicalEvent,
+      hookEventName,
+      parseError: false,
+      payloadStr: rawPayloadStr,
+      incomingBeforeNormalize,
+      normalizedPayload: structuredClone(payload),
+    })
+  }
+  return payload
+}
+
+function enrichPayload(
+  payload: Record<string, any>,
+  agentId: string | undefined,
+  processStartedAt: number
+): void {
+  if (!payload._terminal) {
+    const terminal = detectTerminal()
+    payload._terminal = { app: terminal.app, name: terminal.name }
+  }
+  if (!payload._env) payload._env = buildAllowlistedEnv()
+  if (agentId && !payload._agent) payload._agent = agentId
+  payload._swizTiming = {
+    cliBootstrapMs: Math.max(0, performance.now() - processStartedAt),
+  }
+}
+
 export async function runThinDispatch(
   args: string[],
   processStartedAt: number = performance.now()
@@ -252,48 +314,8 @@ export async function runThinDispatch(
     canonicalEvent = parsedArgs.canonicalEvent
     hookEventName = parsedArgs.hookEventName
     const rawPayloadStr = await readStdinPayload()
-    let payload: Record<string, any>
-    try {
-      payload = parsePayload(rawPayloadStr, canonicalEvent)
-    } catch (error) {
-      if (shouldCaptureIncomingPayloads()) {
-        scheduleIncomingDispatchCapture({
-          canonicalEvent,
-          hookEventName,
-          parseError: true,
-          payloadStr: rawPayloadStr,
-          incomingBeforeNormalize: null,
-          normalizedPayload: {},
-        })
-      }
-      throw error
-    }
-    ensureDispatchId(payload)
-    const incomingBeforeNormalize = structuredClone(payload)
-    normalizeAgentHookPayload(payload)
-    await backfillPayload(payload)
-    const normalizedPayload = structuredClone(payload)
-
-    if (shouldCaptureIncomingPayloads()) {
-      scheduleIncomingDispatchCapture({
-        canonicalEvent,
-        hookEventName,
-        parseError: false,
-        payloadStr: rawPayloadStr,
-        incomingBeforeNormalize,
-        normalizedPayload,
-      })
-    }
-
-    if (!payload._terminal) {
-      const terminal = detectTerminal()
-      payload._terminal = { app: terminal.app, name: terminal.name }
-    }
-    if (!payload._env) payload._env = buildAllowlistedEnv()
-    if (parsedArgs.agentId && !payload._agent) payload._agent = parsedArgs.agentId
-    payload._swizTiming = {
-      cliBootstrapMs: Math.max(0, performance.now() - processStartedAt),
-    }
+    const payload = await preparePayload(rawPayloadStr, canonicalEvent, hookEventName)
+    enrichPayload(payload, parsedArgs.agentId, processStartedAt)
 
     const response = await tryDaemonDispatch(canonicalEvent, hookEventName, JSON.stringify(payload))
     if (response !== null) {

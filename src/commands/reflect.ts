@@ -353,6 +353,49 @@ export interface ReflectCommandOptions {
   createStreamBufferReporter?: typeof createStreamBufferReporter
 }
 
+interface ReflectionRequestOptions {
+  count: number
+  model?: string
+  timeoutMs: number
+  json: boolean
+  provider?: AiProviderId
+}
+
+async function requestReflection(
+  prompt: string,
+  options: ReflectionRequestOptions,
+  dependencies: ReflectCommandOptions
+): Promise<SessionReflection> {
+  const bufferReporter = (dependencies.createStreamBufferReporter ?? createStreamBufferReporter)({
+    enabled: !options.json,
+  })
+  try {
+    bufferReporter.startSubmitting()
+    const streamed = await (dependencies.promptStreamText ?? promptStreamText)(prompt, {
+      model: options.model,
+      timeout: options.timeoutMs,
+      provider: options.provider,
+      onTextPart: (textPart: string) => {
+        if (!options.json) bufferReporter.onChunk(textPart)
+      },
+    })
+    bufferReporter.finish()
+    const reflection = parseReflectionFromJsonText(streamed, options.count)
+    if (options.json) console.log(JSON.stringify(reflection))
+    return reflection
+  } catch (error) {
+    bufferReporter.finish()
+    // If raw JSON has already been streamed to stdout, avoid fallback output
+    // that would produce mixed/duplicated content.
+    if (options.json) throw error
+    return promptObject(prompt, SessionReflectionSchema(options.count), {
+      model: options.model,
+      timeout: options.timeoutMs,
+      provider: options.provider,
+    })
+  }
+}
+
 export const reflectCommand: Command<ReflectCommandOptions> = {
   name: "reflect",
   description: "Use Gemini to reflect on mistakes in a session transcript",
@@ -410,43 +453,13 @@ export const reflectCommand: Command<ReflectCommandOptions> = {
       )
     }
 
-    let reflection: SessionReflection
-    const bufferReporter = (dependencies.createStreamBufferReporter ?? createStreamBufferReporter)({
-      enabled: !json,
-    })
-    try {
-      bufferReporter.startSubmitting()
-      const streamed = await (dependencies.promptStreamText ?? promptStreamText)(prompt, {
-        model,
-        timeout: timeoutMs,
-        provider,
-        onTextPart: (textPart: string) => {
-          if (!json) bufferReporter.onChunk(textPart)
-        },
-      })
-      bufferReporter.finish()
-      reflection = parseReflectionFromJsonText(streamed, count)
-      if (json) {
-        console.log(JSON.stringify(reflection))
-        return
-      }
-    } catch (error) {
-      bufferReporter.finish()
-      // If raw JSON has already been streamed to stdout, avoid fallback output
-      // that would produce mixed/duplicated content.
-      if (json) throw error
+    const reflection = await requestReflection(
+      prompt,
+      { count, model, timeoutMs, json, provider },
+      dependencies
+    )
 
-      reflection = await promptObject(prompt, SessionReflectionSchema(count), {
-        model,
-        timeout: timeoutMs,
-        provider,
-      })
-    }
-
-    if (json) {
-      console.log(JSON.stringify(reflection, null, 2))
-      return
-    }
+    if (json) return
     console.log(renderReflection(reflection))
   },
 }

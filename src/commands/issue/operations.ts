@@ -89,26 +89,55 @@ function removeFromStore(slug: string | null, number: string): void {
   } catch {}
 }
 
-async function handleCloseFailure(
-  slug: string | null,
-  number: string,
-  stderr: string,
-  exitCode: number,
-  cwd: string,
+interface FailedIssueMutation {
+  slug: string | null
+  number: string
+  stderr: string
+  exitCode: number
+  cwd: string
   runGh: (args: string[], cwd: string) => Promise<GhCommandResult>
-): Promise<void> {
-  if (isGraphQLRateLimited(stderr) && slug) {
-    if (await closeIssueViaRest(slug, number, cwd, runGh)) {
-      removeFromStore(slug, number)
+}
+
+async function handleCloseFailure(failure: FailedIssueMutation): Promise<void> {
+  if (isGraphQLRateLimited(failure.stderr) && failure.slug) {
+    if (await closeIssueViaRest(failure.slug, failure.number, failure.cwd, failure.runGh)) {
+      removeFromStore(failure.slug, failure.number)
       return
     }
   }
-  if (slug) {
+  if (failure.slug) {
     try {
-      getIssueStore().queueMutation(slug, { type: "close", number: parseInt(number, 10) })
+      getIssueStore().queueMutation(failure.slug, {
+        type: "close",
+        number: parseInt(failure.number, 10),
+      })
     } catch {}
   }
-  throw new Error(`gh issue close failed with exit code ${exitCode}`)
+  throw new Error(`gh issue close failed with exit code ${failure.exitCode}`)
+}
+
+interface FailedCommentMutation extends FailedIssueMutation {
+  body: string
+}
+
+async function handleCommentFailure(failure: FailedCommentMutation): Promise<void> {
+  if (
+    isGraphQLRateLimited(failure.stderr) &&
+    failure.slug &&
+    (await commentViaRest(failure.slug, failure.number, failure.body, failure.cwd, failure.runGh))
+  ) {
+    return
+  }
+  if (failure.slug) {
+    try {
+      getIssueStore().queueMutation(failure.slug, {
+        type: "comment",
+        number: parseInt(failure.number, 10),
+        body: failure.body,
+      })
+    } catch {}
+  }
+  throw new Error(`gh issue comment failed with exit code ${failure.exitCode}`)
 }
 
 export async function closeIssue(
@@ -129,7 +158,14 @@ export async function closeIssue(
   const result = await dependencies.runGh(["issue", "close", number], cwd)
 
   if (result.exitCode !== 0) {
-    await handleCloseFailure(slug, number, result.stderr, result.exitCode, cwd, dependencies.runGh)
+    await handleCloseFailure({
+      slug,
+      number,
+      stderr: result.stderr,
+      exitCode: result.exitCode,
+      cwd,
+      runGh: dependencies.runGh,
+    })
     return
   }
   removeFromStore(slug, number)
@@ -155,16 +191,15 @@ export async function commentOnIssue(
   const result = await dependencies.runGh(["issue", "comment", number, "--body", body], cwd)
 
   if (result.exitCode !== 0) {
-    if (isGraphQLRateLimited(result.stderr) && slug) {
-      if (await commentViaRest(slug, number, body, cwd, dependencies.runGh)) return
-    }
-
-    if (slug) {
-      try {
-        getIssueStore().queueMutation(slug, { type: "comment", number: parseInt(number, 10), body })
-      } catch {}
-    }
-    throw new Error(`gh issue comment failed with exit code ${result.exitCode}`)
+    await handleCommentFailure({
+      slug,
+      number,
+      body,
+      stderr: result.stderr,
+      exitCode: result.exitCode,
+      cwd,
+      runGh: dependencies.runGh,
+    })
   }
 }
 
@@ -186,17 +221,15 @@ async function postComment(
   await dependencies.acquireGhSlot()
   const result = await dependencies.runGh(["issue", "comment", number, "--body", body], cwd)
   if (result.exitCode === 0) return
-
-  if (isGraphQLRateLimited(result.stderr) && slug) {
-    if (await commentViaRest(slug, number, body, cwd, dependencies.runGh)) return
-  }
-
-  if (slug) {
-    try {
-      getIssueStore().queueMutation(slug, { type: "comment", number: parseInt(number, 10), body })
-    } catch {}
-  }
-  throw new Error(`gh issue comment failed with exit code ${result.exitCode}`)
+  await handleCommentFailure({
+    slug,
+    number,
+    body,
+    stderr: result.stderr,
+    exitCode: result.exitCode,
+    cwd,
+    runGh: dependencies.runGh,
+  })
 }
 
 async function closeAndRemove(

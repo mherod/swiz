@@ -101,48 +101,50 @@ export function printOpenItems(repo: string, assigneeFilter?: string): void {
 
 const FRESH_SYNC_WINDOW_MS = 30_000
 
-export async function handleSync(args: string[]): Promise<void> {
-  const cwd = process.cwd()
-  const force = args.includes("--force") || args.includes("-f")
+async function resolveSyncRepo(args: string[], cwd: string): Promise<string> {
   const positionals = args.filter((a) => !a.startsWith("-"))
-  let repo: string | null = positionals[1] ?? null
-  if (!repo) {
-    repo = await getRepoSlug(cwd)
-  }
-  if (!repo) {
-    throw new Error(
-      `Repo required. Usage: swiz issue sync [<repo>] [--force]\nOr run this in a git repo with an origin.`
-    )
-  }
+  const repo = positionals[1] ?? (await getRepoSlug(cwd))
+  if (repo) return repo
+  throw new Error(
+    `Repo required. Usage: swiz issue sync [<repo>] [--force]\nOr run this in a git repo with an origin.`
+  )
+}
 
-  let syncAge = ""
-  let lastSyncedMs: number | null = null
+function formatSyncAge(lastSyncedMs: number): string {
+  if (lastSyncedMs < 60_000) return " (last synced <1m ago)"
+  if (lastSyncedMs < 3_600_000) return ` (last synced ${Math.floor(lastSyncedMs / 60_000)}m ago)`
+  if (lastSyncedMs < 86_400_000)
+    return ` (last synced ${Math.floor(lastSyncedMs / 3_600_000)}h ago)`
+  return ` (last synced ${Math.floor(lastSyncedMs / 86_400_000)}d ago)`
+}
+
+function readSyncFreshness(repo: string): { syncAge: string; lastSyncedMs: number | null } {
   try {
     const lastSynced = getIssueStore().getSyncCursor(repo, "last_synced")
-    if (lastSynced) {
-      lastSyncedMs = Date.now() - new Date(lastSynced).getTime()
-      if (lastSyncedMs < 60_000) syncAge = ` (last synced <1m ago)`
-      else if (lastSyncedMs < 3_600_000)
-        syncAge = ` (last synced ${Math.floor(lastSyncedMs / 60_000)}m ago)`
-      else if (lastSyncedMs < 86_400_000)
-        syncAge = ` (last synced ${Math.floor(lastSyncedMs / 3_600_000)}h ago)`
-      else syncAge = ` (last synced ${Math.floor(lastSyncedMs / 86_400_000)}d ago)`
-    } else {
-      syncAge = " (first sync)"
-    }
+    if (!lastSynced) return { syncAge: " (first sync)", lastSyncedMs: null }
+    const lastSyncedMs = Date.now() - new Date(lastSynced).getTime()
+    return { syncAge: formatSyncAge(lastSyncedMs), lastSyncedMs }
   } catch {
-    syncAge = " (first sync)"
+    return { syncAge: " (first sync)", lastSyncedMs: null }
   }
+}
 
-  if (!force && lastSyncedMs !== null && lastSyncedMs < FRESH_SYNC_WINDOW_MS) {
-    console.log(`✅ Up to date${syncAge} — skipping network sync. Use --force to refresh.`)
-    printOpenItems(repo)
-    return
-  }
+function unchangedParts(result: UpstreamSyncResult): string[] {
+  const parts: string[] = []
+  if (result.issues.skipped > 0)
+    parts.push(`${result.issues.skipped} issue${result.issues.skipped === 1 ? "" : "s"}`)
+  if (result.pullRequests.skipped > 0)
+    parts.push(`${result.pullRequests.skipped} PR${result.pullRequests.skipped === 1 ? "" : "s"}`)
+  if (result.labels.skipped > 0)
+    parts.push(`${result.labels.skipped} label${result.labels.skipped === 1 ? "" : "s"}`)
+  if (result.milestones.skipped > 0)
+    parts.push(
+      `${result.milestones.skipped} milestone${result.milestones.skipped === 1 ? "" : "s"}`
+    )
+  return parts
+}
 
-  console.log(`🔄 Syncing upstream state for ${repo}${syncAge}...`)
-  const result = await syncUpstreamState(repo, cwd)
-
+function printSyncCompletion(result: UpstreamSyncResult): void {
   const allChanges = [
     ...result.issues.changes,
     ...result.pullRequests.changes,
@@ -164,25 +166,31 @@ export async function handleSync(args: string[]): Promise<void> {
       : ""
 
   if (allChanges.length === 0 && totalUnchanged > 0) {
-    const parts: string[] = []
-    if (result.issues.skipped > 0)
-      parts.push(`${result.issues.skipped} issue${result.issues.skipped === 1 ? "" : "s"}`)
-    if (result.pullRequests.skipped > 0)
-      parts.push(`${result.pullRequests.skipped} PR${result.pullRequests.skipped === 1 ? "" : "s"}`)
-    if (result.labels.skipped > 0)
-      parts.push(`${result.labels.skipped} label${result.labels.skipped === 1 ? "" : "s"}`)
-    if (result.milestones.skipped > 0)
-      parts.push(
-        `${result.milestones.skipped} milestone${result.milestones.skipped === 1 ? "" : "s"}`
-      )
+    const parts = unchangedParts(result)
     const breakdown = parts.length > 0 ? parts.join(", ") : `${totalUnchanged} entities`
     console.log(`✅ Already up to date (${breakdown} unchanged${cacheSummary})`)
-  } else {
-    console.log("✅ Sync complete:\n")
-    printSyncSummary(result)
-    if (cacheSummary) console.log(`  REST cache  ${cacheSummary.slice(2)}`)
+    return
+  }
+  console.log("✅ Sync complete:\n")
+  printSyncSummary(result)
+  if (cacheSummary) console.log(`  REST cache  ${cacheSummary.slice(2)}`)
+}
+
+export async function handleSync(args: string[]): Promise<void> {
+  const cwd = process.cwd()
+  const force = args.includes("--force") || args.includes("-f")
+  const repo = await resolveSyncRepo(args, cwd)
+  const { syncAge, lastSyncedMs } = readSyncFreshness(repo)
+
+  if (!force && lastSyncedMs !== null && lastSyncedMs < FRESH_SYNC_WINDOW_MS) {
+    console.log(`✅ Up to date${syncAge} — skipping network sync. Use --force to refresh.`)
+    printOpenItems(repo)
+    return
   }
 
+  console.log(`🔄 Syncing upstream state for ${repo}${syncAge}...`)
+  const result = await syncUpstreamState(repo, cwd)
+  printSyncCompletion(result)
   printOpenItems(repo)
 }
 

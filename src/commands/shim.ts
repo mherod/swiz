@@ -297,21 +297,47 @@ async function showStatus(): Promise<void> {
   console.log(`\n  ${DIM}Bypass: SWIZ_BYPASS=1 <command>, or: command <command>${RESET}\n`)
 }
 
-async function install(args: string[]): Promise<void> {
-  const dryRun = args.includes("--dry-run")
-  const shell = process.env.SHELL ?? ""
+function resolveInstallTargets(args: string[], shell: string): ShellProfile[] {
   const profiles = detectProfiles(getHomeDir(), shell)
   const targetName = args.find((arg) => arg.startsWith("."))
   const selected = targetName
     ? profiles.filter((profile) => profile.name === targetName)
     : profiles.filter((profile) => profile.required)
-  if (selected.length === 0) {
+  if (selected.length > 0) return selected
+  if (targetName) {
     throw new Error(
-      targetName
-        ? `Unknown profile: ${targetName}\nAvailable: ${profiles.map((profile) => profile.name).join(", ")}`
-        : "Could not determine shell profile."
+      `Unknown profile: ${targetName}\nAvailable: ${profiles.map((profile) => profile.name).join(", ")}`
     )
   }
+  throw new Error("Could not determine shell profile.")
+}
+
+function printInstallPreview(selected: ShellProfile[]): void {
+  for (const profile of selected) {
+    console.log(`  ${GREEN}+ Ensure shim block in ${profile.name}:${RESET}`)
+    console.log(`  ${DIM}${shimBlock(profile, getShimPath())}${RESET}\n`)
+  }
+  console.log("  No changes written.\n")
+}
+
+function printInstallReceipt(result: ShimChangeResult): void {
+  if (result.changedProfiles.length === 0) {
+    console.log(`  ${GREEN}✓ Shim installation is already current${RESET}\n`)
+    return
+  }
+  for (const path of result.changedProfiles) {
+    console.log(`  ${GREEN}✓ Installed shim in ${path}${RESET}`)
+  }
+  for (const path of result.backupPaths) {
+    console.log(`  ${DIM}Backup: ${path}${RESET}`)
+  }
+  console.log()
+}
+
+async function install(args: string[]): Promise<void> {
+  const dryRun = args.includes("--dry-run")
+  const shell = process.env.SHELL ?? ""
+  const selected = resolveInstallTargets(args, shell)
 
   console.log(`\n  ${BOLD}swiz shim install${dryRun ? " (dry run)" : ""}${RESET}\n`)
   for (const profile of selected) {
@@ -320,11 +346,7 @@ async function install(args: string[]): Promise<void> {
   console.log()
 
   if (dryRun) {
-    for (const profile of selected) {
-      console.log(`  ${GREEN}+ Ensure shim block in ${profile.name}:${RESET}`)
-      console.log(`  ${DIM}${shimBlock(profile, getShimPath())}${RESET}\n`)
-    }
-    console.log("  No changes written.\n")
+    printInstallPreview(selected)
     return
   }
 
@@ -333,17 +355,7 @@ async function install(args: string[]): Promise<void> {
     shimPath: getShimPath(),
     profileNames: selected.map((profile) => profile.name),
   })
-  if (result.changedProfiles.length === 0) {
-    console.log(`  ${GREEN}✓ Shim installation is already current${RESET}\n`)
-  } else {
-    for (const path of result.changedProfiles) {
-      console.log(`  ${GREEN}✓ Installed shim in ${path}${RESET}`)
-    }
-    for (const path of result.backupPaths) {
-      console.log(`  ${DIM}Backup: ${path}${RESET}`)
-    }
-    console.log()
-  }
+  printInstallReceipt(result)
 
   console.log(`  ${DIM}Restart your shell to apply changes.${RESET}\n`)
   console.log("  Shimmed commands: grep, egrep, fgrep, find, sed, awk,")

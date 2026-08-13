@@ -43,6 +43,44 @@ function parseStashInventory(stdout: string): StashEntry[] {
   return entries
 }
 
+function resolveUniqueSelector(inventory: StashEntry[], oid: string): string {
+  const matches = inventory.filter((entry) => entry.oid === oid)
+  if (matches.length === 0) {
+    throw new Error(`Stash OID ${oid} is not present in the current stash inventory.`)
+  }
+  if (matches.length > 1) {
+    throw new Error(
+      `Stash OID ${oid} appears under multiple selectors (${matches.map((entry) => entry.selector).join(", ")}); refusing to guess which recovery entry to remove.`
+    )
+  }
+  return matches[0]!.selector
+}
+
+async function verifySelectorOid(selector: string, oid: string, cwd: string): Promise<void> {
+  const resolved = await getGitClient().run(["rev-parse", "--verify", selector], { cwd })
+  const resolvedOid = resolved.stdout.trim().toLowerCase()
+  if (resolved.exitCode === 0 && resolvedOid === oid) return
+  throw new Error(
+    `Stash selector ${selector} changed before retirement; expected ${oid}, found ${resolvedOid || "unresolved"}. No stash was removed.`
+  )
+}
+
+async function verifyStashAbsent(selector: string, oid: string, cwd: string): Promise<void> {
+  const after = await getGitClient().run(["stash", "list", "--format=%H"], { cwd })
+  if (after.exitCode !== 0) {
+    throw new Error(
+      `Stash ${selector} was dropped, but absence verification failed: ${failureDetail(after.stdout, after.stderr)}`
+    )
+  }
+  const remainingOids = after.stdout
+    .split(/\r?\n/)
+    .map((value) => value.trim().toLowerCase())
+    .filter(Boolean)
+  if (remainingOids.includes(oid)) {
+    throw new Error(`Stash OID ${oid} is still present after dropping ${selector}.`)
+  }
+}
+
 export async function retireStashByOid(
   requestedOid: string,
   cwd = process.cwd()
@@ -60,24 +98,8 @@ export async function retireStashByOid(
     )
   }
 
-  const matches = parseStashInventory(inventory.stdout).filter((entry) => entry.oid === oid)
-  if (matches.length === 0) {
-    throw new Error(`Stash OID ${oid} is not present in the current stash inventory.`)
-  }
-  if (matches.length > 1) {
-    throw new Error(
-      `Stash OID ${oid} appears under multiple selectors (${matches.map((entry) => entry.selector).join(", ")}); refusing to guess which recovery entry to remove.`
-    )
-  }
-
-  const selector = matches[0]!.selector
-  const resolved = await git.run(["rev-parse", "--verify", selector], { cwd })
-  const resolvedOid = resolved.stdout.trim().toLowerCase()
-  if (resolved.exitCode !== 0 || resolvedOid !== oid) {
-    throw new Error(
-      `Stash selector ${selector} changed before retirement; expected ${oid}, found ${resolvedOid || "unresolved"}. No stash was removed.`
-    )
-  }
+  const selector = resolveUniqueSelector(parseStashInventory(inventory.stdout), oid)
+  await verifySelectorOid(selector, oid, cwd)
 
   const dropped = await git.run(["stash", "drop", selector], { cwd })
   if (dropped.exitCode !== 0) {
@@ -86,19 +108,7 @@ export async function retireStashByOid(
     )
   }
 
-  const after = await git.run(["stash", "list", "--format=%H"], { cwd })
-  if (after.exitCode !== 0) {
-    throw new Error(
-      `Stash ${selector} was dropped, but absence verification failed: ${failureDetail(after.stdout, after.stderr)}`
-    )
-  }
-  const remainingOids = after.stdout
-    .split(/\r?\n/)
-    .map((value) => value.trim().toLowerCase())
-    .filter(Boolean)
-  if (remainingOids.includes(oid)) {
-    throw new Error(`Stash OID ${oid} is still present after dropping ${selector}.`)
-  }
+  await verifyStashAbsent(selector, oid, cwd)
 
   return { selector, oid }
 }

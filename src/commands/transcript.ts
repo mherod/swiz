@@ -62,6 +62,62 @@ async function runDisplayMode(
   }
 }
 
+async function generateAutoReplies(turns: Turn[], sessionId: string, cwd: string): Promise<Turn[]> {
+  const allReplies: Turn[] = []
+  for (let passNumber = 1; passNumber <= AUTO_REPLY_MAX_PASSES; passNumber++) {
+    const flipRoles = passNumber % 2 === 0
+    monitor.setPhase(`streaming-pass-${passNumber}`)
+    monitor.pushEvent(
+      `Starting pass ${passNumber}${flipRoles ? " (flipped roles)" : " (original roles)"}`
+    )
+    const replies = await streamAutoReply(turns.concat(allReplies), {
+      sessionId,
+      flipRoles,
+      cwd,
+      passNumber,
+    })
+    if (replies.length === 0) {
+      monitor.pushEvent(`Pass ${passNumber} produced no replies; stopping.`)
+      break
+    }
+    allReplies.push(...replies)
+    monitor.updateStats({ currentPass: passNumber, repliesGenerated: allReplies.length })
+    for (const displayTurn of turnsToDisplayTurns(replies).displayTurns) {
+      monitor.pushTurn(displayTurn)
+    }
+  }
+  return allReplies
+}
+
+async function scheduleAutoReplies(sessionId: string, replies: Turn[]): Promise<void> {
+  const scheduledMessages = new Set<string>()
+  let scheduledCount = 0
+  for (const reply of replies) {
+    const replyText = extractText(reply.entry.message?.content).trim()
+    if (!replyText) continue
+    if (scheduledMessages.has(replyText)) {
+      monitor.pushEvent("[Auto-Steer] Skipped duplicate reply (already scheduled in batch)")
+      continue
+    }
+    scheduledMessages.add(replyText)
+    try {
+      const scheduled = await scheduleAutoSteer(sessionId, replyText, "next_turn", process.cwd())
+      if (scheduled) {
+        scheduledCount++
+        monitor.pushEvent(
+          `[Auto-Steer] ✓ Scheduled reply #${scheduledCount}: "${replyText.slice(0, 60)}..."`
+        )
+      } else {
+        monitor.pushEvent(
+          `[Auto-Steer] ⊘ Reply not scheduled (auto-steer disabled or terminal unsupported): "${replyText.slice(0, 60)}..."`
+        )
+      }
+    } catch (err) {
+      monitor.pushEvent(`[Auto-Steer] ✗ Failed to schedule reply: ${messageFromUnknownError(err)}`)
+    }
+  }
+}
+
 async function runAutoReplyMode(
   turns: Turn[],
   sessionId: string,
@@ -78,77 +134,9 @@ async function runAutoReplyMode(
   })
   await monitor.start()
   try {
-    const allReplies: Turn[] = []
-    const cwd = process.cwd()
-
-    for (let passNumber = 1; passNumber <= AUTO_REPLY_MAX_PASSES; passNumber++) {
-      const flipRoles = passNumber % 2 === 0
-      monitor.setPhase(`streaming-pass-${passNumber}`)
-      const allTurns = turns.concat(allReplies)
-      monitor.pushEvent(
-        `Starting pass ${passNumber}${flipRoles ? " (flipped roles)" : " (original roles)"}`
-      )
-      const replies = await streamAutoReply(allTurns, {
-        sessionId,
-        flipRoles,
-        cwd,
-        passNumber,
-      })
-
-      if (replies.length === 0) {
-        monitor.pushEvent(`Pass ${passNumber} produced no replies; stopping.`)
-        break
-      }
-
-      allReplies.push(...replies)
-      monitor.updateStats({
-        currentPass: passNumber,
-        repliesGenerated: allReplies.length,
-      })
-
-      const replyDisplayTurns = turnsToDisplayTurns(replies).displayTurns
-      for (const t of replyDisplayTurns) {
-        monitor.pushTurn(t)
-      }
-    }
-
+    const allReplies = await generateAutoReplies(turns, sessionId, process.cwd())
     if (!allReplies.length) throw new Error("No response turns were generated.")
-
-    // Schedule auto-replies as auto-steer messages for next session turn
-    const scheduledMessages = new Set<string>()
-    let scheduledCount = 0
-
-    for (const reply of allReplies) {
-      const replyText = extractText(reply.entry.message?.content).trim()
-      if (!replyText) continue
-
-      // Idempotency guard: dedup within batch to prevent duplicate messages in queue
-      if (scheduledMessages.has(replyText)) {
-        monitor.pushEvent(`[Auto-Steer] Skipped duplicate reply (already scheduled in batch)`)
-        continue
-      }
-
-      scheduledMessages.add(replyText)
-
-      try {
-        const scheduled = await scheduleAutoSteer(sessionId, replyText, "next_turn", process.cwd())
-        if (scheduled) {
-          scheduledCount++
-          monitor.pushEvent(
-            `[Auto-Steer] ✓ Scheduled reply #${scheduledCount}: "${replyText.slice(0, 60)}..."`
-          )
-        } else {
-          monitor.pushEvent(
-            `[Auto-Steer] ⊘ Reply not scheduled (auto-steer disabled or terminal unsupported): "${replyText.slice(0, 60)}..."`
-          )
-        }
-      } catch (err) {
-        const errorMsg = messageFromUnknownError(err)
-        monitor.pushEvent(`[Auto-Steer] ✗ Failed to schedule reply: ${errorMsg}`)
-        // Fail-open: continue processing remaining replies
-      }
-    }
-
+    await scheduleAutoReplies(sessionId, allReplies)
     monitor.setPhase("complete")
     monitor.pushEvent("Auto-reply generation complete")
   } finally {
@@ -161,16 +149,16 @@ async function runAutoReplyMode(
 const AUTO_REPLY_CONTEXT_MESSAGE_LIMIT = 20
 const AUTO_REPLY_MAX_PASSES = 2
 
-function turnToAutoReplyMessage({ entry, role }: Turn, flipRoles: boolean): ModelMessage | null {
-  if (role === "user") {
-    const text = extractText(entry.message?.content).trim()
-    if (!text) return null
-    return {
-      role: flipRoles ? "assistant" : "user",
-      content: text,
-    }
-  }
+function userTurnToAutoReplyMessage(entry: Turn["entry"], flipRoles: boolean): ModelMessage | null {
+  const text = extractText(entry.message?.content).trim()
+  if (!text) return null
+  return { role: flipRoles ? "assistant" : "user", content: text }
+}
 
+function assistantTurnToAutoReplyMessage(
+  entry: Turn["entry"],
+  flipRoles: boolean
+): ModelMessage | null {
   const blocks = toContentBlocks(entry.message?.content)
   const textParts: string[] = []
   for (const block of blocks) {
@@ -183,6 +171,12 @@ function turnToAutoReplyMessage({ entry, role }: Turn, flipRoles: boolean): Mode
     role: flipRoles ? "user" : "assistant",
     content: textParts.join("\n"),
   }
+}
+
+function turnToAutoReplyMessage({ entry, role }: Turn, flipRoles: boolean): ModelMessage | null {
+  return role === "user"
+    ? userTurnToAutoReplyMessage(entry, flipRoles)
+    : assistantTurnToAutoReplyMessage(entry, flipRoles)
 }
 
 export function buildAutoReplyMessages(turns: Turn[], flipRoles: boolean): ModelMessage[] {
@@ -303,6 +297,54 @@ export interface TranscriptCommandOptions {
   runAutoReplyMode?: typeof runAutoReplyMode
 }
 
+async function loadTranscriptRunContext(args: string[], detectAgent: typeof detectCurrentAgent) {
+  const parsed = parseTranscriptArgs(args)
+  validateTranscriptArgs(parsed)
+  const selectedAgents = resolveSelectedAgents(
+    parsed.allAgents,
+    parsed.explicitAgents,
+    detectAgent()
+  )
+  const selectedProviders = getSelectedProviders(selectedAgents)
+  validateProviders(selectedProviders, selectedAgents)
+  const timeRange = buildTimeRange(parsed)
+  const hasTimeFilter = timeRange.from !== undefined || timeRange.to !== undefined
+  let sessions = await loadFilteredSessions(parsed.targetDir, selectedProviders)
+  if (hasTimeFilter) sessions = filterSessionsByTime(sessions, timeRange)
+  return { parsed, sessions, timeRange, hasTimeFilter }
+}
+
+interface TranscriptModeRunners {
+  list: typeof runListMode
+  display: typeof runDisplayMode
+  autoReply: typeof runAutoReplyMode
+}
+
+async function executeTranscriptRun(
+  context: Awaited<ReturnType<typeof loadTranscriptRunContext>>,
+  modes: TranscriptModeRunners
+): Promise<void> {
+  const { parsed, sessions, timeRange, hasTimeFilter } = context
+  if (sessions.length === 0 && hasTimeFilter) {
+    console.log(`\n  ${DIM}No sessions found within the specified time range.${RESET}\n`)
+    return
+  }
+  if (parsed.listOnly) {
+    await modes.list(sessions, parsed.targetDir)
+    return
+  }
+  const session = pickSession(sessions, parsed.sessionQuery)
+  const { turns, debugEvents } = await loadSessionContent(
+    session,
+    parsed,
+    timeRange,
+    hasTimeFilter,
+    (id) => console.log(`\n${DIM}Debug log not found for session: ${id}${RESET}`)
+  )
+  const mode = parsed.autoReply ? modes.autoReply : modes.display
+  await mode(turns, session.id, debugEvents)
+}
+
 export const transcriptCommand: Command<TranscriptCommandOptions> = {
   name: "transcript",
   description: "Display Agent-User chat history for the current project",
@@ -351,44 +393,11 @@ export const transcriptCommand: Command<TranscriptCommandOptions> = {
     const listMode = options?.runListMode ?? runListMode
     const displayMode = options?.runDisplayMode ?? runDisplayMode
     const autoReplyMode = options?.runAutoReplyMode ?? runAutoReplyMode
-    const parsed = parseTranscriptArgs(args)
-    validateTranscriptArgs(parsed)
-
-    const selectedAgents = resolveSelectedAgents(
-      parsed.allAgents,
-      parsed.explicitAgents,
-      detectAgent()
-    )
-    const selectedProviders = getSelectedProviders(selectedAgents)
-    validateProviders(selectedProviders, selectedAgents)
-
-    const timeRange = buildTimeRange(parsed)
-    const hasTimeFilter = timeRange.from !== undefined || timeRange.to !== undefined
-
-    let sessions = await loadFilteredSessions(parsed.targetDir, selectedProviders)
-    if (hasTimeFilter) sessions = filterSessionsByTime(sessions, timeRange)
-    if (sessions.length === 0 && hasTimeFilter) {
-      console.log(`\n  ${DIM}No sessions found within the specified time range.${RESET}\n`)
-      return
-    }
-    if (parsed.listOnly) {
-      await listMode(sessions, parsed.targetDir)
-      return
-    }
-
-    const session = pickSession(sessions, parsed.sessionQuery)
-    const { turns, debugEvents } = await loadSessionContent(
-      session,
-      parsed,
-      timeRange,
-      hasTimeFilter,
-      (id) => console.log(`\n${DIM}Debug log not found for session: ${id}${RESET}`)
-    )
-
-    if (parsed.autoReply) {
-      await autoReplyMode(turns, session.id, debugEvents)
-    } else {
-      await displayMode(turns, session.id, debugEvents)
-    }
+    const context = await loadTranscriptRunContext(args, detectAgent)
+    await executeTranscriptRun(context, {
+      list: listMode,
+      display: displayMode,
+      autoReply: autoReplyMode,
+    })
   },
 }
