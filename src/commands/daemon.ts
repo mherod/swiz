@@ -466,6 +466,38 @@ function mergeSessionToolUsageStates(
   }
 }
 
+async function hydrateSessionToolState(
+  cwd: string,
+  session: Session,
+  state: HydratableSessionState,
+  readToolCalls: (cwd: string, sessionId: string) => Promise<CapturedToolCall[]>
+): Promise<boolean> {
+  const persisted = await readToolCalls(cwd, session.id)
+  if (persisted.length === 0) return false
+
+  const mergedCalls = mergeCapturedToolCalls(
+    persisted,
+    state.sessionToolCalls.get(session.id) ?? []
+  )
+  if (mergedCalls.length === 0) return false
+
+  const lastSeen = recoverLastSeenMs(mergedCalls, session.mtime)
+  state.sessionToolCalls.set(session.id, mergedCalls)
+  state.sessionToolUsage.set(
+    session.id,
+    mergeSessionToolUsageStates(
+      state.sessionToolUsage.get(session.id),
+      buildSessionToolUsageStateFromCapturedCalls(mergedCalls, lastSeen)
+    )
+  )
+  const previousActivity = state.sessionActivity.get(session.id)
+  state.sessionActivity.set(session.id, {
+    lastSeen: Math.max(previousActivity?.lastSeen ?? 0, lastSeen),
+    dispatches: previousActivity?.dispatches ?? 0,
+  })
+  return true
+}
+
 export async function hydratePersistedSessionToolState(
   cwd: string,
   state: HydratableSessionState,
@@ -484,30 +516,7 @@ export async function hydratePersistedSessionToolState(
   let hydratedCount = 0
 
   for (const session of sessions) {
-    const persisted = await readToolCalls(cwd, session.id)
-    if (persisted.length === 0) continue
-
-    const mergedCalls = mergeCapturedToolCalls(
-      persisted,
-      state.sessionToolCalls.get(session.id) ?? []
-    )
-    if (mergedCalls.length === 0) continue
-
-    const lastSeen = recoverLastSeenMs(mergedCalls, session.mtime)
-    state.sessionToolCalls.set(session.id, mergedCalls)
-    state.sessionToolUsage.set(
-      session.id,
-      mergeSessionToolUsageStates(
-        state.sessionToolUsage.get(session.id),
-        buildSessionToolUsageStateFromCapturedCalls(mergedCalls, lastSeen)
-      )
-    )
-    const previousActivity = state.sessionActivity.get(session.id)
-    state.sessionActivity.set(session.id, {
-      lastSeen: Math.max(previousActivity?.lastSeen ?? 0, lastSeen),
-      dispatches: previousActivity?.dispatches ?? 0,
-    })
-    hydratedCount++
+    if (await hydrateSessionToolState(cwd, session, state, readToolCalls)) hydratedCount++
   }
 
   return hydratedCount

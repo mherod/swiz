@@ -220,6 +220,123 @@ function parseTaskAgeMs(task: {
   return null
 }
 
+type TaskFileBody = {
+  id?: string
+  status?: string
+  statusChangedAt?: string
+  completionTimestamp?: string
+}
+
+async function statTaskFileForScan(filePath: string): Promise<Stats | null> {
+  try {
+    const fileStat = await stat(filePath)
+    return fileStat.isFile() ? fileStat : null
+  } catch {
+    return null
+  }
+}
+
+async function readTaskFileUtf8(filePath: string): Promise<string | null> {
+  try {
+    return await readFile(filePath, "utf-8")
+  } catch {
+    return null
+  }
+}
+
+function parseTaskFileJson(raw: string): TaskFileBody | null {
+  try {
+    return JSON.parse(raw) as TaskFileBody
+  } catch {
+    return null
+  }
+}
+
+function oldTaskFromStatOnly(options: {
+  cutoffMs: number
+  file: string
+  filePath: string
+  fileStat: Stats
+  sessionId: string
+  status: string
+}): OldTaskFileInfo | null {
+  const { cutoffMs, file, filePath, fileStat, sessionId, status } = options
+  if (fileStat.mtimeMs >= cutoffMs) return null
+  return {
+    sessionId,
+    taskId: file.slice(0, -5),
+    status,
+    path: filePath,
+    sizeBytes: fileStat.size,
+  }
+}
+
+async function processTaskFile(
+  sessionId: string,
+  sessionDir: string,
+  file: string,
+  cutoffMs: number
+): Promise<OldTaskFileInfo | null> {
+  if (!isSessionTaskJsonFile(file)) return null
+  const filePath = join(sessionDir, file)
+  const fileStat = await statTaskFileForScan(filePath)
+  if (!fileStat) return null
+
+  const raw = await readTaskFileUtf8(filePath)
+  if (raw === null) {
+    return oldTaskFromStatOnly({
+      sessionId,
+      file,
+      filePath,
+      fileStat,
+      cutoffMs,
+      status: "(read error)",
+    })
+  }
+
+  const task = parseTaskFileJson(raw)
+  if (task === null) {
+    return oldTaskFromStatOnly({
+      sessionId,
+      file,
+      filePath,
+      fileStat,
+      cutoffMs,
+      status: "(invalid json)",
+    })
+  }
+
+  if (!task.status) return null
+  const taskMs = parseTaskAgeMs(task) ?? fileStat.mtimeMs
+  if (taskMs >= cutoffMs) return null
+  return {
+    sessionId,
+    taskId: task.id ?? file.slice(0, -5),
+    status: task.status,
+    path: filePath,
+    sizeBytes: fileStat.size,
+  }
+}
+
+async function processTaskSessionDir(
+  sessionId: string,
+  tasksDir: string,
+  cutoffMs: number
+): Promise<OldTaskFileInfo[]> {
+  const oldTaskFiles: OldTaskFileInfo[] = []
+  const sessionDir = join(tasksDir, sessionId)
+  const sessionDirStat = await stat(sessionDir).catch(() => null)
+  if (!sessionDirStat?.isDirectory()) return oldTaskFiles
+  const files = await readdir(sessionDir).catch(() => null)
+  if (!files) return oldTaskFiles
+
+  for (const file of files) {
+    const taskFile = await processTaskFile(sessionId, sessionDir, file, cutoffMs)
+    if (taskFile) oldTaskFiles.push(taskFile)
+  }
+  return oldTaskFiles
+}
+
 async function findOldTaskFiles(
   tasksDir: string,
   cutoffMs: number,
@@ -233,125 +350,10 @@ async function findOldTaskFiles(
     return oldTaskFiles
   }
 
-  type TaskFileBody = {
-    id?: string
-    status?: string
-    statusChangedAt?: string
-    completionTimestamp?: string
-  }
-
-  async function statTaskFileForScan(filePath: string): Promise<Stats | null> {
-    try {
-      const s = await stat(filePath)
-      return s.isFile() ? s : null
-    } catch {
-      return null
-    }
-  }
-
-  async function readTaskFileUtf8(filePath: string): Promise<string | null> {
-    try {
-      return await readFile(filePath, "utf-8")
-    } catch {
-      return null
-    }
-  }
-
-  function parseTaskFileJson(raw: string): TaskFileBody | null {
-    try {
-      return JSON.parse(raw) as TaskFileBody
-    } catch {
-      return null
-    }
-  }
-
-  function oldTaskFromStatOnly(
-    sessionId: string,
-    file: string,
-    filePath: string,
-    fileStat: Stats,
-    cutoffMs: number,
-    status: string
-  ): OldTaskFileInfo | null {
-    if (fileStat.mtimeMs >= cutoffMs) return null
-    return {
-      sessionId,
-      taskId: file.slice(0, -5),
-      status,
-      path: filePath,
-      sizeBytes: fileStat.size,
-    }
-  }
-
-  async function processTaskFile(
-    sessionId: string,
-    sessionDir: string,
-    file: string,
-    cutoffMs: number
-  ): Promise<OldTaskFileInfo | null> {
-    if (!isSessionTaskJsonFile(file)) return null
-    const filePath = join(sessionDir, file)
-    const fileStat = await statTaskFileForScan(filePath)
-    if (!fileStat) return null
-
-    const raw = await readTaskFileUtf8(filePath)
-    if (raw === null) {
-      return oldTaskFromStatOnly(sessionId, file, filePath, fileStat, cutoffMs, "(read error)")
-    }
-
-    const task = parseTaskFileJson(raw)
-    if (task === null) {
-      return oldTaskFromStatOnly(sessionId, file, filePath, fileStat, cutoffMs, "(invalid json)")
-    }
-
-    if (!task.status) return null
-    const taskMs = parseTaskAgeMs(task) ?? fileStat.mtimeMs
-    if (taskMs >= cutoffMs) return null
-
-    return {
-      sessionId,
-      taskId: task.id ?? file.slice(0, -5),
-      status: task.status,
-      path: filePath,
-      sizeBytes: fileStat.size,
-    }
-  }
-
-  async function processSessionDir(
-    sessionId: string,
-    tasksDir: string,
-    cutoffMs: number
-  ): Promise<OldTaskFileInfo[]> {
-    const oldTaskFiles: OldTaskFileInfo[] = []
-    const sessionDir = join(tasksDir, sessionId)
-    let sessionDirStat: Awaited<ReturnType<typeof stat>>
-    try {
-      sessionDirStat = await stat(sessionDir)
-    } catch {
-      return oldTaskFiles
-    }
-    if (!sessionDirStat.isDirectory()) return oldTaskFiles
-
-    let files: string[] = []
-    try {
-      files = await readdir(sessionDir)
-    } catch {
-      return oldTaskFiles
-    }
-
-    for (const file of files) {
-      const taskFile = await processTaskFile(sessionId, sessionDir, file, cutoffMs)
-      if (taskFile) {
-        oldTaskFiles.push(taskFile)
-      }
-    }
-    return oldTaskFiles
-  }
-
   for (const sessionId of sessionEntries) {
     if (allowedSessionIds && !allowedSessionIds.has(sessionId)) continue
 
-    const sessionTasks = await processSessionDir(sessionId, tasksDir, cutoffMs)
+    const sessionTasks = await processTaskSessionDir(sessionId, tasksDir, cutoffMs)
     if (sessionTasks.length > 0) {
       oldTaskFiles.push(...sessionTasks)
     }
@@ -382,17 +384,8 @@ export async function truncateJsonlFile(
       if (kept.length > 0) kept.push(line)
       continue
     }
-    let ts: number | null = null
-    try {
-      const obj = JSON.parse(line) as { timestamp?: string }
-      if (obj.timestamp) {
-        const parsed = Date.parse(obj.timestamp)
-        if (!Number.isNaN(parsed)) ts = parsed
-      }
-    } catch {
-      // Unparseable line — keep it
-    }
-    if (ts !== null && ts < cutoffMs) {
+    const timestamp = parseJsonlTimestamp(line)
+    if (timestamp !== null && timestamp < cutoffMs) {
       removed++
     } else {
       kept.push(line)
@@ -409,6 +402,44 @@ export async function truncateJsonlFile(
   return removed
 }
 
+function parseJsonlTimestamp(line: string): number | null {
+  try {
+    const timestamp = (JSON.parse(line) as { timestamp?: string }).timestamp
+    if (!timestamp) return null
+    const parsed = Date.parse(timestamp)
+    return Number.isNaN(parsed) ? null : parsed
+  } catch {
+    return null
+  }
+}
+
+interface TruncationResult {
+  filesAffected: number
+  linesRemoved: number
+}
+
+async function truncateSessionPath(
+  path: string,
+  cutoffMs: number,
+  skipBackup?: boolean
+): Promise<TruncationResult> {
+  if (path.endsWith(".jsonl")) {
+    const linesRemoved = await truncateJsonlFile(path, cutoffMs, skipBackup)
+    return { filesAffected: linesRemoved > 0 ? 1 : 0, linesRemoved }
+  }
+
+  const entries = await readdir(path).catch(() => null)
+  if (!entries) return { filesAffected: 0, linesRemoved: 0 }
+  const result = { filesAffected: 0, linesRemoved: 0 }
+  for (const entry of entries) {
+    if (!entry.endsWith(".jsonl")) continue
+    const removed = await truncateJsonlFile(join(path, entry), cutoffMs)
+    if (removed > 0) result.filesAffected++
+    result.linesRemoved += removed
+  }
+  return result
+}
+
 async function truncateKeptSessions(
   results: ProjectResult[],
   cutoffMs: number,
@@ -419,29 +450,10 @@ async function truncateKeptSessions(
 
   for (const { keep } of results) {
     for (const session of keep) {
-      for (const p of session.paths) {
-        if (p.endsWith(".jsonl")) {
-          const removed = await truncateJsonlFile(p, cutoffMs, skipBackup)
-          if (removed > 0) {
-            filesAffected++
-            linesRemoved += removed
-          }
-        } else {
-          let entries: string[]
-          try {
-            entries = await readdir(p)
-          } catch {
-            continue
-          }
-          for (const entry of entries) {
-            if (!entry.endsWith(".jsonl")) continue
-            const removed = await truncateJsonlFile(join(p, entry), cutoffMs)
-            if (removed > 0) {
-              filesAffected++
-              linesRemoved += removed
-            }
-          }
-        }
+      for (const path of session.paths) {
+        const result = await truncateSessionPath(path, cutoffMs, skipBackup)
+        filesAffected += result.filesAffected
+        linesRemoved += result.linesRemoved
       }
     }
   }
@@ -642,36 +654,55 @@ async function getRealSessionMtime(taskDirPath: string): Promise<number | null> 
   let maxMs = 0
   for (const file of taskEntries) {
     if (!isSessionTaskJsonFile(file)) continue
-    const p = join(taskDirPath, file)
-    let s: Stats
-    try {
-      s = await stat(p)
-    } catch (err) {
-      debugLog(`[doctor] stat failed for ${p}: ${(err as NodeJS.ErrnoException).code ?? err}`)
-      continue
-    }
-    let taskMs = s.mtimeMs
-    let raw: string
-    try {
-      raw = await readFile(p, "utf-8")
-    } catch (err) {
-      debugLog(`[doctor] readFile failed for ${p}: ${(err as NodeJS.ErrnoException).code ?? err}`)
-      if (taskMs > maxMs) maxMs = taskMs
-      continue
-    }
-    try {
-      const taskJson = JSON.parse(raw) as {
-        statusChangedAt?: string
-        completionTimestamp?: string
-      }
-      const parsedMs = parseTaskAgeMs(taskJson)
-      if (parsedMs !== null) taskMs = parsedMs
-    } catch {
-      // invalid JSON — stick to file mtime
-    }
+    const taskMs = await getTaskFileMtime(join(taskDirPath, file))
+    if (taskMs === null) continue
     if (taskMs > maxMs) maxMs = taskMs
   }
   return maxMs > 0 ? maxMs : null
+}
+
+async function getTaskFileMtime(path: string): Promise<number | null> {
+  let fileStat: Stats
+  try {
+    fileStat = await stat(path)
+  } catch (error) {
+    debugLog(`[doctor] stat failed for ${path}: ${(error as NodeJS.ErrnoException).code ?? error}`)
+    return null
+  }
+
+  let raw: string
+  try {
+    raw = await readFile(path, "utf-8")
+  } catch (error) {
+    debugLog(
+      `[doctor] readFile failed for ${path}: ${(error as NodeJS.ErrnoException).code ?? error}`
+    )
+    return fileStat.mtimeMs
+  }
+  try {
+    return parseTaskAgeMs(JSON.parse(raw) as TaskFileBody) ?? fileStat.mtimeMs
+  } catch {
+    return fileStat.mtimeMs
+  }
+}
+
+async function orphanTaskSession(tasksDir: string, sessionId: string): Promise<SessionInfo | null> {
+  const taskDirPath = join(tasksDir, sessionId)
+  try {
+    const taskDirStat = await stat(taskDirPath)
+    if (!taskDirStat.isDirectory()) return null
+    const realMtimeMs = (await getRealSessionMtime(taskDirPath)) ?? taskDirStat.mtimeMs
+    return {
+      sessionId,
+      paths: [],
+      mtimeMs: realMtimeMs,
+      sizeBytes: 0,
+      taskDirPath,
+      taskDirSizeBytes: await dirSize(taskDirPath),
+    }
+  } catch {
+    return null
+  }
 }
 
 async function appendOrphanTasks(
@@ -688,24 +719,8 @@ async function appendOrphanTasks(
   const orphans: SessionInfo[] = []
   for (const entry of taskEntries) {
     if (!ORPHAN_SESSION_ID_RE.test(entry) || allKnownSessionIds.has(entry)) continue
-    const taskDirPath = join(tasksDir, entry)
-    try {
-      const s = await stat(taskDirPath)
-      if (!s.isDirectory()) continue
-
-      const realMtimeMs = (await getRealSessionMtime(taskDirPath)) ?? s.mtimeMs
-
-      orphans.push({
-        sessionId: entry,
-        paths: [],
-        mtimeMs: realMtimeMs,
-        sizeBytes: 0,
-        taskDirPath,
-        taskDirSizeBytes: await dirSize(taskDirPath),
-      })
-    } catch {
-      /* skip unreadable task directories */
-    }
+    const orphan = await orphanTaskSession(tasksDir, entry)
+    if (orphan) orphans.push(orphan)
   }
 
   if (orphans.length > 0) {
@@ -970,14 +985,18 @@ function buildCleanupNotes(
   return parts.length > 0 ? ` + ${parts.join(" + ")}` : ""
 }
 
-function printCleanupResult(
-  sessions: { succeeded: number; failed: number; taskDirsRemoved: number },
-  tasks: { removed: number; failed: number },
-  claude: { removed: number; failed: number },
-  gemini: { removed: number; failed: number },
-  totalBytes: number,
-  doneVerb = "moved to Trash"
-): void {
+interface CleanupResult {
+  sessions: { succeeded: number; failed: number; taskDirsRemoved: number }
+  tasks: { removed: number; failed: number }
+  claude: { removed: number; failed: number }
+  gemini: { removed: number; failed: number }
+  totalBytes: number
+  doneVerb?: string
+}
+
+function printCleanupResult(result: CleanupResult): void {
+  const { sessions, tasks, claude, gemini, totalBytes } = result
+  const doneVerb = result.doneVerb ?? "moved to Trash"
   const notes = buildCleanupNotes(sessions, tasks, claude, gemini)
   console.log(
     `  ${GREEN}${BOLD}Done.${RESET} ${sessions.succeeded} session(s)${notes}` +
@@ -1030,7 +1049,14 @@ async function executeCleanup(opts: ExecuteCleanupOpts): Promise<void> {
     }
 
     console.log()
-    printCleanupResult(sessions, tasks, claude, gemini, opts.totalBytes, doneVerb)
+    printCleanupResult({
+      sessions,
+      tasks,
+      claude,
+      gemini,
+      totalBytes: opts.totalBytes,
+      doneVerb,
+    })
   } finally {
     if (daemonStopState === "stopped") {
       const restarted = await restartDaemonAfterCleanup()

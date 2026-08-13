@@ -202,6 +202,17 @@ interface InvalidSkillFixFailure {
   error: string
 }
 
+interface InvalidSkillFixResult {
+  nameFixed: InvalidSkillNameFixSuccess[]
+  generated: InvalidSkillGenerateSuccess[]
+  failed: InvalidSkillFixFailure[]
+}
+
+type InvalidSkillFixOutcome =
+  | { kind: "nameFixed"; value: InvalidSkillNameFixSuccess }
+  | { kind: "generated"; value: InvalidSkillGenerateSuccess }
+  | { kind: "failed"; value: InvalidSkillFixFailure }
+
 async function fixSkillNameMismatch(entry: InvalidSkillEntry): Promise<{ oldName: string } | null> {
   const skillPath = join(entry.entryDir, "SKILL.md")
   try {
@@ -266,67 +277,67 @@ async function fixMissingFrontmatterFields(entry: InvalidSkillEntry): Promise<bo
   }
 }
 
-export async function fixInvalidSkillEntries(entries: InvalidSkillEntry[]): Promise<{
-  nameFixed: InvalidSkillNameFixSuccess[]
-  generated: InvalidSkillGenerateSuccess[]
-  failed: InvalidSkillFixFailure[]
-}> {
-  const nameFixed: InvalidSkillNameFixSuccess[] = []
-  const generated: InvalidSkillGenerateSuccess[] = []
-  const failed: InvalidSkillFixFailure[] = []
-  for (const entry of entries) {
-    const skillPath = join(entry.entryDir, "SKILL.md")
-    switch (entry.kind) {
-      case "missing_skill_md":
-      case "empty_skill_md":
-        if (await generateSkillMd(entry)) generated.push({ name: entry.name, skillPath })
-        else {
-          failed.push({
-            name: entry.name,
-            originalDir: entry.entryDir,
-            error: "could not create SKILL.md",
-          })
-        }
-        break
-      case "no_frontmatter":
-        if (await fixNoFrontmatter(entry)) generated.push({ name: entry.name, skillPath })
-        else {
-          failed.push({
-            name: entry.name,
-            originalDir: entry.entryDir,
-            error: "could not add frontmatter to SKILL.md",
-          })
-        }
-        break
-      case "missing_frontmatter_fields":
-        if (await fixMissingFrontmatterFields(entry))
-          generated.push({ name: entry.name, skillPath })
-        else {
-          failed.push({
-            name: entry.name,
-            originalDir: entry.entryDir,
-            error: "could not fix missing frontmatter fields in SKILL.md",
-          })
-        }
-        break
-      case "name_mismatch": {
-        const result = await fixSkillNameMismatch(entry)
-        if (result !== null)
-          nameFixed.push({ name: entry.name, skillPath, oldName: result.oldName })
-        else {
-          failed.push({
-            name: entry.name,
-            originalDir: entry.entryDir,
-            error: "could not update SKILL.md name field",
-          })
-        }
-        break
-      }
-      default:
-        failed.push({ name: entry.name, originalDir: entry.entryDir, error: entry.reason })
-    }
+function invalidSkillFailure(entry: InvalidSkillEntry, error: string): InvalidSkillFixOutcome {
+  return {
+    kind: "failed",
+    value: { name: entry.name, originalDir: entry.entryDir, error },
   }
-  return { nameFixed, generated, failed }
+}
+
+async function generatedSkillOutcome(
+  entry: InvalidSkillEntry,
+  fixEntry: (entry: InvalidSkillEntry) => Promise<boolean>,
+  failure: string
+): Promise<InvalidSkillFixOutcome> {
+  if (!(await fixEntry(entry))) return invalidSkillFailure(entry, failure)
+  return {
+    kind: "generated",
+    value: { name: entry.name, skillPath: join(entry.entryDir, "SKILL.md") },
+  }
+}
+
+async function fixInvalidSkillEntry(entry: InvalidSkillEntry): Promise<InvalidSkillFixOutcome> {
+  switch (entry.kind) {
+    case "missing_skill_md":
+    case "empty_skill_md":
+      return generatedSkillOutcome(entry, generateSkillMd, "could not create SKILL.md")
+    case "no_frontmatter":
+      return generatedSkillOutcome(entry, fixNoFrontmatter, "could not add frontmatter to SKILL.md")
+    case "missing_frontmatter_fields":
+      return generatedSkillOutcome(
+        entry,
+        fixMissingFrontmatterFields,
+        "could not fix missing frontmatter fields in SKILL.md"
+      )
+    case "name_mismatch": {
+      const result = await fixSkillNameMismatch(entry)
+      return result
+        ? {
+            kind: "nameFixed",
+            value: {
+              name: entry.name,
+              skillPath: join(entry.entryDir, "SKILL.md"),
+              oldName: result.oldName,
+            },
+          }
+        : invalidSkillFailure(entry, "could not update SKILL.md name field")
+    }
+    default:
+      return invalidSkillFailure(entry, entry.reason)
+  }
+}
+
+export async function fixInvalidSkillEntries(
+  entries: InvalidSkillEntry[]
+): Promise<InvalidSkillFixResult> {
+  const result: InvalidSkillFixResult = { nameFixed: [], generated: [], failed: [] }
+  for (const entry of entries) {
+    const outcome = await fixInvalidSkillEntry(entry)
+    if (outcome.kind === "nameFixed") result.nameFixed.push(outcome.value)
+    else if (outcome.kind === "generated") result.generated.push(outcome.value)
+    else result.failed.push(outcome.value)
+  }
+  return result
 }
 
 export interface PluginCacheInfo {
@@ -637,32 +648,28 @@ async function skillDiffSummary(activePath: string, overriddenPath: string): Pro
   }
 }
 
-export async function fixSkillConflicts(
-  conflicts: SkillConflict[],
-  fix: boolean
-): Promise<string[]> {
+async function describeSkillConflicts(conflicts: SkillConflict[]): Promise<string[]> {
   const messages: string[] = []
-  if (conflicts.length === 0) return messages
-
-  if (!fix) {
-    for (const conflict of conflicts) {
-      for (const overridden of conflict.overridden) {
-        if (await areSkillsSame(conflict.active, overridden)) {
-          messages.push(
-            `${conflict.name}: redundant version at ${displayPath(dirname(overridden.path))} — remove manually`
-          )
-        } else {
-          const diffStats = await skillDiffSummary(conflict.active.path, overridden.path)
-          const diffSuffix = diffStats ? ` (${diffStats})` : ""
-          messages.push(
-            `${conflict.name}: version at ${displayPath(dirname(overridden.path))} differs from active version${diffSuffix} — resolve manually`
-          )
-        }
+  for (const conflict of conflicts) {
+    for (const overridden of conflict.overridden) {
+      if (await areSkillsSame(conflict.active, overridden)) {
+        messages.push(
+          `${conflict.name}: redundant version at ${displayPath(dirname(overridden.path))} — remove manually`
+        )
+        continue
       }
+      const diffStats = await skillDiffSummary(conflict.active.path, overridden.path)
+      const diffSuffix = diffStats ? ` (${diffStats})` : ""
+      messages.push(
+        `${conflict.name}: version at ${displayPath(dirname(overridden.path))} differs from active version${diffSuffix} — resolve manually`
+      )
     }
-    return messages
   }
+  return messages
+}
 
+async function removeOverriddenSkills(conflicts: SkillConflict[]): Promise<string[]> {
+  const messages: string[] = []
   let removedCount = 0
   for (const conflict of conflicts) {
     const sharedEntries = [conflict.active, ...conflict.overridden].filter((entry) => entry.shared)
@@ -686,6 +693,14 @@ export async function fixSkillConflicts(
   }
   if (removedCount > 0) messages.push("Skill conflicts resolved")
   return messages
+}
+
+export async function fixSkillConflicts(
+  conflicts: SkillConflict[],
+  fix: boolean
+): Promise<string[]> {
+  if (conflicts.length === 0) return []
+  return fix ? removeOverriddenSkills(conflicts) : describeSkillConflicts(conflicts)
 }
 
 export async function fixStalePluginCache(infos: PluginCacheInfo[]): Promise<string[]> {

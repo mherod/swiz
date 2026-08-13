@@ -181,88 +181,101 @@ function reportAggressiveHookReplacement(
   console.log()
 }
 
+function hasStaleConfigWarnings(results: CheckResult[]): boolean {
+  return results.some(
+    (result) =>
+      result.name.endsWith("config sync") &&
+      result.status === "warn" &&
+      (result.detail.includes(" missing:") || result.detail.includes("outdated (no --agent)"))
+  )
+}
+
+async function fixAndReportSkillConflicts(ctx: AutoFixContext): Promise<void> {
+  const messages = await fixSkillConflicts(ctx.skillConflicts, ctx.fix)
+  if (messages.length === 0) return
+  console.log(`  ${BOLD}Skill conflicts detected${RESET}. Removing overridden versions...\n`)
+  for (const message of messages) console.log(`  ${GREEN}✓${RESET} ${message}`)
+  console.log()
+}
+
+async function fixAndReportCategoryFields(): Promise<void> {
+  const result = await removeInvalidCategoryFields()
+  if (result.cleaned.length === 0) return
+  console.log(`  ${BOLD}Removing invalid category fields from skills...${RESET}\n`)
+  for (const skillName of result.cleaned) {
+    console.log(`  ${GREEN}✓${RESET} ${skillName}: removed category field`)
+  }
+  for (const item of result.failed) {
+    console.log(`  ${RED}✗${RESET} ${item.skill}: could not clean (${item.error})`)
+  }
+  console.log()
+}
+
+function reportPluginCacheMessage(message: string): void {
+  if (message.startsWith("Restart ")) {
+    console.log(`  ${DIM}${message}${RESET}`)
+  } else if (message.includes(": copied") || message.includes(": updated")) {
+    console.log(`  ${GREEN}✓${RESET} ${message}`)
+  } else {
+    console.log(`  ${RED}✗${RESET} ${message}`)
+  }
+}
+
+async function fixAndReportPluginCache(ctx: AutoFixContext): Promise<void> {
+  const messages = await fixStalePluginCache(ctx.pluginCacheInfos)
+  if (messages.length === 0) return
+  console.log(`  ${BOLD}Syncing plugin cache...${RESET}\n`)
+  for (const message of messages) reportPluginCacheMessage(message)
+  console.log()
+}
+
+async function runAutoCleanup(dependencies: AutoFixDependencies): Promise<void> {
+  try {
+    await runWithTimeout("auto-cleanup", AUTO_CLEANUP_TIMEOUT_MS, dependencies.autoCleanup)
+  } catch (error) {
+    const message =
+      error instanceof DoctorTimeoutError
+        ? `  ${YELLOW}Warning: auto-cleanup timed out after ${AUTO_CLEANUP_TIMEOUT_MS}ms${RESET}`
+        : `  ${YELLOW}Warning: auto-cleanup failed: ${error}${RESET}`
+    stderrLog("auto-cleanup", message)
+  }
+}
+
+async function applyDoctorFixes(
+  ctx: AutoFixContext,
+  dependencies: AutoFixDependencies
+): Promise<void> {
+  if (!ctx.aggressive) await dependencies.fixStaleConfigs(ctx.results)
+  await fixMissingConfigs()
+  await fixAndReportSkillConflicts(ctx)
+  await fixInvalidSkills(ctx.invalidSkillEntries)
+  await fixAndReportCategoryFields()
+  await fixAndReportPluginCache(ctx)
+  await runAutoCleanup(dependencies)
+}
+
+function reportAvailableFixes(ctx: AutoFixContext): void {
+  const fixables = [
+    hasStaleConfigWarnings(ctx.results) ? "stale configs" : null,
+    ctx.invalidSkillEntries.length > 0 ? "invalid skill entries" : null,
+    ctx.pluginCacheInfos.length > 0 ? "stale plugin cache" : null,
+  ].filter((value): value is string => value !== null)
+  if (fixables.length > 0) {
+    console.log(`  ${YELLOW}${fixables.join(" and ")} detected. Run: swiz doctor --fix${RESET}\n`)
+  }
+}
+
 async function handleAutoFixes(
   ctx: AutoFixContext,
   dependencies: AutoFixDependencies
 ): Promise<void> {
-  const {
-    fix,
-    aggressive,
-    verbose,
-    results,
-    skillConflicts,
-    invalidSkillEntries,
-    pluginCacheInfos,
-  } = ctx
-  const hasStaleConfigs = results.some(
-    (r) =>
-      r.name.endsWith("config sync") &&
-      r.status === "warn" &&
-      (r.detail.includes(" missing:") || r.detail.includes("outdated (no --agent)"))
-  )
-  if (aggressive) {
+  if (ctx.aggressive) {
     const replacements = await dependencies.replaceAgentHooksWithSwiz()
-    reportAggressiveHookReplacement(replacements, verbose)
-    if (!fix) return
+    reportAggressiveHookReplacement(replacements, ctx.verbose)
+    if (!ctx.fix) return
   }
-  if (fix) {
-    if (!aggressive) await dependencies.fixStaleConfigs(results)
-    await fixMissingConfigs()
-    const skillConflictMessages = await fixSkillConflicts(skillConflicts, fix)
-    if (skillConflictMessages.length > 0) {
-      console.log(`  ${BOLD}Skill conflicts detected${RESET}. Removing overridden versions...\n`)
-      for (const message of skillConflictMessages) {
-        console.log(`  ${GREEN}✓${RESET} ${message}`)
-      }
-      console.log()
-    }
-    await fixInvalidSkills(invalidSkillEntries)
-    const categoryCleanup = await removeInvalidCategoryFields()
-    if (categoryCleanup.cleaned.length > 0) {
-      console.log(`  ${BOLD}Removing invalid category fields from skills...${RESET}\n`)
-      for (const skillName of categoryCleanup.cleaned) {
-        console.log(`  ${GREEN}✓${RESET} ${skillName}: removed category field`)
-      }
-      for (const item of categoryCleanup.failed) {
-        console.log(`  ${RED}✗${RESET} ${item.skill}: could not clean (${item.error})`)
-      }
-      if (categoryCleanup.cleaned.length > 0) console.log()
-    }
-    const pluginCacheMessages = await fixStalePluginCache(pluginCacheInfos)
-    if (pluginCacheMessages.length > 0) {
-      console.log(`  ${BOLD}Syncing plugin cache...${RESET}\n`)
-      for (const message of pluginCacheMessages) {
-        if (message.startsWith("Restart ")) {
-          console.log(`  ${DIM}${message}${RESET}`)
-        } else if (message.includes(": copied") || message.includes(": updated")) {
-          console.log(`  ${GREEN}✓${RESET} ${message}`)
-        } else {
-          console.log(`  ${RED}✗${RESET} ${message}`)
-        }
-      }
-      console.log()
-    }
-    try {
-      await runWithTimeout("auto-cleanup", AUTO_CLEANUP_TIMEOUT_MS, dependencies.autoCleanup)
-    } catch (err) {
-      const message =
-        err instanceof DoctorTimeoutError
-          ? `  ${YELLOW}Warning: auto-cleanup timed out after ${AUTO_CLEANUP_TIMEOUT_MS}ms${RESET}`
-          : `  ${YELLOW}Warning: auto-cleanup failed: ${err}${RESET}`
-      stderrLog("auto-cleanup", message)
-    }
-    return
-  }
-  if (hasStaleConfigs || invalidSkillEntries.length > 0 || pluginCacheInfos.length > 0) {
-    const fixables = [
-      hasStaleConfigs ? "stale configs" : null,
-      invalidSkillEntries.length > 0 ? "invalid skill entries" : null,
-      pluginCacheInfos.length > 0 ? "stale plugin cache" : null,
-    ]
-      .filter(Boolean)
-      .join(" and ")
-    console.log(`  ${YELLOW}${fixables} detected. Run: swiz doctor --fix${RESET}\n`)
-  }
+  if (ctx.fix) return applyDoctorFixes(ctx, dependencies)
+  reportAvailableFixes(ctx)
 }
 
 /** Best-effort daemon notification after fixing issues (similar to settings write). */

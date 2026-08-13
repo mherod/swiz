@@ -12,6 +12,28 @@ import { sessionDataCache } from "../session-data.ts"
 import { transcriptWatchPathsForProject } from "../utils.ts"
 import { TranscriptDispatchConcurrencyGate } from "./transcript-dispatch-concurrency.ts"
 
+interface MonitoringSettings {
+  autoSteerEnabled: boolean
+  maxConcurrent: number
+  notificationsEnabled: boolean
+  speakEnabled: boolean
+}
+
+function resolveMonitoringSettings(
+  project: ProjectSwizSettings | null,
+  global: Awaited<ReturnType<typeof readSwizSettings>>
+): MonitoringSettings {
+  return {
+    autoSteerEnabled: project?.autoSteerTranscriptWatching ?? global.autoSteerTranscriptWatching,
+    maxConcurrent:
+      project?.transcriptMonitorMaxConcurrentDispatches ??
+      global.transcriptMonitorMaxConcurrentDispatches ??
+      0,
+    notificationsEnabled: global.swizNotifyHooks,
+    speakEnabled: project?.speak ?? global.speak,
+  }
+}
+
 function parseToolCallInput(detailStr: string | undefined): Record<string, any> {
   if (!detailStr) return {}
   try {
@@ -143,23 +165,123 @@ export class TranscriptMonitor {
 
   terminate(): void {}
 
+  private latestToolCallMessage(data: {
+    messages: Array<{ role: string; toolCalls?: Array<{ name: string; detail: string }> }>
+  }) {
+    return data.messages
+      .slice(-10)
+      .reverse()
+      .find((message) => message.role === "assistant" && (message.toolCalls?.length ?? 0) > 0)
+  }
+
+  private latestSpeakableMessage(data: { messages: Array<{ role: string; text: string }> }) {
+    return data.messages
+      .slice(-10)
+      .reverse()
+      .find(
+        (message) => message.role === "assistant" && message.text && !isHookFeedback(message.text)
+      )
+  }
+
+  private scheduleDispatch(
+    canonicalEvent: "postToolUse" | "notification",
+    payload: Record<string, unknown>,
+    cwd: string,
+    manifestGroups: HookGroup[]
+  ): void {
+    this.dispatchConcurrency.schedule(() =>
+      executeDispatch({
+        canonicalEvent,
+        hookEventName: canonicalEvent,
+        payloadStr: JSON.stringify(payload),
+        daemonContext: true,
+        manifestProvider: async (candidate: string) =>
+          candidate === cwd ? manifestGroups : this.caches.manifestCache.get(candidate),
+      })
+    )
+  }
+
+  private async dispatchToolCallChange(
+    cwd: string,
+    session: Session,
+    data: Awaited<ReturnType<typeof sessionDataCache.get>>,
+    manifestGroups: HookGroup[]
+  ): Promise<boolean> {
+    if (!data?.lastToolCallFingerprint) return false
+    const previous = this.lastToolCallFingerprints.get(session.id)
+    if (previous === data.lastToolCallFingerprint) return false
+
+    const message = `tool call fingerprint change in ${session.id}: ${previous} -> ${data.lastToolCallFingerprint}`
+    stderrLog("tool call detection", `[daemon] ${message}`)
+    void logPseudoHook(message)
+    this.lastToolCallFingerprints.set(session.id, data.lastToolCallFingerprint)
+    const toolCallMessage = this.latestToolCallMessage(data)
+    const toolCall = toolCallMessage?.toolCalls?.[0]
+    if (!toolCall) return false
+    if (await this.isEventOnCooldown(manifestGroups, "postToolUse", cwd)) return true
+
+    const trigger = `new tool call detected in ${session.id}, triggering auto-steer: ${toolCall.name}`
+    stderrLog("postToolUse dispatch", `[daemon] ${trigger}`)
+    void logPseudoHook(trigger)
+    this.scheduleDispatch(
+      "postToolUse",
+      {
+        session_id: session.id,
+        transcript_path: session.path,
+        cwd,
+        tool_name: toolCall.name,
+        tool_input: parseToolCallInput(toolCall.detail),
+      },
+      cwd,
+      manifestGroups
+    )
+    return false
+  }
+
+  private async dispatchMessageChange(
+    cwd: string,
+    session: Session,
+    data: Awaited<ReturnType<typeof sessionDataCache.get>>,
+    manifestGroups: HookGroup[]
+  ): Promise<void> {
+    if (!data?.lastMessageFingerprint) return
+    const previous = this.lastMessageFingerprints.get(session.id)
+    if (previous === data.lastMessageFingerprint) return
+
+    const message = `message fingerprint change in ${session.id}: ${previous} -> ${data.lastMessageFingerprint}`
+    stderrLog("message detection", `[daemon] ${message}`)
+    void logPseudoHook(message)
+    this.lastMessageFingerprints.set(session.id, data.lastMessageFingerprint)
+    const textMessage = this.latestSpeakableMessage(data)
+    if (!textMessage || (await this.isEventOnCooldown(manifestGroups, "notification", cwd))) return
+
+    const trigger = `new assistant message detected in ${session.id}, triggering speak`
+    stderrLog("notification dispatch", `[daemon] ${trigger}`)
+    void logPseudoHook(trigger)
+    this.scheduleDispatch(
+      "notification",
+      {
+        session_id: session.id,
+        transcript_path: session.path,
+        cwd,
+        type: "assistant_message",
+        message: textMessage.text,
+      },
+      cwd,
+      manifestGroups
+    )
+  }
+
   async checkProject(cwd: string): Promise<void> {
     const [cached, globalSettings] = await Promise.all([
       this.caches.projectSettingsCache.get(cwd),
       readSwizSettings(),
     ])
-    const settings = cached.settings
-    if (!globalSettings.swizNotifyHooks) return
-    const autoSteerEnabled =
-      settings?.autoSteerTranscriptWatching ?? globalSettings.autoSteerTranscriptWatching
-    const speakEnabled = settings?.speak ?? globalSettings.speak
-    if (!autoSteerEnabled && !speakEnabled) return
+    const settings = resolveMonitoringSettings(cached.settings, globalSettings)
+    if (!settings.notificationsEnabled) return
+    if (!settings.autoSteerEnabled && !settings.speakEnabled) return
 
-    this.dispatchConcurrency.setMaxConcurrent(
-      settings?.transcriptMonitorMaxConcurrentDispatches ??
-        globalSettings.transcriptMonitorMaxConcurrentDispatches ??
-        0
-    )
+    this.dispatchConcurrency.setMaxConcurrent(settings.maxConcurrent)
 
     const latestSession = await this.getLatestSession(cwd)
     if (!latestSession) return
@@ -170,91 +292,17 @@ export class TranscriptMonitor {
     ])
     if (!data) return
 
-    if (autoSteerEnabled && data.lastToolCallFingerprint) {
-      const prevFingerprint = this.lastToolCallFingerprints.get(latestSession.id)
-      if (prevFingerprint !== data.lastToolCallFingerprint) {
-        const msg = `tool call fingerprint change in ${latestSession.id}: ${prevFingerprint} -> ${data.lastToolCallFingerprint}`
-        stderrLog("tool call detection", `[daemon] ${msg}`)
-        void logPseudoHook(msg)
-        this.lastToolCallFingerprints.set(latestSession.id, data.lastToolCallFingerprint)
-        let toolCallMessage: (typeof data.messages)[0] | undefined
-        for (let i = data.messages.length - 1; i >= Math.max(0, data.messages.length - 10); i--) {
-          const msg = data.messages[i]
-          if (msg && msg.role === "assistant" && (msg.toolCalls?.length ?? 0) > 0) {
-            toolCallMessage = msg
-            break
-          }
-        }
-
-        if (toolCallMessage) {
-          if (await this.isEventOnCooldown(manifestGroups, "postToolUse", cwd)) return
-          const triggerMsg = `new tool call detected in ${latestSession.id}, triggering auto-steer: ${toolCallMessage.toolCalls![0]!.name}`
-          stderrLog("postToolUse dispatch", `[daemon] ${triggerMsg}`)
-          void logPseudoHook(triggerMsg)
-          const toolName = toolCallMessage.toolCalls![0]!.name
-          const payload = {
-            session_id: latestSession.id,
-            transcript_path: latestSession.path,
-            cwd,
-            tool_name: toolName,
-            tool_input: parseToolCallInput(toolCallMessage.toolCalls![0]!.detail),
-          }
-
-          this.dispatchConcurrency.schedule(() =>
-            executeDispatch({
-              canonicalEvent: "postToolUse",
-              hookEventName: "postToolUse",
-              payloadStr: JSON.stringify(payload),
-              daemonContext: true,
-              manifestProvider: async (c: string) =>
-                c === cwd ? manifestGroups : this.caches.manifestCache.get(c),
-            })
-          )
-        }
-      }
+    if (settings.autoSteerEnabled) {
+      const stoppedByCooldown = await this.dispatchToolCallChange(
+        cwd,
+        latestSession,
+        data,
+        manifestGroups
+      )
+      if (stoppedByCooldown) return
     }
-
-    if (speakEnabled && data.lastMessageFingerprint) {
-      const prevMessageFingerprint = this.lastMessageFingerprints.get(latestSession.id)
-      if (prevMessageFingerprint !== data.lastMessageFingerprint) {
-        const msg = `message fingerprint change in ${latestSession.id}: ${prevMessageFingerprint} -> ${data.lastMessageFingerprint}`
-        stderrLog("message detection", `[daemon] ${msg}`)
-        void logPseudoHook(msg)
-        this.lastMessageFingerprints.set(latestSession.id, data.lastMessageFingerprint)
-        let textMessage: (typeof data.messages)[0] | undefined
-        for (let i = data.messages.length - 1; i >= Math.max(0, data.messages.length - 10); i--) {
-          const msg = data.messages[i]
-          if (msg && msg.role === "assistant" && msg.text && !isHookFeedback(msg.text)) {
-            textMessage = msg
-            break
-          }
-        }
-
-        if (textMessage) {
-          if (await this.isEventOnCooldown(manifestGroups, "notification", cwd)) return
-          const triggerMsg = `new assistant message detected in ${latestSession.id}, triggering speak`
-          stderrLog("notification dispatch", `[daemon] ${triggerMsg}`)
-          void logPseudoHook(triggerMsg)
-          const payload = {
-            session_id: latestSession.id,
-            transcript_path: latestSession.path,
-            cwd,
-            type: "assistant_message",
-            message: textMessage.text,
-          }
-
-          this.dispatchConcurrency.schedule(() =>
-            executeDispatch({
-              canonicalEvent: "notification",
-              hookEventName: "notification",
-              payloadStr: JSON.stringify(payload),
-              daemonContext: true,
-              manifestProvider: async (c: string) =>
-                c === cwd ? manifestGroups : this.caches.manifestCache.get(c),
-            })
-          )
-        }
-      }
+    if (settings.speakEnabled) {
+      await this.dispatchMessageChange(cwd, latestSession, data, manifestGroups)
     }
   }
 }

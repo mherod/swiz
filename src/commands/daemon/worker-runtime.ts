@@ -31,6 +31,24 @@ interface WorkerTransport {
   close(): void
 }
 
+function stringField(parsed: Record<string, any>, snake: string, camel?: string): string | null {
+  const primary = parsed[snake]
+  if (typeof primary === "string") return primary
+  const fallback = camel ? parsed[camel] : undefined
+  return typeof fallback === "string" ? fallback : null
+}
+
+function objectField(
+  parsed: Record<string, any>,
+  snake: string,
+  camel: string
+): Record<string, any> | undefined {
+  const primary = parsed[snake]
+  if (primary && typeof primary === "object") return primary as Record<string, any>
+  const fallback = parsed[camel]
+  return fallback && typeof fallback === "object" ? (fallback as Record<string, any>) : undefined
+}
+
 function parseDispatchPayloadInThread(payloadStr: string): NormalizedDispatchPayload | null {
   let parsed: Record<string, any>
   try {
@@ -40,25 +58,12 @@ function parseDispatchPayloadInThread(payloadStr: string): NormalizedDispatchPay
   }
   normalizeAgentHookPayload(parsed)
 
-  const toolName =
-    typeof parsed.tool_name === "string"
-      ? parsed.tool_name
-      : typeof parsed.toolName === "string"
-        ? parsed.toolName
-        : null
-  const toolInput =
-    parsed.tool_input && typeof parsed.tool_input === "object"
-      ? (parsed.tool_input as Record<string, any>)
-      : parsed.toolInput && typeof parsed.toolInput === "object"
-        ? (parsed.toolInput as Record<string, any>)
-        : undefined
-
   return {
-    cwd: typeof parsed.cwd === "string" ? parsed.cwd : null,
-    sessionId: typeof parsed.session_id === "string" ? parsed.session_id : null,
-    transcriptPath: typeof parsed.transcript_path === "string" ? parsed.transcript_path : null,
-    toolName,
-    toolInput,
+    cwd: stringField(parsed, "cwd"),
+    sessionId: stringField(parsed, "session_id"),
+    transcriptPath: stringField(parsed, "transcript_path"),
+    toolName: stringField(parsed, "tool_name", "toolName"),
+    toolInput: objectField(parsed, "tool_input", "toolInput"),
   }
 }
 

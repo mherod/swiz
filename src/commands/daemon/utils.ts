@@ -222,14 +222,19 @@ export function capturedSessionToolCallLogPath(
   )
 }
 
-export async function persistSessionToolCall(
+type PersistSessionToolCallArgs = [
   cwd: string,
   sessionId: string,
   toolName: string,
   toolInput: Record<string, any> | undefined,
   nowMs: number,
-  homeDir = getHomeDir()
-): Promise<void> {
+  homeDir?: string,
+]
+
+export const persistSessionToolCall = async (
+  ...args: PersistSessionToolCallArgs
+): Promise<void> => {
+  const [cwd, sessionId, toolName, toolInput, nowMs, homeDir = getHomeDir()] = args
   const path = capturedSessionToolCallLogPath(cwd, sessionId, homeDir)
   await appendJsonlEntry(path, buildCapturedToolCall(toolName, toolInput, nowMs))
 }

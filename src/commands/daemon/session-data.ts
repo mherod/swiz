@@ -155,6 +155,57 @@ class SessionDataCache {
     pendingFallback.push({ messageIndex, key: messageFallbackKey(message, seen) })
   }
 
+  private static trackToolCalls(
+    toolCalls: Array<{ name: string; detail: string }>,
+    toolCounts: Map<string, number>,
+    entry: TranscriptEntry,
+    entryIndex: number
+  ): string | undefined {
+    let fingerprint: string | undefined
+    for (let index = 0; index < toolCalls.length; index++) {
+      const toolCall = toolCalls[index]!
+      toolCounts.set(toolCall.name, (toolCounts.get(toolCall.name) ?? 0) + 1)
+      fingerprint = `${toolCall.name}:${toolCall.detail}:${entry.timestamp ?? ""}:${entryIndex}:${index}`
+    }
+    return fingerprint
+  }
+
+  private static trackTimestamp(
+    entry: TranscriptEntry,
+    message: SessionMessage,
+    messageIndex: number,
+    current: { startedAt: number; lastMessageAt: number },
+    fallback: {
+      seenSignatures: Map<string, number>
+      pendingFallback: Array<{ messageIndex: number; key: string }>
+    }
+  ): { startedAt: number; lastMessageAt: number } {
+    const timestamp = entry.timestamp ? new Date(entry.timestamp).getTime() : 0
+    if (!Number.isFinite(timestamp) || timestamp <= 0) {
+      SessionDataCache.trackFallbackSignature(
+        message,
+        fallback.seenSignatures,
+        fallback.pendingFallback,
+        messageIndex
+      )
+      return current
+    }
+    return {
+      startedAt: current.startedAt === 0 ? timestamp : Math.min(current.startedAt, timestamp),
+      lastMessageAt: Math.max(current.lastMessageAt, timestamp),
+    }
+  }
+
+  private static trimExtractedMessages(
+    messages: SessionMessage[],
+    pendingFallback: Array<{ messageIndex: number; key: string }>
+  ): void {
+    const trimOffset = Math.max(0, messages.length - MAX_SESSION_MESSAGES)
+    if (trimOffset === 0) return
+    messages.splice(0, trimOffset)
+    for (const fallback of pendingFallback) fallback.messageIndex -= trimOffset
+  }
+
   private static extractMessages(entries: ReturnType<typeof parseTranscriptEntries>) {
     const messages: SessionMessage[] = []
     const toolCounts = new Map<string, number>()
@@ -174,40 +225,22 @@ class SessionDataCache {
       const built = SessionDataCache.buildMessage(entry)
       if (!built) continue
       const { message, toolCalls } = built
-      for (let j = 0; j < toolCalls.length; j++) {
-        const tc = toolCalls[j]!
-        toolCounts.set(tc.name, (toolCounts.get(tc.name) ?? 0) + 1)
-        lastToolCallFingerprint = `${tc.name}:${tc.detail}:${entry.timestamp ?? ""}:${i}:${j}`
-      }
+      lastToolCallFingerprint =
+        SessionDataCache.trackToolCalls(toolCalls, toolCounts, entry, i) ?? lastToolCallFingerprint
       if (message.role === "assistant" && message.text) {
         lastMessageFingerprint = `assistant:${message.text.slice(-100)}:${entry.timestamp ?? ""}:${i}`
       }
       messages.push(message)
-
-      const ts = entry.timestamp ? new Date(entry.timestamp).getTime() : 0
-      if (ts > 0) {
-        if (startedAt === 0 || ts < startedAt) startedAt = ts
-        if (ts > lastMessageAt) lastMessageAt = ts
-        continue
-      }
-
-      SessionDataCache.trackFallbackSignature(
+      ;({ startedAt, lastMessageAt } = SessionDataCache.trackTimestamp(
+        entry,
         message,
-        seenSignatures,
-        pendingFallback,
-        messages.length - 1
-      )
+        messages.length - 1,
+        { startedAt, lastMessageAt },
+        { seenSignatures, pendingFallback }
+      ))
     }
 
-    // Trim messages and fallback to cap in-memory growth.
-    const trimOffset =
-      messages.length > MAX_SESSION_MESSAGES ? messages.length - MAX_SESSION_MESSAGES : 0
-    if (trimOffset > 0) {
-      messages.splice(0, trimOffset)
-      for (let i = 0; i < pendingFallback.length; i++) {
-        pendingFallback[i]!.messageIndex -= trimOffset
-      }
-    }
+    SessionDataCache.trimExtractedMessages(messages, pendingFallback)
 
     return {
       messages,

@@ -29,6 +29,20 @@ export interface WatchEntry {
 }
 
 const WATCH_INVALIDATION_DEBOUNCE_MS = 50
+const IGNORED_PATH_NAMES = new Set([
+  ".git",
+  ".svn",
+  ".hg",
+  "node_modules",
+  ".swiz",
+  ".github",
+  ".vscode",
+  ".idea",
+  "dist",
+  "build",
+  "target",
+  "vendor",
+])
 
 const defaultRuntime: FileWatcherRuntime = {
   watch: (path, options, listener) => watch(path, options, listener),
@@ -143,22 +157,7 @@ export class BaseFileWatcherRegistry {
 
   private shouldIgnore(name: string): boolean {
     const n = name.toLowerCase()
-    return (
-      n === ".git" ||
-      n === ".svn" ||
-      n === ".hg" ||
-      n === "node_modules" ||
-      n === ".swiz" ||
-      n === ".github" ||
-      n === ".vscode" ||
-      n === ".idea" ||
-      n === "dist" ||
-      n === "build" ||
-      n === "target" ||
-      n === "vendor" ||
-      name.includes("/.git/") ||
-      name.endsWith("/.git")
-    )
+    return IGNORED_PATH_NAMES.has(n) || name.includes("/.git/") || name.endsWith("/.git")
   }
 
   /** Close and remove all watchers whose label ends with the given suffix. */

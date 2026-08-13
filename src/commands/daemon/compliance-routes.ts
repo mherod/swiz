@@ -138,20 +138,41 @@ export async function handleComplianceRecord(
   if (typeof body?.sessionId !== "string" || !body.sessionId || typeof body?.state !== "string") {
     return Response.json({ error: "Missing required fields: sessionId, state" }, { status: 400 })
   }
+  const transitioned = recordComplianceState(
+    { ...body, sessionId: body.sessionId, state: body.state },
+    ctx.sessionComplianceState
+  )
+  return Response.json({ transitioned })
+}
+
+function recordComplianceState(
+  body: {
+    sessionId: string
+    state: string
+    at?: number
+    taskDurations?: Array<{ id: string; status: string; durationMs: number }>
+  },
+  store: SessionComplianceState
+): boolean {
   const at = typeof body.at === "number" ? body.at : Date.now()
   const taskDurations = Array.isArray(body.taskDurations) ? body.taskDurations : undefined
-  const existing = ctx.sessionComplianceState.get(body.sessionId)
+  const existing = store.get(body.sessionId)
   const transitioned = existing?.current?.state !== body.state
-  if (transitioned) {
-    const transitions = existing?.transitions ?? []
-    const entry = { state: body.state, at, taskDurations }
-    transitions.push(entry)
-    ctx.sessionComplianceState.set(body.sessionId, { current: entry, transitions })
-  } else if (existing?.current && taskDurations) {
-    // Refresh task durations on the current entry without resetting `at`.
-    existing.current.taskDurations = taskDurations
-  }
-  return Response.json({ transitioned })
+  if (!transitioned) return refreshComplianceDurations(existing?.current ?? null, taskDurations)
+
+  const transitions = existing?.transitions ?? []
+  const entry = { state: body.state, at, taskDurations }
+  transitions.push(entry)
+  store.set(body.sessionId, { current: entry, transitions })
+  return true
+}
+
+function refreshComplianceDurations(
+  current: ComplianceEntry | null,
+  taskDurations: ComplianceEntry["taskDurations"]
+): false {
+  if (current && taskDurations) current.taskDurations = taskDurations
+  return false
 }
 
 export function handleComplianceCurrent(url: URL, ctx: ComplianceRoutesContext): Response {

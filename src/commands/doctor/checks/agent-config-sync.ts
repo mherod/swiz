@@ -62,32 +62,28 @@ async function loadAgentSettings(agent: AgentDef): Promise<AgentSettingsLoadResu
   }
 }
 
+function hooksFromSettings(
+  agent: AgentDef,
+  settings: Record<string, unknown>
+): Record<string, unknown> {
+  const raw = agent.wrapsHooks ? settings.hooks : settings[agent.hooksKey]
+  return raw && typeof raw === "object" && !Array.isArray(raw)
+    ? (raw as Record<string, unknown>)
+    : {}
+}
+
 export async function checkAgentConfigSync(agent: AgentDef): Promise<CheckResult> {
   const loaded = await loadAgentSettings(agent)
   if (!loaded.ok) return loaded.diagnostic
   const { settings } = loaded
 
-  const hooksRaw = agent.wrapsHooks
-    ? ((settings.hooks as Record<string, unknown> | undefined) ?? {})
-    : ((settings[agent.hooksKey] as Record<string, unknown> | undefined) ?? {})
-  const hooks = typeof hooksRaw === "object" && !Array.isArray(hooksRaw) ? hooksRaw : {}
+  const hooks = hooksFromSettings(agent, settings)
 
   const installed = extractDispatchEvents(hooks)
   const expected = getExpectedCanonicalEvents()
   const withoutAgent = extractDispatchEventsWithoutAgent(hooks)
 
-  const missing: string[] = []
-  const outdated: string[] = []
-  for (const event of expected) {
-    if (agent.unsupportedEvents?.includes(event)) continue
-    if (!installed.has(event)) {
-      const agentEvent = translateEvent(event, agent)
-      missing.push(`${event} (${agentEvent})`)
-    } else if (withoutAgent.has(event)) {
-      const agentEvent = translateEvent(event, agent)
-      outdated.push(`${event} (${agentEvent})`)
-    }
-  }
+  const { missing, outdated } = findConfigDrift(agent, expected, installed, withoutAgent)
 
   if (missing.length === 0 && outdated.length === 0) {
     return {
@@ -105,6 +101,23 @@ export async function checkAgentConfigSync(agent: AgentDef): Promise<CheckResult
     status: "warn",
     detail: `${parts.join("; ")} — run: swiz install`,
   }
+}
+
+function findConfigDrift(
+  agent: AgentDef,
+  expected: Set<string>,
+  installed: Set<string>,
+  withoutAgent: Set<string>
+): { missing: string[]; outdated: string[] } {
+  const missing: string[] = []
+  const outdated: string[] = []
+  for (const event of expected) {
+    if (agent.unsupportedEvents?.includes(event)) continue
+    const label = `${event} (${translateEvent(event, agent)})`
+    if (!installed.has(event)) missing.push(label)
+    else if (withoutAgent.has(event)) outdated.push(label)
+  }
+  return { missing, outdated }
 }
 
 export const agentConfigSyncCheck: DiagnosticCheck = {
