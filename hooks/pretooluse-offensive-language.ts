@@ -97,6 +97,32 @@ function unexpectedHookFailureOutput(err: unknown): SwizHookOutput {
   return {}
 }
 
+async function findLazyAssistantMessage(
+  raw: Record<string, any>,
+  transcriptPath: string
+): Promise<{ assistantText: string; matches: LazyPattern[] } | null> {
+  const lines = await resolveSessionLines(raw, transcriptPath)
+  if (lines.length === 0) return null
+
+  const assistantText = extractLastAssistantText(lines)
+  if (!assistantText) return null
+
+  const matches = findAllLazyPatterns(assistantText)
+  return matches.length === 0 ? null : { assistantText, matches }
+}
+
+function buildSteerMessage(matches: LazyPattern[], refined: string | null): string {
+  return refined ? `${refined}\n\n${STEER_SUFFIX}` : formatAllDenialMessages(matches, STEER_SUFFIX)
+}
+
+async function deliverSteer(sessionId: string, message: string, cwd: string): Promise<void> {
+  const delivered = await scheduleAutoSteer(sessionId, message, undefined, cwd || undefined)
+  if (delivered) return
+  process.stderr.write(
+    "pretooluse-offensive-language: auto-steer delivery failed (terminal and channel unavailable)\n"
+  )
+}
+
 export async function evaluatePretooluseOffensiveLanguage(
   raw: Record<string, any>
 ): Promise<SwizHookOutput> {
@@ -105,31 +131,17 @@ export async function evaluatePretooluseOffensiveLanguage(
 
   if (!transcriptPath) return {}
 
-  const lines = await resolveSessionLines(raw, transcriptPath)
-
-  if (lines.length === 0) return {}
-
-  const assistantText = extractLastAssistantText(lines)
-  if (!assistantText) return {}
-
-  const matches = findAllLazyPatterns(assistantText)
-  if (matches.length === 0) return {}
+  const lazyMessage = await findLazyAssistantMessage(raw, transcriptPath)
+  if (!lazyMessage) return {}
+  const { assistantText, matches } = lazyMessage
 
   const sessionId = (input.session_id as string) ?? ""
   if (!sessionId) return {}
 
   const refined = await tryRefinedFeedback(assistantText, matches)
-  const message = refined
-    ? `${refined}\n\n${STEER_SUFFIX}`
-    : formatAllDenialMessages(matches, STEER_SUFFIX)
-
+  const message = buildSteerMessage(matches, refined)
   const cwd = (input.cwd as string) ?? ""
-  const delivered = await scheduleAutoSteer(sessionId, message, undefined, cwd || undefined)
-  if (!delivered) {
-    process.stderr.write(
-      "pretooluse-offensive-language: auto-steer delivery failed (terminal and channel unavailable)\n"
-    )
-  }
+  await deliverSteer(sessionId, message, cwd)
   return {}
 }
 

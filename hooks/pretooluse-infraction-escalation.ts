@@ -67,6 +67,38 @@ function cooldownMessage(): string {
   )
 }
 
+function resolveNowMs(input: Record<string, unknown>): number {
+  return typeof input._testNowMs === "number" && Number.isFinite(input._testNowMs)
+    ? input._testNowMs
+    : Date.now()
+}
+
+async function shouldStandDown(
+  input: object,
+  level: ReturnType<typeof evaluateInfraction>["level"]
+): Promise<boolean> {
+  if (level !== "red" && level !== "cooldown") return false
+  const cwd = (input as { cwd?: string }).cwd ?? process.cwd()
+  const { recencyOptions } = await resolveSkillRecencyOptions(cwd)
+  return await wasEditUnblockSkillRecentlyUsed(input as Record<string, unknown>, recencyOptions)
+}
+
+function outputForAssessment(assessment: ReturnType<typeof evaluateInfraction>): SwizHookOutput {
+  if (assessment.level === "red") {
+    return preToolUseDeny(
+      redCardMessage(assessment.toolName, assessment.key, assessment.priorDenialCount)
+    )
+  }
+  if (assessment.level === "cooldown") return preToolUseDeny(cooldownMessage())
+  if (assessment.level === "yellow") {
+    return buildContextHookOutput(
+      "PreToolUse",
+      yellowCardMessage(assessment.toolName, assessment.key)
+    )
+  }
+  return {}
+}
+
 export async function evaluatePretooluseInfractionEscalation(
   input: object
 ): Promise<SwizHookOutput> {
@@ -84,39 +116,13 @@ export async function evaluatePretooluseInfractionEscalation(
   const lines = await resolveSessionLines(hookInput as Record<string, any>, transcriptPath)
   if (lines.length === 0) return {}
 
-  const nowMs =
-    typeof hookInput._testNowMs === "number" && Number.isFinite(hookInput._testNowMs)
-      ? hookInput._testNowMs
-      : Date.now()
-
-  const assessment = evaluateInfraction(lines, current, nowMs)
+  const assessment = evaluateInfraction(lines, current, resolveNowMs(hookInput))
 
   // Escape hatch: a recent /unblock-myself or /re-assess is the deliberate
   // "I've reconsidered this block" action the red card itself points to. When the
   // agent has taken it, stand down the hard blocks instead of escalating further.
-  if (assessment.level === "red" || assessment.level === "cooldown") {
-    const cwd = (input as { cwd?: string }).cwd ?? process.cwd()
-    const { recencyOptions } = await resolveSkillRecencyOptions(cwd)
-    if (await wasEditUnblockSkillRecentlyUsed(input as Record<string, unknown>, recencyOptions)) {
-      return {}
-    }
-  }
-
-  if (assessment.level === "red") {
-    return preToolUseDeny(
-      redCardMessage(assessment.toolName, assessment.key, assessment.priorDenialCount)
-    )
-  }
-  if (assessment.level === "cooldown") {
-    return preToolUseDeny(cooldownMessage())
-  }
-  if (assessment.level === "yellow") {
-    return buildContextHookOutput(
-      "PreToolUse",
-      yellowCardMessage(assessment.toolName, assessment.key)
-    )
-  }
-  return {}
+  if (await shouldStandDown(input, assessment.level)) return {}
+  return outputForAssessment(assessment)
 }
 
 const pretooluseInfractionEscalation: SwizToolHook = {

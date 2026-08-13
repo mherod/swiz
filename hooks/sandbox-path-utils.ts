@@ -128,21 +128,35 @@ function isSafeSedCommand(stage: string): boolean {
   return true
 }
 
+function hasUnsafeAwkOption(tokens: string[], commandIndex: number): boolean {
+  return tokens
+    .slice(commandIndex + 1)
+    .some(
+      (token) =>
+        token === "-f" ||
+        token.startsWith("--file") ||
+        token === "-i" ||
+        token.startsWith("-i") ||
+        token.startsWith("--in-place")
+    )
+}
+
+function hasUnsafeAwkProgram(programAndArgs: string): boolean {
+  return [
+    /\bsystem\s*\(/i,
+    /@load\b/i,
+    /\|\s*&?\s*getline\b/,
+    /\b(?:print|printf)\b[^;}]*?(?:>>?|\|)/,
+  ].some((pattern) => pattern.test(programAndArgs))
+}
+
 function isSafeAwkCommand(stage: string): boolean {
   const tokens = tokenizeShellSegment(stage)
   const commandIndex = commandTokenIndex(tokens)
   if (tokens[commandIndex] !== "awk") return true
-
-  for (const token of tokens.slice(commandIndex + 1)) {
-    if (token === "-f" || token.startsWith("--file")) return false
-    if (token === "-i" || token.startsWith("-i") || token.startsWith("--in-place")) return false
-  }
-
+  if (hasUnsafeAwkOption(tokens, commandIndex)) return false
   const programAndArgs = tokens.slice(commandIndex + 1).join(" ")
-  if (/\bsystem\s*\(/i.test(programAndArgs) || /@load\b/i.test(programAndArgs)) return false
-  if (/\|\s*&?\s*getline\b/.test(programAndArgs)) return false
-  if (/\b(?:print|printf)\b[^;}]*?(?:>>?|\|)/.test(programAndArgs)) return false
-  return true
+  return !hasUnsafeAwkProgram(programAndArgs)
 }
 
 const UNSAFE_FIND_ACTIONS = [

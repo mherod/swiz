@@ -29,9 +29,15 @@ export function resetPermissionRequestCounts(): void {
   requestCounts.clear()
 }
 
-export function evaluatePermissionrequestInfractionRecord(input: unknown): SwizHookOutput {
+interface PermissionAttempt {
+  sessionId: string
+  toolName: string
+  toolInput?: Record<string, unknown>
+}
+
+function parsePermissionAttempt(input: unknown): PermissionAttempt | null {
   const parsed = permissionRequestHookInputSchema.safeParse(input)
-  if (!parsed.success) return {}
+  if (!parsed.success) return null
 
   const data = parsed.data as {
     session_id?: unknown
@@ -40,15 +46,16 @@ export function evaluatePermissionrequestInfractionRecord(input: unknown): SwizH
   }
   const sessionId = typeof data.session_id === "string" ? data.session_id : ""
   const toolName = typeof data.tool_name === "string" ? data.tool_name : ""
-  if (!sessionId || !toolName) return {}
+  if (!sessionId || !toolName) return null
 
   const toolInput =
     data.tool_input && typeof data.tool_input === "object"
       ? (data.tool_input as Record<string, unknown>)
       : undefined
-  const key = attemptKey(toolName, toolInput)
-  if (!key) return {}
+  return { sessionId, toolName, toolInput }
+}
 
+function incrementRequestCount(sessionId: string, key: string): number {
   let perSession = requestCounts.get(sessionId)
   if (!perSession) {
     perSession = new Map<string, number>()
@@ -56,7 +63,17 @@ export function evaluatePermissionrequestInfractionRecord(input: unknown): SwizH
   }
   const count = (perSession.get(key) ?? 0) + 1
   perSession.set(key, count)
+  return count
+}
 
+export function evaluatePermissionrequestInfractionRecord(input: unknown): SwizHookOutput {
+  const attempt = parsePermissionAttempt(input)
+  if (!attempt) return {}
+  const { sessionId, toolName, toolInput } = attempt
+  const key = attemptKey(toolName, toolInput)
+  if (!key) return {}
+
+  const count = incrementRequestCount(sessionId, key)
   if (count < PERMISSION_ESCALATION_THRESHOLD) return {}
 
   return buildContextHookOutput(

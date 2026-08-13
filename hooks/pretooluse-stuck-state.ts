@@ -72,6 +72,10 @@ function parseLine(line: string): Record<string, any> | null {
   }
 }
 
+function isRecord(value: unknown): value is Record<string, any> {
+  return Boolean(value) && typeof value === "object"
+}
+
 function resultFromBlock(block: Record<string, any>, entryTimestampMs: number | null): ToolResult {
   const text = textFromUnknown(block.content)
   return {
@@ -87,16 +91,22 @@ function collectResults(lines: string[]): Map<string, ToolResult> {
   for (const line of lines) {
     const entry = parseLine(line)
     if (!entry) continue
-    const entryTimestampMs = parseTimestampMs(entry.timestamp ?? entry.created_at ?? entry.time)
-    const content = entry.message?.content
-    if (!Array.isArray(content)) continue
-    for (const block of content) {
-      if ((block as Record<string, any>)?.type !== "tool_result") continue
-      const id = String((block as Record<string, any>).tool_use_id ?? "")
-      if (id) results.set(id, resultFromBlock(block as Record<string, any>, entryTimestampMs))
-    }
+    collectEntryResults(entry, results)
   }
   return results
+}
+
+function collectEntryResults(entry: Record<string, any>, results: Map<string, ToolResult>): void {
+  const content = entry.message?.content
+  if (!Array.isArray(content)) return
+  const timestamp = parseTimestampMs(entry.timestamp ?? entry.created_at ?? entry.time)
+  for (const rawBlock of content) {
+    if (!isRecord(rawBlock)) continue
+    const block = rawBlock
+    if (block.type !== "tool_result") continue
+    const id = String(block.tool_use_id ?? "")
+    if (id) results.set(id, resultFromBlock(block, timestamp))
+  }
 }
 
 function normalizeCommand(command: string): string {
@@ -228,30 +238,50 @@ export function parseStuckStateEvents(lines: string[]): TranscriptEvent[] {
   for (const line of lines) {
     const entry = parseLine(line)
     if (!entry) continue
-    const entryTimestampMs = parseTimestampMs(entry.timestamp ?? entry.created_at ?? entry.time)
-
-    for (const skillName of extractHumanSkillExpansions(entry)) {
-      if (skillName === UNBLOCK_SKILL) {
-        events.push({ kind: "skill", skillName, timestampMs: entryTimestampMs })
-        events.push({ kind: "progress", timestampMs: entryTimestampMs })
-      }
-    }
-
-    if (entry.type !== "assistant") continue
-    const content = entry.message?.content
-    if (!Array.isArray(content)) continue
-    for (const rawBlock of content) {
-      const block = rawBlock as Record<string, any>
-      if (block.type !== "tool_use") continue
-      const result = results.get(String(block.id ?? ""))
-      const name = String(block.name ?? "")
-      if (isShellTool(name)) appendShellEvents(events, block, result, entryTimestampMs)
-      else if (isCodeChangeTool(name)) appendFileEvents(events, block, result, entryTimestampMs)
-      else if (isTaskUpdateTool(name)) appendTaskEvents(events, block, result, entryTimestampMs)
-      else if (isSkillTool(name)) appendSkillEvents(events, block, result, entryTimestampMs)
-    }
+    appendStuckStateEntryEvents(entry, results, events)
   }
   return events
+}
+
+function appendHumanSkillEvents(
+  entry: Record<string, any>,
+  events: TranscriptEvent[],
+  timestampMs: number | null
+): void {
+  for (const skillName of extractHumanSkillExpansions(entry)) {
+    if (skillName !== UNBLOCK_SKILL) continue
+    events.push({ kind: "skill", skillName, timestampMs })
+    events.push({ kind: "progress", timestampMs })
+  }
+}
+
+function appendToolUseEvent(
+  block: Record<string, any>,
+  result: ToolResult | undefined,
+  events: TranscriptEvent[],
+  timestampMs: number | null
+): void {
+  const name = String(block.name ?? "")
+  if (isShellTool(name)) appendShellEvents(events, block, result, timestampMs)
+  else if (isCodeChangeTool(name)) appendFileEvents(events, block, result, timestampMs)
+  else if (isTaskUpdateTool(name)) appendTaskEvents(events, block, result, timestampMs)
+  else if (isSkillTool(name)) appendSkillEvents(events, block, result, timestampMs)
+}
+
+function appendStuckStateEntryEvents(
+  entry: Record<string, any>,
+  results: Map<string, ToolResult>,
+  events: TranscriptEvent[]
+): void {
+  const timestamp = parseTimestampMs(entry.timestamp ?? entry.created_at ?? entry.time)
+  appendHumanSkillEvents(entry, events, timestamp)
+  if (entry.type !== "assistant" || !Array.isArray(entry.message?.content)) return
+  for (const rawBlock of entry.message.content) {
+    if (!isRecord(rawBlock)) continue
+    const block = rawBlock
+    if (block.type !== "tool_use") continue
+    appendToolUseEvent(block, results.get(String(block.id ?? "")), events, timestamp)
+  }
 }
 
 function resolveCurrentTool(input: {

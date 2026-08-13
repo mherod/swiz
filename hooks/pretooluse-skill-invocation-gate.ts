@@ -138,27 +138,42 @@ interface SkillRequirement {
  * Returns null when no skill gate applies (command is not gated or is exempt).
  */
 function classifyRequiredSkill(command: string, cleanedCommand: string): SkillRequirement | null {
+  return (
+    classifyGitSkill(cleanedCommand) ??
+    classifyIssueSkill(command) ??
+    classifyPrSkill(command, cleanedCommand)
+  )
+}
+
+function singleSkillRequirement(skill: string): SkillRequirement {
+  return { primary: skill, anyOf: [skill] }
+}
+
+function classifyGitSkill(cleanedCommand: string): SkillRequirement | null {
   if (GIT_COMMIT_RE.test(cleanedCommand)) {
-    const skill = GATE_REQUIRED_SKILLS.commit.name
-    return { primary: skill, anyOf: [skill] }
+    return singleSkillRequirement(GATE_REQUIRED_SKILLS.commit.name)
   }
   if (GIT_PUSH_RE.test(cleanedCommand)) {
     if (GIT_PUSH_DELETE_RE.test(cleanedCommand)) return null // branch deletion is not a code push
-    const skill = GATE_REQUIRED_SKILLS.push.name
-    return { primary: skill, anyOf: [skill] }
+    return singleSkillRequirement(GATE_REQUIRED_SKILLS.push.name)
   }
+  return null
+}
+
+function classifyIssueSkill(command: string): SkillRequirement | null {
   if (GH_ISSUE_ADD_TRIAGED_LABEL_RE.test(command)) {
-    const skill = GATE_REQUIRED_SKILLS.triageIssues.name
-    return { primary: skill, anyOf: [skill] }
+    return singleSkillRequirement(GATE_REQUIRED_SKILLS.triageIssues.name)
   }
   if (GH_ISSUE_LABEL_CHANGE_RE.test(command)) {
-    const skill = GATE_REQUIRED_SKILLS.refineIssue.name
-    return { primary: skill, anyOf: [skill] }
+    return singleSkillRequirement(GATE_REQUIRED_SKILLS.refineIssue.name)
   }
   if (GH_ISSUE_SELF_ASSIGN_RE.test(command)) {
-    const skill = GATE_REQUIRED_SKILLS.workOnIssue.name
-    return { primary: skill, anyOf: [skill] }
+    return singleSkillRequirement(GATE_REQUIRED_SKILLS.workOnIssue.name)
   }
+  return null
+}
+
+function classifyPrSkill(command: string, cleanedCommand: string): SkillRequirement | null {
   if (GH_PR_CHECKOUT_RE.test(cleanedCommand))
     return {
       primary: "pr-checkout",
@@ -169,16 +184,13 @@ function classifyRequiredSkill(command: string, cleanedCommand: string): SkillRe
       ],
     }
   if (isPullRequestMergeCommand(command)) {
-    const skill = GATE_REQUIRED_SKILLS.prQaAndMerge.name
-    return { primary: skill, anyOf: [skill] }
+    return singleSkillRequirement(GATE_REQUIRED_SKILLS.prQaAndMerge.name)
   }
   if (GH_PR_CREATE_RE.test(cleanedCommand)) {
-    const skill = GATE_REQUIRED_SKILLS.prOpen.name
-    return { primary: skill, anyOf: [skill] }
+    return singleSkillRequirement(GATE_REQUIRED_SKILLS.prOpen.name)
   }
   if (GH_PR_REVIEW_DISMISS_RE.test(cleanedCommand)) {
-    const skill = GATE_REQUIRED_SKILLS.prCommentsAddress.name
-    return { primary: skill, anyOf: [skill] }
+    return singleSkillRequirement(GATE_REQUIRED_SKILLS.prCommentsAddress.name)
   }
   return null
 }
@@ -375,50 +387,62 @@ async function checkTaskListRequirement(
   )
 }
 
+function isTrunkMergeExempt(ctx: GatedCommandCtx, rawInput: Record<string, any>): boolean {
+  const settings = rawInput._effectiveSettings as { trunkMode?: boolean } | undefined
+  return ctx.primary === GATE_REQUIRED_SKILLS.prQaAndMerge.name && settings?.trunkMode === true
+}
+
+async function invokedSkillOutput(
+  ctx: GatedCommandCtx,
+  rawInput: Record<string, any>,
+  invokedSkills: string[],
+  recencyOptions: CurrentSessionUsageRecencyOptions,
+  reason: string
+): Promise<SwizHookOutput | null> {
+  if (!ctx.anyOfSkills.some((skill) => invokedSkills.includes(skill))) return null
+  const blocked = await checkTaskListRequirement(ctx.primary, rawInput, recencyOptions)
+  if (blocked) return blocked
+  const ref = formatAnyOfSkillRef(ctx.anyOfSkills, rawInput)
+  return preToolUseAllow(`${ref} skill was invoked recently.\n${reason}`)
+}
+
+async function evaluateSkillInvocationGate(rawInput: Record<string, any>): Promise<SwizHookOutput> {
+  const ctx = resolveGatedCommand(rawInput)
+  if (!ctx) return {}
+  if (isTrunkMergeExempt(ctx, rawInput)) {
+    return preToolUseAllow(
+      "Continue in trunk-mode merge policy: the merge skill is not required and reviewer approval is not required; GitHub remains authoritative for mergeability, checks, and branch protection."
+    )
+  }
+
+  const cwd = (rawInput.cwd as string) ?? process.cwd()
+  const preflightBlock = await checkSkillSpecificPreflight(ctx.primary, rawInput, cwd)
+  if (preflightBlock) return preflightBlock
+  const { recencyOptions } = await resolveSkillRecencyOptions(cwd)
+  if (!rawInput.transcript_path) return {}
+
+  const invokedSkills = await getRecentlyInvokedSkillsForCurrentSession(rawInput, recencyOptions)
+  const reason = formatSessionSkillsForReason(invokedSkills, recencyOptions)
+  const invokedOutput = await invokedSkillOutput(
+    ctx,
+    rawInput,
+    invokedSkills,
+    recencyOptions,
+    reason
+  )
+  if (invokedOutput) return invokedOutput
+  if (await isSkillRequirementOnCooldown(rawInput, ctx.primary)) return {}
+  await markSkillRequirementCooldown(rawInput, ctx.primary)
+  return buildDenyMessage(ctx.primary, ctx.anyOfSkills, ctx.skillFiles, reason, rawInput)
+}
+
 const pretoolusSkillInvocationGate: SwizHook = {
   name: "pretooluse-skill-invocation-gate",
   event: "preToolUse",
   matcher: "Bash",
   timeout: 5,
 
-  run: async (rawInput: Record<string, any>): Promise<SwizHookOutput> => {
-    const ctx = resolveGatedCommand(rawInput)
-    if (!ctx) return {}
-    const { primary, anyOfSkills, skillFiles } = ctx
-
-    const effectiveSettings = rawInput._effectiveSettings as { trunkMode?: boolean } | undefined
-    if (
-      primary === GATE_REQUIRED_SKILLS.prQaAndMerge.name &&
-      effectiveSettings?.trunkMode === true
-    ) {
-      return preToolUseAllow(
-        "Continue in trunk-mode merge policy: the merge skill is not required and reviewer approval is not required; GitHub remains authoritative for mergeability, checks, and branch protection."
-      )
-    }
-
-    const cwd: string = (rawInput.cwd as string) ?? process.cwd()
-    const preflightBlock = await checkSkillSpecificPreflight(primary, rawInput, cwd)
-    if (preflightBlock) return preflightBlock
-
-    const { recencyOptions } = await resolveSkillRecencyOptions(cwd)
-
-    const transcriptPath: string = (rawInput.transcript_path as string) ?? ""
-    if (!transcriptPath) return {}
-
-    const invokedSkills = await getRecentlyInvokedSkillsForCurrentSession(rawInput, recencyOptions)
-    const reason = formatSessionSkillsForReason(invokedSkills, recencyOptions)
-
-    if (anyOfSkills.some((skill) => invokedSkills.includes(skill))) {
-      const blocked = await checkTaskListRequirement(primary, rawInput, recencyOptions)
-      if (blocked) return blocked
-      const ref = formatAnyOfSkillRef(anyOfSkills, rawInput)
-      return preToolUseAllow(`${ref} skill was invoked recently.\n${reason}`)
-    }
-
-    if (await isSkillRequirementOnCooldown(rawInput, primary)) return {}
-    await markSkillRequirementCooldown(rawInput, primary)
-    return buildDenyMessage(primary, anyOfSkills, skillFiles, reason, rawInput)
-  },
+  run: evaluateSkillInvocationGate,
 }
 
 export default pretoolusSkillInvocationGate

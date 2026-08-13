@@ -16,33 +16,37 @@ import { splitShellSegments } from "../src/utils/shell-patterns.ts"
 
 // ── Shared body parser ─────────────────────────────────────────────────────────
 
+function parseDelimitedBody(rest: string, delimiter: "'" | "`"): string {
+  const end = rest.indexOf(delimiter, 1)
+  return end === -1 ? rest.slice(1) : rest.slice(1, end)
+}
+
+function parseDoubleQuotedBody(rest: string): string {
+  let body = ""
+  for (let i = 1; i < rest.length; i++) {
+    const ch = rest[i]!
+    if (ch === "\\" && i + 1 < rest.length) {
+      body += rest[++i]!
+      continue
+    }
+    if (ch === '"') break
+    body += ch
+  }
+  return body
+}
+
+function parseUnquotedBody(rest: string): string {
+  const end = rest.search(/[\s|;&\n]/)
+  return end === -1 ? rest : rest.slice(0, end)
+}
+
 /** Parse a quoted or unquoted inline script body from the raw string after a flag. */
 export function parseQuotedBody(rest: string): string | null {
   if (!rest) return null
-  const q = rest[0]!
-  if (q === "'") {
-    const end = rest.indexOf("'", 1)
-    return end === -1 ? rest.slice(1) : rest.slice(1, end)
-  }
-  if (q === '"') {
-    let body = ""
-    for (let i = 1; i < rest.length; i++) {
-      const ch = rest[i]!
-      if (ch === "\\" && i + 1 < rest.length) {
-        body += rest[++i]!
-        continue
-      }
-      if (ch === '"') break
-      body += ch
-    }
-    return body
-  }
-  if (q === "`") {
-    const end = rest.indexOf("`", 1)
-    return end === -1 ? rest.slice(1) : rest.slice(1, end)
-  }
-  const end = rest.search(/[\s|;&\n]/)
-  return end === -1 ? rest : rest.slice(0, end)
+  const quote = rest[0]
+  if (quote === "'" || quote === "`") return parseDelimitedBody(rest, quote)
+  if (quote === '"') return parseDoubleQuotedBody(rest)
+  return parseUnquotedBody(rest)
 }
 
 /** Extract the script body from the argument immediately following a flag (e.g. -e, -c, --eval). */

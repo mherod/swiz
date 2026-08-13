@@ -201,6 +201,31 @@ describe("pretooluse-stuck-state", () => {
     })
   })
 
+  test("malformed transcript content blocks fail open", async () => {
+    const lines = [
+      JSON.stringify({
+        type: "assistant",
+        timestamp: atMinutesAgo(1),
+        message: { content: [null, "invalid", { type: "text", text: "ignore" }] },
+      }),
+      JSON.stringify({
+        type: "user",
+        timestamp: atMinutesAgo(1),
+        message: { content: [null] },
+      }),
+    ]
+
+    await withTranscript(lines, async (path) => {
+      const result = await runHook(path, {
+        tool_name: "Bash",
+        tool_input: { command: "bun test src/example.test.ts" },
+      })
+
+      expect(result.exitCode).toBe(0)
+      expect(result.stdout).toBe("")
+    })
+  })
+
   test("cooldown behavior is declared for dispatcher enforcement", () => {
     expect(pretooluseStuckState.cooldownSeconds).toBe(600)
     expect(pretooluseStuckState.requiredSettings).toEqual(["enforceUnblockMyself"])

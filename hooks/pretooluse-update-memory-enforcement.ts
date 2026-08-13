@@ -287,6 +287,28 @@ async function getPendingReminderLines(
   return { lines, lastTriggerIndex }
 }
 
+function isAutoMemoryEdit(toolName: string, toolInput: unknown): boolean {
+  if (!isWriteTool(toolName) && !isEditTool(toolName)) return false
+  const strings: string[] = []
+  collectStrings(toolInput, strings)
+  return strings.some((value) => isAutoMemoryPath(value))
+}
+
+async function evaluatePendingMemoryReminder(
+  input: ToolHookInput,
+  pendingReminder: { lines: string[]; lastTriggerIndex: number },
+  cwd: string,
+  toolName: string,
+  toolInput: unknown
+): Promise<SwizHookOutput> {
+  const { lines, lastTriggerIndex } = pendingReminder
+  if (await shouldSkipAfterTrigger(lines, lastTriggerIndex, cwd, input.session_id)) return {}
+
+  const state = scanTranscript(lines, lastTriggerIndex)
+  if (isCurrentToolSatisfying(state, toolName, toolInput)) return {}
+  return preToolUseDeny(buildDenialReason(toolName, !state.skillReadComplete))
+}
+
 export async function evaluatePretooluseUpdateMemoryEnforcement(
   raw: Record<string, any>
 ): Promise<SwizHookOutput> {
@@ -301,14 +323,7 @@ export async function evaluatePretooluseUpdateMemoryEnforcement(
   // Auto-memory entries written by the built-in memory system are exempt from
   // enforcement — they are distinct from /update-memory skill rule writes and must
   // not be blocked or used to satisfy the skill-read/markdown-write requirements.
-  const toolInputStrings: string[] = []
-  collectStrings(toolInput, toolInputStrings)
-  if (
-    (isWriteTool(toolName) || isEditTool(toolName)) &&
-    toolInputStrings.some((v) => isAutoMemoryPath(v))
-  ) {
-    return {}
-  }
+  if (isAutoMemoryEdit(toolName, toolInput)) return {}
 
   const pendingReminder = await getPendingReminderLines(
     input as Record<string, unknown>,
@@ -317,13 +332,7 @@ export async function evaluatePretooluseUpdateMemoryEnforcement(
     toolName
   )
   if (!pendingReminder) return {}
-  const { lines, lastTriggerIndex } = pendingReminder
-  if (await shouldSkipAfterTrigger(lines, lastTriggerIndex, cwd, input.session_id)) return {}
-
-  const state = scanTranscript(lines, lastTriggerIndex)
-  if (isCurrentToolSatisfying(state, toolName, toolInput)) return {}
-
-  return preToolUseDeny(buildDenialReason(toolName, !state.skillReadComplete))
+  return await evaluatePendingMemoryReminder(input, pendingReminder, cwd, toolName, toolInput)
 }
 
 const pretooluseUpdateMemoryEnforcement: SwizToolHook = {

@@ -574,6 +574,23 @@ function parseHookInput(input: Record<string, any>): {
   }
 }
 
+function commandRulesOutput(
+  rules: Rule[],
+  command: string,
+  strippedCommand: string
+): SwizHookOutput | null {
+  const reporterBlock = checkBunTestReporter(command)
+  if (reporterBlock) return reporterBlock
+
+  const ruleResult = evaluateRules(rules, command, strippedCommand)
+  if (!ruleResult.ok) return ruleResult.output
+
+  const nonCanonicalGit = findNonCanonicalGitInvocation(command)
+  if (nonCanonicalGit) return preToolUseDeny(buildNonCanonicalGitMessage(nonCanonicalGit))
+  if (ruleResult.warnings.length > 0) return preToolUseAllow(ruleResult.warnings.join("\n\n"))
+  return null
+}
+
 export async function evaluatePretooluseBannedCommands(input: unknown): Promise<SwizHookOutput> {
   const PM = await detectPackageManager()
   const RUNTIME: "bun" | "node" = PM === "bun" ? "bun" : "node"
@@ -601,21 +618,7 @@ export async function evaluatePretooluseBannedCommands(input: unknown): Promise<
     ? RULES.filter((r) => r.match !== isShellFileWrite)
     : RULES
 
-  const reporterBlock = checkBunTestReporter(command)
-  if (reporterBlock) return reporterBlock
-
-  const ruleResult = evaluateRules(effectiveRules, command, strippedCommand)
-  if (!ruleResult.ok) return ruleResult.output
-
-  const nonCanonicalGit = findNonCanonicalGitInvocation(command)
-  if (nonCanonicalGit) {
-    return preToolUseDeny(buildNonCanonicalGitMessage(nonCanonicalGit))
-  }
-
-  if (ruleResult.warnings.length > 0) {
-    return preToolUseAllow(ruleResult.warnings.join("\n\n"))
-  }
-  return {}
+  return commandRulesOutput(effectiveRules, command, strippedCommand) ?? {}
 }
 
 const pretooluseBannedCommands: SwizToolHook = {

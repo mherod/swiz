@@ -31,84 +31,82 @@ import {
 
 const SKILL_NAME = GATE_REQUIRED_SKILLS.convertToKotlin.name
 
+async function shouldGateKotlinTarget(filePath: string, cwd: string): Promise<boolean> {
+  if (filePath.endsWith(".java")) return true
+  if (!filePath.endsWith(".kt")) return false
+  const absolutePath = resolve(cwd, filePath)
+  const javaPath = `${absolutePath.slice(0, -3)}.java`
+  const [javaExists, ktExists] = await Promise.all([
+    Bun.file(javaPath).exists(),
+    Bun.file(absolutePath).exists(),
+  ])
+  return javaExists && !ktExists
+}
+
+function formatRecentSkills(skills: string[]): string {
+  return skills.length === 0 ? "(none)" : skills.map((skill) => `/${skill}`).join(", ")
+}
+
+async function hasGradleKotlinFrameworks(cwd: string): Promise<boolean> {
+  const frameworks = await detectFrameworks(cwd)
+  return frameworks.has("gradle") && frameworks.has("kotlin")
+}
+
+function buildKotlinGateDenial(
+  filePath: string,
+  isKt: boolean,
+  skillRef: string,
+  window: string,
+  invokedSkills: string[]
+): ReturnType<typeof preToolUseDeny> {
+  const fileName = filePath.split(/[/\\]/).pop() ?? filePath
+  if (isKt) {
+    return preToolUseDeny(
+      `BLOCKED: creating ${fileName} matches a neighbouring Java file and requires the ${skillRef} skill.\n\n` +
+        `This is because both Gradle and Kotlin have been detected in this project. ` +
+        `We require Java files to be converted to Kotlin using the ${skillRef} skill to maintain codebase consistency.\n\n` +
+        `Skills used recently (${window}): ${formatRecentSkills(invokedSkills)}\n\n` +
+        `Invoke ${skillRef} to convert the Java file instead of creating the Kotlin file manually.`
+    )
+  }
+  return preToolUseDeny(
+    `BLOCKED: editing ${fileName} requires the ${skillRef} skill.\n\n` +
+      `This is because both Gradle and Kotlin have been detected in this project. ` +
+      `We require all Java files to be converted to Kotlin using the ${skillRef} skill to maintain codebase consistency.\n\n` +
+      `Skills used recently (${window}): ${formatRecentSkills(invokedSkills)}\n\n` +
+      `Invoke ${skillRef} before editing Java files.`
+  )
+}
+
+async function evaluateConvertToKotlinGate(input: FileEditHookInput): Promise<SwizHookOutput> {
+  const filePath = input.tool_input?.file_path ?? ""
+  const cwd = (input.cwd as string | undefined) ?? process.cwd()
+  if (!(await shouldGateKotlinTarget(filePath, cwd))) return {}
+
+  if (!(await hasGradleKotlinFrameworks(cwd))) return {}
+
+  const rawInput = input as unknown as Record<string, unknown>
+  if (!skillExistsForHookPayload(SKILL_NAME, rawInput)) return {}
+  if (!rawInput.transcript_path) return {}
+
+  const { recencyOptions, windowText: window } = await resolveSkillRecencyOptions(cwd)
+  const invokedSkills = await getRecentlyInvokedSkillsForCurrentSession(rawInput, recencyOptions)
+  const skillRef = formatSkillReferenceForAgent(SKILL_NAME)
+  const isKt = filePath.endsWith(".kt")
+  if (invokedSkills.includes(SKILL_NAME)) {
+    const action = isKt ? "creating Kotlin file" : "Java file edit"
+    return preToolUseAllow(`${skillRef} was invoked recently — ${action} allowed.`)
+  }
+  return buildKotlinGateDenial(filePath, isKt, skillRef, window, invokedSkills)
+}
+
 const pretooluseRequireConvertToKotlin: SwizFileEditHook = {
   name: "pretooluse-require-convert-to-kotlin",
   event: "preToolUse",
   matcher: "Edit|Write|NotebookEdit",
   timeout: 5,
 
-  run: async (input: FileEditHookInput): Promise<SwizHookOutput> => {
-    const filePath = input.tool_input?.file_path ?? ""
-    const isJava = filePath.endsWith(".java")
-    const isKt = filePath.endsWith(".kt")
-    if (!isJava && !isKt) {
-      return {}
-    }
-
-    const cwd = (input.cwd as string | undefined) ?? process.cwd()
-    const frameworks = await detectFrameworks(cwd)
-    if (!frameworks.has("gradle") || !frameworks.has("kotlin")) {
-      return {}
-    }
-
-    if (isKt) {
-      const absolutePath = resolve(cwd, filePath)
-      const javaPath = `${absolutePath.slice(0, -3)}.java`
-      const [javaExists, ktExists] = await Promise.all([
-        Bun.file(javaPath).exists(),
-        Bun.file(absolutePath).exists(),
-      ])
-      if (!javaExists || ktExists) {
-        return {}
-      }
-    }
-
-    const rawInput = input as unknown as Record<string, unknown>
-    if (!skillExistsForHookPayload(SKILL_NAME, rawInput)) {
-      return {}
-    }
-
-    const transcriptPath = (rawInput.transcript_path as string | undefined) ?? ""
-    if (!transcriptPath) {
-      return {}
-    }
-
-    const { recencyOptions, windowText: window } = await resolveSkillRecencyOptions(cwd)
-
-    const invokedSkills = await getRecentlyInvokedSkillsForCurrentSession(rawInput, recencyOptions)
-    const skillRef = formatSkillReferenceForAgent(SKILL_NAME)
-
-    if (invokedSkills.includes(SKILL_NAME)) {
-      return preToolUseAllow(
-        isKt
-          ? `${skillRef} was invoked recently — creating Kotlin file allowed.`
-          : `${skillRef} was invoked recently — Java file edit allowed.`
-      )
-    }
-
-    const fileName = filePath.split(/[/\\]/).pop() ?? filePath
-    if (isKt) {
-      return preToolUseDeny(
-        `BLOCKED: creating ${fileName} matches a neighbouring Java file and requires the ${skillRef} skill.\n\n` +
-          `This is because both Gradle and Kotlin have been detected in this project. ` +
-          `We require Java files to be converted to Kotlin using the ${skillRef} skill to maintain codebase consistency.\n\n` +
-          `Skills used recently (${window}): ${
-            invokedSkills.length === 0 ? "(none)" : invokedSkills.map((s) => `/${s}`).join(", ")
-          }\n\n` +
-          `Invoke ${skillRef} to convert the Java file instead of creating the Kotlin file manually.`
-      )
-    }
-
-    return preToolUseDeny(
-      `BLOCKED: editing ${fileName} requires the ${skillRef} skill.\n\n` +
-        `This is because both Gradle and Kotlin have been detected in this project. ` +
-        `We require all Java files to be converted to Kotlin using the ${skillRef} skill to maintain codebase consistency.\n\n` +
-        `Skills used recently (${window}): ${
-          invokedSkills.length === 0 ? "(none)" : invokedSkills.map((s) => `/${s}`).join(", ")
-        }\n\n` +
-        `Invoke ${skillRef} before editing Java files.`
-    )
-  },
+  run: evaluateConvertToKotlinGate,
 }
 
 export default pretooluseRequireConvertToKotlin

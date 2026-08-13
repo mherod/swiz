@@ -394,6 +394,30 @@ function checkTsIgnore(content: string): SwizHookOutput | null {
   return null
 }
 
+function normalizedTsEdit(
+  input: FileEditHookInput
+): { oldString: string; newString: string } | null {
+  const toolInput = input.tool_input
+  if (!toolInput) return null
+  const { file_path: filePath = "", old_string: oldString = "", content = "" } = toolInput
+  if (!/\.(ts|tsx)$/.test(filePath)) return null
+  const newString = toolInput.new_string ?? content
+  return { oldString: oldString.normalize("NFKC"), newString: newString.normalize("NFKC") }
+}
+
+function firstTsQualityViolation(oldString: string, newString: string): SwizHookOutput {
+  const asAnyViolation = checkAsAny(oldString, newString)
+  if (asAnyViolation) return asAnyViolation
+  const lintViolation = checkLintDisables(newString)
+  if (lintViolation) return lintViolation
+  return checkTsIgnore(newString) ?? preToolUseAllow("")
+}
+
+function evaluateTsQuality(input: FileEditHookInput): SwizHookOutput {
+  const edit = normalizedTsEdit(input)
+  return edit ? firstTsQualityViolation(edit.oldString, edit.newString) : {}
+}
+
 // ─── SwizHook ─────────────────────────────────────────────────────────────────
 
 const pretooluseTsQuality: SwizHook<FileEditHookInput> = {
@@ -403,23 +427,7 @@ const pretooluseTsQuality: SwizHook<FileEditHookInput> = {
   timeout: 5,
 
   run(rawInput) {
-    const input = rawInput as FileEditHookInput
-
-    const filePath = input.tool_input?.file_path ?? ""
-    if (!/\.(ts|tsx)$/.test(filePath)) return {}
-
-    // NFKC normalization via schema transform is unavailable in inline path; normalize manually.
-    const oldString = (input.tool_input?.old_string ?? "").normalize("NFKC")
-    const newString = (input.tool_input?.new_string ?? input.tool_input?.content ?? "").normalize(
-      "NFKC"
-    )
-
-    return (
-      checkAsAny(oldString, newString) ??
-      checkLintDisables(newString) ??
-      checkTsIgnore(newString) ??
-      preToolUseAllow("")
-    )
+    return evaluateTsQuality(rawInput as FileEditHookInput)
   },
 }
 

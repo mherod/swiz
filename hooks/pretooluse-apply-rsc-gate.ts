@@ -54,42 +54,45 @@ export function isRscGatedFile(filePath: string): boolean {
   )
 }
 
+function formatInvokedSkills(skills: string[]): string {
+  return skills.length === 0 ? "(none)" : skills.map((skill) => `/${skill}`).join(", ")
+}
+
+async function evaluateApplyRscGate(input: FileEditHookInput): Promise<SwizHookOutput> {
+  const filePath = input.tool_input?.file_path ?? ""
+  if (!isRscGatedFile(filePath)) return {}
+
+  const rawInput = input as unknown as Record<string, unknown>
+  if (!skillExistsForHookPayload(SKILL_NAME, rawInput)) return {}
+
+  const transcriptPath = (rawInput.transcript_path as string | undefined) ?? ""
+  if (!transcriptPath) return {}
+
+  const cwd = (input.cwd as string | undefined) ?? process.cwd()
+  const { recencyOptions, windowText: window } = await resolveSkillRecencyOptions(cwd)
+  const invokedSkills = await getRecentlyInvokedSkillsForCurrentSession(rawInput, recencyOptions)
+  const skillRef = formatSkillReferenceForAgent(SKILL_NAME)
+
+  if (invokedSkills.includes(SKILL_NAME)) {
+    return preToolUseAllow(`${skillRef} was invoked recently — RSC file edit allowed.`)
+  }
+
+  const fileName = filePath.split(/[/\\]/).pop() ?? filePath
+  return preToolUseDeny(
+    `BLOCKED: editing ${fileName} requires the ${skillRef} skill.\n\n` +
+      `Skills used recently (${window}): ${formatInvokedSkills(invokedSkills)}\n\n` +
+      `Invoke ${skillRef} before editing RSC page, layout, error, loading, or client component files. ` +
+      `The skill enforces correct Server/Client Component boundaries and import conventions.`
+  )
+}
+
 const pretooluseApplyRscGate: SwizFileEditHook = {
   name: "pretooluse-apply-rsc-gate",
   event: "preToolUse",
   matcher: "Edit|Write|NotebookEdit",
   timeout: 5,
 
-  run: async (input: FileEditHookInput): Promise<SwizHookOutput> => {
-    const filePath = input.tool_input?.file_path ?? ""
-    if (!isRscGatedFile(filePath)) return {}
-
-    const rawInput = input as unknown as Record<string, unknown>
-    if (!skillExistsForHookPayload(SKILL_NAME, rawInput)) return {}
-
-    const transcriptPath = (rawInput.transcript_path as string | undefined) ?? ""
-    if (!transcriptPath) return {}
-
-    const cwd = (input.cwd as string | undefined) ?? process.cwd()
-    const { recencyOptions, windowText: window } = await resolveSkillRecencyOptions(cwd)
-
-    const invokedSkills = await getRecentlyInvokedSkillsForCurrentSession(rawInput, recencyOptions)
-    const skillRef = formatSkillReferenceForAgent(SKILL_NAME)
-
-    if (invokedSkills.includes(SKILL_NAME)) {
-      return preToolUseAllow(`${skillRef} was invoked recently — RSC file edit allowed.`)
-    }
-
-    const fileName = filePath.split(/[/\\]/).pop() ?? filePath
-    return preToolUseDeny(
-      `BLOCKED: editing ${fileName} requires the ${skillRef} skill.\n\n` +
-        `Skills used recently (${window}): ${
-          invokedSkills.length === 0 ? "(none)" : invokedSkills.map((s) => `/${s}`).join(", ")
-        }\n\n` +
-        `Invoke ${skillRef} before editing RSC page, layout, error, loading, or client component files. ` +
-        `The skill enforces correct Server/Client Component boundaries and import conventions.`
-    )
-  },
+  run: evaluateApplyRscGate,
 }
 
 export default pretooluseApplyRscGate

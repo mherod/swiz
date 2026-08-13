@@ -20,7 +20,7 @@ import {
   type SwizFileEditHook,
   type SwizHookOutput,
 } from "../src/SwizHook.ts"
-import { fileEditHookInputSchema } from "../src/schemas.ts"
+import { type FileEditHookInput, fileEditHookInputSchema } from "../src/schemas.ts"
 import { readProjectSettings, readSwizSettings } from "../src/settings.ts"
 import { isFileEditTool } from "../src/tool-matchers.ts"
 import { getDefaultBranch } from "../src/utils/git-utils.ts"
@@ -211,94 +211,110 @@ async function getCrossRepoHint(target: string, cwd: string): Promise<string> {
   return ""
 }
 
+async function checkEarlySandboxPolicy(
+  input: Record<string, unknown>,
+  filePath: string,
+  cwd: string
+): Promise<SwizHookOutput | null> {
+  const settings = await readSwizSettings()
+  if (!settings.sandboxedEdits) return preToolUseAllow("")
+  const trunkResult = await checkTrunkMode(input, cwd)
+  return trunkResult ?? checkSwizConfigEdit(filePath)
+}
+
+async function checkAgentOwnedExternalPath(
+  target: string,
+  allowCodexHome: boolean
+): Promise<SwizHookOutput | null> {
+  const homeDir = getHomeDirOrNull()
+  if (allowCodexHome && homeDir) {
+    const canonicalHome = await resolveCanonical(homeDir)
+    if (isCodexHomePath(target, canonicalHome)) {
+      return preToolUseAllowWithContext(
+        "Codex home-directory edit allowed: within ~/.codex.",
+        SAFE_READ_ONLY_INSPECTION_HINT
+      )
+    }
+  }
+  if (!AUTO_MEMORY_PATH_RE.test(target.replace(/\\/g, "/"))) return null
+  return preToolUseAllowWithContext(
+    "Auto-memory write allowed: within agent memory directory.",
+    SAFE_READ_ONLY_INSPECTION_HINT
+  )
+}
+
+type SandboxTargetResolution = { ok: true; target: string } | { ok: false; output: SwizHookOutput }
+
+async function resolveSandboxTarget(filePath: string): Promise<SandboxTargetResolution> {
+  const rawTaskStorageResult = checkProtectedTaskStorageEdit(filePath)
+  if (rawTaskStorageResult) return { ok: false, output: rawTaskStorageResult }
+
+  const target = await resolveCanonical(filePath)
+  const taskStorageResult = checkProtectedTaskStorageEdit(target)
+  return taskStorageResult ? { ok: false, output: taskStorageResult } : { ok: true, target }
+}
+
+async function evaluateActiveSandbox(
+  parsed: FileEditHookInput,
+  filePath: string,
+  target: string,
+  hookCwd: string
+): Promise<SwizHookOutput> {
+  const earlyResult = await checkEarlySandboxPolicy(
+    parsed as Record<string, unknown>,
+    filePath,
+    hookCwd
+  )
+  if (earlyResult) return earlyResult
+
+  const cwd = await resolveCanonical(hookCwd)
+  const allowCodexHome = detectCurrentAgentFromHookPayload(parsed)?.id === "codex"
+  const ownedPathResult = await checkAgentOwnedExternalPath(target, allowCodexHome)
+  if (ownedPathResult) return ownedPathResult
+
+  const hiddenHomePathResult = await checkHiddenHomePath(target, cwd)
+  if (hiddenHomePathResult) return hiddenHomePathResult
+  const rootsResult = await checkAllowedRoots(target, cwd)
+  if (rootsResult) return rootsResult
+
+  const crossRepoHint = await getCrossRepoHint(target, cwd)
+  return preToolUseDeny(
+    [
+      "File edit blocked: path is outside the session sandbox.",
+      "",
+      `  Attempted: ${target}`,
+      `  Session cwd: ${cwd}`,
+      "",
+      "Sandboxed-edits mode is enabled: only edits within the current project directory or temporary directories are allowed.",
+      buildIssueGuidance(null),
+      "",
+      SAFE_READ_ONLY_INSPECTION_HINT,
+      crossRepoHint,
+    ]
+      .filter(Boolean)
+      .join("\n")
+  )
+}
+
+async function evaluateSandboxedEdit(input: FileEditHookInput): Promise<SwizHookOutput> {
+  const parsed = fileEditHookInputSchema.parse(input)
+  if (!isFileEditTool(parsed.tool_name ?? "")) return preToolUseAllow("")
+
+  const filePath = (parsed.tool_input?.file_path as string | undefined) ?? ""
+  if (!filePath) return preToolUseAllow("")
+  const targetResolution = await resolveSandboxTarget(filePath)
+  if (!targetResolution.ok) return targetResolution.output
+  const hookCwd = parsed.cwd ?? process.cwd()
+  return await evaluateActiveSandbox(parsed, filePath, targetResolution.target, hookCwd)
+}
+
 const pretooluseSandboxedEdits: SwizFileEditHook = {
   name: "pretooluse-sandboxed-edits",
   event: "preToolUse",
   matcher: "Edit|Write|NotebookEdit",
   timeout: 5,
 
-  async run(input): Promise<SwizHookOutput> {
-    const parsed = fileEditHookInputSchema.parse(input)
-    const allowCodexHome = detectCurrentAgentFromHookPayload(parsed)?.id === "codex"
-
-    if (!isFileEditTool(parsed.tool_name ?? "")) return preToolUseAllow("")
-
-    const filePath: string = (parsed.tool_input?.file_path as string | undefined) ?? ""
-    if (!filePath) return preToolUseAllow("")
-
-    // Task files are managed by native task tools, never direct file edits.
-    const rawTaskStorageResult = checkProtectedTaskStorageEdit(filePath)
-    if (rawTaskStorageResult) return rawTaskStorageResult
-
-    const target = await resolveCanonical(filePath)
-    const taskStorageResult = checkProtectedTaskStorageEdit(target)
-    if (taskStorageResult) return taskStorageResult
-
-    const settings = await readSwizSettings()
-    if (!settings.sandboxedEdits) return preToolUseAllow("")
-
-    const hookCwd = parsed.cwd ?? process.cwd()
-
-    // 1. Check trunk mode
-    const trunkResult = await checkTrunkMode(parsed as Record<string, unknown>, hookCwd)
-    if (trunkResult) return trunkResult
-
-    // 2. Block direct edits to swiz config files
-    const configResult = checkSwizConfigEdit(filePath)
-    if (configResult) return configResult
-
-    // All paths are resolved through resolveCanonical so the isWithin() check
-    // operates in a uniform canonical namespace — no mix of logical and real paths.
-    const cwd = await resolveCanonical(hookCwd)
-
-    // 3a. Codex owns its home directory and may update its configuration and skills.
-    const homeDir = getHomeDirOrNull()
-    if (allowCodexHome && homeDir) {
-      const canonicalHome = await resolveCanonical(homeDir)
-      if (isCodexHomePath(target, canonicalHome)) {
-        return preToolUseAllowWithContext(
-          "Codex home-directory edit allowed: within ~/.codex.",
-          SAFE_READ_ONLY_INSPECTION_HINT
-        )
-      }
-    }
-
-    // 3b. Auto-memory writes are always allowed — outside cwd but owned by the agent.
-    if (AUTO_MEMORY_PATH_RE.test(target.replace(/\\/g, "/"))) {
-      return preToolUseAllowWithContext(
-        "Auto-memory write allowed: within agent memory directory.",
-        SAFE_READ_ONLY_INSPECTION_HINT
-      )
-    }
-
-    // 3. Check for blocked hidden home-directory paths before broad sandbox roots.
-    const hiddenHomePathResult = await checkHiddenHomePath(target, cwd)
-    if (hiddenHomePathResult) return hiddenHomePathResult
-
-    // 4. Check allowed sandbox roots (CWD, tmp)
-    const rootsResult = await checkAllowedRoots(target, cwd)
-    if (rootsResult) return rootsResult
-
-    // 5. Provide guidance for blocked paths
-    const crossRepoHint = await getCrossRepoHint(target, cwd)
-
-    return preToolUseDeny(
-      [
-        "File edit blocked: path is outside the session sandbox.",
-        "",
-        `  Attempted: ${target}`,
-        `  Session cwd: ${cwd}`,
-        "",
-        "Sandboxed-edits mode is enabled: only edits within the current project directory or temporary directories are allowed.",
-        buildIssueGuidance(null),
-        "",
-        SAFE_READ_ONLY_INSPECTION_HINT,
-        crossRepoHint,
-      ]
-        .filter(Boolean)
-        .join("\n")
-    )
-  },
+  run: evaluateSandboxedEdit,
 }
 
 export default pretooluseSandboxedEdits
