@@ -27,7 +27,7 @@ import {
   resolveProjectHooks,
 } from "../settings.ts"
 import { syncCodexUpdatePlanFromTranscriptSummary } from "../tasks/codex-update-plan.ts"
-import { isSkillMdOnlyFileEditPayload } from "../tool-matchers.ts"
+import { isMarkdownOnlyFileReadPayload, isSkillMdOnlyFileEditPayload } from "../tool-matchers.ts"
 import {
   type CurrentSessionToolUsage,
   computeTranscriptSummary,
@@ -753,10 +753,11 @@ async function shouldSkipSubagentDispatch(ctx: DispatchContext): Promise<boolean
   return settings.relaxSubagentHooks !== false // default ON
 }
 
-function shouldSkipSkillMdPreToolUse(ctx: DispatchContext): boolean {
-  return (
-    ctx.canonicalEvent === "preToolUse" && isSkillMdOnlyFileEditPayload(ctx.toolName, ctx.payload)
-  )
+function preToolUseBlockerSkipLabel(ctx: DispatchContext): string | null {
+  if (ctx.canonicalEvent !== "preToolUse") return null
+  if (isSkillMdOnlyFileEditPayload(ctx.toolName, ctx.payload)) return "SKILL.md file edit"
+  if (isMarkdownOnlyFileReadPayload(ctx.toolName, ctx.payload)) return "markdown file read"
+  return null
 }
 
 function buildSkipResponse(ctx: DispatchContext, daemonContext?: boolean): Record<string, any> {
@@ -809,8 +810,9 @@ async function performDispatch(req: DispatchRequest): Promise<DispatchResult> {
     return result(response)
   }
 
-  if (shouldSkipSkillMdPreToolUse(ctx)) {
-    log(`   ⏭ SKILL.md file edit, skipping preToolUse blockers`)
+  const preToolUseSkipLabel = preToolUseBlockerSkipLabel(ctx)
+  if (preToolUseSkipLabel) {
+    log(`   ⏭ ${preToolUseSkipLabel}, skipping preToolUse blockers`)
     const response = buildSkipResponse(ctx, req.daemonContext)
     assertDispatchResponseMatchesWire(response, ctx.canonicalEvent, ctx.hookEventName, ctx.agentId)
     return result(response)

@@ -132,6 +132,14 @@ function addPath(paths: Set<string>, value: ToolMatcherValue | undefined): void 
   if (trimmed) paths.add(trimmed)
 }
 
+function addPaths(paths: Set<string>, value: ToolMatcherValue | undefined): void {
+  if (Array.isArray(value)) {
+    for (const candidate of value) addPath(paths, candidate)
+    return
+  }
+  addPath(paths, value)
+}
+
 function basenameForPath(filePath: string): string {
   const normalized = filePath.trim().replace(/\\/g, "/").replace(/\/+$/, "")
   return normalized.split("/").pop() ?? ""
@@ -139,6 +147,10 @@ function basenameForPath(filePath: string): string {
 
 export function isSkillMdPath(filePath: string): boolean {
   return basenameForPath(filePath) === "SKILL.md"
+}
+
+export function isMarkdownPath(filePath: string): boolean {
+  return basenameForPath(filePath).toLowerCase().endsWith(".md")
 }
 
 export function extractApplyPatchFilePaths(command: string): string[] {
@@ -169,6 +181,21 @@ export function extractFileEditTargetPaths(toolInput: ToolMatcherValue | object)
   return [...paths]
 }
 
+export function extractFileReadTargetPaths(toolInput: ToolMatcherValue | object): string[] {
+  if (!isRecord(toolInput)) return []
+
+  const paths = new Set<string>()
+  addPath(paths, toolInput.path)
+  addPath(paths, toolInput.file)
+  addPath(paths, toolInput.file_path)
+  addPath(paths, toolInput.filePath)
+  addPaths(paths, toolInput.paths)
+  addPaths(paths, toolInput.files)
+  addPaths(paths, toolInput.file_paths)
+  addPaths(paths, toolInput.filePaths)
+  return [...paths]
+}
+
 export function isSkillMdOnlyFileEditPayload(
   toolName: string | undefined,
   payload: ToolMatcherRecord
@@ -177,4 +204,14 @@ export function isSkillMdOnlyFileEditPayload(
   const toolInput = payload.tool_input ?? payload.toolInput
   const targets = extractFileEditTargetPaths(toolInput)
   return targets.length > 0 && targets.every(isSkillMdPath)
+}
+
+export function isMarkdownOnlyFileReadPayload(
+  toolName: string | undefined,
+  payload: ToolMatcherRecord
+): boolean {
+  if (!toolName || !READ_TOOLS.has(toolName)) return false
+  const toolInput = payload.tool_input ?? payload.toolInput
+  const targets = extractFileReadTargetPaths(toolInput)
+  return targets.length > 0 && targets.every(isMarkdownPath)
 }

@@ -496,6 +496,76 @@ describe("dispatch execute integration", () => {
         )
       }
     })
+
+    it("skips every preToolUse blocker for markdown-only file reads", async () => {
+      const denyHook: SwizHook = {
+        name: "test-markdown-read-synthetic-blocker",
+        event: "preToolUse",
+        run: () => preToolUseDeny("synthetic block"),
+      }
+      const payloads = [
+        { tool_name: "Read", tool_input: { file_path: "/repo/README.md" } },
+        { tool_name: "read_file", toolInput: { filePath: "/repo/docs/GUIDE.MD" } },
+        { tool_name: "read_file", tool_input: { path: "/repo/CHANGELOG.md" } },
+        {
+          tool_name: "read_many_files",
+          tool_input: { paths: ["/repo/README.md", "/repo/docs/guide.md"] },
+        },
+      ]
+
+      for (const payload of payloads) {
+        let providerCalled = false
+        const result = await executeDispatch({
+          canonicalEvent: "preToolUse",
+          hookEventName: "PreToolUse",
+          payloadStr: JSON.stringify({
+            cwd: process.cwd(),
+            session_id: `markdown-read-${payload.tool_name}`,
+            ...payload,
+          }),
+          manifestProvider: async () => {
+            providerCalled = true
+            return [{ event: "preToolUse", hooks: [{ hook: denyHook }] }]
+          },
+        })
+
+        expect(providerCalled).toBe(false)
+        expect(result.response).toEqual({})
+      }
+    })
+
+    it("keeps preToolUse blockers active for non-markdown and mixed file reads", async () => {
+      const denyHook: SwizHook = {
+        name: "test-non-markdown-read-synthetic-blocker",
+        event: "preToolUse",
+        run: () => preToolUseDeny("synthetic block"),
+      }
+      const payloads = [
+        { tool_name: "Read", tool_input: { file_path: "/repo/src/main.ts" } },
+        {
+          tool_name: "read_many_files",
+          tool_input: { paths: ["/repo/README.md", "/repo/src/main.ts"] },
+        },
+      ]
+
+      for (const payload of payloads) {
+        const result = await executeDispatch({
+          canonicalEvent: "preToolUse",
+          hookEventName: "PreToolUse",
+          payloadStr: JSON.stringify({
+            cwd: process.cwd(),
+            session_id: `non-markdown-read-${payload.tool_name}`,
+            ...payload,
+          }),
+          manifestProvider: async () => [{ event: "preToolUse", hooks: [{ hook: denyHook }] }],
+        })
+
+        expect(result.response.hookSpecificOutput?.permissionDecision).toBe("deny")
+        expect(result.response.hookSpecificOutput?.permissionDecisionReason).toContain(
+          "synthetic block"
+        )
+      }
+    })
   })
 
   describe("ignoreMcpTools short-circuit", () => {
