@@ -1,10 +1,14 @@
 import { describe, expect, test } from "bun:test"
-import { runBashHook, runHookInProcess } from "../src/utils/test-utils.ts"
+import { mkdir } from "node:fs/promises"
+import { join } from "node:path"
+import { runBashHook, runHookInProcess, useTempDir } from "../src/utils/test-utils.ts"
 import {
   extractBothRedirectTarget,
+  extractGitRestoreTargets,
   extractNumberedRedirectTarget,
   extractPlainRedirectTarget,
   extractTeeTarget,
+  isEmptyOrNonExistentFile,
   isPlainRedirectOnly,
   isSafeTempPath,
 } from "./pretooluse-banned-commands.ts"
@@ -128,6 +132,181 @@ describe("pretooluse-banned-commands", () => {
       test("plain git diff is not denied", async () => {
         const result = await runHook("git diff --stat")
         expect(result.decision).not.toBe("deny")
+      })
+    })
+
+    describe("git restore safety rules", () => {
+      const tmp = useTempDir("swiz-restore-test-")
+
+      test("allows git restore targeting an empty file (0 bytes)", async () => {
+        const dir = await tmp.create("empty-file-")
+        const emptyFile = join(dir, "empty.txt")
+        await Bun.write(emptyFile, "")
+
+        const result = await runHookInProcess(HOOK, {
+          tool_name: "Bash",
+          tool_input: { command: "git restore empty.txt" },
+          cwd: dir,
+        })
+        expect(result.decision).toBe("allow")
+        expect(result.reason ?? result.json?.systemMessage ?? result.stdout).toContain(
+          "trash <file>"
+        )
+      })
+
+      test("allows git restore targeting a non-existent file", async () => {
+        const dir = await tmp.create("missing-file-")
+
+        const result = await runHookInProcess(HOOK, {
+          tool_name: "Bash",
+          tool_input: { command: "git restore non-existent.txt" },
+          cwd: dir,
+        })
+        expect(result.decision).toBe("allow")
+        expect(result.reason ?? result.json?.systemMessage ?? result.stdout).toContain(
+          "trash <file>"
+        )
+      })
+
+      test("allows git restore --staged targeting empty or non-existent files", async () => {
+        const dir = await tmp.create("staged-empty-")
+        const emptyFile = join(dir, "staged-empty.txt")
+        await Bun.write(emptyFile, "")
+
+        const result = await runHookInProcess(HOOK, {
+          tool_name: "Bash",
+          tool_input: { command: "git restore --staged staged-empty.txt missing.txt" },
+          cwd: dir,
+        })
+        expect(result.decision).toBe("allow")
+        expect(result.reason ?? result.json?.systemMessage ?? result.stdout).toContain(
+          "trash <file>"
+        )
+      })
+
+      test("allows git restore with options like --source=HEAD -- targeting empty files", async () => {
+        const dir = await tmp.create("source-empty-")
+        const emptyFile = join(dir, "file.ts")
+        await Bun.write(emptyFile, "")
+
+        const result = await runHookInProcess(HOOK, {
+          tool_name: "Bash",
+          tool_input: { command: "git restore --source=HEAD~1 -- file.ts" },
+          cwd: dir,
+        })
+        expect(result.decision).toBe("allow")
+        expect(result.reason ?? result.json?.systemMessage ?? result.stdout).toContain(
+          "trash <file>"
+        )
+      })
+
+      test("blocks git restore targeting a populated file (>0 bytes)", async () => {
+        const dir = await tmp.create("populated-file-")
+        const populatedFile = join(dir, "populated.txt")
+        await Bun.write(populatedFile, "important content\n")
+
+        const result = await runHookInProcess(HOOK, {
+          tool_name: "Bash",
+          tool_input: { command: "git restore populated.txt" },
+          cwd: dir,
+        })
+        expect(result.decision).toBe("deny")
+        expect(result.reason).toContain("git restore")
+        expect(result.reason).toContain("trash <file>")
+      })
+
+      test("blocks git restore if any target file in multi-target list is populated", async () => {
+        const dir = await tmp.create("mixed-files-")
+        const emptyFile = join(dir, "empty.txt")
+        const populatedFile = join(dir, "populated.txt")
+        await Bun.write(emptyFile, "")
+        await Bun.write(populatedFile, "cannot lose this\n")
+
+        const result = await runHookInProcess(HOOK, {
+          tool_name: "Bash",
+          tool_input: { command: "git restore empty.txt populated.txt" },
+          cwd: dir,
+        })
+        expect(result.decision).toBe("deny")
+        expect(result.reason).toContain("git restore")
+        expect(result.reason).toContain("trash <file>")
+      })
+
+      test("blocks git restore targeting a directory (.)", async () => {
+        const dir = await tmp.create("dir-target-")
+
+        const result = await runHookInProcess(HOOK, {
+          tool_name: "Bash",
+          tool_input: { command: "git restore ." },
+          cwd: dir,
+        })
+        expect(result.decision).toBe("deny")
+        expect(result.reason).toContain("git restore")
+      })
+
+      test("blocks git restore targeting a subdirectory", async () => {
+        const dir = await tmp.create("subdir-target-")
+        await mkdir(join(dir, "subfolder"))
+
+        const result = await runHookInProcess(HOOK, {
+          tool_name: "Bash",
+          tool_input: { command: "git restore subfolder" },
+          cwd: dir,
+        })
+        expect(result.decision).toBe("deny")
+        expect(result.reason).toContain("git restore")
+      })
+
+      test("blocks git restore with no targets", async () => {
+        const dir = await tmp.create("no-target-")
+
+        const result = await runHookInProcess(HOOK, {
+          tool_name: "Bash",
+          tool_input: { command: "git restore --staged" },
+          cwd: dir,
+        })
+        expect(result.decision).toBe("deny")
+        expect(result.reason).toContain("git restore")
+      })
+
+      test("extractGitRestoreTargets extracts targets correctly", () => {
+        const extracted1 = extractGitRestoreTargets("git restore foo.ts bar.ts", "/root")
+        expect(extracted1.isGitRestore).toBe(true)
+        expect(extracted1.targets).toEqual(["foo.ts", "bar.ts"])
+        expect(extracted1.hasDynamicTarget).toBe(false)
+
+        const extracted2 = extractGitRestoreTargets(
+          "git -C src restore --staged -- baz.ts",
+          "/root"
+        )
+        expect(extracted2.isGitRestore).toBe(true)
+        expect(extracted2.targets).toEqual(["baz.ts"])
+        expect(extracted2.segmentCwd).toBe("/root/src")
+
+        const extracted3 = extractGitRestoreTargets("git restore --source HEAD file.ts", "/root")
+        expect(extracted3.isGitRestore).toBe(true)
+        expect(extracted3.targets).toEqual(["file.ts"])
+
+        const extracted4 = extractGitRestoreTargets("xargs git restore", "/root")
+        expect(extracted4.isGitRestore).toBe(true)
+        expect(extracted4.hasDynamicTarget).toBe(true)
+      })
+
+      test("isEmptyOrNonExistentFile correctly identifies empty, non-existent, and populated files", async () => {
+        const dir = await tmp.create("unit-file-check-")
+        const emptyFile = join(dir, "empty.ts")
+        const populatedFile = join(dir, "populated.ts")
+        const subDir = join(dir, "sub")
+        const missingFile = join(dir, "does-not-exist.ts")
+
+        await Bun.write(emptyFile, "")
+        await Bun.write(populatedFile, "console.log('hi')")
+        await mkdir(subDir)
+
+        expect(await isEmptyOrNonExistentFile(emptyFile)).toBe(true)
+        expect(await isEmptyOrNonExistentFile(missingFile)).toBe(true)
+        expect(await isEmptyOrNonExistentFile(populatedFile)).toBe(false)
+        expect(await isEmptyOrNonExistentFile(subDir)).toBe(false)
       })
     })
 

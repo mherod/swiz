@@ -4,6 +4,8 @@
 // Rules with severity "warn" allow the command through with a gentle nudge.
 // Rules with severity "deny" (default) block the command entirely.
 
+import { stat } from "node:fs/promises"
+import { resolve } from "node:path"
 import {
   findNonCanonicalGitInvocation,
   type NonCanonicalGitInvocation,
@@ -325,9 +327,9 @@ function buildGitRules(payload: Record<string, unknown>): Rule[] {
       ].join("\n"),
     },
     {
-      match: (c) => /git\s+restore(\s|$)/.test(c),
+      match: isGitRestoreCommand,
       message:
-        "Do not use `git restore`. It silently discards uncommitted changes.\n\nInstead:\n  • Use the Edit tool to undo specific changes in a file\n  • Read the file first, then apply targeted corrections\n  • If you want to revert a commit, use `git revert <hash>` (preserves history)",
+        "Do not use `git restore` directly on files with existing content. It silently discards uncommitted changes without recovery.\n\nInstead:\n  • To discard changes safely, trash the file first: `trash <file>` (creates a recoverable backup), then run `git restore <file>` to restore the clean tracked revision\n  • Use the Edit tool to make targeted corrections without discarding other edits\n  • If you want to revert a commit, use `git revert <hash>` (preserves history)",
     },
     {
       match: (c) => /git\s+reset\s+--hard/.test(c),
@@ -562,6 +564,178 @@ async function requirePruneBranchesForStashRetirement(
   }
 }
 
+export const isGitRestoreCommand = (c: string): boolean => /git\s+restore(\s|$)/.test(c)
+
+export async function isEmptyOrNonExistentFile(filePath: string): Promise<boolean> {
+  try {
+    const s = await stat(filePath)
+    if (!s.isFile()) return false
+    return s.size === 0
+  } catch (err: unknown) {
+    const code = (err as { code?: string })?.code
+    return code === "ENOENT" || code === "ENOTDIR"
+  }
+}
+
+const GIT_GLOBAL_VALUE_FLAGS = new Set([
+  "-c",
+  "--work-tree",
+  "--git-dir",
+  "--namespace",
+  "--config-env",
+])
+
+const RESTORE_VALUE_FLAGS = new Set(["--source", "-s", "--pathspec-from-file", "--conflict"])
+
+export interface GitRestoreExtraction {
+  isGitRestore: boolean
+  targets: string[]
+  segmentCwd: string
+  hasDynamicTarget: boolean
+}
+
+function skipCommandPrefixes(tokens: string[]): number {
+  let i = 0
+  while (i < tokens.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(tokens[i] ?? "")) {
+    i++
+  }
+  while (
+    i < tokens.length &&
+    (tokens[i] === "command" ||
+      tokens[i] === "noglob" ||
+      tokens[i] === "builtin" ||
+      tokens[i] === "exec")
+  ) {
+    i++
+  }
+  return i
+}
+
+function skipGitGlobalOptions(
+  tokens: string[],
+  startIndex: number,
+  baseCwd: string
+): { index: number; segmentCwd: string } {
+  let i = startIndex
+  let segmentCwd = baseCwd
+
+  while (i < tokens.length && (tokens[i] ?? "").startsWith("-")) {
+    const opt = tokens[i] ?? ""
+    if (opt === "-C") {
+      i++
+      if (i < tokens.length) segmentCwd = resolve(segmentCwd, tokens[i]!)
+    } else if (opt.startsWith("-C") && opt.length > 2) {
+      segmentCwd = resolve(segmentCwd, opt.slice(2))
+    } else if (GIT_GLOBAL_VALUE_FLAGS.has(opt)) {
+      i++
+    }
+    i++
+  }
+
+  return { index: i, segmentCwd }
+}
+
+function collectRestoreTargetPaths(
+  tokens: string[],
+  startIndex: number
+): { targets: string[]; hasDynamicTarget: boolean } {
+  let i = startIndex
+  const targets: string[] = []
+  let inOptions = true
+
+  while (i < tokens.length) {
+    const token = tokens[i]!
+    if (inOptions && token === "--") {
+      inOptions = false
+      i++
+      continue
+    }
+
+    if (inOptions && token.startsWith("-")) {
+      if (token === "--pathspec-from-file" || token.startsWith("--pathspec-from-file=")) {
+        return { targets: [], hasDynamicTarget: true }
+      }
+      if (RESTORE_VALUE_FLAGS.has(token)) {
+        i++
+      }
+      i++
+      continue
+    }
+
+    targets.push(token)
+    i++
+  }
+
+  return { targets, hasDynamicTarget: false }
+}
+
+export function extractGitRestoreTargets(segment: string, baseCwd: string): GitRestoreExtraction {
+  const tokens = tokenizeShellSegment(segment)
+  const cmdIndex = skipCommandPrefixes(tokens)
+
+  if (tokens[cmdIndex] !== "git") {
+    const hasRestore = tokens.some(
+      (t, idx) => t === "restore" && idx > 0 && tokens[idx - 1] === "git"
+    )
+    return {
+      isGitRestore: hasRestore,
+      targets: [],
+      segmentCwd: baseCwd,
+      hasDynamicTarget: hasRestore,
+    }
+  }
+
+  const { index: subcmdIndex, segmentCwd } = skipGitGlobalOptions(tokens, cmdIndex + 1, baseCwd)
+
+  if (tokens[subcmdIndex] !== "restore") {
+    return {
+      isGitRestore: false,
+      targets: [],
+      segmentCwd,
+      hasDynamicTarget: false,
+    }
+  }
+
+  const { targets, hasDynamicTarget } = collectRestoreTargetPaths(tokens, subcmdIndex + 1)
+
+  return {
+    isGitRestore: true,
+    targets,
+    segmentCwd,
+    hasDynamicTarget,
+  }
+}
+
+export async function isPermittedGitRestore(command: string, cwd: string): Promise<boolean> {
+  const segments = splitShellSegments(command)
+  let foundAnyRestore = false
+
+  for (const segment of segments) {
+    if (!/git\s+restore\b|\bgit\s+.*\brestore\b/.test(segment)) {
+      continue
+    }
+
+    const extraction = extractGitRestoreTargets(segment, cwd)
+    if (!extraction.isGitRestore) {
+      return false
+    }
+
+    foundAnyRestore = true
+
+    if (extraction.hasDynamicTarget || extraction.targets.length === 0) {
+      return false
+    }
+
+    for (const target of extraction.targets) {
+      const fullPath = resolve(extraction.segmentCwd, target)
+      const allowed = await isEmptyOrNonExistentFile(fullPath)
+      if (!allowed) return false
+    }
+  }
+
+  return foundAnyRestore
+}
+
 function parseHookInput(input: Record<string, any>): {
   command: string
   transcriptPath: string
@@ -614,11 +788,27 @@ export async function evaluatePretooluseBannedCommands(input: unknown): Promise<
     return preToolUseDeny(buildCdDenyMessage(cwd))
   }
 
-  const effectiveRules = (await isRedirectExempt(strippedCommand, cwd, transcriptPath))
-    ? RULES.filter((r) => r.match !== isShellFileWrite)
-    : RULES
+  const isRedirectExempted = await isRedirectExempt(strippedCommand, cwd, transcriptPath)
+  const isRestoreExempt =
+    isGitRestoreCommand(strippedCommand) && (await isPermittedGitRestore(command, cwd))
 
-  return commandRulesOutput(effectiveRules, command, strippedCommand) ?? {}
+  const effectiveRules = RULES.filter((r) => {
+    if (r.match === isShellFileWrite && isRedirectExempted) return false
+    if (r.match === isGitRestoreCommand && isRestoreExempt) return false
+    return true
+  })
+
+  const output = commandRulesOutput(effectiveRules, command, strippedCommand)
+  if (output) return output
+
+  if (isRestoreExempt) {
+    return preToolUseAllow(
+      "Target file is empty or non-existent; safe to restore.\n\n" +
+        "Note: Trashing an existing file with `trash <file>` before `git restore` is the safe, recommended pattern to restore tracked files while keeping a recoverable backup."
+    )
+  }
+
+  return {}
 }
 
 const pretooluseBannedCommands: SwizToolHook = {

@@ -722,9 +722,52 @@ git() {
       esac
       ;;
     restore)
-      printf 'swiz: Do not use `git restore`. It silently discards uncommitted changes.\n' >&2
-      printf 'Use the Edit tool to undo specific changes, or `git revert <hash>`.\n' >&2
-      return 1
+      local has_targets=false
+      local target_empty_or_missing=true
+      local in_opts=true
+      local skip_next=false
+
+      for arg in "${git_cmd_args[@]}"; do
+        if $skip_next; then
+          skip_next=false
+          continue
+        fi
+        if $in_opts && [[ "$arg" == "--" ]]; then
+          in_opts=false
+          continue
+        fi
+        if $in_opts && [[ "$arg" == -* ]]; then
+          case "$arg" in
+            --source|-s|--pathspec-from-file|--conflict)
+              skip_next=true
+              ;;
+            --source=*|-s*|--pathspec-from-file=*|--conflict=*)
+              ;;
+            *)
+              ;;
+          esac
+          continue
+        fi
+        has_targets=true
+        if [[ -d "$arg" ]]; then
+          target_empty_or_missing=false
+          break
+        elif [[ -f "$arg" ]]; then
+          if [[ -s "$arg" ]]; then
+            target_empty_or_missing=false
+            break
+          fi
+        elif [[ -e "$arg" ]]; then
+          target_empty_or_missing=false
+          break
+        fi
+      done
+
+      if ! $has_targets || ! $target_empty_or_missing; then
+        printf 'swiz: Do not use `git restore` directly on files with existing content. It silently discards uncommitted changes without recovery.\n' >&2
+        printf 'To discard changes safely, trash the file first with `trash <file>` (recoverable), then run `git restore <file>` to restore the clean revision.\n' >&2
+        return 1
+      fi
       ;;
     clean)
       printf 'swiz: Do not use `git clean`. It permanently deletes untracked files.\n' >&2

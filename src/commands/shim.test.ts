@@ -272,6 +272,39 @@ describe("shell shim runtime", () => {
     expect(await Bun.file(input).text()).toBe("first\nsecond\n")
   })
 
+  testWithZsh(
+    "allows git restore on empty or missing files while blocking populated files",
+    async () => {
+      const repo = await makeTempGitRepo(tmp, { suffix: "-restore" })
+      const emptyFile = join(repo, "empty.txt")
+      const populatedFile = join(repo, "populated.txt")
+      await Bun.write(emptyFile, "")
+      await Bun.write(populatedFile, "cannot delete\n")
+
+      const emptyResult = await runShell(
+        ZSH_PATH ?? "zsh",
+        ["-f", "-c", 'source "$1"; git restore empty.txt', "swiz", SHIM_PATH],
+        { cwd: repo, env: { SWIZ_SHIM: "strict" } }
+      )
+      expect(emptyResult.stderr).not.toContain("Do not use `git restore`")
+
+      const missingResult = await runShell(
+        ZSH_PATH ?? "zsh",
+        ["-f", "-c", 'source "$1"; git restore non-existent.txt', "swiz", SHIM_PATH],
+        { cwd: repo, env: { SWIZ_SHIM: "strict" } }
+      )
+      expect(missingResult.stderr).not.toContain("Do not use `git restore`")
+
+      const populatedResult = await runShell(
+        ZSH_PATH ?? "zsh",
+        ["-f", "-c", 'source "$1"; git restore populated.txt', "swiz", SHIM_PATH],
+        { cwd: repo, env: { SWIZ_SHIM: "strict" } }
+      )
+      expect(populatedResult.exitCode).toBe(1)
+      expect(populatedResult.stderr).toContain("swiz: Do not use `git restore`")
+    }
+  )
+
   test("does not remove an existing Git index lock", async () => {
     const repo = await makeTempGitRepo(tmp, { suffix: "-lock" })
     const lockPath = join(repo, ".git", "index.lock")
