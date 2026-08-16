@@ -43,6 +43,7 @@ async function dispatch(
       stderr: "pipe",
       env: {
         ...process.env,
+        SWIZ_DIRECT: "1",
         SWIZ_NO_DAEMON: "1",
         SWIZ_TEST_HOOK_TIMEOUT_SEC: "15",
         ...options.env,
@@ -190,6 +191,10 @@ describe("dispatch routing", () => {
       stdin: "pipe",
       stdout: "pipe",
       stderr: "pipe",
+      env: {
+        ...process.env,
+        SWIZ_DIRECT: "1",
+      },
     })
 
     // Intentionally do not write or close stdin.
@@ -214,6 +219,7 @@ describe("dispatch routing", () => {
       stderr: "pipe",
       env: {
         ...process.env,
+        SWIZ_DIRECT: "1",
         SWIZ_NO_DAEMON: "1",
       },
     })
@@ -245,6 +251,7 @@ describe("dispatch routing", () => {
       stderr: "pipe",
       env: {
         ...process.env,
+        SWIZ_DIRECT: "1",
         SWIZ_NO_DAEMON: "1",
         SWIZ_TEST_FORCE_DISPATCH_FAILURE: "1",
       },
@@ -275,6 +282,7 @@ describe("dispatch routing", () => {
       stderr: "pipe",
       env: {
         ...process.env,
+        SWIZ_DIRECT: "1",
         SWIZ_NO_DAEMON: "1",
       },
     })
@@ -305,6 +313,7 @@ describe("dispatch routing", () => {
       stderr: "pipe",
       env: {
         ...process.env,
+        SWIZ_DIRECT: "1",
         SWIZ_NO_DAEMON: "1",
       },
     })
@@ -472,6 +481,7 @@ describe("dispatch routing", () => {
             stderr: "pipe",
             env: {
               ...process.env,
+              SWIZ_DIRECT: "1",
               SWIZ_NO_DAEMON: undefined,
               SWIZ_DAEMON_PORT: String(server.port),
             },
@@ -509,6 +519,7 @@ describe("dispatch replay", () => {
           stderr: "pipe",
           env: {
             ...process.env,
+            SWIZ_DIRECT: "1",
             SWIZ_NO_DAEMON: "1",
             SWIZ_TEST_HOOK_TIMEOUT_SEC: "15",
             // Keep replay deterministic in CI without contacting external providers.
@@ -628,6 +639,10 @@ describe("dispatch replay", () => {
       stdin: "pipe",
       stdout: "pipe",
       stderr: "pipe",
+      env: {
+        ...process.env,
+        SWIZ_DIRECT: "1",
+      },
     })
     void proc.stdin.end()
     const [_stdout, stderr] = await Promise.all([
@@ -644,6 +659,10 @@ describe("dispatch replay", () => {
       stdin: "pipe",
       stdout: "pipe",
       stderr: "pipe",
+      env: {
+        ...process.env,
+        SWIZ_DIRECT: "1",
+      },
     })
 
     // Intentionally do not write or close stdin.
@@ -762,6 +781,7 @@ describe("dispatch stop fast-path — isStopLikeEvent covers both stop and subag
       stderr: "pipe",
       env: {
         ...process.env,
+        SWIZ_DIRECT: "1",
         SWIZ_NO_DAEMON: "1",
         SWIZ_TEST_HOOK_TIMEOUT_SEC: "15",
       },
@@ -794,6 +814,7 @@ describe("dispatch stop fast-path — isStopLikeEvent covers both stop and subag
             stderr: "pipe",
             env: {
               ...process.env,
+              SWIZ_DIRECT: "1",
               SWIZ_NO_DAEMON: "1",
               SWIZ_TEST_HOOK_TIMEOUT_SEC: "15",
             },

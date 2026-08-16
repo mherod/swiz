@@ -5,12 +5,12 @@ const CLI_PROCESS_STARTED_AT = performance.now()
 // Guard: require invocation via the globally linked `swiz` command.
 // The shell sets process.env._ to the command that was actually executed.
 // When run via `swiz`, it ends with "/swiz"; when run via `bun index.ts`, it points to bun.
-// Only enforce in interactive terminals — subprocess/test invocations (piped stdio) are allowed.
+// Direct invocations by agents or interactive shells are blocked unless SWIZ_DIRECT=1 is set.
 
 const invokedAs = process.env._ ?? ""
-// noinspection PointlessBooleanExpressionJS
-const isInteractive = process.stderr.isTTY === true
-if (isInteractive && !invokedAs.endsWith("/swiz") && !process.env.SWIZ_DIRECT) {
+const isSwizBinary =
+  invokedAs.endsWith("/swiz") || invokedAs.endsWith("\\swiz") || invokedAs === "swiz"
+if (!isSwizBinary && !process.env.SWIZ_DIRECT) {
   process.stderr.write(
     "Error: swiz must be invoked via the globally linked command.\n" +
       "\n" +

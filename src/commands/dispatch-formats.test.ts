@@ -70,6 +70,7 @@ async function dispatch({
       stdout: "pipe",
       stderr: "pipe",
       env: neutralAgentEnv({
+        SWIZ_DIRECT: "1",
         HOME: homeDir,
         // Prevent stop-auto-continue from waiting on live AI backends in format tests.
         AI_TEST_NO_BACKEND: "1",
