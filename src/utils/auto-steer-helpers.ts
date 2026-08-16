@@ -34,8 +34,8 @@ async function loadHumaniseModule(): Promise<HumaniseModule> {
  * to touch the file is swallowed because the drain loop still polls as a
  * safety fallback.
  */
-function touchMcpChannelNotify(cwd: string): void {
-  const path = swizMcpChannelNotifyPath(projectKeyFromCwd(cwd))
+function touchMcpChannelNotify(cwd?: string): void {
+  const path = swizMcpChannelNotifyPath(projectKeyFromCwd(cwd ?? process.cwd()))
   const now = new Date()
   try {
     utimesSync(path, now, now)
@@ -496,6 +496,58 @@ export async function sendAutoSteer(
  * preferred because the MCP channel is advisory and may drop notifications.
  * The MCP channel is used only when no AppleScript transport is available.
  */
+async function scheduleTerminalAutoSteer(
+  safeSession: string,
+  renderedMessage: string,
+  resolvedTrigger: AutoSteerTrigger,
+  message: string,
+  terminalApp?: string | null
+): Promise<boolean> {
+  const { getAutoSteerStore } = await import("../auto-steer-store.ts")
+  const store = getAutoSteerStore()
+
+  if (resolvedTrigger === "asap") {
+    const enqueued = store.enqueue(safeSession, renderedMessage, "asap", { dedupKey: message })
+    if (!enqueued) return false
+    const pending = store.consumeOne(safeSession, "asap")
+    if (pending.length === 0) return false
+    return await sendAutoSteer(pending[0]!.message, terminalApp, {
+      requeueOnForegroundDeferSessionId: safeSession,
+    })
+  }
+
+  store.enqueue(safeSession, renderedMessage, resolvedTrigger, { dedupKey: message })
+  return true
+}
+
+async function scheduleMcpAutoSteer(
+  safeSession: string,
+  renderedMessage: string,
+  resolvedTrigger: AutoSteerTrigger,
+  message: string,
+  cwd?: string
+): Promise<boolean> {
+  const { getAutoSteerStore } = await import("../auto-steer-store.ts")
+  const store = getAutoSteerStore()
+  const enqueued = store.enqueue(safeSession, renderedMessage, resolvedTrigger, {
+    cwd,
+    dedupKey: message,
+  })
+  if (enqueued) {
+    touchMcpChannelNotify(cwd)
+  }
+  return true
+}
+
+/**
+ * Schedule an auto-steer input with a steering prompt message.
+ * The message will be typed into the terminal on the next PostToolUse cycle,
+ * giving the agent actionable context (not just "Continue").
+ *
+ * Returns true if the request was scheduled. AppleScript-capable terminals are
+ * preferred because the MCP channel is advisory and may drop notifications.
+ * The MCP channel is used only when no AppleScript transport is available.
+ */
 export async function scheduleAutoSteer(
   sessionId: string,
   message = "Continue",
@@ -509,42 +561,22 @@ export async function scheduleAutoSteer(
   const { terminalApp, settingsAutoSteer } = await checkAutoSteerEligibility(sessionId)
   if (!settingsAutoSteer) return false
 
+  const renderedMessage = await renderAutoSteerMessage(sessionId, message)
+
   if (terminalApp) {
-    const { getAutoSteerStore } = await import("../auto-steer-store.ts")
-    const store = getAutoSteerStore()
-    const renderedMessage = await renderAutoSteerMessage(sessionId, message)
-
-    if (resolvedTrigger === "asap") {
-      // Deliver immediately instead of waiting for a PostToolUse/Stop dispatch.
-      // Enqueue first so the queue's dedup ledger suppresses duplicate sends,
-      // then atomically consume it and type it straight into the terminal.
-      const enqueued = store.enqueue(safeSession, renderedMessage, "asap", { dedupKey: message })
-      if (!enqueued) return false
-      const pending = store.consumeOne(safeSession, "asap")
-      if (pending.length === 0) return false
-      return await sendAutoSteer(pending[0]!.message, terminalApp, {
-        requeueOnForegroundDeferSessionId: safeSession,
-      })
-    }
-
-    store.enqueue(safeSession, renderedMessage, resolvedTrigger, { dedupKey: message })
-    return true
+    return await scheduleTerminalAutoSteer(
+      safeSession,
+      renderedMessage,
+      resolvedTrigger,
+      message,
+      terminalApp
+    )
   }
 
   if (!(await isMcpChannelsSettingEnabled(sessionId))) return false
   if (!canUseMcpChannel(resolvedTrigger, cwd)) return false
 
-  const { getAutoSteerStore } = await import("../auto-steer-store.ts")
-  const store = getAutoSteerStore()
-  const renderedMessage = await renderAutoSteerMessage(sessionId, message)
-  const enqueued = store.enqueue(safeSession, renderedMessage, resolvedTrigger, {
-    cwd,
-    dedupKey: message,
-  })
-  if (enqueued) {
-    touchMcpChannelNotify(cwd)
-  }
-  return true
+  return await scheduleMcpAutoSteer(safeSession, renderedMessage, resolvedTrigger, message, cwd)
 }
 
 /**

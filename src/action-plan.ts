@@ -39,6 +39,25 @@ export function filterTaskListActionSteps(
   return filtered
 }
 
+function resolvePlanSteps(
+  steps: ActionPlanItem[],
+  options?: {
+    translateToolNames?: boolean
+    agent?: AgentDef | null
+    observedToolNames?: Iterable<string>
+  }
+): { agent: AgentDef | null; planSteps: ActionPlanItem[] } {
+  if (!options?.translateToolNames) {
+    return { agent: null, planSteps: steps }
+  }
+  const agent = resolveTranslationAgent({
+    agent: options.agent,
+    observedToolNames: options.observedToolNames,
+  })
+  const planSteps = filterTaskListActionSteps(steps, agentDefinitelySupportsTaskList(agent))
+  return { agent, planSteps }
+}
+
 /**
  * Format a numbered action plan string from a list of steps.
  * Steps can be plain strings or nested arrays for sub-step hierarchies.
@@ -54,16 +73,7 @@ export function formatActionPlan(
   }
 ): string {
   if (steps.length === 0) return ""
-  const agent = options?.translateToolNames
-    ? resolveTranslationAgent({
-        agent: options?.agent,
-        observedToolNames: options?.observedToolNames,
-      })
-    : null
-  const planSteps =
-    options?.translateToolNames === true
-      ? filterTaskListActionSteps(steps, agentDefinitelySupportsTaskList(agent))
-      : steps
+  const { agent, planSteps } = resolvePlanSteps(steps, options)
   if (planSteps.length === 0) return ""
   const lines = renderItems(planSteps, agent, 1, "  ")
   if (!lines.trim()) return ""

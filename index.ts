@@ -71,9 +71,8 @@ function shouldUseThinDispatch(argv: string[]): boolean {
   return !!event && event !== "replay" && event !== "stop" && event !== "subagentStop"
 }
 
-async function runGeneralCli(): Promise<void> {
+async function loadAllCommands(): Promise<import("./src/types.ts").Command[]> {
   const [
-    cli,
     skill,
     hooks,
     install,
@@ -109,7 +108,6 @@ async function runGeneralCli(): Promise<void> {
     usage,
     daemon,
   ] = await Promise.all([
-    import("./src/cli.ts"),
     import("./src/commands/skill.ts"),
     import("./src/commands/hooks.ts"),
     import("./src/commands/install.ts"),
@@ -146,7 +144,7 @@ async function runGeneralCli(): Promise<void> {
     import("./src/commands/daemon.ts"),
   ])
 
-  const commands = [
+  return [
     skill.skillCommand,
     hooks.hooksCommand,
     install.installCommand,
@@ -182,6 +180,11 @@ async function runGeneralCli(): Promise<void> {
     usage.usageCommand,
     daemon.daemonCommand,
   ]
+}
+
+async function runGeneralCli(): Promise<void> {
+  const cli = await import("./src/cli.ts")
+  const commands = await loadAllCommands()
   for (const command of commands) cli.registerCommand(command)
   await cli.run()
 }

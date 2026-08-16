@@ -12,6 +12,81 @@ import { streamJsonlLines, tryParseJsonLine } from "./utils/jsonl.ts"
 
 const DEFAULT_COOLDOWN_SECONDS = 10
 
+async function checkCooldown(sessionId: string, cooldownSeconds: number): Promise<boolean> {
+  if (cooldownSeconds <= 0) return true
+  const cooldownFile = speakCooldownPath(sessionId)
+  try {
+    if (await Bun.file(cooldownFile).exists()) {
+      const lastRun = parseInt((await Bun.file(cooldownFile).text()).trim(), 10)
+      const age = Date.now() - lastRun
+      if (age < cooldownSeconds * 1000) return false
+    }
+    await Bun.write(cooldownFile, String(Date.now()))
+  } catch {
+    // Ignore cooldown errors — fail open
+  }
+  return true
+}
+
+async function readLastSpokenPosition(posFile: string): Promise<number> {
+  try {
+    if (await Bun.file(posFile).exists()) {
+      return parseInt((await Bun.file(posFile).text()).trim(), 10) || 0
+    }
+  } catch {
+    // Corrupted pos file — start from 0
+  }
+  return 0
+}
+
+interface AssistantBlock {
+  type?: string
+  text?: string
+}
+
+interface AssistantEntry {
+  type?: string
+  message?: { content?: AssistantBlock[] }
+}
+
+function collectAssistantText(entry: AssistantEntry | undefined, texts: string[]): void {
+  if (!entry || entry.type !== "assistant") return
+  for (const block of entry.message?.content ?? []) {
+    if (block.type === "text" && block.text) {
+      texts.push(block.text)
+    }
+  }
+}
+
+async function extractNewAssistantText(
+  transcriptPath: string,
+  lastPos: number
+): Promise<{ texts: string[]; totalLines: number }> {
+  const texts: string[] = []
+  let totalLines = 0
+  for await (const line of streamJsonlLines(transcriptPath)) {
+    if (!line.trim()) continue
+    totalLines++
+    if (totalLines <= lastPos) continue
+    const entry = tryParseJsonLine(line) as AssistantEntry | undefined
+    collectAssistantText(entry, texts)
+  }
+  return { texts, totalLines }
+}
+
+async function resolveTranscriptNewText(
+  sessionId: string,
+  transcriptPath: string
+): Promise<string> {
+  if (!(await Bun.file(transcriptPath).exists())) return ""
+  const posFile = speakPositionPath(sessionId)
+  const lastPos = await readLastSpokenPosition(posFile)
+  const { texts, totalLines } = await extractNewAssistantText(transcriptPath, lastPos)
+  if (totalLines <= lastPos) return ""
+  await Bun.write(posFile, String(totalLines))
+  return texts.join(" ").replace(/\s+/g, " ").trim()
+}
+
 /**
  * Orchestrate incremental narration for a session.
  * Handles incremental text detection, PID-aware locking, and TTS spawning.
@@ -29,71 +104,18 @@ export async function narrateSession(payload: {
   const settings = getEffectiveSwizSettings(rawSettings, sessionId)
   if (!settings.speak) return
 
-  // Check cooldown if requested
-  if (cooldownSeconds > 0) {
-    const cooldownFile = speakCooldownPath(sessionId)
-    try {
-      if (await Bun.file(cooldownFile).exists()) {
-        const lastRun = parseInt((await Bun.file(cooldownFile).text()).trim(), 10)
-        const age = Date.now() - lastRun
-        if (age < cooldownSeconds * 1000) return
-      }
-      await Bun.write(cooldownFile, String(Date.now()))
-    } catch {
-      // Ignore cooldown errors — fail open
-    }
-  }
+  const canProceed = await checkCooldown(sessionId, cooldownSeconds)
+  if (!canProceed) return
 
   const hasMessage = typeof message === "string" && message.trim().length > 0
-  if (!hasMessage && !(await Bun.file(transcriptPath).exists())) return
-
-  const lockFile = speakLockPath(sessionId)
-
-  let newText = ""
-
-  if (hasMessage) {
-    newText = message!.trim()
-  } else {
-    const posFile = speakPositionPath(sessionId)
-    let lastPos = 0
-    try {
-      if (await Bun.file(posFile).exists()) {
-        lastPos = parseInt((await Bun.file(posFile).text()).trim(), 10) || 0
-      }
-    } catch {
-      // Corrupted pos file — start from 0
-    }
-
-    const texts: string[] = []
-    let totalLines = 0
-
-    for await (const line of streamJsonlLines(transcriptPath)) {
-      if (!line.trim()) continue
-      totalLines++
-      if (totalLines <= lastPos) continue
-      const entry = tryParseJsonLine(line) as
-        | {
-            type?: string
-            message?: { content?: Array<{ type?: string; text?: string }> }
-          }
-        | undefined
-      if (!entry || entry.type !== "assistant") continue
-      for (const block of entry.message?.content ?? []) {
-        if (block.type === "text" && block.text) {
-          texts.push(block.text)
-        }
-      }
-    }
-
-    if (totalLines <= lastPos) return
-
-    await Bun.write(posFile, String(totalLines))
-    newText = texts.join(" ").replace(/\s+/g, " ").trim()
-  }
+  const newText = hasMessage
+    ? message!.trim()
+    : await resolveTranscriptNewText(sessionId, transcriptPath)
 
   if (newText.length < 5) return
 
   const truncated = newText.slice(0, 500)
+  const lockFile = speakLockPath(sessionId)
 
   try {
     await withFileLock(lockFile, async () => {

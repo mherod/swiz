@@ -82,16 +82,98 @@ export const grepTool = tool({
   },
 })
 
+async function resolveSkillOrError(
+  name: string
+): Promise<{ skill: Awaited<ReturnType<typeof findSkills>>[number] } | { error: string }> {
+  const skills = await findSkills()
+  const skill = skills.find((s) => s.name === name)
+  if (!skill) {
+    const available = skills.map((s) => s.name).join(", ")
+    return { error: `Skill not found: ${name}. Available skills: ${available}` }
+  }
+  return { skill }
+}
+
+function convertSkillForAgents(
+  content: string,
+  from_agent: string | undefined,
+  warnings: string[]
+): { content: string; error?: string } {
+  const activeAgent = detectCurrentAgent() ?? getAgent("claude")!
+  const sourceAgent = from_agent ? getAgent(from_agent) : activeAgent
+
+  if (!sourceAgent) {
+    return {
+      content,
+      error: `Unknown agent: ${from_agent}. Valid: ${AGENTS.map((a) => a.id).join(", ")}`,
+    }
+  }
+
+  if (sourceAgent.id !== activeAgent.id) {
+    const conversionResult = convertSkillContent(content, sourceAgent, activeAgent, AGENTS)
+    if (conversionResult.unmapped.length > 0) {
+      warnings.push(
+        `⚠ Unmapped tools: ${conversionResult.unmapped.join(", ")} (no equivalent in ${activeAgent.id})`
+      )
+    }
+    return { content: conversionResult.content }
+  }
+
+  return { content }
+}
+
+async function prepareSkillOutput(
+  rawContent: string,
+  name: string,
+  args: string,
+  from_agent?: string,
+  strip_frontmatter = false
+): Promise<{
+  description: string
+  category?: string
+  content: string
+  warnings?: string[]
+  error?: string
+}> {
+  const warnings: string[] = []
+  const availabilityWarning = getSkillToolAvailabilityWarning(name, rawContent)
+  if (availabilityWarning) {
+    warnings.push(availabilityWarning.message)
+  }
+
+  const description = parseFrontmatterField(rawContent, "description") ?? ""
+  const category = parseFrontmatterField(rawContent, "category") ?? ""
+
+  const positionalArgs = args ? args.split(/\s+/) : []
+  let content = substituteArgs(rawContent, positionalArgs)
+
+  const conversion = convertSkillForAgents(content, from_agent, warnings)
+  if (conversion.error) return { description, content, error: conversion.error }
+  content = conversion.content
+
+  content = await expandInlineCommands(content)
+  if (strip_frontmatter) {
+    content = stripFrontmatter(content)
+  }
+
+  return {
+    description,
+    category: category || undefined,
+    content,
+    warnings: warnings.length > 0 ? warnings : undefined,
+  }
+}
+
 export const skillTool = tool({
   description:
-    "Load and render a skill by name. Skills are reusable instruction sets (SKILL.md) that guide how to perform specific tasks. Returns the rendered skill content ready for execution.",
+    "Load a dynamic skill into context. Skills are modular capability bundles containing instructions, examples, and scripts. If the requested skill is not available, the tool returns the list of all available skill names.",
   inputSchema: z.object({
-    name: z.string().describe("Skill name (e.g., 'commit', 'push', 'test')"),
+    name: z.string().describe("Skill name (e.g. 'firebase-basics', 'commit')"),
     args: z
       .string()
       .optional()
       .describe(
-        "Arguments to pass to the skill (space-separated, used in $0, $1, $ARGUMENTS substitution)"
+        "Optional arguments passed to the skill (e.g. '123' for an issue number). Replaces $ARGUMENTS, $1, $2... in the skill content."
       ),
     from_agent: z
       .string()
@@ -104,70 +186,28 @@ export const skillTool = tool({
   }),
   execute: async ({ name, args = "", from_agent, strip_frontmatter = false }) => {
     try {
-      // Check skill exists
-      const skills = await findSkills()
-      const skill = skills.find((s) => s.name === name)
-      if (!skill) {
-        const available = skills.map((s) => s.name).join(", ")
-        return {
-          error: `Skill not found: ${name}. Available skills: ${available}`,
-        }
-      }
+      const resolved = await resolveSkillOrError(name)
+      if ("error" in resolved) return { error: resolved.error }
+      const { skill } = resolved
 
-      // Read raw content
-      let content = await Bun.file(skill.path).text()
-
-      // Check tool availability warnings
-      const warnings: string[] = []
-      const availabilityWarning = getSkillToolAvailabilityWarning(name, content)
-      if (availabilityWarning) {
-        warnings.push(availabilityWarning.message)
-      }
-
-      // Get metadata
-      const description = parseFrontmatterField(content, "description") ?? ""
-      const category = parseFrontmatterField(content, "category") ?? ""
-
-      // Substituting arguments before conversion
-      const positionalArgs = args ? args.split(/\s+/) : []
-      content = substituteArgs(content, positionalArgs)
-
-      // Convert between agents if requested
-      const activeAgent = detectCurrentAgent() ?? getAgent("claude")!
-      const sourceAgent = from_agent ? getAgent(from_agent) : activeAgent
-
-      if (!sourceAgent) {
-        return {
-          error: `Unknown agent: ${from_agent}. Valid: ${AGENTS.map((a) => a.id).join(", ")}`,
-        }
-      }
-
-      if (sourceAgent.id !== activeAgent.id) {
-        const conversionResult = convertSkillContent(content, sourceAgent, activeAgent, AGENTS)
-        content = conversionResult.content
-        if (conversionResult.unmapped.length > 0) {
-          warnings.push(
-            `⚠ Unmapped tools: ${conversionResult.unmapped.join(", ")} (no equivalent in ${activeAgent.id})`
-          )
-        }
-      }
-
-      // Expand inline commands
-      content = await expandInlineCommands(content)
-
-      // Strip frontmatter if requested
-      if (strip_frontmatter) {
-        content = stripFrontmatter(content)
-      }
+      const rawContent = await Bun.file(skill.path).text()
+      const prepared = await prepareSkillOutput(
+        rawContent,
+        name,
+        args,
+        from_agent,
+        strip_frontmatter
+      )
+      if (prepared.error) return { error: prepared.error }
 
       return {
         name: skill.name,
         source: skill.source,
         path: skill.path,
-        description,
-        category: category || undefined,
-        content,
-        warnings: warnings.length > 0 ? warnings : undefined,
+        description: prepared.description,
+        category: prepared.category,
+        content: prepared.content,
+        warnings: prepared.warnings,
       }
     } catch (err) {
       return { error: messageFromUnknownError(err) }

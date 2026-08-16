@@ -1,4 +1,5 @@
 import { join } from "node:path"
+import { z } from "zod"
 import {
   AGENTS,
   type AgentDef,
@@ -107,17 +108,27 @@ export function agentHasTaskTools(): boolean {
   return agent.tasksEnabled
 }
 
-type HookPayload = Record<string, unknown>
+export const hookPayloadSchema = z.looseObject({
+  _agent: z.string().optional(),
+  _env: z.record(z.string(), z.string().optional()).optional(),
+  transcript_path: z.string().optional(),
+  tool_name: z.string().optional(),
+  toolName: z.string().optional(),
+})
 
-function getStringField(input: HookPayload | undefined, key: string): string {
-  const value = input?.[key]
+export type HookPayload = z.infer<typeof hookPayloadSchema>
+
+function getStringField(input: object | null | undefined, key: string): string {
+  if (!input || typeof input !== "object") return ""
+  const value = Reflect.get(input, key)
   return typeof value === "string" ? value : ""
 }
 
 function payloadEnv(
-  input: HookPayload | undefined
+  input: object | null | undefined
 ): Record<string, string | undefined> | undefined {
-  const env = input?._env
+  if (!input || typeof input !== "object") return undefined
+  const env = Reflect.get(input, "_env")
   if (!env || typeof env !== "object" || Array.isArray(env)) return undefined
 
   const result: Record<string, string | undefined> = {}
@@ -129,7 +140,7 @@ function payloadEnv(
   return result
 }
 
-function detectCodexPayload(input: HookPayload | undefined): AgentDef | null {
+function detectCodexPayload(input: object | null | undefined): AgentDef | null {
   const transcriptPath = getStringField(input, "transcript_path")
   if (transcriptPath.includes("/.codex/sessions/")) return getAgent("codex") ?? null
 
@@ -152,7 +163,9 @@ function detectCodexPayload(input: HookPayload | undefined): AgentDef | null {
  * Fast path: if `_agent` is set on the payload (injected by `swiz dispatch
  * --agent <name>`), resolve it directly and skip env scanning.
  */
-export function detectCurrentAgentFromHookPayload(input: HookPayload | undefined): AgentDef | null {
+export function detectCurrentAgentFromHookPayload(
+  input: object | null | undefined
+): AgentDef | null {
   const explicitAgentId = getStringField(input, "_agent")
   if (explicitAgentId) {
     const found = getAgent(explicitAgentId)
@@ -168,7 +181,7 @@ export function detectCurrentAgentFromHookPayload(input: HookPayload | undefined
  * Check whether the hook payload's originating agent has task tools.
  * Codex is modeled as task-enabled through its `update_plan` planning surface.
  */
-export function agentHasTaskToolsForHookPayload(input: HookPayload | undefined): boolean {
+export function agentHasTaskToolsForHookPayload(input: object | null | undefined): boolean {
   const agent = detectCurrentAgentFromHookPayload(input)
   if (!agent) return true
   return agent.tasksEnabled
@@ -180,7 +193,7 @@ export function agentHasTaskToolsForHookPayload(input: HookPayload | undefined):
  * incomplete-task stop gate, including unknown callers which default to Claude.
  */
 export function shouldEnforceIncompleteTasksForHookPayload(
-  input: HookPayload | undefined
+  input: object | null | undefined
 ): boolean {
   return detectCurrentAgentFromHookPayload(input)?.id !== "codex"
 }

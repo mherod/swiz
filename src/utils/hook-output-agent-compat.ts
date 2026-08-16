@@ -86,6 +86,29 @@ function sanitizeCodexHookOutput(output: HookOutputLike): HookOutputLike {
 const TOOL_NAME_TEXT_FIELDS = ["reason", "systemMessage", "stopReason"] as const
 const NESTED_TOOL_NAME_TEXT_FIELDS = ["additionalContext", "permissionDecisionReason"] as const
 
+function canSkipToolNameTranslation(agent: AgentDef | undefined): boolean {
+  if (!agent || agent.id === "claude") return true
+  return Object.keys(agent.toolAliases).length === 0 && !agent.taskToolAliases
+}
+
+function translateToolNameField(value: unknown, agent: AgentDef): string | null {
+  if (typeof value !== "string" || !value) return null
+  const translated = translateToolNamesInText(value, agent)
+  return translated !== value ? translated : null
+}
+
+function translateNestedToolNames(
+  hookSpecificOutput: unknown,
+  agent: AgentDef,
+  onTranslate: (field: (typeof NESTED_TOOL_NAME_TEXT_FIELDS)[number], value: string) => void
+): void {
+  if (!isPlainObject(hookSpecificOutput)) return
+  for (const field of NESTED_TOOL_NAME_TEXT_FIELDS) {
+    const translated = translateToolNameField(hookSpecificOutput[field], agent)
+    if (translated !== null) onTranslate(field, translated)
+  }
+}
+
 /**
  * Rewrite canonical tool names (Bash/Edit/TaskCreate…) in agent-visible text
  * fields to the agent's own tool names, so no foreign tool name leaks to the
@@ -97,31 +120,19 @@ function translateHookOutputToolNames<T extends HookOutputLike>(
   output: T,
   agent: AgentDef | undefined
 ): T {
-  if (!agent || agent.id === "claude") return output
-  if (Object.keys(agent.toolAliases).length === 0 && !agent.taskToolAliases) return output
+  if (canSkipToolNameTranslation(agent)) return output
 
   let result: HookOutputLike | null = null
-  const ensureClone = (): HookOutputLike => {
-    result ??= structuredClone(output)
-    return result
-  }
+  const ensureClone = (): HookOutputLike => (result ??= structuredClone(output))
 
   for (const field of TOOL_NAME_TEXT_FIELDS) {
-    const value = output[field]
-    if (typeof value !== "string" || !value) continue
-    const translated = translateToolNamesInText(value, agent)
-    if (translated !== value) ensureClone()[field] = translated
+    const translated = translateToolNameField(output[field], agent!)
+    if (translated !== null) ensureClone()[field] = translated
   }
 
-  const hookSpecificOutput = output.hookSpecificOutput
-  if (isPlainObject(hookSpecificOutput)) {
-    for (const field of NESTED_TOOL_NAME_TEXT_FIELDS) {
-      const value = hookSpecificOutput[field]
-      if (typeof value !== "string" || !value) continue
-      const translated = translateToolNamesInText(value, agent)
-      if (translated !== value) ensureClone().hookSpecificOutput[field] = translated
-    }
-  }
+  translateNestedToolNames(output.hookSpecificOutput, agent!, (field, translated) => {
+    ensureClone().hookSpecificOutput[field] = translated
+  })
 
   return (result ?? output) as T
 }

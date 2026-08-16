@@ -325,6 +325,32 @@ function completeJsonlTailText(raw: string, reachedStart: boolean): string {
   return firstNewline === -1 ? "" : raw.slice(firstNewline + 1)
 }
 
+async function readTailSlice(
+  file: Bun.BunFile,
+  fileSize: number,
+  byteLimit: number
+): Promise<{ text: string; meta: JsonlTailTextMeta }> {
+  const rawStart = Math.max(0, fileSize - byteLimit)
+  const readStart = rawStart > 0 ? rawStart - 1 : 0
+  const raw = await file.slice(readStart).text()
+  const reachedStart = rawStart === 0
+  const bytesRead = fileSize - readStart
+  const text = completeJsonlTailText(raw, reachedStart)
+  const meta: JsonlTailTextMeta = { reachedStart, bytesRead, fileSize }
+  return { text, meta }
+}
+
+function isTailReadSufficient(
+  text: string,
+  meta: JsonlTailTextMeta,
+  byteLimit: number,
+  maxBytes: number,
+  options: JsonlTailTextOptions
+): boolean {
+  const enough = options.isEnough ? options.isEnough(text, meta) : true
+  return enough || meta.reachedStart || byteLimit >= maxBytes
+}
+
 export async function readJsonlTailTextFromFile(
   file: Bun.BunFile,
   fileSize: number,
@@ -335,16 +361,9 @@ export async function readJsonlTailTextFromFile(
   let byteLimit = Math.min(maxBytes, initialBytes)
 
   while (true) {
-    const rawStart = Math.max(0, fileSize - byteLimit)
-    const readStart = rawStart > 0 ? rawStart - 1 : 0
-    const raw = await file.slice(readStart).text()
-    const reachedStart = rawStart === 0
-    const bytesRead = fileSize - readStart
-    const text = completeJsonlTailText(raw, reachedStart)
-    const meta = { reachedStart, bytesRead, fileSize }
+    const { text, meta } = await readTailSlice(file, fileSize, byteLimit)
 
-    const enough = options.isEnough ? options.isEnough(text, meta) : true
-    if (enough || reachedStart || byteLimit >= maxBytes) {
+    if (isTailReadSufficient(text, meta, byteLimit, maxBytes, options)) {
       return { ...meta, text }
     }
 

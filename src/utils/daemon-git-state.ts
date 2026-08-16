@@ -47,6 +47,39 @@ export interface FetchGitStatusFromDaemonOptions {
   timeoutMs?: number
 }
 
+function resolveDaemonEndpointRequest(
+  path: string,
+  body: Record<string, any>,
+  options?: FetchGitStatusFromDaemonOptions
+): { url: string; init: RequestInit } {
+  const port = options?.port ?? getDaemonPort()
+  const signal = options?.signal ?? AbortSignal.timeout(options?.timeoutMs ?? 500)
+  return {
+    url: `http://127.0.0.1:${port}${path}`,
+    init: {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      signal,
+    },
+  }
+}
+
+async function postDaemonJson<T>(
+  path: string,
+  body: Record<string, any>,
+  options?: FetchGitStatusFromDaemonOptions
+): Promise<T | null> {
+  const { url, init } = resolveDaemonEndpointRequest(path, body, options)
+  try {
+    const res = await fetch(url, init)
+    if (!res.ok) return null
+    return (await res.json()) as T
+  } catch {
+    return null
+  }
+}
+
 /**
  * POST `{ cwd }` to the daemon `/git/state` endpoint.
  * Returns null when the daemon is down, the response is not OK, or the body lacks `status`.
@@ -55,21 +88,12 @@ export async function fetchGitStatusFromDaemon(
   cwd: string,
   options?: FetchGitStatusFromDaemonOptions
 ): Promise<GitStatusV2 | null> {
-  const port = options?.port ?? getDaemonPort()
-  const signal = options?.signal ?? AbortSignal.timeout(options?.timeoutMs ?? 500)
-  try {
-    const res = await fetch(`http://127.0.0.1:${port}/git/state`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ cwd }),
-      signal,
-    })
-    if (!res.ok) return null
-    const data = (await res.json()) as { status?: Record<string, any> } | null
-    return data?.status ? parseDaemonGitStateRecord(data.status) : null
-  } catch {
-    return null
-  }
+  const data = await postDaemonJson<{ status?: Record<string, any> }>(
+    "/git/state",
+    { cwd },
+    options
+  )
+  return data?.status ? parseDaemonGitStateRecord(data.status) : null
 }
 
 export interface DaemonLastUserMessage {
@@ -89,26 +113,18 @@ export async function fetchLastUserMessageFromDaemon(
   sessionId: string,
   options?: FetchGitStatusFromDaemonOptions & { transcriptPath?: string; cwd?: string }
 ): Promise<DaemonLastUserMessage | null> {
-  const port = options?.port ?? getDaemonPort()
-  const signal = options?.signal ?? AbortSignal.timeout(options?.timeoutMs ?? 500)
-  try {
-    const res = await fetch(`http://127.0.0.1:${port}/sessions/last-user-message`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        sessionId,
-        transcriptPath: options?.transcriptPath,
-        cwd: options?.cwd,
-      }),
-      signal,
-    })
-    if (!res.ok) return null
-    const data = (await res.json()) as Partial<DaemonLastUserMessage> | null
-    if (!data || typeof data.at !== "number") return null
-    return { at: data.at, source: data.source === "transcript" ? "transcript" : "hook" }
-  } catch {
-    return null
+  const body = {
+    sessionId,
+    transcriptPath: options?.transcriptPath,
+    cwd: options?.cwd,
   }
+  const data = await postDaemonJson<Partial<DaemonLastUserMessage>>(
+    "/sessions/last-user-message",
+    body,
+    options
+  )
+  if (!data || typeof data.at !== "number") return null
+  return { at: data.at, source: data.source === "transcript" ? "transcript" : "hook" }
 }
 
 /**
@@ -120,21 +136,10 @@ export async function fetchSessionTasksFromDaemon(
   cwd: string,
   options?: FetchGitStatusFromDaemonOptions
 ): Promise<Array<{ subject: string; status: string }> | null> {
-  const port = options?.port ?? getDaemonPort()
-  const signal = options?.signal ?? AbortSignal.timeout(options?.timeoutMs ?? 500)
-  try {
-    const res = await fetch(`http://127.0.0.1:${port}/sessions/tasks`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ sessionId, cwd, limit: 50 }),
-      signal,
-    })
-    if (!res.ok) return null
-    const data = (await res.json()) as {
-      tasks?: Array<{ subject: string; status: string }>
-    } | null
-    return Array.isArray(data?.tasks) ? data.tasks : null
-  } catch {
-    return null
-  }
+  const data = await postDaemonJson<{ tasks?: Array<{ subject: string; status: string }> }>(
+    "/sessions/tasks",
+    { sessionId, cwd, limit: 50 },
+    options
+  )
+  return Array.isArray(data?.tasks) ? data.tasks : null
 }

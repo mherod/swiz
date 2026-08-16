@@ -132,41 +132,58 @@ export function isBackgroundCommand(hookInput: PostToolHookInput, command: strin
   )
 }
 
+interface TokenizeState {
+  quote: string | null
+  token: string
+  tokens: string[]
+}
+
+function processQuotedChar(state: TokenizeState, segment: string, index: number): number {
+  const ch = segment[index]!
+  if (ch === state.quote) {
+    state.quote = null
+    return index
+  }
+  if (state.quote === '"' && ch === "\\" && index + 1 < segment.length) {
+    state.token += segment[index + 1]!
+    return index + 1
+  }
+  state.token += ch
+  return index
+}
+
+function processUnquotedChar(state: TokenizeState, segment: string, index: number): number {
+  const ch = segment[index]!
+  if (ch === '"' || ch === "'") {
+    state.quote = ch
+    return index
+  }
+  if (ch === "\\" && index + 1 < segment.length) {
+    state.token += segment[index + 1]!
+    return index + 1
+  }
+  if (ch === " " || ch === "\t") {
+    if (state.token) {
+      state.tokens.push(state.token)
+      state.token = ""
+    }
+    return index
+  }
+  state.token += ch
+  return index
+}
+
 /**
  * Basic shell tokenizer that splits on whitespace while respecting single/double quotes.
  */
 export function tokenize(segment: string): string[] {
-  const tokens: string[] = []
-  let token = ""
-  let quote: string | null = null
+  const state: TokenizeState = { quote: null, token: "", tokens: [] }
 
   for (let i = 0; i < segment.length; i++) {
-    const ch = segment[i]!
-    if (quote) {
-      if (ch === quote) {
-        quote = null
-      } else if (quote === '"' && ch === "\\" && i + 1 < segment.length) {
-        token += segment[++i]!
-      } else {
-        token += ch
-      }
-    } else {
-      if (ch === '"' || ch === "'") {
-        quote = ch
-      } else if (ch === "\\" && i + 1 < segment.length) {
-        token += segment[++i]!
-      } else if (ch === " " || ch === "\t") {
-        if (token) {
-          tokens.push(token)
-          token = ""
-        }
-      } else {
-        token += ch
-      }
-    }
+    i = state.quote ? processQuotedChar(state, segment, i) : processUnquotedChar(state, segment, i)
   }
-  if (token) {
-    tokens.push(token)
+  if (state.token) {
+    state.tokens.push(state.token)
   }
-  return tokens
+  return state.tokens
 }

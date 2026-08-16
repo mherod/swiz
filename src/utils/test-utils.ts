@@ -29,26 +29,27 @@ export interface InProcessCommandResult {
  * contracts. Command behavior tests use this helper so Bun startup, environment
  * setup, and unrelated CLI module initialization are not repeated per case.
  */
-export async function runCommandInProcess<TOptions>(
-  command: Command<TOptions>,
-  args: string[],
-  options: {
-    commandOptions?: TOptions
-    cwd?: string
-    env?: Record<string, string | undefined>
-  } = {}
-): Promise<InProcessCommandResult> {
-  await acquireEnvLock()
+interface ProcessEnvBackup {
+  originalEnv: Map<string, string | undefined>
+  originalCwd: string
+  originalExitCode: typeof process.exitCode
+  originalLog: typeof console.log
+  originalError: typeof console.error
+}
+
+function backupProcessState(
+  envOverrides: Record<string, string | undefined> | undefined,
+  stdout: string[],
+  stderr: string[]
+): ProcessEnvBackup {
   const originalEnv = new Map<string, string | undefined>()
   const originalCwd = process.cwd()
   const originalExitCode = process.exitCode
   const commandConsole = globalThis.console
   const originalLog = commandConsole.log
   const originalError = commandConsole.error
-  const stdout: string[] = []
-  const stderr: string[] = []
 
-  for (const [key, value] of Object.entries(options.env ?? {})) {
+  for (const [key, value] of Object.entries(envOverrides ?? {})) {
     originalEnv.set(key, process.env[key])
     if (value === undefined) delete process.env[key]
     else process.env[key] = value
@@ -61,24 +62,63 @@ export async function runCommandInProcess<TOptions>(
     stderr.push(values.map(String).join(" "))
   }
 
-  let exitCode: 0 | 1 = 0
+  return { originalEnv, originalCwd, originalExitCode, originalLog, originalError }
+}
+
+function restoreProcessState(backup: ProcessEnvBackup): void {
+  globalThis.console.log = backup.originalLog
+  globalThis.console.error = backup.originalError
+  process.chdir(backup.originalCwd)
+  process.exitCode = backup.originalExitCode
+  for (const [key, value] of backup.originalEnv) {
+    if (value === undefined) delete process.env[key]
+    else process.env[key] = value
+  }
+}
+
+async function executeCommandWithCwd<TOptions>(
+  command: Command<TOptions>,
+  args: string[],
+  options: { commandOptions?: TOptions; cwd?: string },
+  stderr: string[]
+): Promise<0 | 1> {
   try {
     if (options.cwd) process.chdir(options.cwd)
     process.exitCode = 0
     await command.run(args, options.commandOptions)
-    exitCode = process.exitCode === 0 ? 0 : 1
+    return process.exitCode === 0 ? 0 : 1
   } catch (error) {
-    exitCode = 1
     stderr.push(error instanceof Error ? error.message : String(error))
+    return 1
+  }
+}
+
+/**
+ * Run a command through its public `Command.run()` boundary.
+ *
+ * CLI subprocesses belong in the small set of tests that verify process-level
+ * contracts. Command behavior tests use this helper so Bun startup, environment
+ * setup, and unrelated CLI module initialization are not repeated per case.
+ */
+export async function runCommandInProcess<TOptions>(
+  command: Command<TOptions>,
+  args: string[],
+  options: {
+    commandOptions?: TOptions
+    cwd?: string
+    env?: Record<string, string | undefined>
+  } = {}
+): Promise<InProcessCommandResult> {
+  await acquireEnvLock()
+  const stdout: string[] = []
+  const stderr: string[] = []
+  const backup = backupProcessState(options.env, stdout, stderr)
+
+  let exitCode: 0 | 1 = 0
+  try {
+    exitCode = await executeCommandWithCwd(command, args, options, stderr)
   } finally {
-    commandConsole.log = originalLog
-    commandConsole.error = originalError
-    process.chdir(originalCwd)
-    process.exitCode = originalExitCode
-    for (const [key, value] of originalEnv) {
-      if (value === undefined) delete process.env[key]
-      else process.env[key] = value
-    }
+    restoreProcessState(backup)
     releaseEnvLockFn()
   }
 

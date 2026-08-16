@@ -292,45 +292,57 @@ export interface HumaniseOptions {
  * Resolves the last non-empty user or assistant message from the session transcript.
  * This provides crucial conversation context for humanisation rewrites.
  */
+interface ParsedTranscriptEntry {
+  role: "user" | "assistant"
+  text: string
+}
+
+function parseTranscriptRoleAndContent(parsed: Record<string, any>): {
+  role: "user" | "assistant" | null
+  content: unknown
+} {
+  if (parsed.type === "user" || parsed.type === "human") {
+    return { role: "user", content: parsed.message?.content ?? parsed.content }
+  }
+  if (parsed.type === "assistant") {
+    return { role: "assistant", content: parsed.message?.content ?? parsed.content }
+  }
+  return { role: null, content: null }
+}
+
+function isInternalUserFeedback(role: "user" | "assistant", text: string): boolean {
+  return (
+    role === "user" &&
+    (text.startsWith("Stop hook feedback:") || text.startsWith("<command-message>"))
+  )
+}
+
+function parseTranscriptLineForMessage(line: string): ParsedTranscriptEntry | null {
+  if (!line.trim()) return null
+  const parsed = tryParseJsonLine(line) as Record<string, any> | undefined
+  if (!parsed) return null
+
+  const { role, content } = parseTranscriptRoleAndContent(parsed)
+  if (!role || !content) return null
+
+  const text = extractTextFromUnknownContent(content).normalize("NFKC").trim()
+  if (!text || isInternalUserFeedback(role, text)) return null
+
+  return { role, text }
+}
+
+/**
+ * Resolves the last non-empty user or assistant message from the session transcript.
+ * This provides crucial conversation context for humanisation rewrites.
+ */
 export async function getLastTranscriptMessage(
   transcriptPath: string
 ): Promise<{ role: "user" | "assistant"; text: string } | null> {
   try {
     const lines = await readSessionLines(transcriptPath)
-    if (lines.length === 0) return null
-
     for (let i = lines.length - 1; i >= 0; i--) {
-      const line = lines[i]
-      if (!line?.trim()) continue
-
-      const parsed = tryParseJsonLine(line) as Record<string, any> | undefined
-      if (!parsed) continue
-
-      let role: "user" | "assistant" | null = null
-      let content: any = null
-
-      if (parsed.type === "user" || parsed.type === "human") {
-        role = "user"
-        content = parsed.message?.content ?? parsed.content
-      } else if (parsed.type === "assistant") {
-        role = "assistant"
-        content = parsed.message?.content ?? parsed.content
-      }
-
-      if (!role || !content) continue
-
-      const text = extractTextFromUnknownContent(content).normalize("NFKC").trim()
-      if (!text) continue
-
-      // Skip internal hook feedback or command messages
-      if (
-        role === "user" &&
-        (text.startsWith("Stop hook feedback:") || text.startsWith("<command-message>"))
-      ) {
-        continue
-      }
-
-      return { role, text }
+      const result = parseTranscriptLineForMessage(lines[i] ?? "")
+      if (result) return result
     }
   } catch {
     // Graceful fallback on any reading/parsing failure
@@ -359,6 +371,26 @@ export async function getInProgressTasksSnippet(
   return ""
 }
 
+async function buildHumaniseContextSnippet(options?: HumaniseOptions): Promise<string> {
+  if (options?._contextSnippet) return options._contextSnippet
+
+  let transcriptSnippet = ""
+  if (options?.transcriptPath) {
+    const lastMsg = await getLastTranscriptMessage(options.transcriptPath)
+    if (lastMsg) {
+      const roleName = lastMsg.role === "user" ? "User" : "Assistant"
+      transcriptSnippet = `\n\nRelated Conversation Context (Last Message):\n[${roleName}]: ${lastMsg.text}`
+    }
+  }
+
+  let taskSnippet = ""
+  if (options?.sessionId) {
+    taskSnippet = await getInProgressTasksSnippet(options.sessionId, options.homeDir)
+  }
+
+  return `${transcriptSnippet}${taskSnippet}`
+}
+
 /**
  * Rewrites a message into a humanised, single paragraph via the AI provider layer.
  */
@@ -367,24 +399,7 @@ export async function humaniseText(message: string, options?: HumaniseOptions): 
   const trimmed = message.trim()
   if (!trimmed) return message
 
-  let contextSnippet = options?._contextSnippet ?? ""
-  if (!options?._contextSnippet) {
-    let transcriptSnippet = ""
-    if (options?.transcriptPath) {
-      const lastMsg = await getLastTranscriptMessage(options.transcriptPath)
-      if (lastMsg) {
-        transcriptSnippet = `\n\nRelated Conversation Context (Last Message):\n[${lastMsg.role === "user" ? "User" : "Assistant"}]: ${lastMsg.text}`
-      }
-    }
-
-    let taskSnippet = ""
-    if (options?.sessionId) {
-      taskSnippet = await getInProgressTasksSnippet(options.sessionId, options.homeDir)
-    }
-
-    contextSnippet = `${transcriptSnippet}${taskSnippet}`
-  }
-
+  const contextSnippet = await buildHumaniseContextSnippet(options)
   const optsWithContext = { ...options, _contextSnippet: contextSnippet }
   const cacheKey = `${trimmed}::${options?.systemPrompt ?? ""}::${contextSnippet}`
   const cached = HUMANISE_CACHE.get(cacheKey)
@@ -400,12 +415,25 @@ function getFallback(trimmed: string, options?: HumaniseOptions): string {
   return fallbackHumaniseText(trimmed, { stripLine: options?.stripLine })
 }
 
-async function humaniseTextUncached(trimmed: string, options?: HumaniseOptions): Promise<string> {
-  const fallback = getFallback(trimmed, options)
-
-  const systemPrompt = options?.systemPrompt ?? DEFAULT_HUMANISE_SYSTEM_PROMPT
+async function fetchAndFormatRewrittenText(
+  prompt: string,
+  trimmed: string,
+  options?: HumaniseOptions
+): Promise<string | null> {
   const timeout = options?.timeoutMs ?? DEFAULT_HUMANISE_TIMEOUT_MS
   const stripLine = options?.stripLine
+  const rewrittenRaw = await promptText(prompt, { provider: "openrouter", timeout })
+  const rewritten = toSingleParagraph(rewrittenRaw, stripLine)
+
+  if (!rewritten || rewritten === toSingleParagraph(trimmed, stripLine)) {
+    return null
+  }
+  return rewritten
+}
+
+async function humaniseTextUncached(trimmed: string, options?: HumaniseOptions): Promise<string> {
+  const fallback = getFallback(trimmed, options)
+  const systemPrompt = options?.systemPrompt ?? DEFAULT_HUMANISE_SYSTEM_PROMPT
   const contextSnippet = options?._contextSnippet ?? ""
   const prompt = `${systemPrompt}${contextSnippet}\n\nText to rewrite:\n${trimmed}`
   const cacheDir = options?.cacheDir
@@ -414,12 +442,8 @@ async function humaniseTextUncached(trimmed: string, options?: HumaniseOptions):
   if (diskCached) return diskCached
 
   try {
-    const rewrittenRaw = await promptText(prompt, { provider: "openrouter", timeout })
-    const rewritten = toSingleParagraph(rewrittenRaw, stripLine)
-
-    if (!rewritten || rewritten === toSingleParagraph(trimmed, stripLine)) {
-      return fallback
-    }
+    const rewritten = await fetchAndFormatRewrittenText(prompt, trimmed, options)
+    if (!rewritten) return fallback
     await writePromptDiskCache(prompt, rewritten, cacheDir)
     return rewritten
   } catch {

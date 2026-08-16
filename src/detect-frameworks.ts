@@ -229,31 +229,42 @@ export async function detectProjectStack(cwd?: string): Promise<string[]> {
   return promise
 }
 
-async function detectProjectStackInner(dir: string): Promise<ProjectStack[]> {
-  const stacks: ProjectStack[] = []
-
+async function detectJsRuntime(dir: string): Promise<ProjectStack | null> {
   const hasBunLock =
     (await fileExists(join(dir, "bun.lockb"))) || (await fileExists(join(dir, "bun.lock")))
-  const hasPkg = await fileExists(join(dir, "package.json"))
+  if (hasBunLock) return "bun"
+  if (await fileExists(join(dir, "package.json"))) return "node"
+  return null
+}
 
-  if (hasBunLock) {
-    stacks.push("bun")
-  } else if (hasPkg) {
-    stacks.push("node")
+const SINGLE_FILE_INDICATORS: Array<[string, ProjectStack]> = [
+  ["go.mod", "go"],
+  ["Gemfile", "ruby"],
+  ["Cargo.toml", "rust"],
+  ["composer.json", "php"],
+]
+
+const MULTI_FILE_INDICATORS: Array<[readonly string[], ProjectStack]> = [
+  [PYTHON_INDICATOR_FILES, "python"],
+  [JAVA_INDICATOR_FILES, "java"],
+  [KOTLIN_INDICATOR_FILES, "kotlin"],
+  [GRADLE_INDICATOR_FILES, "gradle"],
+]
+
+async function detectIndicatorStacks(dir: string): Promise<ProjectStack[]> {
+  const detected: ProjectStack[] = []
+  for (const [file, stack] of SINGLE_FILE_INDICATORS) {
+    if (await fileExists(join(dir, file))) detected.push(stack)
   }
-
-  if (await fileExists(join(dir, "go.mod"))) stacks.push("go")
-
-  if (await hasAnyFile(dir, PYTHON_INDICATOR_FILES)) {
-    stacks.push("python")
+  for (const [files, stack] of MULTI_FILE_INDICATORS) {
+    if (await hasAnyFile(dir, files)) detected.push(stack)
   }
+  return detected
+}
 
-  if (await fileExists(join(dir, "Gemfile"))) stacks.push("ruby")
-  if (await fileExists(join(dir, "Cargo.toml"))) stacks.push("rust")
-  if (await hasAnyFile(dir, JAVA_INDICATOR_FILES)) stacks.push("java")
-  if (await fileExists(join(dir, "composer.json"))) stacks.push("php")
-  if (await hasAnyFile(dir, KOTLIN_INDICATOR_FILES)) stacks.push("kotlin")
-  if (await hasAnyFile(dir, GRADLE_INDICATOR_FILES)) stacks.push("gradle")
-
+async function detectProjectStackInner(dir: string): Promise<ProjectStack[]> {
+  const jsStack = await detectJsRuntime(dir)
+  const otherStacks = await detectIndicatorStacks(dir)
+  const stacks: ProjectStack[] = jsStack ? [jsStack, ...otherStacks] : otherStacks
   return stacks.sort()
 }
