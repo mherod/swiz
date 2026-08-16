@@ -274,94 +274,146 @@ function parseCursorSqliteEntries(text: string): TranscriptEntry[] {
   return entries
 }
 
+function cleanAntigravityUserRequest(raw: string): string {
+  return raw.replace(/^<USER_REQUEST>\n?/, "").replace(/\n?<\/USER_REQUEST>[\s\S]*$/, "")
+}
+
+function parseAntigravityToolInput(rawArgs: unknown): Record<string, unknown> {
+  let parsedArgs = rawArgs
+  if (typeof parsedArgs === "string") {
+    try {
+      parsedArgs = JSON.parse(parsedArgs)
+    } catch {}
+  }
+  return parsedArgs && typeof parsedArgs === "object" && !Array.isArray(parsedArgs)
+    ? (parsedArgs as Record<string, unknown>)
+    : {}
+}
+
+function parseAntigravityToolCall(
+  call: unknown,
+  stepIndex: unknown,
+  callIdSeq: number
+): { block: ContentBlock; callId: string } | null {
+  if (
+    !call ||
+    typeof call !== "object" ||
+    typeof (call as Record<string, unknown>).name !== "string"
+  ) {
+    return null
+  }
+  const callRec = call as Record<string, unknown>
+  const callId = `call_${stepIndex}_${callIdSeq}`
+  const input = parseAntigravityToolInput(callRec.args)
+  return {
+    block: {
+      type: "tool_use",
+      id: callId,
+      name: String(callRec.name),
+      input,
+    },
+    callId,
+  }
+}
+
+interface AntigravityState {
+  callIdSeq: number
+  lastToolUseId: string
+}
+
+function handleAntigravityUserInput(
+  rec: Record<string, unknown>,
+  createdAt: string | undefined,
+  entries: TranscriptEntry[]
+): void {
+  const rawContent = typeof rec.content === "string" ? rec.content : ""
+  entries.push({
+    type: "user",
+    timestamp: createdAt,
+    message: {
+      role: "user",
+      content: cleanAntigravityUserRequest(rawContent),
+    },
+  })
+}
+
+function handleAntigravityPlannerResponse(
+  rec: Record<string, unknown>,
+  createdAt: string | undefined,
+  state: AntigravityState,
+  entries: TranscriptEntry[]
+): void {
+  const blocks: ContentBlock[] = []
+  if (typeof rec.content === "string" && rec.content.trim().length > 0) {
+    blocks.push({ type: "text", text: rec.content })
+  }
+  if (Array.isArray(rec.tool_calls)) {
+    for (const call of rec.tool_calls) {
+      state.callIdSeq++
+      const result = parseAntigravityToolCall(call, rec.step_index, state.callIdSeq)
+      if (result) {
+        state.lastToolUseId = result.callId
+        blocks.push(result.block)
+      }
+    }
+  }
+  if (blocks.length > 0) {
+    entries.push({
+      type: "assistant",
+      timestamp: createdAt,
+      message: { role: "assistant", content: blocks },
+    })
+  }
+}
+
+function handleAntigravityToolResult(
+  rec: Record<string, unknown>,
+  createdAt: string | undefined,
+  lastToolUseId: string,
+  entries: TranscriptEntry[]
+): void {
+  if (!lastToolUseId || typeof rec.content !== "string") return
+  entries.push({
+    type: "user",
+    timestamp: createdAt,
+    message: {
+      role: "user",
+      content: [
+        {
+          type: "tool_result",
+          tool_use_id: lastToolUseId,
+          content: rec.content,
+        },
+      ],
+    },
+  })
+}
+
+function processAntigravityRecord(
+  rec: Record<string, unknown>,
+  state: AntigravityState,
+  entries: TranscriptEntry[]
+): void {
+  const { source, type, created_at } = rec
+  const createdAt = typeof created_at === "string" ? created_at : undefined
+
+  if (type === "USER_INPUT" || source === "USER_EXPLICIT") {
+    handleAntigravityUserInput(rec, createdAt, entries)
+  } else if (source === "MODEL" && type === "PLANNER_RESPONSE") {
+    handleAntigravityPlannerResponse(rec, createdAt, state, entries)
+  } else if (source === "MODEL" && type !== "PLANNER_RESPONSE") {
+    handleAntigravityToolResult(rec, createdAt, state.lastToolUseId, entries)
+  }
+}
+
 export function parseAntigravityJsonlEntries(text: string): TranscriptEntry[] {
   const entries: TranscriptEntry[] = []
-  let callIdSeq = 0
-  let lastToolUseId = ""
+  const state: AntigravityState = { callIdSeq: 0, lastToolUseId: "" }
 
   for (const line of splitJsonlLines(text)) {
     const obj = tryParseJsonLine(line)
-    if (!obj || typeof obj !== "object") continue
-
-    const rec = obj as Record<string, unknown>
-    const stepIndex = rec.step_index
-    const source = rec.source
-    const type = rec.type
-    const createdAt = typeof rec.created_at === "string" ? rec.created_at : undefined
-
-    if (type === "USER_INPUT" || source === "USER_EXPLICIT") {
-      let content = typeof rec.content === "string" ? rec.content : ""
-      content = content.replace(/^<USER_REQUEST>\n?/, "").replace(/\n?<\/USER_REQUEST>[\s\S]*$/, "")
-      entries.push({
-        type: "user",
-        timestamp: createdAt,
-        message: {
-          role: "user",
-          content,
-        },
-      })
-    } else if (source === "MODEL" && type === "PLANNER_RESPONSE") {
-      const blocks: ContentBlock[] = []
-      if (typeof rec.content === "string" && rec.content.trim().length > 0) {
-        blocks.push({ type: "text", text: rec.content })
-      }
-      if (Array.isArray(rec.tool_calls)) {
-        for (const call of rec.tool_calls) {
-          if (
-            call &&
-            typeof call === "object" &&
-            typeof (call as Record<string, unknown>).name === "string"
-          ) {
-            const callRec = call as Record<string, unknown>
-            callIdSeq++
-            const callId = `call_${stepIndex}_${callIdSeq}`
-            lastToolUseId = callId
-            let parsedArgs = callRec.args
-            if (typeof parsedArgs === "string") {
-              try {
-                parsedArgs = JSON.parse(parsedArgs)
-              } catch {}
-            }
-            const input =
-              parsedArgs && typeof parsedArgs === "object" && !Array.isArray(parsedArgs)
-                ? (parsedArgs as Record<string, unknown>)
-                : {}
-            blocks.push({
-              type: "tool_use",
-              id: callId,
-              name: String(callRec.name),
-              input,
-            })
-          }
-        }
-      }
-      if (blocks.length > 0) {
-        entries.push({
-          type: "assistant",
-          timestamp: createdAt,
-          message: {
-            role: "assistant",
-            content: blocks,
-          },
-        })
-      }
-    } else if (source === "MODEL" && type !== "PLANNER_RESPONSE") {
-      if (lastToolUseId && typeof rec.content === "string") {
-        entries.push({
-          type: "user",
-          timestamp: createdAt,
-          message: {
-            role: "user",
-            content: [
-              {
-                type: "tool_result",
-                tool_use_id: lastToolUseId,
-                content: rec.content,
-              },
-            ],
-          },
-        })
-      }
+    if (obj && typeof obj === "object") {
+      processAntigravityRecord(obj as Record<string, unknown>, state, entries)
     }
   }
 
@@ -379,7 +431,7 @@ const FORMAT_PARSERS: Record<string, (text: string) => TranscriptEntry[]> = {
   jsonl: parseJsonlEntries,
 }
 
-function autoDetectTranscriptFormat(text: string): TranscriptEntry[] {
+function tryDetectSpecializedFormat(text: string): TranscriptEntry[] | null {
   if (text.startsWith("SQLite format 3")) {
     const cursorEntries = parseCursorSqliteEntries(text)
     if (cursorEntries.length > 0) return cursorEntries
@@ -388,6 +440,13 @@ function autoDetectTranscriptFormat(text: string): TranscriptEntry[] {
   if (geminiEntries.length > 0) return geminiEntries
   const codexEntries = parseCodexJsonlEntries(text)
   if (codexEntries.length > 0) return codexEntries
+  return null
+}
+
+function autoDetectTranscriptFormat(text: string): TranscriptEntry[] {
+  const specialized = tryDetectSpecializedFormat(text)
+  if (specialized) return specialized
+
   if (text.includes('"step_index"') && text.includes('"source"')) {
     const antigravityEntries = parseAntigravityJsonlEntries(text)
     if (antigravityEntries.length > 0) return antigravityEntries
