@@ -21,7 +21,10 @@ builtin unalias \
   _swiz_ensure_bun_path _swiz_declared_pm _swiz_is_global_pm_operation \
   _swiz_package_dir _swiz_detect_pm \
   _swiz_detect_runtime _swiz_detect_runner \
-  _swiz_is_agent_process _swiz_is_agent_env _swiz_get_setting _swiz_guard \
+  _swiz_is_agent_process _swiz_is_agent_env _swiz_project_dir _swiz_get_setting \
+  _swiz_get_project_state _swiz_trunk_mode_enabled _swiz_guard \
+  _swiz_trunk_mode_branch_change _swiz_trunk_mode_git_guard \
+  _swiz_trunk_mode_has_review_checkout _swiz_trunk_mode_gh_guard \
   _swiz_pm_guard _swiz_has_function _swiz_chain_existing _swiz_run_git _swiz_run_gh \
   2>/dev/null || true
 
@@ -253,12 +256,40 @@ _swiz_is_agent_env() {
   return 1
 }
 
+_swiz_project_dir() {
+  local dir="${1:-$PWD}"
+  case "$dir" in
+    /*) ;;
+    *) dir="$PWD/$dir" ;;
+  esac
+  local fallback="$dir"
+
+  while true; do
+    if [[ -f "$dir/.swiz/config.json" || -f "$dir/.swiz/state.json" ]]; then
+      echo "$dir"
+      return 0
+    fi
+    local parent
+    parent="$(command dirname "$dir")"
+    [[ "$parent" == "$dir" ]] && break
+    dir="$parent"
+  done
+
+  echo "$fallback"
+}
+
 _swiz_get_setting() {
   local key="$1"
+  local start_dir="${2:-$PWD}"
+  local scope="${3:-effective}"
+  local project_dir
+  project_dir="$(_swiz_project_dir "$start_dir")"
   local val=""
   local conf_file
+  local conf_files=("$project_dir/.swiz/config.json")
+  [[ "$scope" == "project" ]] || conf_files+=("${HOME:-}/.swiz/settings.json")
   
-  for conf_file in "$PWD/.swiz/config.json" "${HOME:-}/.swiz/settings.json"; do
+  for conf_file in "${conf_files[@]}"; do
     if [[ -f "$conf_file" ]]; then
       if command -v jq >/dev/null 2>&1; then
         val="$(command jq -r ".$key // empty" "$conf_file" 2>/dev/null)"
@@ -272,6 +303,26 @@ _swiz_get_setting() {
     fi
   done
   echo ""
+}
+
+_swiz_get_project_state() {
+  local start_dir="${1:-$PWD}"
+  local project_dir
+  project_dir="$(_swiz_project_dir "$start_dir")"
+  local state_file="$project_dir/.swiz/state.json"
+  [[ -f "$state_file" ]] || { echo ""; return 0; }
+
+  if command -v jq >/dev/null 2>&1; then
+    command jq -r ".state // empty" "$state_file" 2>/dev/null
+  else
+    command grep -Eo '"state"[[:space:]]*:[[:space:]]*"[^"]*"' "$state_file" 2>/dev/null \
+      | command sed 's/.*:[[:space:]]*"//; s/"$//'
+  fi
+}
+
+_swiz_trunk_mode_enabled() {
+  local start_dir="${1:-$PWD}"
+  [[ "$(_swiz_get_setting "trunkMode" "$start_dir" "project")" == "true" ]]
 }
 
 # Core guard function. Returns 0 (true) if the command should be blocked.
@@ -292,6 +343,146 @@ _swiz_guard() {
   else
     return 1
   fi
+}
+
+# ── Trunk-mode workflow guards ───────────────────────────────────────────────
+# The hook layer owns the canonical policy. These shell guards mirror the
+# shell-reachable subset so commands stay protected in agents without hook
+# event support: no branch/worktree creation and no new PR workflow.
+
+_swiz_trunk_mode_branch_change() {
+  local arg flags
+  local has_positionals=false
+  local has_delete=false
+  local has_mutation=false
+  local has_safe_action=false
+
+  for arg in "$@"; do
+    [[ "$arg" == "--" ]] && continue
+
+    if [[ "$arg" == -[^-]* ]]; then
+      flags="$arg"
+      flags="${flags#-}"
+      [[ "$flags" == *d* || "$flags" == *D* ]] && has_delete=true
+      [[ "$flags" == *m* || "$flags" == *M* || "$flags" == *c* || "$flags" == *C* || "$flags" == *f* ]] && has_mutation=true
+      [[ "$flags" == *a* || "$flags" == *l* || "$flags" == *r* || "$flags" == *u* ]] && has_safe_action=true
+      continue
+    fi
+
+    case "$arg" in
+      --delete|--delete=*)
+        has_delete=true
+        ;;
+      --move|--move=*|--copy|--copy=*|--force|--force=*)
+        has_mutation=true
+        ;;
+      --all|--all=*|--color|--color=*|--column|--column=*|--contains|--contains=*|--edit-description|--edit-description=*|--format|--format=*|--ignore-case|--list|--list=*|--merged|--merged=*|--no-color|--no-column|--no-contains|--no-contains=*|--no-merged|--no-merged=*|--omit-empty|--points-at|--points-at=*|--remotes|--set-upstream-to|--set-upstream-to=*|--show-current|--sort|--sort=*|--unset-upstream)
+        has_safe_action=true
+        ;;
+      -*)
+        ;;
+      *)
+        has_positionals=true
+        ;;
+    esac
+  done
+
+  $has_delete && return 1
+  $has_mutation && return 0
+  $has_safe_action && return 1
+  $has_positionals
+}
+
+_swiz_trunk_mode_git_guard() {
+  local project_dir="$1"
+  local git_cmd="$2"
+  shift 2
+
+  _swiz_trunk_mode_enabled "$project_dir" || return 1
+
+  local default_branch
+  default_branch="$(_swiz_get_setting "defaultBranch" "$project_dir" "project")"
+  [[ -n "$default_branch" ]] || default_branch="main"
+
+  case "$git_cmd" in
+    checkout)
+      local arg
+      for arg in "$@"; do
+        [[ "$arg" == "--" ]] && break
+        case "$arg" in
+          -b|-b*|-B|-B*|--create|--create=*|--force-create|--force-create=*|--orphan|--orphan=*)
+            _swiz_guard "git checkout" "git switch $default_branch" \
+              "Trunk mode keeps work on \`$default_branch\`; branch creation and reshaping are blocked. Continue with \`git switch $default_branch\`, or use \`git switch <existing-branch>\` for recovery." "$@"
+            return $?
+            ;;
+        esac
+      done
+      ;;
+    switch)
+      local arg
+      for arg in "$@"; do
+        [[ "$arg" == "--" ]] && break
+        case "$arg" in
+          -c|-c*|-C|-C*|--create|--create=*|--force-create|--force-create=*|--orphan|--orphan=*)
+            _swiz_guard "git switch" "git switch $default_branch" \
+              "Trunk mode keeps work on \`$default_branch\`; branch creation and reshaping are blocked. Continue with \`git switch $default_branch\`, or use \`git switch <existing-branch>\` for recovery." "$@"
+            return $?
+            ;;
+        esac
+      done
+      ;;
+    branch)
+      if _swiz_trunk_mode_branch_change "$@"; then
+        _swiz_guard "git branch" "git switch $default_branch" \
+          "Trunk mode keeps work on \`$default_branch\`; branch creation and reshaping are blocked. Continue with \`git switch $default_branch\`, or use \`git switch <existing-branch>\` for recovery." "$@"
+        return $?
+      fi
+      ;;
+    worktree)
+      if [[ "$1" == "add" ]]; then
+        _swiz_guard "git worktree add" "git switch $default_branch" \
+          "Trunk mode keeps work in the current working directory; \`git worktree add\` is blocked. Continue with \`git switch $default_branch\`." "$@"
+        return $?
+      fi
+      ;;
+  esac
+
+  return 1
+}
+
+_swiz_trunk_mode_has_review_checkout() {
+  [[ "$(_swiz_get_project_state)" == "reviewing" ]] || return 1
+
+  local has_open_pr
+  has_open_pr="$(command gh pr list --state open --json number --limit 1 --jq 'length > 0' 2>/dev/null)" || return 1
+  [[ "$has_open_pr" == "true" ]]
+}
+
+_swiz_trunk_mode_gh_guard() {
+  local gh_cmd="$1" gh_subcmd="$2"
+
+  _swiz_trunk_mode_enabled || return 1
+  [[ "$gh_cmd" == "pr" ]] || return 1
+
+  local default_branch
+  default_branch="$(_swiz_get_setting "defaultBranch" "$PWD" "project")"
+  [[ -n "$default_branch" ]] || default_branch="main"
+
+  case "$gh_subcmd" in
+    create)
+      _swiz_guard "gh pr create" "git switch $default_branch" \
+        "Trunk mode delivers directly from \`$default_branch\`; pull request creation is blocked. Continue with \`git switch $default_branch\`, commit, and push. Existing pull requests can still be merged with \`gh pr merge <number>\`."
+      return $?
+      ;;
+    checkout)
+      _swiz_trunk_mode_has_review_checkout && return 1
+      _swiz_guard "gh pr checkout" "gh pr view <number>" \
+        "Trunk mode only permits \`gh pr checkout\` while project state is \`reviewing\` and an open pull request exists. Inspect with \`gh pr view <number>\`, or enter review with \`swiz state set reviewing\`."
+      return $?
+      ;;
+  esac
+
+  return 1
 }
 
 # ── Navigation ────────────────────────────────────────────────────────────────
@@ -579,18 +770,39 @@ git() {
   # Identify the git subcommand after global options such as `-C <dir>`.
   # Iterate values directly: bash arrays are zero-based while zsh arrays are
   # one-based, so indirect positional indexing is not portable between them.
+  local git_context_dir="$PWD"
   local git_cmd=""
   local arg
   local skip_global_value=false
+  local capture_git_context=false
   local git_cmd_args=()
   for arg in "${args[@]}"; do
     if [[ -z "$git_cmd" ]]; then
       if $skip_global_value; then
+        if $capture_git_context; then
+          case "$arg" in
+            /*) git_context_dir="$arg" ;;
+            *) git_context_dir="$git_context_dir/$arg" ;;
+          esac
+          capture_git_context=false
+        fi
         skip_global_value=false
         continue
       fi
       case "$arg" in
-        -C|-c|--git-dir|--work-tree|--namespace|--config-env)
+        -C)
+          capture_git_context=true
+          skip_global_value=true
+          ;;
+        -C?*)
+          local inline_git_context
+          inline_git_context="${arg#-C}"
+          case "$inline_git_context" in
+            /*) git_context_dir="$inline_git_context" ;;
+            *) git_context_dir="$git_context_dir/$inline_git_context" ;;
+          esac
+          ;;
+        -c|--git-dir|--work-tree|--namespace|--config-env)
           skip_global_value=true
           ;;
         --git-dir=*|--work-tree=*|--namespace=*|--config-env=*|--exec-path=*|-*)
@@ -603,6 +815,8 @@ git() {
     fi
     git_cmd_args+=("$arg")
   done
+
+  _swiz_trunk_mode_git_guard "$git_context_dir" "$git_cmd" "${git_cmd_args[@]}" && return 1
 
   # Block --no-verify on commit and push
   if [[ "$git_cmd" == "commit" || "$git_cmd" == "push" ]]; then
@@ -914,6 +1128,8 @@ gh() {
 
   local gh_cmd="$1"
   local gh_subcmd="$2"
+
+  _swiz_trunk_mode_gh_guard "$gh_cmd" "$gh_subcmd" && return 1
   
   if [[ "$gh_cmd" == "issue" && "$gh_subcmd" == "close" ]]; then
     local issue_close_gate

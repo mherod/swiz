@@ -32,6 +32,56 @@ async function runShell(
   return { exitCode, stdout, stderr }
 }
 
+async function writeExecutable(path: string, contents: string): Promise<void> {
+  await Bun.write(path, contents)
+  const chmod = Bun.spawn(["chmod", "+x", path], { stdout: "pipe", stderr: "pipe" })
+  const [, stderr, exitCode] = await Promise.all([
+    new Response(chmod.stdout).text(),
+    new Response(chmod.stderr).text(),
+    chmod.exited,
+  ])
+  expect(exitCode, stderr).toBe(0)
+}
+
+async function createTrunkShimProject(
+  options: { enabled?: boolean; state?: string } = {}
+): Promise<string> {
+  const project = await tmp.create("swiz-shim-trunk-")
+  const swizDir = join(project, ".swiz")
+  await mkdir(swizDir, { recursive: true })
+  await Bun.write(
+    join(swizDir, "config.json"),
+    JSON.stringify({ defaultBranch: "main", trunkMode: options.enabled ?? true })
+  )
+  if (options.state) {
+    await Bun.write(join(swizDir, "state.json"), JSON.stringify({ state: options.state }))
+  }
+  return project
+}
+
+async function createShimCommandStub(
+  project: string,
+  name: string,
+  contents: string
+): Promise<string> {
+  const binDir = join(project, "bin")
+  await mkdir(binDir, { recursive: true })
+  await writeExecutable(join(binDir, name), contents)
+  return binDir
+}
+
+async function runSourcedShim(
+  cwd: string,
+  command: string,
+  env: Record<string, string> = {}
+): Promise<{ exitCode: number; stdout: string; stderr: string }> {
+  return await runShell(
+    ZSH_PATH ?? "zsh",
+    ["-f", "-c", 'source "$1"; eval "$2"', "swiz", SHIM_PATH, command],
+    { cwd, env: { SWIZ_SHIM: "strict", ...env } }
+  )
+}
+
 describe("shell shim runtime", () => {
   async function runPackageManagerGuard(cwd: string, invoked: string, args: string[] = []) {
     return await runShell(
@@ -195,6 +245,166 @@ describe("shell shim runtime", () => {
       expect(result.exitCode, `${invoked} ${args.join(" ")}`).toBe(1)
       expect(result.stderr).toContain(`Do not use \`${invoked}\``)
     }
+  })
+
+  testWithZsh("blocks branch and worktree creation in trunk mode", async () => {
+    const project = await createTrunkShimProject()
+    const commands = [
+      "git checkout -b feat/new",
+      "git checkout --orphan feat/orphan",
+      "git switch --create=feat/new",
+      "git switch -C feat/reset",
+      "git branch feat/direct",
+      "git -C . branch --track feat/tracked origin/main",
+      "git branch --copy main feat/copied",
+      "git worktree add ../feature",
+    ]
+
+    for (const command of commands) {
+      const result = await runSourcedShim(project, command)
+      expect(result.exitCode, command).toBe(1)
+      expect(result.stderr, command).toContain("Trunk mode")
+    }
+  })
+
+  testWithZsh("resolves trunk mode from child cwd and git -C targets", async () => {
+    const project = await createTrunkShimProject()
+    const child = join(project, "src")
+    const outside = await tmp.create("swiz-shim-trunk-outside-")
+    await mkdir(child, { recursive: true })
+    const binDir = await createShimCommandStub(
+      project,
+      "git",
+      "#!/usr/bin/env sh\nprintf 'git:%s\\n' \"$*\"\n"
+    )
+    const env = { PATH: [binDir, process.env.PATH ?? ""].join(":") }
+
+    const fromChild = await runSourcedShim(child, "git checkout -b feat/child")
+    expect(fromChild.exitCode).toBe(1)
+    expect(fromChild.stderr).toContain("Trunk mode")
+
+    const fromTarget = await runSourcedShim(
+      outside,
+      ["git -C", project, "worktree add ../feature"].join(" ")
+    )
+    expect(fromTarget.exitCode).toBe(1)
+    expect(fromTarget.stderr).toContain("Trunk mode")
+
+    const unrelatedTarget = await runSourcedShim(
+      project,
+      ["git -C", outside, "checkout -b feat/outside"].join(" "),
+      env
+    )
+    expect(unrelatedTarget.exitCode).toBe(0)
+    expect(unrelatedTarget.stdout).toContain("git:-C")
+    expect(unrelatedTarget.stderr).not.toContain("Trunk mode")
+  })
+
+  testWithZsh("keeps trunk recovery and cleanup commands available", async () => {
+    const project = await createTrunkShimProject()
+    const binDir = await createShimCommandStub(
+      project,
+      "git",
+      "#!/usr/bin/env sh\nprintf 'git:%s\\n' \"$*\"\n"
+    )
+    const env = { PATH: [binDir, process.env.PATH ?? ""].join(":") }
+    const cases = [
+      ["git switch main", "switch main"],
+      ["git checkout feat/existing", "checkout feat/existing"],
+      ["git branch --list", "branch --list"],
+      ["git branch -d feat/merged", "branch -d feat/merged"],
+      ["git worktree list", "worktree list"],
+    ] as const
+
+    for (const [command, delegated] of cases) {
+      const result = await runSourcedShim(project, command, env)
+      expect(result.exitCode, command).toBe(0)
+      expect(result.stdout, command).toContain(["git:", delegated, "\n"].join(""))
+      expect(result.stderr, command).not.toContain("Trunk mode")
+    }
+  })
+
+  testWithZsh("blocks new pull-request workflow in trunk mode", async () => {
+    const project = await createTrunkShimProject()
+    const binDir = await createShimCommandStub(
+      project,
+      "gh",
+      "#!/usr/bin/env sh\nprintf 'gh:%s\\n' \"$*\"\n"
+    )
+    const env = { PATH: [binDir, process.env.PATH ?? ""].join(":") }
+
+    for (const command of ["gh pr create --fill", "gh pr checkout 42"]) {
+      const result = await runSourcedShim(project, command, env)
+      expect(result.exitCode, command).toBe(1)
+      expect(result.stderr, command).toContain("Trunk mode")
+      expect(result.stdout, command).toBe("")
+    }
+  })
+
+  testWithZsh("allows PR checkout only for an active trunk review", async () => {
+    const project = await createTrunkShimProject({ state: "reviewing" })
+    const child = join(project, "src")
+    await mkdir(child, { recursive: true })
+    const binDir = await createShimCommandStub(
+      project,
+      "gh",
+      [
+        "#!/usr/bin/env sh",
+        'if [ "$1" = "pr" ] && [ "$2" = "list" ]; then',
+        "  printf 'true\\n'",
+        "  exit 0",
+        "fi",
+        "printf 'gh:%s\\n' \"$*\"",
+        "",
+      ].join("\n")
+    )
+    const result = await runSourcedShim(child, "gh pr checkout 42", {
+      PATH: [binDir, process.env.PATH ?? ""].join(":"),
+    })
+
+    expect(result.exitCode).toBe(0)
+    expect(result.stdout).toBe("gh:pr checkout 42\n")
+    expect(result.stderr).not.toContain("Trunk mode")
+  })
+
+  testWithZsh("blocks PR checkout when a trunk review has no open PR", async () => {
+    const project = await createTrunkShimProject({ state: "reviewing" })
+    const binDir = await createShimCommandStub(
+      project,
+      "gh",
+      [
+        "#!/usr/bin/env sh",
+        'if [ "$1" = "pr" ] && [ "$2" = "list" ]; then',
+        "  printf 'false\\n'",
+        "  exit 0",
+        "fi",
+        "printf 'gh:%s\\n' \"$*\"",
+        "",
+      ].join("\n")
+    )
+    const result = await runSourcedShim(project, "gh pr checkout 42", {
+      PATH: [binDir, process.env.PATH ?? ""].join(":"),
+    })
+
+    expect(result.exitCode).toBe(1)
+    expect(result.stderr).toContain("Trunk mode")
+    expect(result.stdout).toBe("")
+  })
+
+  testWithZsh("leaves branch creation available when trunk mode is disabled", async () => {
+    const project = await createTrunkShimProject({ enabled: false })
+    const binDir = await createShimCommandStub(
+      project,
+      "git",
+      "#!/usr/bin/env sh\nprintf 'git:%s\\n' \"$*\"\n"
+    )
+    const result = await runSourcedShim(project, "git checkout -b feat/allowed", {
+      PATH: [binDir, process.env.PATH ?? ""].join(":"),
+    })
+
+    expect(result.exitCode).toBe(0)
+    expect(result.stdout).toBe("git:checkout -b feat/allowed\n")
+    expect(result.stderr).not.toContain("Trunk mode")
   })
 
   testWithZsh("finds Bun before login PATH setup runs", async () => {
