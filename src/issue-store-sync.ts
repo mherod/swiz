@@ -1,6 +1,12 @@
 import { debugLog } from "./debug.ts"
 import { getRepoSlug } from "./git-helpers.ts"
-import type { GitHubCiRunRecord, GitHubClient, IssueStore } from "./issue-store.ts"
+import type {
+  GitHubCiRunRecord,
+  GitHubClient,
+  GitHubIssueRecord,
+  GitHubPullRequestRecord,
+  IssueStore,
+} from "./issue-store.ts"
 import { mapSyncedPrBranchDetail } from "./pr-branch-detail.ts"
 import { getDefaultBranch } from "./utils/git-utils.ts"
 
@@ -82,6 +88,73 @@ const DISPLAY_FIELDS = [
   "color",
 ] as const
 
+function describeNumericDelta(
+  field: string,
+  label: string,
+  oldObj: Record<string, unknown>,
+  newObj: Record<string, unknown>
+): string | null {
+  if (
+    field === "commentCount" &&
+    typeof oldObj[field] === "number" &&
+    typeof newObj[field] === "number"
+  ) {
+    const delta = (newObj[field] as number) - (oldObj[field] as number)
+    if (delta > 0) {
+      return `+${delta} ${delta === 1 ? "comment" : "comments"}`
+    }
+    return `${label} ${oldObj[field]} → ${newObj[field]}`
+  }
+  return null
+}
+
+function describeScalarFieldChange(field: string, label: string, val: unknown): string | null {
+  if (typeof val !== "string") return null
+  if (field === "title") {
+    const truncated = val.length > 50 ? `${val.slice(0, 47)}…` : val
+    return `${label} → "${truncated}"`
+  }
+  const display = field === "reviewDecision" ? (REVIEW_LABELS[val] ?? val) : val
+  return `${label} → ${display}`
+}
+
+function describeSingleFieldChange(
+  field: string,
+  oldObj: Record<string, unknown>,
+  newObj: Record<string, unknown>
+): string | null {
+  const oldVal = JSON.stringify(oldObj[field])
+  const newVal = JSON.stringify(newObj[field])
+  if (oldVal === newVal) return null
+
+  const label = FIELD_LABELS[field] ?? field
+
+  const numericDelta = describeNumericDelta(field, label, oldObj, newObj)
+  if (numericDelta) return numericDelta
+
+  const scalarChange = describeScalarFieldChange(field, label, newObj[field])
+  if (scalarChange) return scalarChange
+
+  if (field === "labels" || field === "assignees" || field === "requestedReviewers") {
+    const diff = describeArrayDiff(oldObj[field], newObj[field])
+    if (diff) return `${label} ${diff}`
+  }
+
+  return label
+}
+
+function countChangedKeys(
+  oldObj: Record<string, unknown>,
+  newObj: Record<string, unknown>
+): number {
+  const allKeys = new Set([...Object.keys(oldObj), ...Object.keys(newObj)])
+  let diffCount = 0
+  for (const k of allKeys) {
+    if (JSON.stringify(oldObj[k]) !== JSON.stringify(newObj[k])) diffCount++
+  }
+  return diffCount
+}
+
 /**
  * Produce a human-readable summary of what changed between two JSON-serialised
  * entities.  Returns e.g. `"state → closed"`, `"labels +bug"`, `"review → approved"`.
@@ -99,64 +172,12 @@ function describeChanges(oldJson: string, newJson: string): string {
 
   const changed: string[] = []
   for (const field of DISPLAY_FIELDS) {
-    const oldVal = JSON.stringify(oldObj[field])
-    const newVal = JSON.stringify(newObj[field])
-    if (oldVal === newVal) continue
-
-    const label = FIELD_LABELS[field] ?? field
-
-    // Numeric delta: "comments +3" or "comments 5 → 2"
-    if (
-      field === "commentCount" &&
-      typeof oldObj[field] === "number" &&
-      typeof newObj[field] === "number"
-    ) {
-      const delta = (newObj[field] as number) - (oldObj[field] as number)
-      if (delta > 0) {
-        changed.push(`+${delta} ${delta === 1 ? "comment" : "comments"}`)
-      } else {
-        changed.push(`${label} ${oldObj[field]} → ${newObj[field]}`)
-      }
-      continue
-    }
-
-    // Title: show truncated new value in quotes
-    if (field === "title" && typeof newObj[field] === "string") {
-      const title = newObj[field] as string
-      const truncated = title.length > 50 ? `${title.slice(0, 47)}…` : title
-      changed.push(`${label} → "${truncated}"`)
-      continue
-    }
-
-    // Scalar transition: "state → closed", "review → approved"
-    if (typeof newObj[field] === "string") {
-      const display =
-        field === "reviewDecision"
-          ? (REVIEW_LABELS[newObj[field] as string] ?? newObj[field])
-          : newObj[field]
-      changed.push(`${label} → ${display}`)
-      continue
-    }
-
-    // Array fields: show added/removed names
-    if (field === "labels" || field === "assignees" || field === "requestedReviewers") {
-      const diff = describeArrayDiff(oldObj[field], newObj[field])
-      if (diff) {
-        changed.push(`${label} ${diff}`)
-        continue
-      }
-    }
-
-    changed.push(label)
+    const desc = describeSingleFieldChange(field, oldObj, newObj)
+    if (desc) changed.push(desc)
   }
   if (changed.length > 0) return changed.join(", ")
 
-  // Fall back: count how many top-level keys differ
-  const allKeys = new Set([...Object.keys(oldObj), ...Object.keys(newObj)])
-  let diffCount = 0
-  for (const k of allKeys) {
-    if (JSON.stringify(oldObj[k]) !== JSON.stringify(newObj[k])) diffCount++
-  }
+  const diffCount = countChangedKeys(oldObj, newObj)
   return diffCount > 0 ? `${diffCount} field${diffCount > 1 ? "s" : ""} updated` : "updated"
 }
 
@@ -273,22 +294,31 @@ function syncEntityGroup(
   }
 }
 
-function syncCiRuns(
-  s: IssueStore,
-  repo: string,
-  runs:
-    | { headSha: string; databaseId: number; status: string; conclusion: string; url: string }[]
-    | null,
-  result: UpstreamSyncResult
-): void {
-  if (!runs || runs.length === 0) return
-  // Deduplicate by SHA — keep the run with the highest databaseId (most recent).
-  // Without this, multiple runs per SHA cause oscillation between syncs.
-  const bySha = new Map<string, (typeof runs)[number]>()
+type CiRunInput = {
+  headSha: string
+  databaseId: number
+  status: string
+  conclusion: string
+  url: string
+}
+
+function deduplicateRunsBySha(runs: readonly CiRunInput[]): Map<string, CiRunInput> {
+  const bySha = new Map<string, CiRunInput>()
   for (const r of runs) {
     const existing = bySha.get(r.headSha)
     if (!existing || r.databaseId > existing.databaseId) bySha.set(r.headSha, r)
   }
+  return bySha
+}
+
+function syncCiRuns(
+  s: IssueStore,
+  repo: string,
+  runs: CiRunInput[] | null,
+  result: UpstreamSyncResult
+): void {
+  if (!runs || runs.length === 0) return
+  const bySha = deduplicateRunsBySha(runs)
   const changed: {
     sha: string
     run_id: number
@@ -565,22 +595,10 @@ async function syncComments(
   ctx.result.comments.upserted = commentCount
 }
 
-/**
- * Poll upstream GitHub state for a repo and refresh the local store.
- * Fetches open issues, open PRs, and recent workflow runs, then upserts
- * into the shared store. Safe to call on a cadence from the daemon.
- */
-export async function syncUpstreamState(
-  repo: string,
-  cwd: string,
-  opts?: { store?: IssueStore; client?: GitHubClient }
-): Promise<UpstreamSyncResult> {
-  const { getIssueStore, GhCliGitHubClient } = await import("./issue-store.ts")
-  const s = opts?.store ?? getIssueStore()
-
+function createInitialSyncResult(): UpstreamSyncResult {
   const bucket = (): SyncBucket => ({ upserted: 0, removed: 0, skipped: 0, changes: [] })
   const tracked = () => ({ upserted: 0, changes: [] as SyncChange[] })
-  const result: UpstreamSyncResult = {
+  return {
     issues: bucket(),
     pullRequests: bucket(),
     ciStatuses: tracked(),
@@ -594,29 +612,136 @@ export async function syncUpstreamState(
     restCache: { requests: 0, notModified: 0, writes: 0 },
     fetchOk: false,
   }
+}
+
+async function verifyRepoOriginInvariant(
+  repo: string,
+  cwd: string,
+  hasClient: boolean
+): Promise<boolean> {
+  if (hasClient) return true
+  const originSlug = await getRepoSlug(cwd)
+  if (originSlug !== null && originSlug !== repo) {
+    debugLog(
+      `[issue-sync] refusing sync: repo "${repo}" does not match the origin of cwd ` +
+        `("${originSlug}"). cwd-implied fetches would corrupt the cache — run from the ` +
+        `repo's checkout or supply a repo-targeted client.`
+    )
+    return false
+  }
+  return true
+}
+
+function hasEntitySnapshotChanged(
+  items: unknown[] | null,
+  snap: { count: number; maxUpdatedAt: string | null }
+): boolean {
+  if (!items) return false
+  const countChanged = items.length !== snap.count
+  const maxUpdated = maxUpdatedAt(items as { updatedAt?: string }[])
+  return countChanged || maxUpdated !== snap.maxUpdatedAt
+}
+
+interface PrimarySyncPayloads {
+  issues: GitHubIssueRecord[] | null
+  prs: GitHubPullRequestRecord[] | null
+  runs: CiRunInput[] | null
+  labels: { name: string }[] | null
+  milestones: { number: number }[] | null
+  closedIssues: GitHubIssueRecord[] | null
+  closedPrs: GitHubPullRequestRecord[] | null
+}
+
+function syncPrimaryEntities(
+  s: IssueStore,
+  repo: string,
+  payloads: PrimarySyncPayloads,
+  result: UpstreamSyncResult
+): void {
+  syncEntityGroup(
+    repo,
+    payloads.issues,
+    payloads.closedIssues,
+    {
+      upsert: (r, items) => s.upsertIssues(r, items),
+      removeClosed: (r, nums) => s.removeClosedIssues(r, nums),
+      remove: (r, nums) => s.removeIssues(r, nums),
+      getRaw: (r, num) => s.getIssueRaw(r, num),
+    },
+    result.issues
+  )
+  syncEntityGroup(
+    repo,
+    payloads.prs,
+    payloads.closedPrs,
+    {
+      upsert: (r, items) => s.upsertPullRequests(r, items),
+      removeClosed: (r, nums) => s.removeClosedPullRequests(r, nums),
+      remove: (r, nums) => s.removePullRequests(r, nums),
+      getRaw: (r, num) => s.getPullRequestRaw(r, num),
+    },
+    result.pullRequests
+  )
+  syncCiRuns(s, repo, payloads.runs, result)
+  syncLabels(s, repo, payloads.labels, result)
+  syncMilestones(s, repo, payloads.milestones, result)
+}
+
+function checkAllPrimaryListsCached(
+  cacheHits: number,
+  payloads: PrimarySyncPayloads,
+  issuesChanged: boolean,
+  prsChanged: boolean
+): boolean {
+  return (
+    cacheHits >= 5 &&
+    payloads.issues !== null &&
+    payloads.prs !== null &&
+    payloads.runs !== null &&
+    payloads.labels !== null &&
+    payloads.milestones !== null &&
+    !issuesChanged &&
+    !prsChanged
+  )
+}
+
+async function fetchClosedEntities(
+  gh: GitHubClient,
+  cwd: string,
+  issuesChanged: boolean,
+  prsChanged: boolean
+): Promise<[GitHubIssueRecord[] | null, GitHubPullRequestRecord[] | null]> {
+  return await Promise.all([
+    issuesChanged ? gh.listIssues(cwd, "closed") : Promise.resolve(null),
+    prsChanged ? gh.listPullRequests(cwd, "closed") : Promise.resolve(null),
+  ])
+}
+
+function updateSyncFreshnessCursor(ctx: SyncContext, isFetchOk: boolean): void {
+  ctx.result.fetchOk = isFetchOk
+  if (isFetchOk) {
+    ctx.store.setSyncCursor(ctx.repo, "last_synced", new Date().toISOString())
+    ctx.store.setSyncCursor(ctx.repo, "cwd", ctx.cwd)
+  }
+}
+
+/**
+ * Poll upstream GitHub state for a repo and refresh the local store.
+ * Fetches open issues, open PRs, and recent workflow runs, then upserts
+ * into the shared store. Safe to call on a cadence from the daemon.
+ */
+export async function syncUpstreamState(
+  repo: string,
+  cwd: string,
+  opts?: { store?: IssueStore; client?: GitHubClient }
+): Promise<UpstreamSyncResult> {
+  const { getIssueStore, GhCliGitHubClient } = await import("./issue-store.ts")
+  const s = opts?.store ?? getIssueStore()
+  const result = createInitialSyncResult()
   const gh = opts?.client ?? new GhCliGitHubClient(result.restCache)
 
-  // ─── Enforce the repo/cwd invariant (#711) ──────────────────────────────
-  // Every default-client fetch resolves its target repo from `cwd`'s origin
-  // remote (gh runs without `--repo`), so writing under `repo` is only safe
-  // when `repo` IS that origin slug. A mismatch would store one repo's data
-  // under another repo's key in the shared store and let removeClosedIssues()
-  // purge the victim repo's legitimate rows. Refuse rather than corrupt.
-  //
-  // An injected client (tests, or a future slug-targeted client) owns its own
-  // targeting, so it bypasses the guard. A null origin slug (no remote / not a
-  // git repo) can't be proven mismatched, so it is left permissive.
-  if (!opts?.client) {
-    const originSlug = await getRepoSlug(cwd)
-    if (originSlug !== null && originSlug !== repo) {
-      debugLog(
-        `[issue-sync] refusing sync: repo "${repo}" does not match the origin of cwd ` +
-          `("${originSlug}"). cwd-implied fetches would corrupt the cache — run from the ` +
-          `repo's checkout or supply a repo-targeted client.`
-      )
-      return result
-    }
-  }
+  const allowed = await verifyRepoOriginInvariant(repo, cwd, Boolean(opts?.client))
+  if (!allowed) return result
 
   // ─── Snapshot existing state for fast-path decisions ────────────────────
   const issueSnap = s.getIssueSnapshot(repo)
@@ -630,95 +755,38 @@ export async function syncUpstreamState(
     gh.listLabels(cwd),
     gh.listMilestones(cwd),
   ])
-  const primaryListCacheHits = result.restCache.notModified
 
-  // ─── Determine whether closed fetch is needed ──────────────────────────
-  // If the open count matches the stored count AND max updatedAt matches,
-  // nothing was opened or closed — skip the expensive closed-entity fetch.
-  const issueCountChanged = issues ? issues.length !== issueSnap.count : false
-  const issueMaxUpdated = issues ? maxUpdatedAt(issues as { updatedAt?: string }[]) : null
-  const issuesChanged = issueCountChanged || issueMaxUpdated !== issueSnap.maxUpdatedAt
+  const issuesChanged = hasEntitySnapshotChanged(issues, issueSnap)
+  const prsChanged = hasEntitySnapshotChanged(prs, prSnap)
+  const [closedIssues, closedPrs] = await fetchClosedEntities(gh, cwd, issuesChanged, prsChanged)
 
-  const prCountChanged = prs ? prs.length !== prSnap.count : false
-  const prMaxUpdated = prs ? maxUpdatedAt(prs as { updatedAt?: string }[]) : null
-  const prsChanged = prCountChanged || prMaxUpdated !== prSnap.maxUpdatedAt
-
-  // Only fetch closed entities when open set has changed (count or content)
-  const [closedIssues, closedPrs] = await Promise.all([
-    issuesChanged ? gh.listIssues(cwd, "closed") : Promise.resolve(null),
-    prsChanged ? gh.listPullRequests(cwd, "closed") : Promise.resolve(null),
-  ])
-
-  syncEntityGroup(
-    repo,
+  const payloads: PrimarySyncPayloads = {
     issues,
-    closedIssues,
-    {
-      upsert: (r, items) => s.upsertIssues(r, items),
-      removeClosed: (r, nums) => s.removeClosedIssues(r, nums),
-      remove: (r, nums) => s.removeIssues(r, nums),
-      getRaw: (r, num) => s.getIssueRaw(r, num),
-    },
-    result.issues
-  )
-  syncEntityGroup(
-    repo,
     prs,
+    runs,
+    labels,
+    milestones,
+    closedIssues,
     closedPrs,
-    {
-      upsert: (r, items) => s.upsertPullRequests(r, items),
-      removeClosed: (r, nums) => s.removeClosedPullRequests(r, nums),
-      remove: (r, nums) => s.removePullRequests(r, nums),
-      getRaw: (r, num) => s.getPullRequestRaw(r, num),
-    },
-    result.pullRequests
-  )
-  syncCiRuns(s, repo, runs, result)
-  syncLabels(s, repo, labels, result)
-  syncMilestones(s, repo, milestones, result)
+  }
+
+  syncPrimaryEntities(s, repo, payloads, result)
 
   const ctx: SyncContext = { store: s, client: gh, repo, cwd, result }
+  const allPrimaryListsCached = checkAllPrimaryListsCached(
+    result.restCache.notModified,
+    payloads,
+    issuesChanged,
+    prsChanged
+  )
 
-  const allPrimaryListsCached =
-    primaryListCacheHits >= 5 &&
-    issues !== null &&
-    prs !== null &&
-    runs !== null &&
-    labels !== null &&
-    milestones !== null &&
-    !issuesChanged &&
-    !prsChanged
-
-  // ─── Branch-level sync ──────────────────────────────────────────────────
-  // Sync CI runs and PR detail for branches with open PRs, plus the default branch.
   if (!allPrimaryListsCached) {
     await syncBranchData(ctx, prs, prsChanged)
-  }
-
-  // ─── Comment sync ───────────────────────────────────────────────────────
-  // Sync comments for blocked/stalled issues AND recently-updated issues
-  if (!allPrimaryListsCached) {
     await syncComments(ctx, issues, issuesChanged)
-  }
-
-  // ─── Event-sourced sync (#521) ──────────────────────────────────────────
-  // Append new issue events to the append-only log so intermediate
-  // transitions (open→closed→reopened, label churn, review_requested) are
-  // captured even when they don't alter the snapshot state we just diffed.
-  if (!allPrimaryListsCached) {
     await syncIssueEvents(s, gh, repo, result)
   }
 
-  // Only advance freshness cursors when the primary lists actually loaded.
-  // A null return means every gh/REST attempt for that list failed (offline,
-  // expired auth) — advancing the cursor would report a failed sync as fresh
-  // and make consumers skip the next real sync (#715).
-  result.fetchOk = issues !== null && prs !== null
-  if (result.fetchOk) {
-    s.setSyncCursor(repo, "last_synced", new Date().toISOString())
-    s.setSyncCursor(repo, "cwd", cwd)
-  }
-
+  updateSyncFreshnessCursor(ctx, issues !== null && prs !== null)
   return result
 }
 

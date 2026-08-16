@@ -262,6 +262,33 @@ export class AutoSteerStore {
     )
   }
 
+  private isDuplicate(
+    trigger: AutoSteerTrigger,
+    dedupKey: string,
+    now: number,
+    projectScope: string,
+    sessionId: string
+  ): boolean {
+    const pendingDup = this._stmtPendingDuplicate.get(
+      trigger,
+      dedupKey,
+      now,
+      projectScope,
+      sessionId
+    )
+    if (pendingDup) return true
+
+    const recentCutoff = now - DEDUP_WINDOW_MS
+    const recentDup = this._stmtRecentlyDelivered.get(
+      trigger,
+      dedupKey,
+      recentCutoff,
+      projectScope,
+      sessionId
+    )
+    return Boolean(recentDup)
+  }
+
   /**
    * Enqueue a steering message for a session with a given trigger.
    * @param opts.ttlMs Optional TTL in milliseconds — message expires if not consumed in time.
@@ -281,29 +308,14 @@ export class AutoSteerStore {
     const now = Date.now()
     const projKey = opts?.cwd ? projectKeyFromCwd(opts.cwd) : null
     const dedupKey = opts?.dedupKey ?? message
+    const projectScope = projKey ?? sessionId
 
-    // Skip if identical message is already pending for this project (and not expired)
-    const pendingDup = this._stmtPendingDuplicate.get(
-      trigger,
-      dedupKey,
-      now,
-      projKey ?? sessionId,
-      sessionId
-    )
-    if (pendingDup) return false
+    if (this.isDuplicate(trigger, dedupKey, now, projectScope, sessionId)) {
+      return false
+    }
 
-    // Skip if identical message was recently delivered to any session on this project
-    const recentCutoff = now - DEDUP_WINDOW_MS
-    const recentDup = this._stmtRecentlyDelivered.get(
-      trigger,
-      dedupKey,
-      recentCutoff,
-      projKey ?? sessionId,
-      sessionId
-    )
-    if (recentDup) return false
-
-    this._stmtEnqueue.run(sessionId, message, trigger, now, opts?.ttlMs ?? null, projKey, dedupKey)
+    const ttlMs = opts?.ttlMs ?? null
+    this._stmtEnqueue.run(sessionId, message, trigger, now, ttlMs, projKey, dedupKey)
     return true
   }
 

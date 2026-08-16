@@ -167,6 +167,21 @@ function cloneDefaults(): SwizSettings {
   return { ...DEFAULT_SETTINGS, sessions: { ...DEFAULT_SETTINGS.sessions } }
 }
 
+const LEGACY_DEFAULT_SEGMENT_SETS = [
+  LEGACY_DEFAULT_STATUS_LINE_SEGMENTS,
+  PRE_METRICS_DEFAULT_STATUS_LINE_SEGMENTS,
+  PRE_TASKS_DEFAULT_STATUS_LINE_SEGMENTS,
+  PRE_SKILLS_DEFAULT_STATUS_LINE_SEGMENTS,
+  PRE_CHECKS_DEFAULT_STATUS_LINE_SEGMENTS,
+] as const
+
+function isAnyLegacyDefault(segments: readonly StatusLineSegment[]): boolean {
+  return LEGACY_DEFAULT_SEGMENT_SETS.some(
+    (legacy) =>
+      segments.length === legacy.length && legacy.every((segment) => segments.includes(segment))
+  )
+}
+
 function normalizeStatusLineSegments(value: unknown): StatusLineSegment[] {
   if (!Array.isArray(value)) return DEFAULT_SETTINGS.statusLineSegments
 
@@ -177,34 +192,7 @@ function normalizeStatusLineSegments(value: unknown): StatusLineSegment[] {
   if (!valid) return DEFAULT_SETTINGS.statusLineSegments
 
   const segments = value as StatusLineSegment[]
-  const isLegacyDefault =
-    segments.length === LEGACY_DEFAULT_STATUS_LINE_SEGMENTS.length &&
-    LEGACY_DEFAULT_STATUS_LINE_SEGMENTS.every((segment) => segments.includes(segment))
-
-  const isPreMetricsDefault =
-    segments.length === PRE_METRICS_DEFAULT_STATUS_LINE_SEGMENTS.length &&
-    PRE_METRICS_DEFAULT_STATUS_LINE_SEGMENTS.every((segment) => segments.includes(segment))
-
-  const isPreTasksDefault =
-    segments.length === PRE_TASKS_DEFAULT_STATUS_LINE_SEGMENTS.length &&
-    PRE_TASKS_DEFAULT_STATUS_LINE_SEGMENTS.every((segment) => segments.includes(segment))
-
-  const isPreSkillsDefault =
-    segments.length === PRE_SKILLS_DEFAULT_STATUS_LINE_SEGMENTS.length &&
-    PRE_SKILLS_DEFAULT_STATUS_LINE_SEGMENTS.every((segment) => segments.includes(segment))
-
-  const isPreChecksDefault =
-    segments.length === PRE_CHECKS_DEFAULT_STATUS_LINE_SEGMENTS.length &&
-    PRE_CHECKS_DEFAULT_STATUS_LINE_SEGMENTS.every((segment) => segments.includes(segment))
-
-  if (
-    isLegacyDefault ||
-    isPreMetricsDefault ||
-    isPreTasksDefault ||
-    isPreSkillsDefault ||
-    isPreChecksDefault
-  )
-    return [...ALL_STATUS_LINE_SEGMENTS]
+  if (isAnyLegacyDefault(segments)) return [...ALL_STATUS_LINE_SEGMENTS]
   return segments
 }
 
@@ -317,6 +305,18 @@ function applyHooksAndCategories(obj: Record<string, any>, result: ProjectSwizSe
   }
 }
 
+function applyConcurrentDispatches(obj: Record<string, any>, result: ProjectSwizSettings): void {
+  const maxDispatches = obj.transcriptMonitorMaxConcurrentDispatches
+  if (
+    typeof maxDispatches === "number" &&
+    Number.isInteger(maxDispatches) &&
+    maxDispatches >= 0 &&
+    maxDispatches <= 64
+  ) {
+    result.transcriptMonitorMaxConcurrentDispatches = maxDispatches
+  }
+}
+
 function normalizeProjectSettings(value: unknown): ProjectSwizSettings | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null
   const obj = value as Record<string, any>
@@ -341,16 +341,7 @@ function normalizeProjectSettings(value: unknown): ProjectSwizSettings | null {
     "skillRecencyMaxAgeMinutes",
   ])
 
-  // transcriptMonitorMaxConcurrentDispatches allows 0 (unlimited) — non-negative guard
-  const maxDispatches = obj.transcriptMonitorMaxConcurrentDispatches
-  if (
-    typeof maxDispatches === "number" &&
-    Number.isInteger(maxDispatches) &&
-    maxDispatches >= 0 &&
-    maxDispatches <= 64
-  ) {
-    result.transcriptMonitorMaxConcurrentDispatches = maxDispatches
-  }
+  applyConcurrentDispatches(obj, result)
 
   const defaultBranch = parseDefaultBranch(obj.defaultBranch)
   if (defaultBranch) result.defaultBranch = defaultBranch
@@ -373,6 +364,31 @@ function normalizeProjectSettings(value: unknown): ProjectSwizSettings | null {
   return result
 }
 
+function applyHookArrayFields(h: Record<string, any>, def: FileHookDef): void {
+  if (Array.isArray(h.stacks) && h.stacks.every((s: unknown) => typeof s === "string")) {
+    def.stacks = h.stacks as string[]
+  }
+  if (
+    Array.isArray(h.requiredSettings) &&
+    h.requiredSettings.every((s: unknown) => typeof s === "string")
+  ) {
+    def.requiredSettings = h.requiredSettings as (keyof import("./types").EffectiveSwizSettings)[]
+  }
+}
+
+function mapFileHookDef(h: Record<string, any>): FileHookDef {
+  const def: FileHookDef = { file: h.file as string }
+  if (typeof h.timeout === "number") def.timeout = h.timeout
+  if (typeof h.async === "boolean") def.async = h.async
+  if (h.asyncMode === "fire-and-forget" || h.asyncMode === "block-until-complete") {
+    def.asyncMode = h.asyncMode
+  }
+  if (typeof h.condition === "string") def.condition = h.condition
+  if (typeof h.cooldownSeconds === "number") def.cooldownSeconds = h.cooldownSeconds
+  applyHookArrayFields(h, def)
+  return def
+}
+
 /** Validate and normalize project-local hook groups from config JSON */
 function normalizeProjectHooks(raw: unknown[]): HookGroup[] {
   const groups: HookGroup[] = []
@@ -389,27 +405,7 @@ function normalizeProjectHooks(raw: unknown[]): HookGroup[] {
           !Array.isArray(h) &&
           typeof (h as Record<string, any>).file === "string"
       )
-      .map((h): FileHookDef => {
-        const def: FileHookDef = { file: h.file as string }
-        if (typeof h.timeout === "number") def.timeout = h.timeout
-        if (typeof h.async === "boolean") def.async = h.async
-        if (h.asyncMode === "fire-and-forget" || h.asyncMode === "block-until-complete") {
-          def.asyncMode = h.asyncMode
-        }
-        if (typeof h.condition === "string") def.condition = h.condition
-        if (typeof h.cooldownSeconds === "number") def.cooldownSeconds = h.cooldownSeconds
-        if (Array.isArray(h.stacks) && h.stacks.every((s: unknown) => typeof s === "string")) {
-          def.stacks = h.stacks as string[]
-        }
-        if (
-          Array.isArray(h.requiredSettings) &&
-          h.requiredSettings.every((s: unknown) => typeof s === "string")
-        ) {
-          def.requiredSettings =
-            h.requiredSettings as (keyof import("./types").EffectiveSwizSettings)[]
-        }
-        return def
-      })
+      .map(mapFileHookDef)
     if (hooks.length > 0) {
       groups.push({
         event: g.event,

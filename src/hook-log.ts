@@ -224,6 +224,29 @@ export class HookLogStore {
     return write
   }
 
+  private updateAggregateForEntry(key: string, entry: HookLogEntry): void {
+    const aggregate = this.metrics.aggregates[key] ?? {
+      count: 0,
+      totalDurationMs: 0,
+      maxDurationMs: 0,
+      payloadBytesTotal: 0,
+      payloadBytesMax: 0,
+      statuses: {},
+      skipReasons: {},
+    }
+    aggregate.count += 1
+    aggregate.totalDurationMs += entry.durationMs
+    aggregate.maxDurationMs = Math.max(aggregate.maxDurationMs, entry.durationMs)
+    const payloadBytes = entry.payloadBytes ?? 0
+    aggregate.payloadBytesTotal += payloadBytes
+    aggregate.payloadBytesMax = Math.max(aggregate.payloadBytesMax, payloadBytes)
+    aggregate.statuses[entry.status] = (aggregate.statuses[entry.status] ?? 0) + 1
+    if (entry.skipReason) {
+      aggregate.skipReasons[entry.skipReason] = (aggregate.skipReasons[entry.skipReason] ?? 0) + 1
+    }
+    this.metrics.aggregates[key] = aggregate
+  }
+
   private recordAggregates(entries: HookLogEntry[]): void {
     for (const entry of entries) {
       if (entry.kind === "dispatch" || entry.hook === "dispatch") continue
@@ -234,26 +257,7 @@ export class HookLogStore {
       ) {
         continue
       }
-      const aggregate = this.metrics.aggregates[key] ?? {
-        count: 0,
-        totalDurationMs: 0,
-        maxDurationMs: 0,
-        payloadBytesTotal: 0,
-        payloadBytesMax: 0,
-        statuses: {},
-        skipReasons: {},
-      }
-      aggregate.count += 1
-      aggregate.totalDurationMs += entry.durationMs
-      aggregate.maxDurationMs = Math.max(aggregate.maxDurationMs, entry.durationMs)
-      const payloadBytes = entry.payloadBytes ?? 0
-      aggregate.payloadBytesTotal += payloadBytes
-      aggregate.payloadBytesMax = Math.max(aggregate.payloadBytesMax, payloadBytes)
-      aggregate.statuses[entry.status] = (aggregate.statuses[entry.status] ?? 0) + 1
-      if (entry.skipReason) {
-        aggregate.skipReasons[entry.skipReason] = (aggregate.skipReasons[entry.skipReason] ?? 0) + 1
-      }
-      this.metrics.aggregates[key] = aggregate
+      this.updateAggregateForEntry(key, entry)
     }
   }
 

@@ -486,6 +486,54 @@ async function fetchViaRest(
   return parsed
 }
 
+function parseNormalizedBody<T>(data: string, normalize?: (body: unknown) => unknown): T | null {
+  try {
+    const bodyObj = JSON.parse(data)
+    return (normalize ? normalize(bodyObj) : bodyObj) as T
+  } catch {
+    return null
+  }
+}
+
+interface RestResponseContext {
+  repo: string
+  mapping: RestFallbackMapping
+  store: IssueStore
+  stats?: RestFallbackStats
+}
+
+function handleRestSuccess<T>(
+  result: { status?: number | null | undefined; headers: Record<string, string>; body: string },
+  ctx: RestResponseContext
+): T | null {
+  const etag = result.headers.etag
+  if (etag) {
+    if (ctx.stats) ctx.stats.writes++
+    debugLog(`[swiz] REST_CACHE_WRITE etag=${etag} for ${ctx.mapping.endpoint}`)
+    ctx.store.setHttpCache(ctx.repo, ctx.mapping.endpoint, etag, result.body)
+  }
+  return parseNormalizedBody<T>(result.body, ctx.mapping.normalize)
+}
+
+function handleRestResponse<T>(
+  result: { status?: number | null | undefined; headers: Record<string, string>; body: string },
+  cached: { data: string; etag: string } | null,
+  ctx: RestResponseContext
+): T | null {
+  if (result.status === 304 && cached) {
+    if (ctx.stats) ctx.stats.notModified++
+    debugLog(`[swiz] REST_CACHE_HIT (304 Not Modified) for ${ctx.mapping.endpoint}`)
+    return parseNormalizedBody<T>(cached.data, ctx.mapping.normalize)
+  }
+
+  const isSuccess = typeof result.status === "number" && result.status >= 200 && result.status < 300
+  if (isSuccess) {
+    return handleRestSuccess<T>(result, ctx)
+  }
+
+  return null
+}
+
 /**
  * Fetch a mapped gh list command via REST API.
  * Returns null if no REST mapping exists for the command or if REST fails.
@@ -518,33 +566,7 @@ export async function tryRestFallback<T>(
   const result = await fetchViaRest(endpoint, cwd, cached?.etag)
   if (result === null) return null
 
-  if (result.status === 304 && cached) {
-    if (stats) stats.notModified++
-    debugLog(`[swiz] REST_CACHE_HIT (304 Not Modified) for ${endpoint}`)
-    try {
-      const bodyObj = JSON.parse(cached.data)
-      return (mapping.normalize ? mapping.normalize(bodyObj) : bodyObj) as T
-    } catch {
-      return null
-    }
-  }
-
-  if (result.status && result.status >= 200 && result.status < 300) {
-    const etag = result.headers.etag
-    if (etag) {
-      if (stats) stats.writes++
-      debugLog(`[swiz] REST_CACHE_WRITE etag=${etag} for ${endpoint}`)
-      s.setHttpCache(repo, endpoint, etag, result.body)
-    }
-    try {
-      const bodyObj = JSON.parse(result.body)
-      return (mapping.normalize ? mapping.normalize(bodyObj) : bodyObj) as T
-    } catch {
-      return null
-    }
-  }
-
-  return null
+  return handleRestResponse<T>(result, cached, { repo, mapping, store: s, stats })
 }
 
 // ─── Mutation REST fallback (used when GraphQL is rate-limited) ───────────

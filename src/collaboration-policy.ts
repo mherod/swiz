@@ -290,6 +290,31 @@ export function requiresPeerReview(mode: CollaborationMode): boolean {
   return getCollaborationModePolicy(mode).requirePeerReview
 }
 
+async function fetchCollaborationData(
+  cwd: string,
+  repoSlug: string | null,
+  ghJsonRunner: typeof ghJson
+): Promise<[OpenPullRequest[] | null, GitHubCommit[] | null]> {
+  return await Promise.all([
+    ghJsonRunner<OpenPullRequest[]>(
+      ["pr", "list", "--state", "open", "--json", "number,author", "--limit", "10"],
+      cwd
+    ),
+    repoSlug ? ghJsonRunner<GitHubCommit[]>(["api", `repos/${repoSlug}/commits`], cwd) : null,
+  ])
+}
+
+function applyForkTopology(
+  policy: { signals: string[]; isCollaborative: boolean },
+  fork: { upstreamSlug: string } | null
+): void {
+  if (!fork) return
+  if (!policy.signals.some((s) => s.includes("fork"))) {
+    policy.signals.push(`Fork of upstream repository (${fork.upstreamSlug})`)
+  }
+  policy.isCollaborative = true
+}
+
 export async function detectProjectCollaborationPolicy(
   cwd: string,
   options: DetectProjectCollaborationOptions = {}
@@ -297,17 +322,14 @@ export async function detectProjectCollaborationPolicy(
   const ownership = await detectRepoOwnership(cwd, options)
   const ghJsonRunner = options.ghJson ?? ghJson
 
-  const [openPullRequestsResult, commitsResult] = await Promise.all([
-    ghJsonRunner<OpenPullRequest[]>(
-      ["pr", "list", "--state", "open", "--json", "number,author", "--limit", "10"],
-      cwd
-    ),
-    ownership.repoSlug
-      ? ghJsonRunner<GitHubCommit[]>(["api", `repos/${ownership.repoSlug}/commits`], cwd)
-      : null,
-  ])
+  const [openPullRequestsResult, commitsResult] = await fetchCollaborationData(
+    cwd,
+    ownership.repoSlug,
+    ghJsonRunner
+  )
 
-  const dayAgoMs = (options.nowMs ?? Date.now()) - ONE_DAY_MS
+  const nowMs = options.nowMs ?? Date.now()
+  const dayAgoMs = nowMs - ONE_DAY_MS
   const recentContributorLogins = getRecentContributorLogins(commitsResult ?? null, dayAgoMs)
 
   const policy = evaluateCollaborationPolicy({
@@ -319,12 +341,7 @@ export async function detectProjectCollaborationPolicy(
 
   // Fork workflow implies team collaboration — you're contributing to an upstream repo
   const fork = await detectForkTopology(cwd)
-  if (fork) {
-    if (!policy.signals.some((s) => s.includes("fork"))) {
-      policy.signals.push(`Fork of upstream repository (${fork.upstreamSlug})`)
-    }
-    policy.isCollaborative = true
-  }
+  applyForkTopology(policy, fork)
 
   const resolved = ownership.resolved && openPullRequestsResult !== null && commitsResult !== null
 

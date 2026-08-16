@@ -107,6 +107,133 @@ export interface MutationPayload {
   title?: string
 }
 
+const ISSUE_STORE_SCHEMA_SQL = `
+  CREATE TABLE IF NOT EXISTS issues (
+    repo TEXT NOT NULL,
+    number INTEGER NOT NULL,
+    data TEXT NOT NULL,
+    synced_at INTEGER NOT NULL,
+    PRIMARY KEY (repo, number)
+  );
+  CREATE TABLE IF NOT EXISTS pull_requests (
+    repo TEXT NOT NULL,
+    number INTEGER NOT NULL,
+    data TEXT NOT NULL,
+    synced_at INTEGER NOT NULL,
+    PRIMARY KEY (repo, number)
+  );
+  CREATE TABLE IF NOT EXISTS ci_status (
+    repo TEXT NOT NULL,
+    sha TEXT NOT NULL,
+    data TEXT NOT NULL,
+    synced_at INTEGER NOT NULL,
+    PRIMARY KEY (repo, sha)
+  );
+  CREATE TABLE IF NOT EXISTS pending_mutations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    repo TEXT NOT NULL,
+    mutation TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    last_attempt INTEGER,
+    attempts INTEGER DEFAULT 0
+  );
+  CREATE TABLE IF NOT EXISTS ci_branch_runs (
+    repo TEXT NOT NULL,
+    branch TEXT NOT NULL,
+    data TEXT NOT NULL,
+    synced_at INTEGER NOT NULL,
+    PRIMARY KEY (repo, branch)
+  );
+  CREATE TABLE IF NOT EXISTS pr_branch_detail (
+    repo TEXT NOT NULL,
+    branch TEXT NOT NULL,
+    data TEXT NOT NULL,
+    synced_at INTEGER NOT NULL,
+    PRIMARY KEY (repo, branch)
+  );
+  CREATE TABLE IF NOT EXISTS issue_comments (
+    repo TEXT NOT NULL,
+    issue_number INTEGER NOT NULL,
+    comment_id INTEGER NOT NULL,
+    data TEXT NOT NULL,
+    synced_at INTEGER NOT NULL,
+    PRIMARY KEY (repo, comment_id)
+  );
+  CREATE INDEX IF NOT EXISTS idx_issue_comments_repo_issue
+  ON issue_comments (repo, issue_number);
+  CREATE TABLE IF NOT EXISTS labels (
+    repo TEXT NOT NULL,
+    name TEXT NOT NULL,
+    data TEXT NOT NULL,
+    synced_at INTEGER NOT NULL,
+    PRIMARY KEY (repo, name)
+  );
+  CREATE TABLE IF NOT EXISTS milestones (
+    repo TEXT NOT NULL,
+    number INTEGER NOT NULL,
+    data TEXT NOT NULL,
+    synced_at INTEGER NOT NULL,
+    PRIMARY KEY (repo, number)
+  );
+  CREATE TABLE IF NOT EXISTS branch_protection (
+    repo TEXT NOT NULL,
+    branch TEXT NOT NULL,
+    data TEXT NOT NULL,
+    synced_at INTEGER NOT NULL,
+    PRIMARY KEY (repo, branch)
+  );
+  CREATE TABLE IF NOT EXISTS issue_events (
+    repo TEXT NOT NULL,
+    event_id INTEGER NOT NULL,
+    issue_number INTEGER,
+    event_type TEXT NOT NULL,
+    actor TEXT,
+    created_at TEXT NOT NULL,
+    payload_json TEXT NOT NULL,
+    synced_at INTEGER NOT NULL,
+    PRIMARY KEY (repo, event_id)
+  );
+  CREATE INDEX IF NOT EXISTS idx_issue_events_repo_created
+  ON issue_events (repo, created_at);
+  CREATE INDEX IF NOT EXISTS idx_issue_events_repo_issue
+  ON issue_events (repo, issue_number);
+  CREATE TABLE IF NOT EXISTS sync_cursors (
+    repo TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    value TEXT NOT NULL,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (repo, kind)
+  );
+  CREATE TABLE IF NOT EXISTS http_cache (
+    repo TEXT NOT NULL,
+    endpoint TEXT NOT NULL,
+    etag TEXT NOT NULL,
+    data TEXT NOT NULL,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (repo, endpoint)
+  );
+  CREATE TABLE IF NOT EXISTS session_commits (
+    project_key TEXT NOT NULL,
+    session_id TEXT NOT NULL,
+    last_commit_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (project_key, session_id)
+  );
+  CREATE INDEX IF NOT EXISTS idx_session_commits_project_last_commit
+  ON session_commits (project_key, last_commit_at);
+  CREATE TABLE IF NOT EXISTS session_edits (
+    project_key TEXT NOT NULL,
+    session_id TEXT NOT NULL,
+    file_path TEXT NOT NULL,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (project_key, session_id, file_path)
+  );
+  CREATE INDEX IF NOT EXISTS idx_session_edits_project_session
+  ON session_edits (project_key, session_id);
+  CREATE INDEX IF NOT EXISTS idx_session_edits_project_file
+  ON session_edits (project_key, file_path, updated_at);
+`
+
 // ─── IssueStoreReader ────────────────────────────────────────────────────────
 
 /**
@@ -370,179 +497,7 @@ export class IssueStore {
   }
 
   private migrate(): void {
-    this.db.run(`
-      CREATE TABLE IF NOT EXISTS issues (
-        repo TEXT NOT NULL,
-        number INTEGER NOT NULL,
-        data TEXT NOT NULL,
-        synced_at INTEGER NOT NULL,
-        PRIMARY KEY (repo, number)
-      )
-    `)
-    this.db.run(`
-      CREATE TABLE IF NOT EXISTS pull_requests (
-        repo TEXT NOT NULL,
-        number INTEGER NOT NULL,
-        data TEXT NOT NULL,
-        synced_at INTEGER NOT NULL,
-        PRIMARY KEY (repo, number)
-      )
-    `)
-    this.db.run(`
-      CREATE TABLE IF NOT EXISTS ci_status (
-        repo TEXT NOT NULL,
-        sha TEXT NOT NULL,
-        data TEXT NOT NULL,
-        synced_at INTEGER NOT NULL,
-        PRIMARY KEY (repo, sha)
-      )
-    `)
-    this.db.run(`
-      CREATE TABLE IF NOT EXISTS pending_mutations (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        repo TEXT NOT NULL,
-        mutation TEXT NOT NULL,
-        created_at INTEGER NOT NULL,
-        last_attempt INTEGER,
-        attempts INTEGER DEFAULT 0
-      )
-    `)
-    this.db.run(`
-      CREATE TABLE IF NOT EXISTS ci_branch_runs (
-        repo TEXT NOT NULL,
-        branch TEXT NOT NULL,
-        data TEXT NOT NULL,
-        synced_at INTEGER NOT NULL,
-        PRIMARY KEY (repo, branch)
-      )
-    `)
-    this.db.run(`
-      CREATE TABLE IF NOT EXISTS pr_branch_detail (
-        repo TEXT NOT NULL,
-        branch TEXT NOT NULL,
-        data TEXT NOT NULL,
-        synced_at INTEGER NOT NULL,
-        PRIMARY KEY (repo, branch)
-      )
-    `)
-    this.db.run(`
-      CREATE TABLE IF NOT EXISTS issue_comments (
-        repo TEXT NOT NULL,
-        issue_number INTEGER NOT NULL,
-        comment_id INTEGER NOT NULL,
-        data TEXT NOT NULL,
-        synced_at INTEGER NOT NULL,
-        PRIMARY KEY (repo, comment_id)
-      )
-    `)
-    this.db.run(`
-      CREATE INDEX IF NOT EXISTS idx_issue_comments_repo_issue
-      ON issue_comments (repo, issue_number)
-    `)
-    this.db.run(`
-      CREATE TABLE IF NOT EXISTS labels (
-        repo TEXT NOT NULL,
-        name TEXT NOT NULL,
-        data TEXT NOT NULL,
-        synced_at INTEGER NOT NULL,
-        PRIMARY KEY (repo, name)
-      )
-    `)
-    this.db.run(`
-      CREATE TABLE IF NOT EXISTS milestones (
-        repo TEXT NOT NULL,
-        number INTEGER NOT NULL,
-        data TEXT NOT NULL,
-        synced_at INTEGER NOT NULL,
-        PRIMARY KEY (repo, number)
-      )
-    `)
-    this.db.run(`
-      CREATE TABLE IF NOT EXISTS branch_protection (
-        repo TEXT NOT NULL,
-        branch TEXT NOT NULL,
-        data TEXT NOT NULL,
-        synced_at INTEGER NOT NULL,
-        PRIMARY KEY (repo, branch)
-      )
-    `)
-    // Append-only event log for issue state transitions. Written by the
-    // event-sourced sync path (issue-store-sync.ts), consumed by effect
-    // handlers. event_id is the GitHub numeric event id (primary key) so
-    // re-inserts are idempotent via INSERT OR IGNORE.
-    this.db.run(`
-      CREATE TABLE IF NOT EXISTS issue_events (
-        repo TEXT NOT NULL,
-        event_id INTEGER NOT NULL,
-        issue_number INTEGER,
-        event_type TEXT NOT NULL,
-        actor TEXT,
-        created_at TEXT NOT NULL,
-        payload_json TEXT NOT NULL,
-        synced_at INTEGER NOT NULL,
-        PRIMARY KEY (repo, event_id)
-      )
-    `)
-    this.db.run(`
-      CREATE INDEX IF NOT EXISTS idx_issue_events_repo_created
-      ON issue_events (repo, created_at)
-    `)
-    this.db.run(`
-      CREATE INDEX IF NOT EXISTS idx_issue_events_repo_issue
-      ON issue_events (repo, issue_number)
-    `)
-    // Small KV table for per-repo sync cursors. Currently stores
-    // `issue_events` cursor (ISO-8601) separate from the snapshot sync's
-    // lastSyncAt so event sync and snapshot sync can diverge safely.
-    this.db.run(`
-      CREATE TABLE IF NOT EXISTS sync_cursors (
-        repo TEXT NOT NULL,
-        kind TEXT NOT NULL,
-        value TEXT NOT NULL,
-        updated_at INTEGER NOT NULL,
-        PRIMARY KEY (repo, kind)
-      )
-    `)
-    this.db.run(`
-      CREATE TABLE IF NOT EXISTS http_cache (
-        repo TEXT NOT NULL,
-        endpoint TEXT NOT NULL,
-        etag TEXT NOT NULL,
-        data TEXT NOT NULL,
-        updated_at INTEGER NOT NULL,
-        PRIMARY KEY (repo, endpoint)
-      )
-    `)
-    this.db.run(`
-      CREATE TABLE IF NOT EXISTS session_commits (
-        project_key TEXT NOT NULL,
-        session_id TEXT NOT NULL,
-        last_commit_at INTEGER NOT NULL,
-        updated_at INTEGER NOT NULL,
-        PRIMARY KEY (project_key, session_id)
-      )
-    `)
-    this.db.run(`
-      CREATE INDEX IF NOT EXISTS idx_session_commits_project_last_commit
-      ON session_commits (project_key, last_commit_at)
-    `)
-    this.db.run(`
-      CREATE TABLE IF NOT EXISTS session_edits (
-        project_key TEXT NOT NULL,
-        session_id TEXT NOT NULL,
-        file_path TEXT NOT NULL,
-        updated_at INTEGER NOT NULL,
-        PRIMARY KEY (project_key, session_id, file_path)
-      )
-    `)
-    this.db.run(`
-      CREATE INDEX IF NOT EXISTS idx_session_edits_project_session
-      ON session_edits (project_key, session_id)
-    `)
-    this.db.run(`
-      CREATE INDEX IF NOT EXISTS idx_session_edits_project_file
-      ON session_edits (project_key, file_path, updated_at)
-    `)
+    this.db.exec(ISSUE_STORE_SCHEMA_SQL)
   }
 
   // ─── Sync snapshot (change-detection) ────────────────────────────────────

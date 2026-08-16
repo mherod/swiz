@@ -39,6 +39,92 @@ export function resetPrTrackerState(): void {
   prStateHistory.clear()
 }
 
+function evictStalePrStates(nowMs: number): void {
+  if (Math.random() >= 0.1) return
+  for (const [prNumber, state] of prStateHistory.entries()) {
+    if (nowMs - new Date(state.syncedAt).getTime() > PR_STATE_TTL_MS) {
+      prStateHistory.delete(prNumber)
+    }
+  }
+}
+
+function buildCommentLookup(
+  currentPrs: Array<{ number: number; reviewDecision: string | null }>,
+  currentComments: Array<{ id: string; prNumber: number }>
+): Map<number, Set<string>> {
+  const syncedPrNumbers = new Set(currentPrs.map((p) => p.number))
+  const commentsMap = new Map<number, Set<string>>()
+  for (const c of currentComments) {
+    if (!syncedPrNumbers.has(c.prNumber)) continue
+    let set = commentsMap.get(c.prNumber)
+    if (!set) {
+      set = new Set()
+      commentsMap.set(c.prNumber, set)
+    }
+    if (set.size < MAX_COMMENTS_PER_PR) {
+      set.add(c.id)
+    }
+  }
+  return commentsMap
+}
+
+function detectDecisionTransition(
+  prNumber: number,
+  prevDecision: PrReviewDecision,
+  currDecision: PrReviewDecision,
+  now: string
+): AutoSteerPayload | null {
+  if (
+    prevDecision === null &&
+    (currDecision === "APPROVED" || currDecision === "CHANGES_REQUESTED")
+  ) {
+    const isApproved = currDecision === "APPROVED"
+    return {
+      type: isApproved ? "PR_APPROVAL" : "PR_CHANGES_REQUESTED",
+      prNumber,
+      message: isApproved
+        ? `Pull request #${prNumber} received an approval. You may proceed to merge or address pending items.`
+        : `Pull request #${prNumber} has requested changes. Review feedback requires attention before proceeding.`,
+      timestamp: now,
+      priority: isApproved ? "normal" : "high",
+    }
+  }
+  if (prevDecision === "CHANGES_REQUESTED" && currDecision === "APPROVED") {
+    return {
+      type: "PR_APPROVAL",
+      prNumber,
+      message: `Pull request #${prNumber} previously requested changes, but has now been approved.`,
+      timestamp: now,
+      priority: "high",
+    }
+  }
+  return null
+}
+
+function detectCommentTransition(
+  prNumber: number,
+  prev: PrReviewState | undefined,
+  currentCommentIds: Set<string>,
+  now: string
+): AutoSteerPayload | null {
+  if (!prev) return null
+  let newCount = 0
+  for (const id of currentCommentIds) {
+    if (!prev.commentIds.has(id)) newCount++
+  }
+  if (newCount === 0) return null
+  return {
+    type: "PR_COMMENT",
+    prNumber,
+    message:
+      newCount === 1
+        ? `New comment on pull request #${prNumber}. Review inline feedback.`
+        : `${newCount} new comments on pull request #${prNumber}. Review inline feedback.`,
+    timestamp: now,
+    priority: "normal",
+  }
+}
+
 /**
  * Detect PR review state transitions and new comments.
  *
@@ -54,29 +140,8 @@ export function trackPrReviewTransitions(
   const now = new Date().toISOString()
   const nowMs = Date.now()
 
-  // Evict stale entries for closed/aged-out PRs (batch prune once)
-  if (Math.random() < 0.1) {
-    for (const [prNumber, state] of prStateHistory.entries()) {
-      if (nowMs - new Date(state.syncedAt).getTime() > PR_STATE_TTL_MS) {
-        prStateHistory.delete(prNumber)
-      }
-    }
-  }
-
-  // Build comment lookup: prNumber → Set<id> for ONLY the PRs in this sync
-  const syncedPrNumbers = new Set(currentPrs.map((p) => p.number))
-  const commentsMap = new Map<number, Set<string>>()
-  for (const c of currentComments) {
-    if (!syncedPrNumbers.has(c.prNumber)) continue
-    let set = commentsMap.get(c.prNumber)
-    if (!set) {
-      set = new Set()
-      commentsMap.set(c.prNumber, set)
-    }
-    if (set.size < MAX_COMMENTS_PER_PR) {
-      set.add(c.id)
-    }
-  }
+  evictStalePrStates(nowMs)
+  const commentsMap = buildCommentLookup(currentPrs, currentComments)
 
   // Diff PR review decisions and comments
   for (const pr of currentPrs) {
@@ -84,53 +149,17 @@ export function trackPrReviewTransitions(
     const prevDecision = (prev?.reviewDecision ?? null) as PrReviewDecision
     const currDecision = (pr.reviewDecision ?? null) as PrReviewDecision
 
-    // 1. Detect review transitions
-    if (
-      prevDecision === null &&
-      (currDecision === "APPROVED" || currDecision === "CHANGES_REQUESTED")
-    ) {
-      autoSteers.push({
-        type: currDecision === "APPROVED" ? "PR_APPROVAL" : "PR_CHANGES_REQUESTED",
-        prNumber: pr.number,
-        message:
-          currDecision === "APPROVED"
-            ? `Pull request #${pr.number} received an approval. You may proceed to merge or address pending items.`
-            : `Pull request #${pr.number} has requested changes. Review feedback requires attention before proceeding.`,
-        timestamp: now,
-        priority: currDecision === "CHANGES_REQUESTED" ? "high" : "normal",
-      })
-    } else if (prevDecision === "CHANGES_REQUESTED" && currDecision === "APPROVED") {
-      autoSteers.push({
-        type: "PR_APPROVAL",
-        prNumber: pr.number,
-        message: `Pull request #${pr.number} previously requested changes, but has now been approved.`,
-        timestamp: now,
-        priority: "high",
-      })
+    const decisionPayload = detectDecisionTransition(pr.number, prevDecision, currDecision, now)
+    if (decisionPayload) {
+      autoSteers.push(decisionPayload)
     }
 
-    // 2. Detect new comments (only for PRs in the current sync)
     const currentCommentIds = commentsMap.get(pr.number) ?? new Set<string>()
-    if (prev) {
-      let newCount = 0
-      for (const id of currentCommentIds) {
-        if (!prev.commentIds.has(id)) newCount++
-      }
-      if (newCount > 0) {
-        autoSteers.push({
-          type: "PR_COMMENT",
-          prNumber: pr.number,
-          message:
-            newCount === 1
-              ? `New comment on pull request #${pr.number}. Review inline feedback.`
-              : `${newCount} new comments on pull request #${pr.number}. Review inline feedback.`,
-          timestamp: now,
-          priority: "normal",
-        })
-      }
+    const commentPayload = detectCommentTransition(pr.number, prev, currentCommentIds, now)
+    if (commentPayload) {
+      autoSteers.push(commentPayload)
     }
 
-    // Update tracked state for this PR
     prStateHistory.set(pr.number, {
       prNumber: pr.number,
       reviewDecision: currDecision,
