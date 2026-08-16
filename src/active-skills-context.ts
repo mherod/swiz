@@ -1,4 +1,5 @@
-import { type ToolHookInput, toolHookInputSchema } from "./schemas.ts"
+import { z } from "zod"
+import { type JsonLike, type ToolHookInput, toolHookInputSchema } from "./schemas.ts"
 import {
   formatCurrentSessionUsageWindow,
   formatSkillFileReadFallback,
@@ -11,21 +12,34 @@ import {
 const activeSkillsContextCache = new Map<string, Promise<string | null>>()
 const ACTIVE_SKILLS_CONTEXT_CACHE_MAX = 128
 
-interface ActiveSkillsEnrichment {
-  _currentSessionToolUsage?: { events?: unknown[] }
-  _effectiveSettings?: {
-    skillRecencyMaxAgeMinutes?: unknown
-    skillRecencyMaxTurns?: unknown
-  }
-  _lastUserMessageAt?: unknown
-  _transcriptSummary?: { skillInvocations?: unknown[] }
-}
+const activeSkillsEnrichmentSchema = z.looseObject({
+  _currentSessionToolUsage: z
+    .looseObject({
+      events: z.array(z.record(z.string(), z.custom<JsonLike>())).optional(),
+    })
+    .optional(),
+  _effectiveSettings: z
+    .looseObject({
+      skillRecencyMaxAgeMinutes: z.number().optional(),
+      skillRecencyMaxTurns: z.number().optional(),
+    })
+    .optional(),
+  _lastUserMessageAt: z.union([z.string(), z.number()]).optional(),
+  _transcriptSummary: z
+    .looseObject({
+      skillInvocations: z.array(z.string()).optional(),
+    })
+    .optional(),
+})
+
+type ActiveSkillsEnrichment = z.infer<typeof activeSkillsEnrichmentSchema>
 
 function recencyFromEffectiveSettings(input: ToolHookInput): {
   recencyOptions: { maxTurns: number; maxAgeMs: number }
   windowText: string
 } | null {
-  const effective = (input as ToolHookInput & ActiveSkillsEnrichment)._effectiveSettings
+  const parsed = activeSkillsEnrichmentSchema.safeParse(input)
+  const effective = parsed.success ? parsed.data._effectiveSettings : undefined
   const maxTurns = effective?.skillRecencyMaxTurns
   const maxAgeMinutes = effective?.skillRecencyMaxAgeMinutes
   if (
@@ -42,33 +56,49 @@ function recencyFromEffectiveSettings(input: ToolHookInput): {
   return { recencyOptions, windowText: formatCurrentSessionUsageWindow(recencyOptions) }
 }
 
+function hasEnrichmentData(enriched: ActiveSkillsEnrichment): boolean {
+  return (
+    enriched._currentSessionToolUsage !== undefined ||
+    enriched._transcriptSummary !== undefined ||
+    enriched._lastUserMessageAt !== undefined
+  )
+}
+
+function extractRecentUsageEvents(usage?: { events?: JsonLike[] }): JsonLike[] {
+  return Array.isArray(usage?.events) ? usage.events.slice(-12) : []
+}
+
+function buildCacheKeyPayload(
+  input: ToolHookInput,
+  enriched: ActiveSkillsEnrichment,
+  includeVerifiedSkillPaths: boolean
+): readonly JsonLike[] {
+  const events = extractRecentUsageEvents(enriched._currentSessionToolUsage)
+  const skills = enriched._transcriptSummary?.skillInvocations ?? []
+  const settings = enriched._effectiveSettings
+  const lastUserMessageAt = enriched._lastUserMessageAt ?? null
+  return [
+    input.session_id ?? "",
+    input.cwd ?? "",
+    lastUserMessageAt,
+    events,
+    skills,
+    settings?.skillRecencyMaxTurns ?? null,
+    settings?.skillRecencyMaxAgeMinutes ?? null,
+    includeVerifiedSkillPaths,
+  ]
+}
+
 function activeSkillsCacheKey(
   input: ToolHookInput,
   includeVerifiedSkillPaths: boolean
 ): string | null {
-  const enriched = input as ToolHookInput & ActiveSkillsEnrichment
-  if (
-    !enriched._currentSessionToolUsage &&
-    !enriched._transcriptSummary &&
-    enriched._lastUserMessageAt === undefined
-  ) {
+  const parsed = activeSkillsEnrichmentSchema.safeParse(input)
+  const enriched = parsed.success ? parsed.data : {}
+  if (!hasEnrichmentData(enriched)) {
     return null
   }
-  const usage = enriched._currentSessionToolUsage
-  const events = Array.isArray(usage?.events) ? usage.events.slice(-12) : []
-  const skills = Array.isArray(enriched._transcriptSummary?.skillInvocations)
-    ? enriched._transcriptSummary.skillInvocations
-    : []
-  return JSON.stringify([
-    input.session_id ?? "",
-    input.cwd ?? "",
-    enriched._lastUserMessageAt ?? null,
-    events,
-    skills,
-    enriched._effectiveSettings?.skillRecencyMaxTurns ?? null,
-    enriched._effectiveSettings?.skillRecencyMaxAgeMinutes ?? null,
-    includeVerifiedSkillPaths,
-  ])
+  return JSON.stringify(buildCacheKeyPayload(input, enriched, includeVerifiedSkillPaths))
 }
 
 export function formatActiveSkillsContext(

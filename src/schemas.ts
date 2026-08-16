@@ -499,7 +499,7 @@ export const toolHookInputSchema = z.union([
   claudeToolHookInputSchema,
   codexPreToolUseInputSchema,
   geminiBeforeToolInputSchema,
-]) as z.ZodType<HookBase & Partial<z.infer<typeof ToolCallCoreSchema>> & Record<string, unknown>>
+]) as z.ZodType<HookBase & Partial<z.infer<typeof ToolCallCoreSchema>>>
 
 export type ToolHookInput = z.infer<typeof toolHookInputSchema>
 
@@ -511,8 +511,8 @@ export type TaskToolInput = ToolHookInput & {
     subject?: string
     description?: string
     activeForm?: string
-    metadata?: Record<string, unknown>
-    [key: string]: unknown
+    metadata?: Record<string, JsonLike>
+    [key: string]: JsonLike | undefined
   }
 }
 
@@ -577,7 +577,7 @@ export const postToolUseHookInputSchema = z.union([
   codexPostToolUseInputSchema,
   geminiAfterToolInputSchema,
   allOptional(PkgPostToolUseFailureInputSchema),
-]) as z.ZodType<HookBase & Record<string, unknown>>
+]) as z.ZodType<HookBase>
 
 export type PostToolUseHookInput = z.infer<typeof postToolUseHookInputSchema>
 
@@ -598,7 +598,7 @@ export const stopHookInputSchema = z.union([
   claudeStopHookInputSchema,
   codexStopInputSchema,
   geminiAfterAgentInputSchema,
-]) as z.ZodType<HookBase & Record<string, unknown>>
+]) as z.ZodType<HookBase>
 
 export type StopHookInput = z.infer<typeof stopHookInputSchema>
 
@@ -609,7 +609,7 @@ export type StopHookInput = z.infer<typeof stopHookInputSchema>
  */
 export const stopHookExtendedInputSchema = hookBaseSchema.extend(
   PkgSubagentStopInputSchema.partial().shape
-) as z.ZodType<HookBase & Record<string, unknown>>
+) as z.ZodType<HookBase>
 
 export type StopHookExtendedInput = z.infer<typeof stopHookExtendedInputSchema>
 
@@ -630,7 +630,7 @@ export const sessionStartHookInputSchema = z.union([
   claudeSessionStartHookInputSchema,
   codexSessionStartInputSchema,
   geminiSessionStartInputSchema,
-]) as z.ZodType<HookBase & Record<string, unknown>>
+]) as z.ZodType<HookBase>
 
 export type SessionStartHookInput = z.infer<typeof sessionStartHookInputSchema>
 
@@ -649,7 +649,7 @@ export const userPromptSubmitHookInputSchema = z.union([
   claudeUserPromptSubmitHookInputSchema,
   codexUserPromptSubmitInputSchema,
   geminiBeforeAgentInputSchema,
-]) as z.ZodType<HookBase & Record<string, unknown>>
+]) as z.ZodType<HookBase>
 
 export type UserPromptSubmitHookInput = z.infer<typeof userPromptSubmitHookInputSchema>
 

@@ -64,7 +64,7 @@ export type RepoSlugResolver = (cwd: string) => Promise<string | null>
 
 const DEFAULT_PROBES: RepositoryCapabilityProbes = { isGitRepo, getRepoSlug, hasGhCli }
 
-function isRepositoryCapability(value: unknown): value is RepositoryCapability {
+function isRepositoryCapability(value: object | null | undefined): value is RepositoryCapability {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false
   return (
     typeof Reflect.get(value, "canonicalRoot") === "string" &&
