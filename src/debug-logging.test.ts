@@ -169,7 +169,10 @@ describe("debugLog enforcement", () => {
         const trimmed = line.trim()
         if (trimmed.startsWith("//") || trimmed.startsWith("*")) continue
 
-        if (/\bconsole\.(error|warn)\b/.test(line)) {
+        // Call sites only: `typeof console.error` annotations and
+        // `globalThis.console.error = …` restores in test-harness code emit
+        // nothing, and allowlisting those files would waive the real rule.
+        if (/\bconsole\.(error|warn)\s*\(/.test(line)) {
           violations.push(`${rel}:${i + 1}: ${trimmed}`)
         }
       }
@@ -198,7 +201,8 @@ describe("debugLog enforcement", () => {
         const trimmed = line.trim()
         if (trimmed.startsWith("//") || trimmed.startsWith("*")) continue
 
-        if (/\bconsole\.(log|info)\b/.test(line)) {
+        // Call sites only — see the console.error/warn scan above.
+        if (/\bconsole\.(log|info)\s*\(/.test(line)) {
           violations.push(`${rel}:${i + 1}: ${trimmed}`)
         }
       }
@@ -279,7 +283,8 @@ describe("debugLog enforcement", () => {
         const trimmed = line.trim()
         if (trimmed.startsWith("//") || trimmed.startsWith("*")) continue
 
-        if (/\bconsole\.(error|warn)\b/.test(line)) {
+        // Call sites only — see the source-wide scan above.
+        if (/\bconsole\.(error|warn)\s*\(/.test(line)) {
           violations.push(`${rel}:${i + 1}: ${trimmed}`)
         }
       }
