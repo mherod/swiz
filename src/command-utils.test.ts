@@ -72,12 +72,45 @@ describe("findNonCanonicalGitInvocation", () => {
     expect(findNonCanonicalGitInvocation("sudo sh -c 'git status'")?.kind).toBe("nested-shell")
   })
 
-  test("classifies command and process substitutions", () => {
-    expect(findNonCanonicalGitInvocation('echo "$(git status)"')?.kind).toBe("shell-substitution")
-    expect(findNonCanonicalGitInvocation("diff <(git status) expected")?.kind).toBe(
+  test("classifies command and process substitutions with mutating Git", () => {
+    expect(findNonCanonicalGitInvocation('echo "$(git push origin main)"')?.kind).toBe(
       "shell-substitution"
     )
-    expect(findNonCanonicalGitInvocation("echo `git status`")?.kind).toBe("shell-substitution")
+    expect(findNonCanonicalGitInvocation("diff <(git reset --hard HEAD) expected")?.kind).toBe(
+      "shell-substitution"
+    )
+    expect(findNonCanonicalGitInvocation("echo `git commit -m x`")?.kind).toBe("shell-substitution")
+  })
+
+  test("classifies substitutions whose bodies use wrappers or config writes", () => {
+    expect(findNonCanonicalGitInvocation("V=$(env git status)")?.kind).toBe("shell-substitution")
+    expect(findNonCanonicalGitInvocation("V=$(/usr/bin/git status)")?.kind).toBe(
+      "shell-substitution"
+    )
+    expect(findNonCanonicalGitInvocation('V=$(git config user.name "X Y")')?.kind).toBe(
+      "shell-substitution"
+    )
+    expect(
+      findNonCanonicalGitInvocation("V=$(git config --global --unset core.hooksPath)")?.kind
+    ).toBe("shell-substitution")
+  })
+
+  test("allows read-only Git inside command substitution", () => {
+    expect(findNonCanonicalGitInvocation('echo "$(git status)"')).toBeNull()
+    expect(
+      findNonCanonicalGitInvocation("STATUS=$(git status --short --branch | head -1)")
+    ).toBeNull()
+    expect(
+      findNonCanonicalGitInvocation(
+        'HOOKS_PATH=$(git config --path --get core.hooksPath 2>/dev/null || git rev-parse --git-path hooks 2>/dev/null || echo "")'
+      )
+    ).toBeNull()
+    expect(findNonCanonicalGitInvocation("GIT_NAME=$(git config user.name)")).toBeNull()
+    expect(
+      findNonCanonicalGitInvocation(
+        'echo "SHA: $(git rev-parse HEAD) | Branch: $(git branch --show-current)"'
+      )
+    ).toBeNull()
   })
 
   test("ignores Git text that is not executed", () => {

@@ -42,6 +42,7 @@ import {
   readProjectState,
   readSwizSettings,
 } from "../src/settings.ts"
+import { getRecentlyUsedToolsForCurrentSession } from "../src/skill-utils.ts"
 import { createTaskStoreForHookPayload } from "../src/task-roots.ts"
 import {
   CODEX_UPDATE_PLAN_TOOL_NAMES,
@@ -85,11 +86,9 @@ import { readTasks } from "../src/tasks/task-repository.ts"
 import {
   CANONICAL_TASKLIST_SYNC_MAX_AGE_MS,
   readCanonicalTaskListSyncAtMs,
+  writeCanonicalTaskListSyncSentinel,
 } from "../src/tasks/task-state-cache.ts"
-import {
-  isTaskSubjectCarryoverDeferral,
-  isTaskSubjectWorkDeferral,
-} from "../src/tasks/task-subject-deferral.ts"
+import { isTaskSubjectWorkDeferral } from "../src/tasks/task-subject-deferral.ts"
 import {
   applyTaskUpdatePreview,
   duplicateSubjectSeverity,
@@ -619,12 +618,33 @@ async function checkCanonicalTaskListSync(
     return undefined
   }
 
+  // Sentinel missing or stale — check transcript evidence before denying. The
+  // sentinel's only writer is the PostToolUse TaskList sync hook; when that
+  // event does not dispatch for the current agent, denying on the absent
+  // sentinel turns the "Run TaskList now" remediation into an unsatisfiable
+  // retry loop. A TaskList call visible in the recent transcript window is
+  // direct evidence the sync happened, so accept it and self-heal the sentinel.
+  if (await hasRecentTaskListEvidence(input)) {
+    await writeCanonicalTaskListSyncSentinel(sessionId)
+    return undefined
+  }
+
   return preToolUseDeny(
     taskGovernanceMessage(input, {
       kind: "canonical-tasklist-stale",
       toolName,
     })
   )
+}
+
+async function hasRecentTaskListEvidence(input: Record<string, any>): Promise<boolean> {
+  try {
+    const recentTools = await getRecentlyUsedToolsForCurrentSession(input)
+    return recentTools.some((name) => isTaskListTool(name))
+  } catch {
+    // Transcript unavailable — the caller falls through to the deny.
+    return false
+  }
 }
 
 interface SlowTaskEntry {
@@ -1552,9 +1572,7 @@ function checkUpdatePlanFinalTaskState(
 
 function findDeferralPlanItem(plan: UpdatePlanTaskInput[]): UpdatePlanTaskInput | undefined {
   return plan.find(
-    (item) =>
-      isIncompleteTaskStatus(item.status) &&
-      (isTaskSubjectWorkDeferral(item.step) || isTaskSubjectCarryoverDeferral(item.step))
+    (item) => isIncompleteTaskStatus(item.status) && isTaskSubjectWorkDeferral(item.step)
   )
 }
 
@@ -1786,11 +1804,7 @@ export const enforceTaskupdateHook: SwizToolHook = {
 type ParsedGovernanceInput = ReturnType<typeof toolHookInputSchema.parse>
 
 function validateNativeTaskUpdateInput(toolInput: Record<string, any>): SwizHookOutput | null {
-  if (
-    typeof toolInput.subject === "string" &&
-    (isTaskSubjectWorkDeferral(toolInput.subject) ||
-      isTaskSubjectCarryoverDeferral(toolInput.subject))
-  ) {
+  if (typeof toolInput.subject === "string" && isTaskSubjectWorkDeferral(toolInput.subject)) {
     return preToolUseDeny(
       `Deferral tactic detected: task subject "${toolInput.subject}" uses deferral framing. ` +
         "All work is to be completed in this session. There is no follow-up session. " +
@@ -1896,7 +1910,7 @@ export async function evaluateTaskCreatePath(
   toolInput: Record<string, any>
 ): Promise<SwizHookOutput> {
   const subject: string = (toolInput?.subject as string) ?? ""
-  if (isTaskSubjectWorkDeferral(subject) || isTaskSubjectCarryoverDeferral(subject)) {
+  if (isTaskSubjectWorkDeferral(subject)) {
     return preToolUseDeny(
       `Deferral tactic detected: task subject "${subject}" uses deferral framing. ` +
         "All work is to be completed in this session. There is no follow-up session. " +

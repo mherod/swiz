@@ -10,6 +10,7 @@ import {
   swizMcpChannelStatusPath,
   swizPseudoHookLogPath,
   TMP_ROOT,
+  taskListSyncSentinelPath,
 } from "./temp-paths.ts"
 
 describe("TMP_ROOT", () => {
@@ -27,6 +28,12 @@ describe("PUBLIC_TMP_ROOT", () => {
   test("uses stable /tmp for human-inspected captures", () => {
     expect(PUBLIC_TMP_ROOT).toBe("/tmp")
     expect(SWIZ_INCOMING_ROOT).toBe("/tmp/swiz-incoming")
+  })
+
+  test("taskListSyncSentinelPath uses PUBLIC_TMP_ROOT so daemon and CLI dispatch agree", () => {
+    expect(taskListSyncSentinelPath("session-x")).toBe(
+      "/tmp/swiz-tasklist-sync-session-x.timestamp"
+    )
   })
 })
 

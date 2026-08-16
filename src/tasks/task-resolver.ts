@@ -114,7 +114,19 @@ async function partitionByMeta(
   return { matched, remaining }
 }
 
-function matchesJunieEventCwd(entry: Record<string, any>, filterCwd: string): boolean {
+const junieEventSchema = z.looseObject({
+  kind: z.string(),
+  event: z.looseObject({
+    agentEvent: z.looseObject({
+      kind: z.string(),
+      blob: z.string().optional(),
+    }),
+  }),
+})
+
+type JunieEvent = z.infer<typeof junieEventSchema>
+
+function matchesJunieEventCwd(entry: JunieEvent, filterCwd: string): boolean {
   if (
     (entry.kind !== "SessionA2uxEvent" && entry.kind !== "SessionEvent") ||
     entry.event?.agentEvent?.kind !== "AgentStateUpdatedEvent" ||
@@ -133,16 +145,7 @@ function matchesJunieEventCwd(entry: Record<string, any>, filterCwd: string): bo
 async function scanJunieEventsForCwd(eventsPath: string, filterCwd: string): Promise<boolean> {
   try {
     const text = await readFile(eventsPath, "utf-8")
-    const schema = z.looseObject({
-      kind: z.string(),
-      event: z.looseObject({
-        agentEvent: z.looseObject({
-          kind: z.string(),
-          blob: z.string().optional(),
-        }),
-      }),
-    })
-    const entries = parseJsonl(text, schema)
+    const entries = parseJsonl(text, junieEventSchema)
     return entries.some((entry) => matchesJunieEventCwd(entry, filterCwd))
   } catch {
     return false

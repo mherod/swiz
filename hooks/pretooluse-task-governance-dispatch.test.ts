@@ -584,12 +584,29 @@ describe("evaluateTaskCreatePath", () => {
     }
   })
 
-  test("denies a carryover deferral subject", async () => {
+  test("allows a consider-phrased same-session subject", async () => {
+    // Bare "Consider …" subjects are exactly what the planning-buffer nag asks
+    // for as broader follow-on tasks; only explicit session-boundary deferrals
+    // (issue refs, "Future:", "next session", …) are denied.
     const sessionId = uniqueSessionId("pgrep-dispatch-test-carryover")
     try {
       await cleanupSession(sessionId)
       const input = { tool_name: "TaskCreate", session_id: sessionId, _taskHome: TASK_HOME }
       const result = await evaluateTaskCreatePath(input, { subject: "Consider extracting helpers" })
+      expect(permissionDecision(result)).not.toBe("deny")
+    } finally {
+      await cleanupSession(sessionId)
+    }
+  })
+
+  test("denies a consider subject that defers to an issue", async () => {
+    const sessionId = uniqueSessionId("pgrep-dispatch-test-issue-deferral")
+    try {
+      await cleanupSession(sessionId)
+      const input = { tool_name: "TaskCreate", session_id: sessionId, _taskHome: TASK_HOME }
+      const result = await evaluateTaskCreatePath(input, {
+        subject: "Consider issue #633: reduce governance complexity",
+      })
       expect(permissionDecision(result)).toBe("deny")
     } finally {
       await cleanupSession(sessionId)

@@ -6,6 +6,7 @@ import {
 } from "../agent-paths.ts"
 import type { AgentDef } from "../agents.ts"
 import { selectStableHookVariant } from "../hook-message-rephrasing.ts"
+import { CANONICAL_TASKLIST_SYNC_MAX_AGE_MS } from "./task-governance-constants.ts"
 import { replaceTaskGovernanceSynonyms } from "./task-governance-rephrasing.ts"
 import {
   type DuplicateSubjectGroup,
@@ -356,10 +357,14 @@ function buildStaleTasksMessage(r: Req<"stale-tasks">): string {
 }
 
 function buildCanonicalTasklistStaleMessage(r: Req<"canonical-tasklist-stale">): string {
+  const windowMinutes = Math.round(CANONICAL_TASKLIST_SYNC_MAX_AGE_MS / 60_000)
   const lead = `Sync task state before ${r.toolName}.`
   return (
     `${lead}\n\n` +
-    formatTranslatedActionPlan([TASKLIST_STABILITY_STEP, retryAfterTaskList(r.toolName)])
+    `Cause: no canonical TaskList sync is recorded for this session within the last ${windowMinutes} minutes.\n\n` +
+    formatTranslatedActionPlan([TASKLIST_STABILITY_STEP, retryAfterTaskList(r.toolName)]) +
+    `\nIf this block re-fires immediately after a TaskList call, the sync record is not being written — ` +
+    `treat it as a hook fault and use the /re-assess skill instead of retrying.`
   )
 }
 

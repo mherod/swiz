@@ -4,7 +4,12 @@
 // Used by transcript-summary parsing and hook scripts that inspect Bash tool
 // calls. Extracted from hooks/hook-utils.ts (issue #84).
 
-import { splitShellSegments, tokenizeShellSegment } from "./utils/shell-patterns.ts"
+import {
+  type ParsedGitInvocationTokens,
+  parseGitInvocationTokens,
+  splitShellSegments,
+  tokenizeShellSegment,
+} from "./utils/shell-patterns.ts"
 
 /**
  * Normalize shell backslash-newline continuations so that
@@ -100,6 +105,96 @@ const GIT_COMMAND_WRAPPERS = new Set([
 ])
 const SHELL_SUBCOMMAND_RE = /(?:\$\(|[<>]\()([^()]*)\)|`([^`]*)`/g
 const SHELL_ASSIGNMENT_RE = /^[A-Za-z_][A-Za-z0-9_]*=/
+
+// ─── Read-only git classification for substitution bodies ───────────────────
+// Reading repo state inside $(...) is ubiquitous in scripts and skill
+// preambles (`BRANCH=$(git branch --show-current)`); only mutating git needs
+// the canonical statement-boundary form that command-profile matchers can see.
+
+const READ_ONLY_GIT_SUBCOMMANDS = new Set([
+  "blame",
+  "cat-file",
+  "describe",
+  "diff",
+  "for-each-ref",
+  "log",
+  "ls-files",
+  "ls-remote",
+  "merge-base",
+  "reflog",
+  "rev-list",
+  "rev-parse",
+  "shortlog",
+  "show",
+  "status",
+  "symbolic-ref",
+])
+const GIT_CONFIG_READ_FLAGS = new Set(["--get", "--get-all", "--get-regexp", "--list", "-l"])
+const GIT_CONFIG_WRITE_FLAGS = new Set([
+  "--add",
+  "--edit",
+  "-e",
+  "--remove-section",
+  "--rename-section",
+  "--replace-all",
+  "--unset",
+  "--unset-all",
+])
+const GIT_BRANCH_MUTATION_FLAGS = new Set([
+  "-C",
+  "-c",
+  "-D",
+  "-d",
+  "--delete",
+  "--copy",
+  "--edit-description",
+  "-f",
+  "--force",
+  "-M",
+  "-m",
+  "--move",
+  "--unset-upstream",
+])
+const SHELL_REDIRECT_TOKEN_RE = /^\d*[<>]/
+
+function isReadOnlyGitConfigArgs(args: string[]): boolean {
+  if (args.some((arg) => GIT_CONFIG_WRITE_FLAGS.has(arg))) return false
+  if (args.some((arg) => GIT_CONFIG_READ_FLAGS.has(arg))) return true
+  // `git config user.name` reads; `git config user.name value` writes.
+  const positionals = args.filter(
+    (arg) => !arg.startsWith("-") && !SHELL_REDIRECT_TOKEN_RE.test(arg)
+  )
+  return positionals.length <= 1
+}
+
+function isReadOnlyGitBranchArgs(args: string[]): boolean {
+  return args.every(
+    (arg) =>
+      arg.startsWith("-") &&
+      !GIT_BRANCH_MUTATION_FLAGS.has(arg) &&
+      !arg.startsWith("--set-upstream-to")
+  )
+}
+
+function isReadOnlyGitInvocation(invocation: ParsedGitInvocationTokens): boolean {
+  const { subcommand, args } = invocation
+  if (READ_ONLY_GIT_SUBCOMMANDS.has(subcommand)) return true
+  if (subcommand === "branch") return isReadOnlyGitBranchArgs(args)
+  if (subcommand === "remote") {
+    return args.length === 0 || ["-v", "get-url", "show"].includes(args[0] ?? "")
+  }
+  if (subcommand === "stash") return args[0] === "list" || args[0] === "show"
+  if (subcommand === "config") return isReadOnlyGitConfigArgs(args)
+  return false
+}
+
+/** True when every direct git use inside a substitution body is read-only. */
+function isReadOnlyGitSubstitutionBody(body: string): boolean {
+  return splitShellSegments(body).every((segment) => {
+    const parsed = parseGitInvocationTokens(segment)
+    return parsed === null || isReadOnlyGitInvocation(parsed)
+  })
+}
 
 function executableBasename(token: string): string {
   return token.slice(token.lastIndexOf("/") + 1)
@@ -227,7 +322,15 @@ function collectGitInvocations(command: string, depth: number): GitInvocation[] 
 
   const usages: GitInvocation[] = []
   for (const body of extractExecutableSubcommands(command)) {
-    if (collectGitInvocations(body, depth + 1).length > 0) {
+    const inner = collectGitInvocations(body, depth + 1)
+    if (inner.length === 0) continue
+    // Canonical read-only git inside a substitution cannot bypass any
+    // command-profile matcher (read subcommands are not gated), so allow it.
+    // Wrappers, binary paths, nested shells, and mutating subcommands inside
+    // the body still surface as a shell-substitution violation.
+    const canonicalReadOnly =
+      inner.every((usage) => usage.kind === "canonical") && isReadOnlyGitSubstitutionBody(body)
+    if (!canonicalReadOnly) {
       usages.push({ kind: "shell-substitution", invocation: body })
     }
   }

@@ -300,6 +300,19 @@ function _parseGitInvocation(segment: string): _ParsedGitInvocation | null {
   return { subcommand, args: tokens.slice(subcommandIndex + 1) }
 }
 
+export interface ParsedGitInvocationTokens {
+  subcommand: string
+  args: string[]
+}
+
+/**
+ * Parse `git [global-opts] <subcommand> <args>` from one shell segment.
+ * Returns null when the segment is not a direct git invocation.
+ */
+export function parseGitInvocationTokens(segment: string): ParsedGitInvocationTokens | null {
+  return _parseGitInvocation(segment)
+}
+
 function _gitInvocations(command: string): _ParsedGitInvocation[] {
   const invocations: _ParsedGitInvocation[] = []
   for (const segment of splitShellSegments(command)) {

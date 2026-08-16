@@ -138,15 +138,28 @@ export function applyTaskCreateEvent(sessionId: string, taskId: string, subject:
 
 /**
  * Apply a TaskUpdate event: update status and/or subject of an existing task.
- * If the task isn't in the map yet (first event for this session), it's added.
+ * If the task isn't in the map yet but the session is tracked, it's added.
  * Logs a warning and sets the reconciliation flag on invalid transitions.
+ *
+ * When the session has NO event state at all, the update is dropped: a
+ * single-task list fabricated from one update would masquerade as the
+ * complete session state, and downstream count hooks would report
+ * "Planning buffer empty" while disk holds the real queue. With no entry,
+ * readers fall back to disk, which stays authoritative.
  */
 export function applyTaskUpdateEvent(
   sessionId: string,
   taskId: string,
   updates: { status?: string; subject?: string }
 ): void {
-  const tasks = sessionTasks.get(sessionId) ?? []
+  const tasks = sessionTasks.get(sessionId)
+  if (!tasks) {
+    debugLog(
+      `[task-transition] event-state: dropping TaskUpdate for untracked session ` +
+        `${sessionId.slice(0, 8)}… (task #${taskId}) — disk remains authoritative.`
+    )
+    return
+  }
   const idx = tasks.findIndex((t) => t.id === taskId)
   if (idx >= 0) {
     const existing = tasks[idx]!

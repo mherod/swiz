@@ -197,6 +197,97 @@ describe("pretooluse-require-tasks hook", () => {
     }
   })
 
+  test("allows Bash when sync sentinel is missing but transcript shows a recent TaskList, and self-heals the sentinel", async () => {
+    const tmpHome = await mkdtemp(join(tmpdir(), "swiz-hook-sync-fallback-"))
+    const sessionId = `test-sync-fallback-${Date.now()}`
+    const tasksDir = join(tmpHome, ".claude", "tasks", sessionId)
+    const { mkdir } = await import("node:fs/promises")
+    await mkdir(tasksDir, { recursive: true })
+    // Healthy task state so no other governance check denies
+    await Bun.write(
+      join(tasksDir, "1.json"),
+      JSON.stringify({ id: "1", subject: "Current work", status: "in_progress" })
+    )
+    await Bun.write(
+      join(tasksDir, "2.json"),
+      JSON.stringify({ id: "2", subject: "Next step", status: "pending" })
+    )
+    // Transcript with a recent TaskList call — the sentinel writer (PostToolUse
+    // TaskList sync) may not dispatch for every agent, so this evidence must
+    // satisfy the canonical sync gate on its own.
+    const transcriptPath = join(tmpHome, "transcript.jsonl")
+    const taskListLine = JSON.stringify({
+      type: "assistant",
+      timestamp: new Date(Date.now() - 1000).toISOString(),
+      message: { content: [{ type: "tool_use", id: "t1", name: "TaskList", input: {} }] },
+    })
+    await Bun.write(transcriptPath, `${taskListLine}\n`)
+    try {
+      const result = await runHook(
+        {
+          tool_name: "Bash",
+          tool_input: { command: "echo hello" },
+          session_id: sessionId,
+          transcript_path: transcriptPath,
+        },
+        { HOME: tmpHome }
+      )
+      expect(result.exitCode).toBe(0)
+      const decision = result.parsed?.hookSpecificOutput?.permissionDecision
+      expect(decision).not.toBe("deny")
+      // Sentinel self-heals so subsequent calls pass without re-scanning
+      expect(await Bun.file(taskListSyncSentinelPath(sessionId)).exists()).toBe(true)
+    } finally {
+      await rm(tmpHome, { recursive: true, force: true })
+      await rm(taskListSyncSentinelPath(sessionId), { force: true })
+    }
+  })
+
+  test("canonical sync deny states its cause and a false-positive escape route", async () => {
+    const tmpHome = await mkdtemp(join(tmpdir(), "swiz-hook-sync-deny-"))
+    const sessionId = `test-sync-deny-${Date.now()}`
+    const tasksDir = join(tmpHome, ".claude", "tasks", sessionId)
+    const { mkdir } = await import("node:fs/promises")
+    await mkdir(tasksDir, { recursive: true })
+    await Bun.write(
+      join(tasksDir, "1.json"),
+      JSON.stringify({ id: "1", subject: "Current work", status: "in_progress" })
+    )
+    await Bun.write(
+      join(tasksDir, "2.json"),
+      JSON.stringify({ id: "2", subject: "Next step", status: "pending" })
+    )
+    // Transcript exists but contains no TaskList call — the gate must deny
+    // with a message that names the real condition, not just "sync".
+    const transcriptPath = join(tmpHome, "transcript.jsonl")
+    const readLine = JSON.stringify({
+      type: "assistant",
+      timestamp: new Date(Date.now() - 1000).toISOString(),
+      message: { content: [{ type: "tool_use", id: "t1", name: "Read", input: {} }] },
+    })
+    await Bun.write(transcriptPath, `${readLine}\n`)
+    try {
+      const result = await runHook(
+        {
+          tool_name: "Bash",
+          tool_input: { command: "echo hello" },
+          session_id: sessionId,
+          transcript_path: transcriptPath,
+        },
+        { HOME: tmpHome }
+      )
+      expect(result.exitCode).toBe(0)
+      const hookOutput = result.parsed?.hookSpecificOutput as Record<string, any> | undefined
+      expect(hookOutput?.permissionDecision).toBe("deny")
+      const reason = String(hookOutput?.permissionDecisionReason ?? "")
+      expect(reason).toContain("Sync task state before Bash")
+      expect(reason).toContain("no canonical TaskList sync is recorded")
+      expect(reason).toContain("/re-assess")
+    } finally {
+      await rm(tmpHome, { recursive: true, force: true })
+    }
+  })
+
   test("denies (fail-closed) when hook receives malformed JSON stdin", async () => {
     // PROCESS_CONTRACT_TEST: malformed stdin must fail closed at the executable boundary.
     const proc = Bun.spawn([process.execPath, HOOK_PATH], {

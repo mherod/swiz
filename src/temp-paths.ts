@@ -28,7 +28,12 @@ export function swizUpstreamSyncDriftCooldownPath(repoKey: string): string {
 }
 
 export function taskListSyncSentinelPath(sessionId: string): string {
-  return `${TMP_ROOT}/swiz-tasklist-sync-${sessionId}.timestamp`
+  // Fixed public root: this sentinel is written and read from both the launchd
+  // daemon (no TMPDIR → tmpdir() is /tmp) and CLI-local dispatch processes
+  // (user TMPDIR → /var/folders/…/T). A tmpdir()-relative path lets the writer
+  // and reader disagree when dispatch flaps between the two, which turns the
+  // canonical TaskList staleness gate into an unclearable deny loop.
+  return `${PUBLIC_TMP_ROOT}/swiz-tasklist-sync-${sessionId}.timestamp`
 }
 
 export function stopGitPushPromptedFlagPath(safeSession: string): string {

@@ -111,17 +111,28 @@ describe("task-event-state", () => {
       expect(state[0]!.subject).toBe("Bypassed")
     })
 
-    it("adds task when ID not yet tracked", () => {
+    it("adds task when ID not yet tracked in an already-tracked session", () => {
+      applyTaskCreateEvent("s1", "1", "Existing")
       applyTaskUpdateEvent("s1", "5", { status: "in_progress", subject: "Late arrival" })
       const state = getSessionEventState("s1")!
-      expect(state).toHaveLength(1)
-      expect(state[0]!.id).toBe("5")
-      expect(state[0]!.status).toBe("in_progress")
+      expect(state).toHaveLength(2)
+      expect(state[1]!.id).toBe("5")
+      expect(state[1]!.status).toBe("in_progress")
     })
 
     it("defaults to pending status when no status provided for new task", () => {
+      applyTaskCreateEvent("s1", "1", "Existing")
       applyTaskUpdateEvent("s1", "5", { subject: "No status" })
-      expect(getSessionEventState("s1")![0]!.status).toBe("pending")
+      expect(getSessionEventState("s1")![1]!.status).toBe("pending")
+    })
+
+    it("drops updates for an untracked session instead of fabricating a singleton list", () => {
+      // A one-task list fabricated from a single update would masquerade as
+      // the complete session state and drive false "Planning buffer empty"
+      // nags while disk holds the real queue.
+      applyTaskUpdateEvent("s-untracked", "1", { status: "in_progress", subject: "Lone update" })
+      expect(getSessionEventState("s-untracked")).toBeNull()
+      expect(needsReconciliation("s-untracked")).toBe(false)
     })
   })
 

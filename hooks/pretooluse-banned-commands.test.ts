@@ -358,11 +358,12 @@ describe("pretooluse-banned-commands", () => {
       }
 
       for (const command of [
-        'echo "$(git status)"',
-        "diff <(git status) expected.txt",
-        "echo `git status`",
+        'echo "$(git push origin main)"',
+        "diff <(git fetch origin main) expected.txt",
+        "echo `git commit -m x`",
+        "V=$(env git status)",
       ]) {
-        test(`blocks Git inside shell substitution: ${command}`, async () => {
+        test(`blocks mutating or wrapped Git inside shell substitution: ${command}`, async () => {
           const result = await runHook(command)
           expect(result.decision).toBe("deny")
           expect(result.reason).toContain("directly as `git`")
@@ -764,6 +765,17 @@ describe("pretooluse-banned-commands", () => {
       "echo '`git status`'",
     ]) {
       test(`allows non-executable Git prose: ${command}`, async () => {
+        const result = await runHook(command)
+        expect(result.decision).toBeUndefined()
+      })
+    }
+
+    for (const command of [
+      "STATUS=$(git status --short --branch | head -1)",
+      'HOOKS_PATH=$(git config --path --get core.hooksPath 2>/dev/null || git rev-parse --git-path hooks 2>/dev/null || echo "")',
+      'echo "SHA: $(git rev-parse HEAD) | Branch: $(git branch --show-current)"',
+    ]) {
+      test(`allows read-only Git inside substitution: ${command}`, async () => {
         const result = await runHook(command)
         expect(result.decision).toBeUndefined()
       })
