@@ -222,6 +222,21 @@ export function keepSideEffectPostToolGroups(groups: HookGroup[]): HookGroup[] {
  * file-based hook blocks first. This window lets all hooks race fairly. */
 const STOP_COLLECTION_TIMEOUT_MS = 10_000
 
+function applyMergedContextToResponse(
+  finalResponse: HookOutput,
+  contexts: string[],
+  hookEventName: string
+): void {
+  const mergedContext = mergeHookContexts(contexts, hookEventName)
+  if (mergedContext) {
+    finalResponse.systemMessage = appendContext(finalResponse.systemMessage, mergedContext)
+
+    const existingHso = mergeHookSpecificOutputClone(finalResponse, hookEventName)
+    existingHso.additionalContext = mergedContext
+    finalResponse.hookSpecificOutput = existingHso
+  }
+}
+
 /** Process blocking hook results, collecting contexts from all hooks.
  *  For stop events: runs all hooks, forwards first block, merges all contexts.
  *  For other events: may have been aborted early, but still collects contexts
@@ -238,12 +253,11 @@ export function processBlockingResults(
   let firstBlockHandled = false
 
   for (const { execution, parsed: resp } of results) {
-    if (execution.status === "skipped" || execution.status === "aborted") {
-      executions.push(execution)
-      continue
-    }
+    executions.push(execution)
+    if (execution.status === "skipped" || execution.status === "aborted") continue
 
-    if (resp && isBlock(resp)) {
+    const blocked = resp ? isBlock(resp) : false
+    if (blocked) {
       log(`   ✗ BLOCK from ${execution.file}`)
       execution.status = "block"
 
@@ -251,39 +265,51 @@ export function processBlockingResults(
         // First block: copy its entire response as the final response
         merge(finalResponse, resp)
         firstBlockHandled = true
-        // Still collect additionalContext via extractContext so it is flattened into
-        // systemMessage (agents read top-level systemMessage; nested hso alone is insufficient).
-        const firstCtx = extractContext(resp)
-        if (firstCtx) contexts.push(firstCtx)
-      } else {
-        // Subsequent blocks: only extract their context (if any) for inclusion
-        const ctx = extractContext(resp)
-        if (ctx) contexts.push(ctx)
       }
-
-      executions.push(execution)
-      // Continue processing remaining hooks to collect contexts and executions
-      continue
+    } else {
+      log(`   ✓ ${execution.file} (${resp ? "ok" : "no output"})`)
     }
 
-    // Non-block hook: extract per-hook additionalContext for merging
     if (resp) {
       const ctx = extractContext(resp)
       if (ctx) contexts.push(ctx)
     }
+  }
 
+  applyMergedContextToResponse(finalResponse, contexts, hookEventName)
+}
+
+function processSingleStopResult(
+  execution: HookExecution,
+  resp: Record<string, any> | null,
+  blockReasons: Array<{ file: string; reason: string }>,
+  contexts: string[]
+): void {
+  if (execution.status === "skipped" || execution.status === "aborted") return
+
+  if (resp && isBlock(resp)) {
+    log(`   ✗ BLOCK from ${execution.file}`)
+    execution.status = "block"
+    const reason = (resp as { reason?: string }).reason
+    if (reason) blockReasons.push({ file: execution.file, reason })
+  } else {
     log(`   ✓ ${execution.file} (${resp ? "ok" : "no output"})`)
-    executions.push(execution)
   }
 
-  const mergedContext = mergeHookContexts(contexts, hookEventName)
-  if (mergedContext) {
-    finalResponse.systemMessage = appendContext(finalResponse.systemMessage, mergedContext)
-
-    const existingHso = mergeHookSpecificOutputClone(finalResponse, hookEventName)
-    existingHso.additionalContext = mergedContext
-    finalResponse.hookSpecificOutput = existingHso
+  if (resp) {
+    const ctx = extractContext(resp)
+    if (ctx) contexts.push(ctx)
   }
+}
+
+function applyAggregatedBlockReasons(
+  finalResponse: HookOutput,
+  blockReasons: Array<{ file: string; reason: string }>
+): void {
+  if (blockReasons.length === 0) return
+  finalResponse.decision = "block"
+  finalResponse.reason = formatAggregatedStopReason(blockReasons)
+  log(`   result: ${blockReasons.length} block(s) aggregated`)
 }
 
 /**
@@ -305,98 +331,128 @@ export function processAggregatedStopResults(
   const contexts: string[] = []
 
   for (const { execution, parsed: resp } of results) {
-    if (execution.status === "skipped" || execution.status === "aborted") {
-      executions.push(execution)
-      continue
-    }
-
-    if (resp && isBlock(resp)) {
-      log(`   ✗ BLOCK from ${execution.file}`)
-      execution.status = "block"
-      const reason = (resp as { reason?: string }).reason
-      if (reason) blockReasons.push({ file: execution.file, reason })
-      const ctx = extractContext(resp)
-      if (ctx) contexts.push(ctx)
-      executions.push(execution)
-      continue
-    }
-
-    if (resp) {
-      const ctx = extractContext(resp)
-      if (ctx) contexts.push(ctx)
-    }
-
-    log(`   ✓ ${execution.file} (${resp ? "ok" : "no output"})`)
     executions.push(execution)
+    processSingleStopResult(execution, resp, blockReasons, contexts)
   }
 
-  if (blockReasons.length > 0) {
-    finalResponse.decision = "block"
-    finalResponse.reason = formatAggregatedStopReason(blockReasons)
-    log(`   result: ${blockReasons.length} block(s) aggregated`)
-  }
+  applyAggregatedBlockReasons(finalResponse, blockReasons)
+  applyMergedContextToResponse(finalResponse, contexts, hookEventName)
+}
 
-  const mergedContext = mergeHookContexts(contexts, hookEventName)
-  if (mergedContext) {
-    finalResponse.systemMessage = appendContext(finalResponse.systemMessage, mergedContext)
-
-    const existingHso = mergeHookSpecificOutputClone(finalResponse, hookEventName)
-    existingHso.additionalContext = mergedContext
-    finalResponse.hookSpecificOutput = existingHso
+async function checkPostToolUseSkillSkip(
+  ctx: HookStrategyContext
+): Promise<{ shortCircuit?: Record<string, any>; updatedCtx?: HookStrategyContext }> {
+  if (ctx.canonicalEvent !== "postToolUse") return {}
+  let payload: Record<string, any> = {}
+  try {
+    payload = JSON.parse(ctx.enrichedPayloadStr)
+  } catch {}
+  if (await shouldSkipPostToolUseHooks(payload, ctx.cwd)) {
+    const sideEffectGroups = keepSideEffectPostToolGroups(ctx.filteredGroups)
+    log(
+      `   postToolUse: skill recently active — skipping advisory hooks` +
+        (sideEffectGroups.length > 0
+          ? ` (keeping ${sideEffectGroups.length} side-effect group(s))`
+          : "")
+    )
+    if (sideEffectGroups.length === 0) {
+      const response: Record<string, any> = {}
+      coerceDispatchAgentEnvelopeInPlace(
+        response,
+        ctx.canonicalEvent,
+        ctx.hookEventName,
+        ctx.agentId
+      )
+      writeResponse(response)
+      return { shortCircuit: response }
+    }
+    return { updatedCtx: { ...ctx, filteredGroups: sideEffectGroups } }
   }
+  return {}
+}
+
+async function checkOnSessionStopShortCircuit(
+  ctx: HookStrategyContext
+): Promise<Record<string, any> | null> {
+  if (ctx.canonicalEvent !== "stop") return null
+  const shortCircuited = await tryOnSessionStopDelivery(ctx.enrichedPayloadStr)
+  if (!shortCircuited) return null
+
+  const response: Record<string, any> = {}
+  normalizeStopDispatchResponseInPlace(response, ctx.hookEventName)
+  coerceDispatchAgentEnvelopeInPlace(response, ctx.canonicalEvent, ctx.hookEventName, ctx.agentId)
+  writeResponse(response)
+  return response
+}
+
+async function resolveBlockingHumaniseParams(enrichedPayloadStr: string): Promise<{
+  humaniseEnabled: boolean
+  sessionId?: string
+  transcriptPath?: string
+  withinGrace: boolean
+}> {
+  let humaniseEnabled = false
+  let sessionId: string | undefined
+  let transcriptPath: string | undefined
+  let withinGrace = false
+  try {
+    const payload = JSON.parse(enrichedPayloadStr)
+    humaniseEnabled = payload._effectiveSettings?.humaniseAutoSteer ?? false
+    sessionId = typeof payload.session_id === "string" ? payload.session_id : undefined
+    transcriptPath =
+      typeof payload.transcript_path === "string" ? payload.transcript_path : undefined
+    const { isWithinUserMessageGrace } = await import("../../src/tasks/task-governance-grace.ts")
+    withinGrace = await isWithinUserMessageGrace(payload)
+  } catch {}
+  return { humaniseEnabled, sessionId, transcriptPath, withinGrace }
+}
+
+async function maybeHumaniseBlockingResponse(
+  finalResponse: Record<string, any>,
+  ctx: HookStrategyContext
+): Promise<void> {
+  const { humaniseEnabled, sessionId, transcriptPath, withinGrace } =
+    await resolveBlockingHumaniseParams(ctx.enrichedPayloadStr)
+
+  // Skip humanisation inside the post-user-message grace window so the
+  // mechanical context voice stays visually distinct from the user's own
+  // messages while they are actively present.
+  if (!humaniseEnabled || withinGrace) return
+
+  const rawContext = finalResponse.hookSpecificOutput?.additionalContext?.trim()
+  if (!rawContext) return
+
+  const { humaniseText, STRATEGY_HUMANISE_SYSTEM_PROMPT } = await import("../utils/humanise.ts")
+  const humanised = await humaniseText(rawContext, {
+    systemPrompt: STRATEGY_HUMANISE_SYSTEM_PROMPT,
+    sessionId,
+    transcriptPath,
+  })
+  finalResponse.systemMessage = humanised
+  finalResponse.hookSpecificOutput.additionalContext = humanised
+}
+
+async function finalizeStopBlock(
+  response: Record<string, any>,
+  enrichedPayloadStr: string
+): Promise<void> {
+  const rawReason = (response as { reason?: string }).reason ?? ""
+  if (rawReason) {
+    response.reason = await compileStopReasons(rawReason)
+  }
+  await tryAutoSteerStopBlock(response, enrichedPayloadStr)
 }
 
 export class BlockingStrategy implements HookExecutionStrategy {
   async execute(ctx: HookStrategyContext): Promise<Record<string, any>> {
-    const { canonicalEvent, enrichedPayloadStr } = ctx
-    const isStop = canonicalEvent === "stop"
+    const isStop = ctx.canonicalEvent === "stop"
 
-    // postToolUse: while a skill is recently active, skip advisory hooks but
-    // keep side-effect hooks (e.g. upstream sync) running.
-    if (canonicalEvent === "postToolUse") {
-      let payload: Record<string, any> = {}
-      try {
-        payload = JSON.parse(enrichedPayloadStr)
-      } catch {}
-      if (await shouldSkipPostToolUseHooks(payload, ctx.cwd)) {
-        const sideEffectGroups = keepSideEffectPostToolGroups(ctx.filteredGroups)
-        log(
-          `   postToolUse: skill recently active — skipping advisory hooks` +
-            (sideEffectGroups.length > 0
-              ? ` (keeping ${sideEffectGroups.length} side-effect group(s))`
-              : "")
-        )
-        if (sideEffectGroups.length === 0) {
-          const response: Record<string, any> = {}
-          coerceDispatchAgentEnvelopeInPlace(
-            response,
-            ctx.canonicalEvent,
-            ctx.hookEventName,
-            ctx.agentId
-          )
-          writeResponse(response)
-          return response
-        }
-        ctx = { ...ctx, filteredGroups: sideEffectGroups }
-      }
-    }
+    const postTool = await checkPostToolUseSkillSkip(ctx)
+    if (postTool.shortCircuit) return postTool.shortCircuit
+    if (postTool.updatedCtx) ctx = postTool.updatedCtx
 
-    // on_session_stop: short-circuit all stop hooks if pending messages exist.
-    if (isStop) {
-      const shortCircuited = await tryOnSessionStopDelivery(enrichedPayloadStr)
-      if (shortCircuited) {
-        const response: Record<string, any> = {}
-        normalizeStopDispatchResponseInPlace(response, ctx.hookEventName)
-        coerceDispatchAgentEnvelopeInPlace(
-          response,
-          ctx.canonicalEvent,
-          ctx.hookEventName,
-          ctx.agentId
-        )
-        writeResponse(response)
-        return response
-      }
-    }
+    const onSessionStop = await checkOnSessionStopShortCircuit(ctx)
+    if (onSessionStop) return onSessionStop
 
     const finalResponse: Record<string, any> = {}
 
@@ -416,44 +472,7 @@ export class BlockingStrategy implements HookExecutionStrategy {
           processBlockingResults(results, executions, finalResponse, ctx.hookEventName)
         }
 
-        let humaniseEnabled = false
-        let sessionId: string | undefined
-        let transcriptPath: string | undefined
-        let withinGrace = false
-        try {
-          const payload = JSON.parse(ctx.enrichedPayloadStr)
-          humaniseEnabled = payload._effectiveSettings?.humaniseAutoSteer ?? false
-          sessionId = typeof payload.session_id === "string" ? payload.session_id : undefined
-          transcriptPath =
-            typeof payload.transcript_path === "string" ? payload.transcript_path : undefined
-          const { isWithinUserMessageGrace } = await import(
-            "../../src/tasks/task-governance-grace.ts"
-          )
-          withinGrace = await isWithinUserMessageGrace(payload)
-        } catch {}
-
-        // Skip humanisation inside the post-user-message grace window so the
-        // mechanical context voice stays visually distinct from the user's own
-        // messages while they are actively present.
-        if (
-          humaniseEnabled &&
-          !withinGrace &&
-          finalResponse.hookSpecificOutput?.additionalContext
-        ) {
-          const rawContext = finalResponse.hookSpecificOutput.additionalContext.trim()
-          if (rawContext) {
-            const { humaniseText, STRATEGY_HUMANISE_SYSTEM_PROMPT } = await import(
-              "../utils/humanise.ts"
-            )
-            const humanised = await humaniseText(rawContext, {
-              systemPrompt: STRATEGY_HUMANISE_SYSTEM_PROMPT,
-              sessionId,
-              transcriptPath,
-            })
-            finalResponse.systemMessage = humanised
-            finalResponse.hookSpecificOutput.additionalContext = humanised
-          }
-        }
+        await maybeHumaniseBlockingResponse(finalResponse, ctx)
 
         if (!isBlock(finalResponse)) {
           log(`   result: all passed`)
@@ -463,11 +482,7 @@ export class BlockingStrategy implements HookExecutionStrategy {
     })
 
     if (isStop && isBlock(response)) {
-      const rawReason = (response as { reason?: string }).reason ?? ""
-      if (rawReason) {
-        response.reason = await compileStopReasons(rawReason)
-      }
-      await tryAutoSteerStopBlock(response, enrichedPayloadStr)
+      await finalizeStopBlock(response, ctx.enrichedPayloadStr)
     }
 
     return response

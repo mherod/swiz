@@ -19,22 +19,24 @@
  */
 import { unset } from "lodash-es"
 
-export function normalizeAgentHookPayload(payload: Record<string, any>): void {
+function normalizeSessionId(payload: Record<string, any>): void {
   const sid = payload.session_id
-  if (typeof sid !== "string" || !sid.trim()) {
-    const conv = payload.conversation_id
-    if (typeof conv === "string" && conv.trim()) {
-      payload.session_id = conv.trim()
-    }
+  if (typeof sid === "string" && sid.trim()) return
+  const conv = payload.conversation_id
+  if (typeof conv === "string" && conv.trim()) {
+    payload.session_id = conv.trim()
   }
+}
 
-  const rootsRaw = payload.workspace_roots
-  const roots: string[] = Array.isArray(rootsRaw)
-    ? rootsRaw
-        .filter((r): r is string => typeof r === "string" && r.trim() !== "")
-        .map((r) => r.trim().replace(/\/+$/, ""))
-    : []
+function parseWorkspaceRoots(rootsRaw: unknown): string[] {
+  if (!Array.isArray(rootsRaw)) return []
+  return rootsRaw
+    .filter((r): r is string => typeof r === "string" && r.trim() !== "")
+    .map((r) => r.trim().replace(/\/+$/, ""))
+}
 
+function normalizeCwd(payload: Record<string, any>): void {
+  const roots = parseWorkspaceRoots(payload.workspace_roots)
   const cwdStr = typeof payload.cwd === "string" ? payload.cwd.trim().replace(/\/+$/, "") : ""
 
   if (roots.length > 0) {
@@ -48,7 +50,11 @@ export function normalizeAgentHookPayload(payload: Record<string, any>): void {
     // Flag that cwd was cleared so backfillPayloadDefaults() can warn if it falls back
     payload._cwdCleared = true
   }
+}
 
+export function normalizeAgentHookPayload(payload: Record<string, any>): void {
+  normalizeSessionId(payload)
+  normalizeCwd(payload)
   normalizeCursorShellCommandShape(payload)
 }
 
@@ -58,6 +64,19 @@ function isCursorGlobalUserDataCwd(cwd: string): boolean {
   return /\/\.cursor$/.test(t) && !t.includes("/.cursor/projects/")
 }
 
+function hasExistingToolName(payload: Record<string, any>): boolean {
+  const name = payload.tool_name ?? payload.toolName
+  return typeof name === "string" && name.trim().length > 0
+}
+
+function hasExistingToolInput(payload: Record<string, any>): boolean {
+  const ti = payload.tool_input ?? payload.toolInput
+  if (!ti || typeof ti !== "object" || Array.isArray(ti)) return false
+  const t = ti as Record<string, any>
+  if (typeof t.command === "string" && t.command.trim()) return true
+  return Object.keys(t).length > 0
+}
+
 /**
  * Cursor IDE shell events use `{ command: "..." }` at the top level. Swiz hooks expect
  * `tool_name` + `tool_input.command` like Claude Code PreToolUse.
@@ -65,18 +84,7 @@ function isCursorGlobalUserDataCwd(cwd: string): boolean {
 function normalizeCursorShellCommandShape(payload: Record<string, any>): void {
   const cmd = payload.command
   if (typeof cmd !== "string" || !cmd.trim()) return
-
-  const hasToolName =
-    (typeof payload.tool_name === "string" && payload.tool_name.trim()) ||
-    (typeof payload.toolName === "string" && payload.toolName.trim())
-  if (hasToolName) return
-
-  const ti = payload.tool_input ?? payload.toolInput
-  if (ti && typeof ti === "object" && !Array.isArray(ti)) {
-    const t = ti as Record<string, any>
-    if (typeof t.command === "string" && t.command.trim()) return
-    if (Object.keys(t).length > 0) return
-  }
+  if (hasExistingToolName(payload) || hasExistingToolInput(payload)) return
 
   const toolInput: Record<string, any> = { command: cmd.trim() }
   if (payload.sandbox === true) {

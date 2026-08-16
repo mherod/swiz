@@ -94,6 +94,23 @@ async function loadCapture(
   }
 }
 
+function initCaptureStats(
+  total: number,
+  oldest?: { name: string; mtimeMs: number },
+  newest?: { name: string; mtimeMs: number }
+): CaptureStats {
+  return {
+    total,
+    byCanonicalEvent: {},
+    byHookEventName: {},
+    parseErrors: 0,
+    oldestFile: oldest ? oldest.name : null,
+    oldestTime: oldest ? oldest.mtimeMs : null,
+    newestFile: newest ? newest.name : null,
+    newestTime: newest ? newest.mtimeMs : null,
+  }
+}
+
 /** Compute summary statistics about captures. */
 async function computeStats(dir: string = SWIZ_INCOMING_ROOT): Promise<CaptureStats> {
   const files = await listCaptureFiles(dir)
@@ -102,18 +119,8 @@ async function computeStats(dir: string = SWIZ_INCOMING_ROOT): Promise<CaptureSt
     const capture = await loadCapture(file.name, dir)
     if (capture) valid.push({ file, capture })
   }
-  const oldest = valid[0]?.file
-  const newest = valid.at(-1)?.file
-  const stats: CaptureStats = {
-    total: valid.length,
-    byCanonicalEvent: {},
-    byHookEventName: {},
-    parseErrors: 0,
-    oldestFile: oldest?.name ?? null,
-    oldestTime: oldest?.mtimeMs ?? null,
-    newestFile: newest?.name ?? null,
-    newestTime: newest?.mtimeMs ?? null,
-  }
+
+  const stats = initCaptureStats(valid.length, valid[0]?.file, valid.at(-1)?.file)
 
   for (const { capture: cap } of valid) {
     const { canonicalEvent, hookEventName, parseError } = cap._swizIncomingCapture
@@ -183,13 +190,10 @@ async function getParseErrors(
   return results
 }
 
-// ─── CLI ────────────────────────────────────────────────────────────────────
+// ─── CLI Handlers ───────────────────────────────────────────────────────────
 
-async function main() {
-  const args = process.argv.slice(2)
-
-  if (args.length === 0 || args[0] === "help" || args[0] === "--help") {
-    console.log(`
+function printHelp(): void {
+  console.log(`
 Inspect captured dispatch payloads from /tmp/swiz-incoming/
 
 Commands:
@@ -202,107 +206,162 @@ Commands:
 Options:
   --limit <n>           Limit results (default: 20)
   --json                Output as JSON (for piping)
-    `)
+`)
+}
+
+async function handleListEvents(asJson: boolean): Promise<void> {
+  const stats = await computeStats()
+  if (asJson) {
+    console.log(JSON.stringify(stats, null, 2))
+    return
+  }
+  console.log(`Total captures: ${stats.total}`)
+  console.log(`Parse errors: ${stats.parseErrors}`)
+  console.log(`\nBy canonical event:`)
+  for (const [event, count] of Object.entries(stats.byCanonicalEvent).sort()) {
+    console.log(`  ${event}: ${count}`)
+  }
+  console.log(`\nBy hook event name (agent-specific):`)
+  for (const [event, count] of Object.entries(stats.byHookEventName).sort()) {
+    console.log(`  ${event}: ${count}`)
+  }
+  if (stats.oldestFile) {
+    console.log(
+      `\nDate range: ${new Date(stats.oldestTime!).toISOString()} to ${new Date(stats.newestTime!).toISOString()}`
+    )
+  }
+}
+
+async function handleErrors(limit: number, asJson: boolean): Promise<void> {
+  const errors = await getParseErrors()
+  if (asJson) {
+    console.log(JSON.stringify(errors, null, 2))
+    return
+  }
+  if (errors.length === 0) {
+    console.log("No parse errors found.")
+    return
+  }
+  console.log(`Found ${errors.length} parse error(s):`)
+  for (const { file, capture } of errors.slice(0, limit)) {
+    console.log(`\n${file}`)
+    console.log(`  payload bytes: ${capture._swizIncomingCapture.payloadBytes ?? "unknown"}`)
+    console.log(`  sha256: ${capture._swizIncomingCapture.payloadSha256 ?? "unknown"}`)
+  }
+}
+
+async function handleEvent(event: string, limit: number, asJson: boolean): Promise<void> {
+  const results = await filterByCanonicalEvent(event)
+  if (asJson) {
+    console.log(JSON.stringify(results, null, 2))
+    return
+  }
+  if (results.length === 0) {
+    console.log(`No captures found for canonical event: ${event}`)
+    return
+  }
+  console.log(`Found ${results.length} capture(s) for event "${event}":`)
+  for (const { file, capture } of results.slice(0, limit)) {
+    const hooks = Object.keys(capture.incoming ?? {}).length > 0 ? "has incoming" : "no incoming"
+    console.log(`  ${file} (${hooks})`)
+  }
+}
+
+async function handleHookEvent(eventName: string, limit: number, asJson: boolean): Promise<void> {
+  const results = await filterByHookEventName(eventName, false)
+  if (asJson) {
+    console.log(JSON.stringify(results, null, 2))
+    return
+  }
+  if (results.length === 0) {
+    console.log(`No captures found for hook event: ${eventName}`)
+    return
+  }
+  console.log(`Found ${results.length} capture(s) for hook event "${eventName}":`)
+  for (const { file, capture } of results.slice(0, limit)) {
+    const canonical = capture._swizIncomingCapture.canonicalEvent
+    console.log(`  ${file} (maps to: ${canonical})`)
+  }
+}
+
+async function handleRecent(countStr: string | undefined, asJson: boolean): Promise<void> {
+  const n = parseInt(countStr ?? "10", 10)
+  const files = await listCaptureFiles()
+  const recent = files.slice(-n)
+  if (asJson) {
+    const results = []
+    for (const file of recent) {
+      const cap = await loadCapture(file.name)
+      if (cap) results.push({ file: file.name, capture: cap })
+    }
+    console.log(JSON.stringify(results, null, 2))
+    return
+  }
+  console.log(`Last ${Math.min(n, files.length)} captures:`)
+  for (const file of recent) {
+    const cap = await loadCapture(file.name)
+    if (cap) {
+      const { canonicalEvent, hookEventName } = cap._swizIncomingCapture
+      console.log(`  ${file}`)
+      console.log(`    canonical: ${canonicalEvent}, hook: ${hookEventName}`)
+    }
+  }
+}
+
+async function runCliCommand(
+  command: string,
+  args: string[],
+  limit: number,
+  asJson: boolean
+): Promise<void> {
+  switch (command) {
+    case "list-events":
+      await handleListEvents(asJson)
+      return
+    case "errors":
+      await handleErrors(limit, asJson)
+      return
+    case "event":
+      if (args[1]) {
+        await handleEvent(args[1], limit, asJson)
+        return
+      }
+      break
+    case "hook-event":
+      if (args[1]) {
+        await handleHookEvent(args[1], limit, asJson)
+        return
+      }
+      break
+    case "recent":
+      await handleRecent(args[1], asJson)
+      return
+  }
+  stderrLog("incoming-inspect-unknown-cmd", `Unknown command: ${command}`)
+  process.exit(1)
+}
+
+// ─── CLI ────────────────────────────────────────────────────────────────────
+
+async function main() {
+  const args = process.argv.slice(2)
+  if (args.length === 0 || args[0] === "help" || args[0] === "--help") {
+    printHelp()
     return
   }
 
   const command = args[0]
-  const limit = args.includes("--limit")
-    ? parseInt(args[args.indexOf("--limit") + 1] ?? "20", 10)
-    : 20
+  if (!command) {
+    printHelp()
+    return
+  }
+
+  const limitIdx = args.indexOf("--limit")
+  const limit = limitIdx >= 0 ? parseInt(args[limitIdx + 1] ?? "20", 10) : 20
   const asJson = args.includes("--json")
 
   try {
-    if (command === "list-events") {
-      const stats = await computeStats()
-      if (asJson) {
-        console.log(JSON.stringify(stats, null, 2))
-      } else {
-        console.log(`Total captures: ${stats.total}`)
-        console.log(`Parse errors: ${stats.parseErrors}`)
-        console.log(`\nBy canonical event:`)
-        for (const [event, count] of Object.entries(stats.byCanonicalEvent).sort()) {
-          console.log(`  ${event}: ${count}`)
-        }
-        console.log(`\nBy hook event name (agent-specific):`)
-        for (const [event, count] of Object.entries(stats.byHookEventName).sort()) {
-          console.log(`  ${event}: ${count}`)
-        }
-        if (stats.oldestFile) {
-          console.log(
-            `\nDate range: ${new Date(stats.oldestTime!).toISOString()} to ${new Date(stats.newestTime!).toISOString()}`
-          )
-        }
-      }
-    } else if (command === "errors") {
-      const errors = await getParseErrors()
-      if (asJson) {
-        console.log(JSON.stringify(errors, null, 2))
-      } else if (errors.length === 0) {
-        console.log("No parse errors found.")
-      } else {
-        console.log(`Found ${errors.length} parse error(s):`)
-        for (const { file, capture } of errors.slice(0, limit)) {
-          console.log(`\n${file}`)
-          console.log(`  payload bytes: ${capture._swizIncomingCapture.payloadBytes ?? "unknown"}`)
-          console.log(`  sha256: ${capture._swizIncomingCapture.payloadSha256 ?? "unknown"}`)
-        }
-      }
-    } else if (command === "event" && args[1]) {
-      const event = args[1]
-      const results = await filterByCanonicalEvent(event)
-      if (asJson) {
-        console.log(JSON.stringify(results, null, 2))
-      } else if (results.length === 0) {
-        console.log(`No captures found for canonical event: ${event}`)
-      } else {
-        console.log(`Found ${results.length} capture(s) for event "${event}":`)
-        for (const { file, capture } of results.slice(0, limit)) {
-          const hooks =
-            Object.keys(capture.incoming ?? {}).length > 0 ? "has incoming" : "no incoming"
-          console.log(`  ${file} (${hooks})`)
-        }
-      }
-    } else if (command === "hook-event" && args[1]) {
-      const eventName = args[1]
-      const results = await filterByHookEventName(eventName, false)
-      if (asJson) {
-        console.log(JSON.stringify(results, null, 2))
-      } else if (results.length === 0) {
-        console.log(`No captures found for hook event: ${eventName}`)
-      } else {
-        console.log(`Found ${results.length} capture(s) for hook event "${eventName}":`)
-        for (const { file, capture } of results.slice(0, limit)) {
-          const canonical = capture._swizIncomingCapture.canonicalEvent
-          console.log(`  ${file} (maps to: ${canonical})`)
-        }
-      }
-    } else if (command === "recent") {
-      const n = parseInt(args[1] ?? "10", 10)
-      const files = await listCaptureFiles()
-      const recent = files.slice(-n)
-      if (asJson) {
-        const results = []
-        for (const file of recent) {
-          const cap = await loadCapture(file.name)
-          if (cap) results.push({ file: file.name, capture: cap })
-        }
-        console.log(JSON.stringify(results, null, 2))
-      } else {
-        console.log(`Last ${Math.min(n, files.length)} captures:`)
-        for (const file of recent) {
-          const cap = await loadCapture(file.name)
-          if (cap) {
-            const { canonicalEvent, hookEventName } = cap._swizIncomingCapture
-            console.log(`  ${file}`)
-            console.log(`    canonical: ${canonicalEvent}, hook: ${hookEventName}`)
-          }
-        }
-      }
-    } else {
-      stderrLog("incoming-inspect-unknown-cmd", `Unknown command: ${command}`)
-      process.exit(1)
-    }
+    await runCliCommand(command, args, limit, asJson)
   } catch (err) {
     stderrLog("incoming-inspect-fatal", messageFromUnknownError(err))
     process.exit(1)

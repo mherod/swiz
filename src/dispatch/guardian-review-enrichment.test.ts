@@ -262,7 +262,7 @@ describe("guardian review dispatch enrichment", () => {
     const { response } = await executeDispatch(request)
     const specific = getHookSpecificOutput(response)
     expect(response.decision).toBeUndefined()
-    expect(specific?.permissionDecision).toBeUndefined()
+    expect(specific?.permissionDecision).toBe("allow")
     expect(response.systemMessage).toContain("retry allowance reached")
     expect(response.systemMessage).toContain("retry is permitted")
   })

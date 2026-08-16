@@ -409,6 +409,38 @@ export function buildSpawnContext(payloadStr: string): PreParsedSpawnContext {
   return { spawnCwd, spawnEnv }
 }
 
+function resolveSpawnOptions(
+  file: string,
+  payloadStr: string,
+  spawnCtx?: PreParsedSpawnContext
+): { cmd: string[]; cwd: string; env?: Record<string, string | undefined> } {
+  const cmd = file.endsWith(".ts") ? ["bun", join(HOOKS_DIR, file)] : [join(HOOKS_DIR, file)]
+  const spawnCwd = (spawnCtx ? spawnCtx.spawnCwd : extractPayloadCwd(payloadStr)) ?? process.cwd()
+  const spawnEnv = spawnCtx
+    ? spawnCtx.spawnEnv
+    : (() => {
+        const callerEnv = extractCallerEnv(payloadStr)
+        return callerEnv ? merge({}, process.env, callerEnv) : undefined
+      })()
+  return { cmd, cwd: spawnCwd, env: spawnEnv }
+}
+
+async function collectProcessOutput(proc: {
+  stdout?: any
+  stderr?: any
+  exited: Promise<number>
+}): Promise<{
+  output: string
+  stderr: string
+}> {
+  const [output, stderr] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+  ])
+  await proc.exited
+  return { output, stderr }
+}
+
 export async function runHook(
   file: string,
   payloadStr: string,
@@ -422,19 +454,9 @@ export async function runHook(
     return buildAbortedResult(file, now, now, timeoutSec ?? DEFAULT_TIMEOUT, null)
   }
 
-  const cmd = file.endsWith(".ts") ? ["bun", join(HOOKS_DIR, file)] : [join(HOOKS_DIR, file)]
+  const { cmd, cwd: spawnCwd, env: spawnEnv } = resolveSpawnOptions(file, payloadStr, spawnCtx)
   const startTime = Date.now()
   const configuredTimeoutSec = getConfiguredTimeoutSec(timeoutSec)
-
-  // Use pre-parsed spawn context when available; fall back to per-hook parsing for
-  // backward-compatible callers (replay, tests) that don't pass spawnCtx.
-  const spawnCwd = spawnCtx ? spawnCtx.spawnCwd : extractPayloadCwd(payloadStr)
-  const spawnEnv = spawnCtx
-    ? spawnCtx.spawnEnv
-    : (() => {
-        const callerEnv = extractCallerEnv(payloadStr)
-        return callerEnv ? merge({}, process.env, callerEnv) : undefined
-      })()
 
   const proc = Bun.spawn(cmd, {
     stdin: "pipe",
@@ -460,11 +482,7 @@ export async function runHook(
     { once: true }
   )
 
-  const [output, stderr] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-  ])
-  await proc.exited
+  const { output, stderr } = await collectProcessOutput(proc)
 
   clearTimeout(timeoutState.timer)
   if (timeoutState.sigkillTimer) clearTimeout(timeoutState.sigkillTimer)
@@ -904,6 +922,44 @@ function scheduleAsyncHookEntry(
   }
 }
 
+async function filterEligibleAsyncEntries(
+  asyncEntries: Array<{ hook: HookDef; id: string }>,
+  signal?: AbortSignal
+): Promise<Array<{ hook: HookDef; id: string }>> {
+  const conditionResults = await Promise.all(
+    asyncEntries.map(({ hook }) =>
+      evalCondition(isInlineHookDef(hook) ? hook.hook.condition : hook.condition)
+    )
+  )
+
+  const eligible: Array<{ hook: HookDef; id: string }> = []
+  for (let i = 0; i < asyncEntries.length; i++) {
+    const entry = asyncEntries[i]!
+    if (!conditionResults[i]) {
+      log(`   ⏭ ${entry.id} [condition false, skipping]`)
+      continue
+    }
+    if (signal?.aborted) {
+      log(`   ⏭ ${entry.id} [async, dispatch aborted]`)
+      continue
+    }
+    eligible.push(entry)
+  }
+  return eligible
+}
+
+function initWorkerPoolIfNeeded(
+  daemonContext: boolean | undefined,
+  eligibleEntries: Array<{ hook: HookDef; id: string }>,
+  workerPoolProvider: () => ReturnType<typeof getWorkerPool>
+): ReturnType<typeof getWorkerPool> | null {
+  const needsWorkerPool =
+    daemonContext && eligibleEntries.some(({ hook }) => !isInlineHookDef(hook))
+  const pool = needsWorkerPool ? workerPoolProvider() : null
+  if (pool) pool.initialize()
+  return pool
+}
+
 export async function launchAsyncHooks(
   groups: HookGroup[],
   payloadStr: string,
@@ -915,44 +971,17 @@ export async function launchAsyncHooks(
   } = {}
 ): Promise<void> {
   const { spawnCtx, workerPoolProvider = getWorkerPool } = options
-  // Flatten all async hooks across groups for concurrent condition evaluation.
   type AsyncEntry = { hook: HookDef; id: string }
   const asyncEntries: AsyncEntry[] = groups.flatMap((group) =>
     group.hooks.filter(isAsyncFireAndForgetHook).map((h) => ({ hook: h, id: hookIdentifier(h) }))
   )
   if (asyncEntries.length === 0) return
 
-  // Evaluate all conditions concurrently instead of sequentially.
-  const conditionResults = await Promise.all(
-    asyncEntries.map(({ hook }) =>
-      evalCondition(isInlineHookDef(hook) ? hook.hook.condition : hook.condition)
-    )
-  )
-
-  const eligibleEntries: AsyncEntry[] = []
-  for (let i = 0; i < asyncEntries.length; i++) {
-    const entry = asyncEntries[i]!
-    if (!conditionResults[i]) {
-      log(`   ⏭ ${entry.id} [condition false, skipping]`)
-      continue
-    }
-    if (signal?.aborted) {
-      log(`   ⏭ ${entry.id} [async, dispatch aborted]`)
-      continue
-    }
-    eligibleEntries.push(entry)
-  }
+  const eligibleEntries = await filterEligibleAsyncEntries(asyncEntries, signal)
   if (eligibleEntries.length === 0) return
 
   const promises: Promise<void>[] = []
-
-  // In daemon context, use the worker pool for parallel execution — workers
-  // stay alive across requests. In CLI context, use runHook directly —
-  // Worker threads would keep the short-lived CLI process alive, causing hangs.
-  const needsWorkerPool =
-    daemonContext && eligibleEntries.some(({ hook }) => !isInlineHookDef(hook))
-  const pool = needsWorkerPool ? workerPoolProvider() : null
-  if (pool) pool.initialize()
+  const pool = initWorkerPoolIfNeeded(daemonContext, eligibleEntries, workerPoolProvider)
 
   for (const { hook } of eligibleEntries) {
     scheduleAsyncHookEntry(hook, payloadStr, {

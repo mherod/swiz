@@ -82,6 +82,44 @@ function backfillStopDispatchReasonFields(response: DispatchJsonRecord): void {
  * Parameter is `object` so callers may pass `Record<string, any>` without a cast; internally
  * treated as {@link DispatchJsonRecord} until Zod validates.
  */
+function applyBlockedStopFields(envelope: DispatchJsonRecord): void {
+  const reasonMissing = trimmedNonEmpty(envelope.reason) === null
+  const stopReasonText = trimmedNonEmpty(envelope.stopReason)
+  if (reasonMissing && stopReasonText !== null) {
+    envelope.reason = stopReasonText
+  }
+}
+
+function applyUnblockedStopFields(envelope: DispatchJsonRecord, hookEventName: string): void {
+  const hso = mergeHookSpecificOutputClone(
+    envelope as Record<string, any>,
+    hookEventName
+  ) as DispatchJsonRecord
+  if (!hasNonEmptyContext(envelope)) {
+    if (!hso.additionalContext || !String(hso.additionalContext).trim()) {
+      hso.additionalContext = DEFAULT_STOP_DISPATCH_ALLOW_CONTEXT
+    }
+  }
+  envelope.hookSpecificOutput = hso
+}
+
+function stripStopHookSpecificOutput(envelope: DispatchJsonRecord): void {
+  const hsoAfter = envelope.hookSpecificOutput
+  if (isPlainRecord(hsoAfter)) {
+    const name = typeof hsoAfter.hookEventName === "string" ? hsoAfter.hookEventName.trim() : ""
+    if (name === "Stop" || name === "SubagentStop") {
+      unset(envelope, "hookSpecificOutput")
+    }
+  }
+}
+
+/**
+ * Ensures merged stop/subagentStop dispatch JSON satisfies {@link stopHookOutputSchema}.
+ * Mutates `response` in place.
+ *
+ * Parameter is `object` so callers may pass `Record<string, any>` without a cast; internally
+ * treated as {@link DispatchJsonRecord} until Zod validates.
+ */
 export function normalizeStopDispatchResponseInPlace(
   response: object,
   hookEventName: string
@@ -97,41 +135,13 @@ export function normalizeStopDispatchResponseInPlace(
   envelope.continue = true
 
   if (dispatchBlocked) {
-    const reasonMissing = trimmedNonEmpty(envelope.reason) === null
-    const stopReasonText = trimmedNonEmpty(envelope.stopReason)
-    if (reasonMissing && stopReasonText !== null) {
-      envelope.reason = stopReasonText
-    }
-  } else if (!hasNonEmptyContext(envelope)) {
-    const hso = mergeHookSpecificOutputClone(
-      envelope as Record<string, any>,
-      hookEventName
-    ) as DispatchJsonRecord
-    // Match prior coercion: non-strings (e.g. numbers) stringify before trim.
-    if (!hso.additionalContext || !String(hso.additionalContext).trim()) {
-      hso.additionalContext = DEFAULT_STOP_DISPATCH_ALLOW_CONTEXT
-    }
-    envelope.hookSpecificOutput = hso
+    applyBlockedStopFields(envelope)
   } else {
-    envelope.hookSpecificOutput = mergeHookSpecificOutputClone(
-      envelope as Record<string, any>,
-      hookEventName
-    ) as DispatchJsonRecord
+    applyUnblockedStopFields(envelope, hookEventName)
   }
 
   backfillStopDispatchReasonFields(envelope)
-
-  // Claude Code rejects hookSpecificOutput unless hookEventName is PreToolUse, UserPromptSubmit,
-  // or PostToolUse. Normalization may merge { hookEventName: "Stop" | "SubagentStop", ... } —
-  // strip it; reason / stopReason / systemMessage carry the narrative.
-  const hsoAfter = envelope.hookSpecificOutput
-  if (isPlainRecord(hsoAfter)) {
-    const name = typeof hsoAfter.hookEventName === "string" ? hsoAfter.hookEventName.trim() : ""
-    if (name === "Stop" || name === "SubagentStop") {
-      unset(envelope, "hookSpecificOutput")
-    }
-  }
-
+  stripStopHookSpecificOutput(envelope)
   stopHookOutputSchema.parse(envelope)
 }
 
