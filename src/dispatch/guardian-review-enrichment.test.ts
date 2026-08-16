@@ -237,6 +237,7 @@ describe("guardian review dispatch enrichment", () => {
         transcript_path: "/virtual/codex.jsonl",
         tool_name: "Bash",
         tool_input: { command: GIT_ADD_COMMAND },
+        _env: { CODEX_THREAD_ID: "guardian-dispatch-rate-limit-test" },
       }),
       daemonContext: true,
       settingsHomeOverride: settingsHome,
@@ -262,7 +263,7 @@ describe("guardian review dispatch enrichment", () => {
     const { response } = await executeDispatch(request)
     const specific = getHookSpecificOutput(response)
     expect(response.decision).toBeUndefined()
-    expect(specific?.permissionDecision).toBe("allow")
+    expect(specific?.permissionDecision).toBeUndefined()
     expect(response.systemMessage).toContain("retry allowance reached")
     expect(response.systemMessage).toContain("retry is permitted")
   })

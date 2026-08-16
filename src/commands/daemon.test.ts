@@ -386,12 +386,21 @@ describe("hydratePersistedSessionToolState", () => {
     expect(state.sessionToolUsage.get("session-1")).toEqual({
       toolNames: ["Read", "Skill"],
       skillInvocations: ["commit"],
+      readFiles: ["/tmp/file.ts"],
+      writtenFiles: [],
       events: [
         {
           kind: "tool",
           value: "Read",
           turnIndex: 0,
           timestamp: "2026-04-03T10:00:00.000Z",
+        },
+        {
+          kind: "read-file",
+          value: "/tmp/file.ts",
+          turnIndex: 0,
+          timestamp: "2026-04-03T10:00:00.000Z",
+          source: "agent",
         },
         {
           kind: "tool",
@@ -404,6 +413,7 @@ describe("hydratePersistedSessionToolState", () => {
           value: "commit",
           turnIndex: 1,
           timestamp: "2026-04-03T10:01:00.000Z",
+          source: "agent",
         },
       ],
       lastSeen: Date.parse("2026-04-03T10:01:00.000Z"),
@@ -462,6 +472,8 @@ describe("hydratePersistedSessionToolState", () => {
     expect(state.sessionToolUsage.get("session-1")).toEqual({
       toolNames: ["Read", "Read", "Bash"],
       skillInvocations: [],
+      readFiles: ["/tmp/file.ts"],
+      writtenFiles: [],
       events: [
         { kind: "tool", value: "Read", turnIndex: 0, timestamp: null },
         {
@@ -469,6 +481,13 @@ describe("hydratePersistedSessionToolState", () => {
           value: "Read",
           turnIndex: 0,
           timestamp: "2026-04-03T10:00:00.000Z",
+        },
+        {
+          kind: "read-file",
+          value: "/tmp/file.ts",
+          turnIndex: 0,
+          timestamp: "2026-04-03T10:00:00.000Z",
+          source: "agent",
         },
         {
           kind: "tool",
