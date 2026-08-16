@@ -3,10 +3,12 @@
 
 import {
   getBashCommandsUsedForCurrentSession,
+  getReadFilesForCurrentSession,
   getRegisteredDispatchSessionLines,
   getSkillsUsedForCurrentSession,
   getToolsUsedForCurrentSession,
   getTranscriptSummary,
+  getWrittenFilesForCurrentSession,
   readCurrentSessionLines,
 } from "../transcript-summary.ts"
 import { extractTextFromUnknownContent } from "../transcript-utils.ts"
@@ -42,20 +44,6 @@ export function extractToolBlocksFromEntry(line: string): Array<Record<string, a
   return content.filter((block: Record<string, any>) => block?.type === "tool_use")
 }
 
-function collectToolBlocksFromLines(lines: string[]): Array<Record<string, any>> {
-  const blocks: Array<Record<string, any>> = []
-  for (const line of lines) {
-    if (!line.trim()) continue
-    blocks.push(...extractToolBlocksFromEntry(line))
-  }
-  return blocks
-}
-
-async function readTranscriptToolBlocks(path: string): Promise<Array<Record<string, any>>> {
-  const lines = await readSessionLines(path)
-  return collectToolBlocksFromLines(lines)
-}
-
 // ── Extractors ────────────────────────────────────────────────────────────────
 
 /**
@@ -85,14 +73,15 @@ export async function extractSkillInvocations(path: string): Promise<string[]> {
  * Used to determine which files the agent has already read this session.
  */
 export async function extractReadFilePaths(path: string): Promise<Set<string>> {
-  const blocks = await readTranscriptToolBlocks(path)
-  const paths = new Set<string>()
-  for (const block of blocks) {
-    if (block.name !== "Read") continue
-    const filePath = String((block.input as Record<string, any>)?.file_path ?? "")
-    if (filePath) paths.add(filePath)
-  }
-  return paths
+  return new Set(await getReadFilesForCurrentSession(path))
+}
+
+/**
+ * Extract all file paths from Write/Edit tool calls in a transcript.
+ * Used to determine which files the agent has written or edited this session.
+ */
+export async function extractWrittenFilePaths(path: string): Promise<Set<string>> {
+  return new Set(await getWrittenFilesForCurrentSession(path))
 }
 
 // ── Blocked tool_use detection ────────────────────────────────────────────────

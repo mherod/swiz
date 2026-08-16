@@ -324,6 +324,19 @@ describe("captureSessionToolUsage", () => {
     captureSessionToolUsage(map, "sess1", "Bash", {}, time2)
     expect(map.get("sess1")!.lastSeen).toBe(time2)
   })
+
+  test("tracks readFiles and writtenFiles from tool calls", () => {
+    const map = new Map<string, SessionToolUsageState>()
+
+    captureSessionToolUsage(map, "sess1", "Read", { file_path: "/path/to/read.ts" }, Date.now())
+    captureSessionToolUsage(map, "sess1", "Edit", { file_path: "/path/to/edit.ts" }, Date.now())
+    captureSessionToolUsage(map, "sess1", "Write", { file_path: "/path/to/write.ts" }, Date.now())
+
+    const session = map.get("sess1")!
+    expect(session.readFiles).toContain("/path/to/read.ts")
+    expect(session.writtenFiles).toContain("/path/to/edit.ts")
+    expect(session.writtenFiles).toContain("/path/to/write.ts")
+  })
 })
 
 describe("mergeToolStats", () => {

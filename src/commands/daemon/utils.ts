@@ -9,12 +9,23 @@ export type { SessionMessage, SessionTaskSummary, ToolCallSummary } from "./type
 
 import { projectKeyFromCwd } from "../../project-key.ts"
 import {
+  extractPathValuesFromToolInput,
   extractSkillNameFromCapturedSkillDetail,
   extractSkillNameFromToolInput,
+  extractSkillNamesFromPathValues,
+  extractSkillNamesFromShellSkillUsageCommand,
   formatSkillToolInputDetail,
 } from "../../skill-usage.ts"
 import { isIncompleteTaskStatus } from "../../tasks/task-repository.ts"
-import { isCodeChangeTool, isTaskTool, READ_TOOLS } from "../../tool-matchers.ts"
+import {
+  extractFileEditTargetPaths,
+  extractFileReadTargetPaths,
+  isCodeChangeTool,
+  isFileEditTool,
+  isShellTool,
+  isTaskTool,
+  READ_TOOLS,
+} from "../../tool-matchers.ts"
 import { extractText } from "../../transcript-utils.ts"
 
 export interface TranscriptWatchPath {
@@ -275,26 +286,70 @@ function usageEventsFromCapturedCalls(calls: CapturedToolCall[]): CurrentSession
     if (call.name === "Skill") {
       const skill = extractSkillNameFromCapturedSkillDetail(call.detail)
       if (skill)
-        events.push({ kind: "skill", value: skill, turnIndex: index, timestamp: call.timestamp })
+        events.push({
+          kind: "skill",
+          value: skill,
+          turnIndex: index,
+          timestamp: call.timestamp,
+          source: "agent",
+        })
+    }
+    if (READ_TOOLS.has(call.name) && call.detail) {
+      events.push({
+        kind: "read-file",
+        value: call.detail,
+        turnIndex: index,
+        timestamp: call.timestamp,
+        source: "agent",
+      })
+    }
+    if (isFileEditTool(call.name) && call.detail) {
+      events.push({
+        kind: "written-file",
+        value: call.detail,
+        turnIndex: index,
+        timestamp: call.timestamp,
+        source: "agent",
+      })
     }
   }
   return events
+}
+
+function appendUnique(target: string[], value: string | null | undefined): void {
+  if (value && !target.includes(value)) target.push(value)
+}
+
+function accumulateCapturedCallDetails(calls: CapturedToolCall[]): {
+  skillInvocations: string[]
+  readFiles: string[]
+  writtenFiles: string[]
+} {
+  const skillInvocations: string[] = []
+  const readFiles: string[] = []
+  const writtenFiles: string[] = []
+  for (const call of calls) {
+    if (call.name === "Skill") {
+      appendUnique(skillInvocations, extractSkillNameFromCapturedSkillDetail(call.detail))
+    } else if (READ_TOOLS.has(call.name)) {
+      appendUnique(readFiles, call.detail)
+    } else if (isFileEditTool(call.name)) {
+      appendUnique(writtenFiles, call.detail)
+    }
+  }
+  return { skillInvocations, readFiles, writtenFiles }
 }
 
 export function buildSessionToolUsageStateFromCapturedCalls(
   calls: CapturedToolCall[],
   lastSeen: number
 ): SessionToolUsageState {
-  const skillInvocations: string[] = []
-  for (const call of calls) {
-    if (call.name !== "Skill") continue
-    const skill = extractSkillNameFromCapturedSkillDetail(call.detail)
-    if (skill) skillInvocations.push(skill)
-  }
-
+  const { skillInvocations, readFiles, writtenFiles } = accumulateCapturedCallDetails(calls)
   return {
     toolNames: calls.map((call) => call.name),
     skillInvocations,
+    readFiles,
+    writtenFiles,
     events: usageEventsFromCapturedCalls(calls),
     lastSeen,
   }
@@ -309,11 +364,122 @@ export function seedSessionToolUsage(
   const entry: SessionToolUsageState = {
     toolNames: [...usage.toolNames],
     skillInvocations: [...usage.skillInvocations],
+    readFiles: Array.isArray(usage.readFiles) ? [...usage.readFiles] : [],
+    writtenFiles: Array.isArray(usage.writtenFiles) ? [...usage.writtenFiles] : [],
     events: usage.events ? [...usage.events] : undefined,
     lastSeen: nowMs,
   }
   sessionToolUsage.set(sessionId, entry)
   return entry
+}
+
+function extractDirectSkillNamesFromTool(
+  toolName: string,
+  toolInput: Record<string, any> | undefined
+): string[] {
+  if (!toolInput) return []
+  if (READ_TOOLS.has(toolName)) {
+    return extractSkillNamesFromPathValues(extractPathValuesFromToolInput(toolInput))
+  }
+  if (isShellTool(toolName)) {
+    const cmd = (toolInput.command ?? toolInput.cmd ?? "") as string
+    return extractSkillNamesFromShellSkillUsageCommand(cmd)
+  }
+  return []
+}
+
+function captureSkillInvocations(
+  entry: SessionToolUsageState,
+  toolName: string,
+  toolInput: Record<string, any> | undefined,
+  turnIndex: number,
+  timestamp: string
+): void {
+  const explicitSkill = toolName === "Skill" ? extractSkillNameFromToolInput(toolInput) : null
+  const directSkills = extractDirectSkillNamesFromTool(toolName, toolInput)
+  const skillsToRecord = explicitSkill ? [explicitSkill, ...directSkills] : directSkills
+
+  for (const skill of skillsToRecord) {
+    if (!entry.skillInvocations.includes(skill)) entry.skillInvocations.push(skill)
+    entry.events?.push({ kind: "skill", value: skill, turnIndex, timestamp, source: "agent" })
+  }
+}
+
+function captureReadFileTargets(
+  entry: SessionToolUsageState,
+  toolInput: Record<string, any> | undefined,
+  turnIndex: number,
+  timestamp: string
+): void {
+  if (!entry.readFiles) entry.readFiles = []
+  for (const filePath of extractFileReadTargetPaths(toolInput ?? {})) {
+    if (!entry.readFiles.includes(filePath)) entry.readFiles.push(filePath)
+    entry.events?.push({
+      kind: "read-file",
+      value: filePath,
+      turnIndex,
+      timestamp,
+      source: "agent",
+    })
+  }
+}
+
+function captureWrittenFileTargets(
+  entry: SessionToolUsageState,
+  toolInput: Record<string, any> | undefined,
+  turnIndex: number,
+  timestamp: string
+): void {
+  if (!entry.writtenFiles) entry.writtenFiles = []
+  for (const filePath of extractFileEditTargetPaths(toolInput ?? {})) {
+    if (!entry.writtenFiles.includes(filePath)) entry.writtenFiles.push(filePath)
+    entry.events?.push({
+      kind: "written-file",
+      value: filePath,
+      turnIndex,
+      timestamp,
+      source: "agent",
+    })
+  }
+}
+
+function captureFileTargets(
+  entry: SessionToolUsageState,
+  toolName: string,
+  toolInput: Record<string, any> | undefined,
+  turnIndex: number,
+  timestamp: string
+): void {
+  if (READ_TOOLS.has(toolName)) {
+    captureReadFileTargets(entry, toolInput, turnIndex, timestamp)
+  }
+  if (isFileEditTool(toolName)) {
+    captureWrittenFileTargets(entry, toolInput, turnIndex, timestamp)
+  }
+}
+
+function getOrCreateSessionToolUsageEntry(
+  existing: SessionToolUsageState | undefined,
+  nowMs: number
+): SessionToolUsageState {
+  if (existing) {
+    return {
+      toolNames: existing.toolNames,
+      skillInvocations: existing.skillInvocations,
+      readFiles: existing.readFiles ?? [],
+      writtenFiles: existing.writtenFiles ?? [],
+      events: existing.events ?? [],
+      lastSeen: nowMs,
+    }
+  }
+  return {
+    toolNames: [],
+    skillInvocations: [],
+    readFiles: [],
+    writtenFiles: [],
+    events: [],
+    lastSeen: nowMs,
+  }
 }
 
 export function captureSessionToolUsage(
@@ -323,30 +489,16 @@ export function captureSessionToolUsage(
   toolInput: Record<string, any> | undefined,
   nowMs: number
 ): SessionToolUsageState {
-  const existing = sessionToolUsage.get(sessionId)
-  const entry: SessionToolUsageState = existing
-    ? {
-        toolNames: existing.toolNames,
-        skillInvocations: existing.skillInvocations,
-        events: existing.events ?? [],
-        lastSeen: nowMs,
-      }
-    : {
-        toolNames: [],
-        skillInvocations: [],
-        events: [],
-        lastSeen: nowMs,
-      }
-
+  const entry = getOrCreateSessionToolUsageEntry(sessionToolUsage.get(sessionId), nowMs)
   const turnIndex = entry.toolNames.length
   const timestamp = new Date(nowMs).toISOString()
+
   entry.toolNames.push(toolName)
   entry.events?.push({ kind: "tool", value: toolName, turnIndex, timestamp })
-  const skill = toolName === "Skill" ? extractSkillNameFromToolInput(toolInput) : null
-  if (skill) {
-    entry.skillInvocations.push(skill)
-    entry.events?.push({ kind: "skill", value: skill, turnIndex, timestamp })
-  }
+
+  captureSkillInvocations(entry, toolName, toolInput, turnIndex, timestamp)
+  captureFileTargets(entry, toolName, toolInput, turnIndex, timestamp)
+
   sessionToolUsage.set(sessionId, entry)
   return entry
 }

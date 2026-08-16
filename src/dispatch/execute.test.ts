@@ -924,6 +924,8 @@ describe("dispatch execute integration", () => {
             toolCallCount: 1,
             bashCommands: ["echo hello"],
             skillInvocations: [],
+            readFiles: [],
+            writtenFiles: [],
             hasGitPush: false,
             sessionLines: [],
             sessionDurationMs: 0,

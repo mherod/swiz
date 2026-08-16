@@ -15,7 +15,7 @@ export async function evaluatePretooluseActiveSkills(
   input: ToolHookInput
 ): Promise<SwizHookOutput> {
   const context = await resolveActiveSkillsContext(input, { includeVerifiedSkillPaths: true })
-  return context ? preToolUseAllowWithContext("", context) : {}
+  return context ? preToolUseAllowWithContext("", context, { rephrase: false }) : {}
 }
 
 const pretooluseActiveSkills: SwizToolHook = {

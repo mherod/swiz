@@ -4,6 +4,7 @@ import {
   formatCurrentSessionUsageWindow,
   formatSkillFileReadFallback,
   getRecentlyInvokedSkillsForCurrentSession,
+  hasAgentDirectlyReadOrInvokedSkill,
   type ResolvedSkillFile,
   resolveSkillFilePathForHookPayload,
   resolveSkillRecencyOptions,
@@ -103,10 +104,12 @@ function activeSkillsCacheKey(
 
 export function formatActiveSkillsContext(
   skills: string[],
-  windowText: string,
+  _windowText?: string,
   skillFiles: readonly ResolvedSkillFile[] = []
 ): string {
-  const active = `Recently active skills (${windowText}): ${skills.map((skill) => `/${skill}`).join(", ")}.`
+  if (skills.length === 0) return ""
+  const label = skills.length === 1 ? "Currently active skill" : "Currently active skills"
+  const active = `${label}: ${skills.map((skill) => `/${skill}`).join(", ")}.`
   return skillFiles.length > 0 ? `${active}\n${formatSkillFileReadFallback(skillFiles)}` : active
 }
 
@@ -144,7 +147,8 @@ async function resolveActiveSkillsContextUncached(
     const skillFiles = includeVerifiedSkillPaths
       ? skills.flatMap((name) => {
           const path = resolveSkillFilePathForHookPayload(name, hookInput, cwd)
-          return path ? [{ name, path }] : []
+          const alreadyReadOrInvoked = hasAgentDirectlyReadOrInvokedSkill(hookInput, name, path)
+          return !alreadyReadOrInvoked && path ? [{ name, path }] : []
         })
       : []
     return formatActiveSkillsContext(skills, windowText, skillFiles)

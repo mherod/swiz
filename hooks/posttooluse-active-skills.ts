@@ -15,7 +15,7 @@ export async function evaluatePosttooluseActiveSkills(
   input: ToolHookInput
 ): Promise<SwizHookOutput> {
   const context = await resolveActiveSkillsContext(input)
-  return context ? buildContextHookOutput("PostToolUse", context) : {}
+  return context ? buildContextHookOutput("PostToolUse", context, { rephrase: false }) : {}
 }
 
 const posttooluseActiveSkills: SwizHook<ToolHookInput> = {

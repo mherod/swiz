@@ -37,6 +37,8 @@ function makeSummary(overrides: Partial<TranscriptSummary> = {}): TranscriptSumm
     toolCallCount: 15,
     bashCommands: [],
     skillInvocations: [],
+    readFiles: [],
+    writtenFiles: [],
     hasGitPush: true,
     sessionLines: [],
     sessionDurationMs: 0,

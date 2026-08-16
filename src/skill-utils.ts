@@ -31,6 +31,7 @@ import {
   formatCurrentSessionUsageWindow,
   getRecentSkillsUsedForCurrentSession,
   getRecentToolsUsedForCurrentSession,
+  hasAgentDirectlyReadOrInvokedSkill,
 } from "./transcript-summary.ts"
 import { stripQuotes } from "./utils/quoted-string.ts"
 
@@ -516,7 +517,11 @@ export function formatSkillFileReadFallback(skillFiles: readonly ResolvedSkillFi
   ].join("\n")
 }
 
-export { formatCurrentSessionUsageWindow, type CurrentSessionUsageRecencyOptions }
+export {
+  formatCurrentSessionUsageWindow,
+  hasAgentDirectlyReadOrInvokedSkill,
+  type CurrentSessionUsageRecencyOptions,
+}
 
 interface RecencyOptionsMemoEntry {
   result: { recencyOptions: CurrentSessionUsageRecencyOptions; windowText: string }

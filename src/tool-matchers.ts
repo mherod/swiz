@@ -33,7 +33,7 @@ export const EDIT_TOOLS = new Set([
   "functions.apply_patch",
 ])
 export const WRITE_TOOLS = new Set(["Write", "write_file", "apply_patch", "functions.apply_patch"])
-export const READ_TOOLS = new Set(["Read", "read_file", "read_many_files"])
+export const READ_TOOLS = new Set(["Read", "read_file", "read_many_files", "view_file"])
 export const NOTEBOOK_TOOLS = new Set([
   "NotebookEdit",
   "EditNotebook",
@@ -132,14 +132,6 @@ function addPath(paths: Set<string>, value: ToolMatcherValue | undefined): void 
   if (trimmed) paths.add(trimmed)
 }
 
-function addPaths(paths: Set<string>, value: ToolMatcherValue | undefined): void {
-  if (Array.isArray(value)) {
-    for (const candidate of value) addPath(paths, candidate)
-    return
-  }
-  addPath(paths, value)
-}
-
 function basenameForPath(filePath: string): string {
   const normalized = filePath.trim().replace(/\\/g, "/").replace(/\/+$/, "")
   return normalized.split("/").pop() ?? ""
@@ -163,14 +155,48 @@ export function extractApplyPatchFilePaths(command: string): string[] {
   return [...paths]
 }
 
+function addPatchPaths(paths: Set<string>, patch: ToolMatcherValue | undefined): void {
+  if (typeof patch !== "string") return
+  for (const line of patch.split("\n")) {
+    const match = line.match(/^\+\+\+\s+b\/(.+)$/)
+    if (match?.[1]) addPath(paths, match[1])
+  }
+}
+
+function addNestedPathRecords(paths: Set<string>, items: ToolMatcherValue | undefined): void {
+  if (!Array.isArray(items)) return
+  for (const item of items) {
+    if (typeof item === "string") {
+      addPath(paths, item)
+    } else if (isRecord(item)) {
+      addPath(paths, item.file_path)
+      addPath(paths, item.filePath)
+      addPath(paths, item.path)
+    }
+  }
+}
+
+const COMMON_PATH_KEYS = [
+  "file_path",
+  "filePath",
+  "target_file",
+  "TargetFile",
+  "path",
+  "AbsolutePath",
+  "notebook_path",
+  "notebookPath",
+] as const
+
 export function extractFileEditTargetPaths(toolInput: ToolMatcherValue | object): string[] {
   if (!isRecord(toolInput)) return []
 
   const paths = new Set<string>()
-  addPath(paths, toolInput.file_path)
-  addPath(paths, toolInput.filePath)
-  addPath(paths, toolInput.notebook_path)
-  addPath(paths, toolInput.notebookPath)
+  for (const key of COMMON_PATH_KEYS) {
+    addPath(paths, toolInput[key])
+  }
+
+  addNestedPathRecords(paths, toolInput.edits)
+  addNestedPathRecords(paths, toolInput.changes)
 
   if (typeof toolInput.command === "string") {
     for (const filePath of extractApplyPatchFilePaths(toolInput.command)) {
@@ -178,6 +204,7 @@ export function extractFileEditTargetPaths(toolInput: ToolMatcherValue | object)
     }
   }
 
+  addPatchPaths(paths, toolInput.patch)
   return [...paths]
 }
 
@@ -185,14 +212,11 @@ export function extractFileReadTargetPaths(toolInput: ToolMatcherValue | object)
   if (!isRecord(toolInput)) return []
 
   const paths = new Set<string>()
-  addPath(paths, toolInput.path)
-  addPath(paths, toolInput.file)
-  addPath(paths, toolInput.file_path)
-  addPath(paths, toolInput.filePath)
-  addPaths(paths, toolInput.paths)
-  addPaths(paths, toolInput.files)
-  addPaths(paths, toolInput.file_paths)
-  addPaths(paths, toolInput.filePaths)
+  for (const key of COMMON_PATH_KEYS) {
+    addPath(paths, toolInput[key])
+  }
+
+  addNestedPathRecords(paths, toolInput.files)
   return [...paths]
 }
 

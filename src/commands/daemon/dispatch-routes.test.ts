@@ -189,6 +189,8 @@ describe("handleDispatchRoute", () => {
             toolCallCount: 0,
             bashCommands: [],
             skillInvocations: [],
+            readFiles: [],
+            writtenFiles: [],
             hasGitPush: false,
             sessionLines: [sessionLine],
             sessionDurationMs: 0,

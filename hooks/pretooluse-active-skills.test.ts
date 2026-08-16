@@ -41,9 +41,7 @@ describe("active-skills tool hooks", () => {
     expect(output.hookSpecificOutput).toMatchObject({
       hookEventName: "PreToolUse",
       permissionDecision: "allow",
-      additionalContext: expect.stringMatching(
-        /^Recently (active|ongoing|live|engaged|open|current|running) skills \(last \d+ turns and last \d+ minutes\): \/commit, \/push\./
-      ),
+      additionalContext: "Currently active skills: /commit, /push.",
     })
   })
 
@@ -53,7 +51,7 @@ describe("active-skills tool hooks", () => {
 
     expect(output.hookSpecificOutput).toMatchObject({
       hookEventName: "PostToolUse",
-      additionalContext: expect.stringMatching(/: \/commit, \/push\.$/),
+      additionalContext: "Currently active skills: /commit, /push.",
     })
   })
 
@@ -61,7 +59,7 @@ describe("active-skills tool hooks", () => {
     const result = await evaluatePosttooluseActiveSkills(activeSkillInput(["commit", "commit"]))
     const output = hookOutputSchema.parse(result)
 
-    expect(output.hookSpecificOutput?.additionalContext).toMatch(/: \/commit\.$/)
+    expect(output.hookSpecificOutput?.additionalContext).toBe("Currently active skill: /commit.")
   })
 
   test("stays silent before and after tools when all skill evidence is stale", async () => {
@@ -74,23 +72,100 @@ describe("active-skills tool hooks", () => {
     expect(await evaluatePosttooluseActiveSkills(input)).toEqual({})
   })
 
-  test("formats an already-filtered skill list without adding policy", () => {
-    expect(formatActiveSkillsContext(["commit", "push"], "configured window")).toBe(
-      "Recently active skills (configured window): /commit, /push."
+  test("formats an already-filtered skill list with singular or plural heading", () => {
+    expect(formatActiveSkillsContext(["commit"])).toBe("Currently active skill: /commit.")
+    expect(formatActiveSkillsContext(["commit", "push"])).toBe(
+      "Currently active skills: /commit, /push."
     )
   })
 
-  test("includes a verified SKILL.md path in pre-tool context", async () => {
+  test("includes a verified SKILL.md path when agent has not yet read or invoked the skill", async () => {
     const dir = await tmp.create()
     const skill = `active-path-${Date.now()}`
     const skillPath = join(dir, ".skills", skill, "SKILL.md")
     await mkdir(join(dir, ".skills", skill), { recursive: true })
     await writeFile(skillPath, `# ${skill}\n`)
-    const input = activeSkillInput([skill])
-    input.cwd = dir
+    const timestamp = new Date().toISOString()
+    const input = {
+      session_id: "active-skills-test",
+      cwd: dir,
+      transcript_path: "/definitely/unavailable/transcript.jsonl",
+      tool_name: "Read",
+      tool_input: { file_path: "README.md" },
+      _effectiveSettings: {
+        skillRecencyMaxTurns: 30,
+        skillRecencyMaxAgeMinutes: 20,
+      },
+      _currentSessionToolUsage: {
+        toolNames: [],
+        skillInvocations: [skill],
+        events: [{ kind: "skill", value: skill, turnIndex: 1, timestamp, source: "user" }],
+      },
+    }
 
     const result = hookOutputSchema.parse(await evaluatePretooluseActiveSkills(input))
-
     expect(result.hookSpecificOutput?.additionalContext).toContain(skillPath)
+  })
+
+  test("omits verified SKILL.md path when agent has already invoked the skill", async () => {
+    const dir = await tmp.create()
+    const skill = `active-invoked-${Date.now()}`
+    const skillPath = join(dir, ".skills", skill, "SKILL.md")
+    await mkdir(join(dir, ".skills", skill), { recursive: true })
+    await writeFile(skillPath, `# ${skill}\n`)
+    const timestamp = new Date().toISOString()
+    const input = {
+      session_id: "active-skills-test",
+      cwd: dir,
+      transcript_path: "/definitely/unavailable/transcript.jsonl",
+      tool_name: "Read",
+      tool_input: { file_path: "README.md" },
+      _effectiveSettings: {
+        skillRecencyMaxTurns: 30,
+        skillRecencyMaxAgeMinutes: 20,
+      },
+      _currentSessionToolUsage: {
+        toolNames: ["Skill"],
+        skillInvocations: [skill],
+        events: [{ kind: "skill", value: skill, turnIndex: 1, timestamp, source: "agent" }],
+      },
+    }
+
+    const result = hookOutputSchema.parse(await evaluatePretooluseActiveSkills(input))
+    expect(result.hookSpecificOutput?.additionalContext).not.toContain(skillPath)
+    expect(result.hookSpecificOutput?.additionalContext).toContain(`/${skill}`)
+  })
+
+  test("omits verified SKILL.md path when agent has already directly read SKILL.md", async () => {
+    const dir = await tmp.create()
+    const skill = `active-read-${Date.now()}`
+    const skillPath = join(dir, ".skills", skill, "SKILL.md")
+    await mkdir(join(dir, ".skills", skill), { recursive: true })
+    await writeFile(skillPath, `# ${skill}\n`)
+    const timestamp = new Date().toISOString()
+    const input = {
+      session_id: "active-skills-test",
+      cwd: dir,
+      transcript_path: "/definitely/unavailable/transcript.jsonl",
+      tool_name: "Read",
+      tool_input: { file_path: "README.md" },
+      _effectiveSettings: {
+        skillRecencyMaxTurns: 30,
+        skillRecencyMaxAgeMinutes: 20,
+      },
+      _currentSessionToolUsage: {
+        toolNames: ["Read"],
+        skillInvocations: [skill],
+        readFiles: [skillPath],
+        events: [
+          { kind: "skill", value: skill, turnIndex: 1, timestamp, source: "user" },
+          { kind: "read-file", value: skillPath, turnIndex: 1, timestamp, source: "agent" },
+        ],
+      },
+    }
+
+    const result = hookOutputSchema.parse(await evaluatePretooluseActiveSkills(input))
+    expect(result.hookSpecificOutput?.additionalContext).not.toContain(skillPath)
+    expect(result.hookSpecificOutput?.additionalContext).toContain(`/${skill}`)
   })
 })

@@ -115,6 +115,8 @@ describe("TranscriptIndexCache", () => {
         toolCallCount: 1,
         bashCommands: ["git status"],
         skillInvocations: [],
+        readFiles: [],
+        writtenFiles: [],
         hasGitPush: false,
         sessionLines: [],
         sessionDurationMs: 0,
@@ -170,6 +172,8 @@ describe("TranscriptIndexCache", () => {
             toolCallCount: 0,
             bashCommands: [],
             skillInvocations: [],
+            readFiles: [],
+            writtenFiles: [],
             hasGitPush: false,
             sessionLines: [sessionLine],
             sessionDurationMs: 0,
@@ -184,14 +188,12 @@ describe("TranscriptIndexCache", () => {
       },
     })
 
-    const pending = [
-      cache.getSummary("/mock/summary.jsonl"),
-      cache.getSummary("/mock/summary.jsonl"),
-      cache.getSummary("/mock/summary.jsonl"),
-    ]
+    const first = cache.getSummary("/mock/summary.jsonl")
+    const second = cache.getSummary("/mock/summary.jsonl")
+    const third = cache.getSummary("/mock/summary.jsonl")
     await Promise.resolve()
     releaseBuild()
-    const summaries = await Promise.all(pending)
+    const summaries = await Promise.all([first, second, third])
 
     expect(buildCalls).toBe(1)
     expect(summaries.every((summary) => summary?.sessionLines[0] === sessionLine)).toBe(true)
@@ -210,6 +212,8 @@ describe("TranscriptIndexCache", () => {
             toolCallCount: 0,
             bashCommands: [],
             skillInvocations: [],
+            readFiles: [],
+            writtenFiles: [],
             hasGitPush: false,
             sessionLines: [String(observedMtimeMs)],
             sessionDurationMs: 0,
@@ -244,6 +248,8 @@ describe("TranscriptIndexCache", () => {
             toolCallCount: 0,
             bashCommands: [],
             skillInvocations: [],
+            readFiles: [],
+            writtenFiles: [],
             hasGitPush: false,
             sessionLines: [oversizedLine],
             sessionDurationMs: 0,

@@ -90,4 +90,49 @@ describe("Codex skill usage detection", () => {
       events: ["debug-iteratively"],
     })
   })
+
+  it("tracks readFiles and writtenFiles from assistant tool use blocks", () => {
+    const readLine = JSON.stringify({
+      type: "assistant",
+      message: {
+        content: [
+          {
+            type: "tool_use",
+            name: "Read",
+            input: { file_path: "/repo/src/index.ts" },
+          },
+        ],
+      },
+    })
+    const editLine = JSON.stringify({
+      type: "assistant",
+      message: {
+        content: [
+          {
+            type: "tool_use",
+            name: "Edit",
+            input: { file_path: "/repo/src/index.ts", old_string: "a", new_string: "b" },
+          },
+          {
+            type: "tool_use",
+            name: "Write",
+            input: { file_path: "/repo/src/new-file.ts", content: "hello" },
+          },
+        ],
+      },
+    })
+
+    const summary = computeSummaryFromSessionLines([readLine, editLine])
+    expect(summary.readFiles).toEqual(["/repo/src/index.ts"])
+    expect(summary.writtenFiles).toEqual(["/repo/src/index.ts", "/repo/src/new-file.ts"])
+
+    const events = collectCurrentSessionUsageEvents([readLine, editLine])
+    expect(events.filter((e) => e.kind === "read-file").map((e) => e.value)).toEqual([
+      "/repo/src/index.ts",
+    ])
+    expect(events.filter((e) => e.kind === "written-file").map((e) => e.value)).toEqual([
+      "/repo/src/index.ts",
+      "/repo/src/new-file.ts",
+    ])
+  })
 })

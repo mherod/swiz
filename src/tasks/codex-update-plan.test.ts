@@ -159,6 +159,8 @@ describe("codex-update-plan", () => {
           toolCallCount: 1,
           bashCommands: [],
           skillInvocations: [],
+          readFiles: [],
+          writtenFiles: [],
           hasGitPush: false,
           sessionLines,
           sessionDurationMs: 0,

@@ -15,7 +15,14 @@ import {
   extractSkillNamesFromUserText,
   stripUserQueryWrapper,
 } from "./skill-usage.ts"
-import { isShellTool, isTaskTool, READ_TOOLS } from "./tool-matchers.ts"
+import {
+  extractFileEditTargetPaths,
+  extractFileReadTargetPaths,
+  isFileEditTool,
+  isShellTool,
+  isTaskTool,
+  READ_TOOLS,
+} from "./tool-matchers.ts"
 import { readJsonlTailText, splitJsonlLines, tryParseJsonLine } from "./utils/jsonl.ts"
 import { gitSubcommandRe } from "./utils/shell-patterns.ts"
 
@@ -38,6 +45,10 @@ export interface TranscriptSummary {
   bashCommands: string[]
   /** Skill names invoked through native tools, direct reads, or explicit user attachments. */
   skillInvocations: string[]
+  /** Target file paths read by the assistant during the current session. */
+  readFiles: string[]
+  /** Target file paths written or edited by the assistant during the current session. */
+  writtenFiles: string[]
   /** Whether any Bash tool call contains `git push`. */
   hasGitPush: boolean
   /**
@@ -81,13 +92,19 @@ export interface CurrentSessionUsageRecencyOptions {
   nowMs?: number
 }
 
-export type CurrentSessionUsageEventKind = "tool" | "skill" | "bash-command"
+export type CurrentSessionUsageEventKind =
+  | "tool"
+  | "skill"
+  | "bash-command"
+  | "read-file"
+  | "written-file"
 
 export interface CurrentSessionUsageEvent {
   kind: CurrentSessionUsageEventKind
   value: string
   turnIndex: number
   timestamp: string | null
+  source?: "agent" | "user"
 }
 
 /**
@@ -97,11 +114,15 @@ export interface CurrentSessionUsageEvent {
 export interface CurrentSessionToolUsage {
   toolNames: string[]
   skillInvocations: string[]
+  readFiles?: string[]
+  writtenFiles?: string[]
   events?: CurrentSessionUsageEvent[]
 }
 
 export interface RecentCurrentSessionUsage extends CurrentSessionToolUsage {
   bashCommands: string[]
+  readFiles: string[]
+  writtenFiles: string[]
   events: CurrentSessionUsageEvent[]
 }
 
@@ -300,6 +321,8 @@ interface SummaryAccumulator {
   toolNames: string[]
   bashCommands: string[]
   skillInvocations: string[]
+  readFiles: string[]
+  writtenFiles: string[]
   hasGitPush: boolean
   firstTimestamp: string | null
   lastTimestamp: string | null
@@ -310,6 +333,8 @@ function createEmptySummaryAccumulator(): SummaryAccumulator {
     toolNames: [],
     bashCommands: [],
     skillInvocations: [],
+    readFiles: [],
+    writtenFiles: [],
     hasGitPush: false,
     firstTimestamp: null,
     lastTimestamp: null,
@@ -351,6 +376,19 @@ function appendSkillInvocations(skills: string[], acc: SummaryAccumulator): void
   }
 }
 
+function accumulateFilePaths(block: ToolBlock, name: string, acc: SummaryAccumulator): void {
+  if (READ_TOOLS.has(name)) {
+    for (const filePath of extractFileReadTargetPaths(block.input ?? {})) {
+      if (!acc.readFiles.includes(filePath)) acc.readFiles.push(filePath)
+    }
+  }
+  if (isFileEditTool(name)) {
+    for (const filePath of extractFileEditTargetPaths(block.input ?? {})) {
+      if (!acc.writtenFiles.includes(filePath)) acc.writtenFiles.push(filePath)
+    }
+  }
+}
+
 function processToolBlock(block: ToolBlock, acc: SummaryAccumulator): void {
   if (block?.type !== "tool_use") return
   const name = extractToolName(block)
@@ -362,6 +400,7 @@ function processToolBlock(block: ToolBlock, acc: SummaryAccumulator): void {
     if (skill) acc.skillInvocations.push(skill)
   }
   appendSkillInvocations(extractDirectSkillReadInvocations(block, name), acc)
+  accumulateFilePaths(block, name, acc)
 }
 
 function collectShellCommandUsageEvents(
@@ -394,7 +433,33 @@ function collectSkillUsageEventsFromBlock(
     if (skill) skills.add(skill)
   }
   for (const skill of extractDirectSkillReadInvocations(block, name)) skills.add(skill)
-  return [...skills].map((value) => ({ kind: "skill", value, turnIndex, timestamp }))
+  return [...skills].map((value) => ({
+    kind: "skill",
+    value,
+    turnIndex,
+    timestamp,
+    source: "agent",
+  }))
+}
+
+function collectFileUsageEventsFromBlock(
+  block: ToolBlock,
+  name: string,
+  turnIndex: number,
+  timestamp: string | null
+): CurrentSessionUsageEvent[] {
+  const events: CurrentSessionUsageEvent[] = []
+  if (READ_TOOLS.has(name)) {
+    for (const filePath of extractFileReadTargetPaths(block.input ?? {})) {
+      events.push({ kind: "read-file", value: filePath, turnIndex, timestamp, source: "agent" })
+    }
+  }
+  if (isFileEditTool(name)) {
+    for (const filePath of extractFileEditTargetPaths(block.input ?? {})) {
+      events.push({ kind: "written-file", value: filePath, turnIndex, timestamp, source: "agent" })
+    }
+  }
+  return events
 }
 
 function collectToolUsageEventsFromBlock(
@@ -409,6 +474,7 @@ function collectToolUsageEventsFromBlock(
   const events: CurrentSessionUsageEvent[] = [{ kind: "tool", value: name, turnIndex, timestamp }]
   events.push(...collectShellCommandUsageEvents(block, name, turnIndex, timestamp))
   events.push(...collectSkillUsageEventsFromBlock(block, name, turnIndex, timestamp))
+  events.push(...collectFileUsageEventsFromBlock(block, name, turnIndex, timestamp))
   return events
 }
 
@@ -545,7 +611,7 @@ function collectUsageEventsForLine(line: string, turnIndex: number): CurrentSess
     events.push(...collectToolUsageEventsFromBlock(block, turnIndex, timestamp))
   }
   for (const skill of extractUserSkillExpansions(line)) {
-    events.push({ kind: "skill", value: skill, turnIndex, timestamp })
+    events.push({ kind: "skill", value: skill, turnIndex, timestamp, source: "user" })
   }
   return events
 }
@@ -606,6 +672,10 @@ function usageFromEvents(events: CurrentSessionUsageEvent[]): RecentCurrentSessi
     bashCommands: events
       .filter((event) => event.kind === "bash-command")
       .map((event) => event.value),
+    readFiles: events.filter((event) => event.kind === "read-file").map((event) => event.value),
+    writtenFiles: events
+      .filter((event) => event.kind === "written-file")
+      .map((event) => event.value),
     events,
   }
 }
@@ -644,14 +714,24 @@ function transcriptPathFromUsageSource(source: string | Record<string, any>): st
   return typeof source.transcript_path === "string" ? source.transcript_path : ""
 }
 
+const USAGE_EVENT_KINDS = new Set<string>([
+  "tool",
+  "skill",
+  "bash-command",
+  "read-file",
+  "written-file",
+])
+
 function isCurrentSessionUsageEvent(value: unknown): value is CurrentSessionUsageEvent {
   if (!value || typeof value !== "object") return false
   const event = value as Record<string, unknown>
+  const hasValidTimestamp = typeof event.timestamp === "string" || event.timestamp === null
   return (
-    (event.kind === "tool" || event.kind === "skill" || event.kind === "bash-command") &&
+    typeof event.kind === "string" &&
+    USAGE_EVENT_KINDS.has(event.kind) &&
     typeof event.value === "string" &&
     typeof event.turnIndex === "number" &&
-    (typeof event.timestamp === "string" || event.timestamp === null)
+    hasValidTimestamp
   )
 }
 
@@ -667,6 +747,12 @@ export function getCurrentSessionToolUsage(
         skillInvocations: candidate.skillInvocations.filter(
           (v): v is string => typeof v === "string"
         ),
+        readFiles: Array.isArray(candidate.readFiles)
+          ? candidate.readFiles.filter((v): v is string => typeof v === "string")
+          : undefined,
+        writtenFiles: Array.isArray(candidate.writtenFiles)
+          ? candidate.writtenFiles.filter((v): v is string => typeof v === "string")
+          : undefined,
         events: Array.isArray(candidate.events)
           ? candidate.events.filter(isCurrentSessionUsageEvent)
           : undefined,
@@ -679,6 +765,8 @@ export function getCurrentSessionToolUsage(
     ? {
         toolNames: summary.toolNames,
         skillInvocations: summary.skillInvocations,
+        readFiles: summary.readFiles,
+        writtenFiles: summary.writtenFiles,
         events: collectCurrentSessionUsageEvents(summary.sessionLines),
       }
     : null
@@ -860,6 +948,126 @@ export async function getRecentBashCommandsUsedForCurrentSession(
   options?: CurrentSessionUsageRecencyOptions
 ): Promise<string[]> {
   return (await getRecentCurrentSessionUsage(source, options)).bashCommands
+}
+
+export async function getReadFilesForCurrentSession(
+  source: string | Record<string, any>
+): Promise<string[]> {
+  if (typeof source !== "string") {
+    const usage = getCurrentSessionToolUsage(source)
+    if (usage?.readFiles) return usage.readFiles
+  }
+  const transcriptPath = transcriptPathFromUsageSource(source)
+  return transcriptPath ? (await readSessionToolUsage(transcriptPath)).readFiles : []
+}
+
+export async function getWrittenFilesForCurrentSession(
+  source: string | Record<string, any>
+): Promise<string[]> {
+  if (typeof source !== "string") {
+    const usage = getCurrentSessionToolUsage(source)
+    if (usage?.writtenFiles) return usage.writtenFiles
+  }
+  const transcriptPath = transcriptPathFromUsageSource(source)
+  return transcriptPath ? (await readSessionToolUsage(transcriptPath)).writtenFiles : []
+}
+
+export async function getRecentReadFilesUsedForCurrentSession(
+  source: string | Record<string, any>,
+  options?: CurrentSessionUsageRecencyOptions
+): Promise<string[]> {
+  return (await getRecentCurrentSessionUsage(source, options)).readFiles
+}
+
+export async function getRecentWrittenFilesUsedForCurrentSession(
+  source: string | Record<string, any>,
+  options?: CurrentSessionUsageRecencyOptions
+): Promise<string[]> {
+  return (await getRecentCurrentSessionUsage(source, options)).writtenFiles
+}
+
+function matchesSkillFilePath(
+  path: string,
+  skillName: string,
+  skillFilePath?: string | null
+): boolean {
+  if (skillFilePath && path === skillFilePath) return true
+  return path.endsWith(`/${skillName}/SKILL.md`) || path.endsWith(`\\${skillName}\\SKILL.md`)
+}
+
+function hasMatchingUsageEvent(
+  events: CurrentSessionUsageEvent[] | undefined,
+  skillName: string,
+  skillFilePath?: string | null
+): boolean {
+  if (!events) return false
+  return events.some(
+    (event) =>
+      (event.kind === "skill" && event.value === skillName && event.source === "agent") ||
+      (event.kind === "read-file" && matchesSkillFilePath(event.value, skillName, skillFilePath))
+  )
+}
+
+function hasMatchingReadFile(
+  readFiles: string[] | undefined,
+  skillName: string,
+  skillFilePath?: string | null
+): boolean {
+  if (!readFiles) return false
+  return readFiles.some((filePath) => matchesSkillFilePath(filePath, skillName, skillFilePath))
+}
+
+function isMatchingAssistantToolBlock(
+  block: ToolBlock,
+  skillName: string,
+  skillFilePath?: string | null
+): boolean {
+  if (block?.type !== "tool_use") return false
+  const name = extractToolName(block)
+  if (name === "Skill" && extractSkillNameFromToolInput(block.input) === skillName) return true
+  if (extractDirectSkillReadInvocations(block, name).includes(skillName)) return true
+  if (READ_TOOLS.has(name)) {
+    const targets = extractFileReadTargetPaths(block.input ?? {})
+    return targets.some((t) => matchesSkillFilePath(t, skillName, skillFilePath))
+  }
+  return false
+}
+
+function hasMatchingSessionLineToolBlock(
+  sessionLines: string[] | null,
+  skillName: string,
+  skillFilePath?: string | null
+): boolean {
+  if (!sessionLines) return false
+  for (const line of sessionLines) {
+    for (const block of parseAssistantToolBlocks(line)) {
+      if (isMatchingAssistantToolBlock(block, skillName, skillFilePath)) return true
+    }
+  }
+  return false
+}
+
+function hasMatchingRawToolUsage(usage: unknown, skillName: string): boolean {
+  if (!usage || typeof usage !== "object") return false
+  const raw = usage as CurrentSessionToolUsage
+  if (!Array.isArray(raw.toolNames) || !Array.isArray(raw.skillInvocations)) return false
+  return raw.toolNames.includes("Skill") && raw.skillInvocations.includes(skillName)
+}
+
+export function hasAgentDirectlyReadOrInvokedSkill(
+  source: Record<string, any>,
+  skillName: string,
+  skillFilePath?: string | null
+): boolean {
+  if (!skillName) return false
+
+  const usage = getCurrentSessionToolUsage(source)
+  if (hasMatchingUsageEvent(usage?.events, skillName, skillFilePath)) return true
+  if (hasMatchingReadFile(usage?.readFiles, skillName, skillFilePath)) return true
+  if (hasMatchingSessionLineToolBlock(getEnrichedSessionLines(source), skillName, skillFilePath)) {
+    return true
+  }
+  return hasMatchingRawToolUsage(source._currentSessionToolUsage, skillName)
 }
 
 export function formatCurrentSessionUsageWindow(
