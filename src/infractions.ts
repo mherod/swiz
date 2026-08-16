@@ -16,7 +16,9 @@
 // Pure transcript scan — no sentinel files (PreToolUse enforcement must not rely
 // on external state per CLAUDE.md).
 
+import { z } from "zod"
 import { normalizeCommand } from "./command-utils.ts"
+import type { JsonLike } from "./schemas.ts"
 import { isCodeChangeTool, isShellTool } from "./tool-matchers.ts"
 import { tryParseJsonLine } from "./utils/jsonl.ts"
 
@@ -119,18 +121,18 @@ function wantedAssessment(
   return { level, wantedLevel: WANTED_LEVEL_BY_INFRACTION[level], priorDenialCount, key, toolName }
 }
 
-function parseTimestampMs(value: unknown): number | null {
+function parseTimestampMs(value: string | number | null | undefined): number | null {
   if (typeof value === "number" && Number.isFinite(value)) return value
   if (typeof value !== "string" || !value.trim()) return null
   const parsed = Date.parse(value)
   return Number.isFinite(parsed) ? parsed : null
 }
 
-function textFromContent(value: unknown): string {
+function textFromContent(value: JsonLike | undefined): string {
   if (typeof value === "string") return value
   if (Array.isArray(value)) return value.map(textFromContent).filter(Boolean).join("\n")
   if (!value || typeof value !== "object") return ""
-  const record = value as Record<string, unknown>
+  const record = value as Record<string, JsonLike>
   if (typeof record.text === "string") return record.text
   if (typeof record.content === "string") return record.content
   return ""
@@ -140,8 +142,9 @@ function isDenialText(text: string): boolean {
   return DENY_FOOTER_MARKERS.some((marker) => text.includes(marker))
 }
 
-function shellCommandKey(input: Record<string, unknown> | undefined): string {
-  const command = String(input?.command ?? input?.cmd ?? "")
+function shellCommandKey(input: object | null | undefined): string {
+  if (!input || typeof input !== "object") return ""
+  const command = String(Reflect.get(input, "command") ?? Reflect.get(input, "cmd") ?? "")
   if (!command) return ""
   // Collapse whitespace so retries differing only in spacing still collide —
   // normalizeCommand alone handles backslash-continuations, not internal runs.
@@ -153,35 +156,57 @@ function shellCommandKey(input: Record<string, unknown> | undefined): string {
  * capped) command; file edits key on the path; anything else keys on the tool name
  * so e.g. repeated denied TaskUpdate attempts still collapse together.
  */
-export function attemptKey(toolName: string, input: Record<string, unknown> | undefined): string {
+export function attemptKey(toolName: string, input: object | null | undefined): string {
   if (isShellTool(toolName)) return shellCommandKey(input)
-  if (isCodeChangeTool(toolName)) return String(input?.file_path ?? input?.path ?? "")
+  if (isCodeChangeTool(toolName)) {
+    if (!input || typeof input !== "object") return ""
+    return String(Reflect.get(input, "file_path") ?? Reflect.get(input, "path") ?? "")
+  }
   return toolName
 }
 
-/** Minimal typed view of a transcript content block — every field is optional/unknown. */
-interface RawBlock {
-  type?: unknown
-  id?: unknown
-  name?: unknown
-  tool_use_id?: unknown
-  content?: unknown
-  timestamp?: unknown
-  input?: Record<string, unknown>
-}
+/** Minimal typed view of a transcript content block — validated with Zod. */
+const rawBlockSchema = z.looseObject({
+  type: z.string().optional(),
+  id: z.union([z.string(), z.number()]).optional(),
+  name: z.string().optional(),
+  tool_use_id: z.union([z.string(), z.number()]).optional(),
+  content: z.custom<JsonLike>().optional(),
+  timestamp: z.union([z.string(), z.number()]).optional(),
+  input: z.record(z.string(), z.custom<JsonLike>()).optional(),
+})
 
-interface RawEntry {
-  type?: unknown
-  timestamp?: unknown
-  message?: { content?: unknown }
-}
+type RawBlock = z.infer<typeof rawBlockSchema>
+
+const rawEntrySchema = z.looseObject({
+  type: z.string().optional(),
+  timestamp: z.union([z.string(), z.number()]).optional(),
+  message: z
+    .looseObject({
+      content: z.union([z.string(), z.array(z.custom<JsonLike>())]).optional(),
+    })
+    .optional(),
+})
+
+type RawEntry = z.infer<typeof rawEntrySchema>
 
 /** Return the content-block array of a transcript entry, or null when absent. */
 function entryBlocks(line: string): { blocks: RawBlock[]; entry: RawEntry } | null {
-  const entry = tryParseJsonLine(line) as RawEntry | undefined
-  if (!entry) return null
+  const parsed = tryParseJsonLine(line)
+  if (!parsed || typeof parsed !== "object") return null
+  const entryResult = rawEntrySchema.safeParse(parsed)
+  if (!entryResult.success) return null
+  const entry = entryResult.data
   const content = entry.message?.content
-  return Array.isArray(content) ? { blocks: content as RawBlock[], entry } : null
+  if (!Array.isArray(content)) return null
+  const blocks: RawBlock[] = []
+  for (const item of content) {
+    const blockResult = rawBlockSchema.safeParse(item)
+    if (blockResult.success) {
+      blocks.push(blockResult.data)
+    }
+  }
+  return { blocks, entry }
 }
 
 /** Collect tool_result records keyed by their originating tool_use_id. */
@@ -231,6 +256,22 @@ function blockedAttemptFromBlock(
   }
 }
 
+function findSettledAttemptInBlocks(
+  blocks: RawBlock[],
+  results: Map<string, ToolResultRecord>
+): SettledAttempt | null {
+  for (let j = blocks.length - 1; j >= 0; j--) {
+    const block = blocks[j]
+    if (!block || block.type !== "tool_use") continue
+    const result = results.get(String(block.id ?? ""))
+    if (!result) continue
+    const key = attemptKey(String(block.name ?? ""), block.input)
+    if (!key) continue
+    return { key, denied: result.denied, isCooldown: result.isCooldown }
+  }
+  return null
+}
+
 /**
  * Find the most recent tool call that has a settled result and report how it
  * resolved. Used to decide whether a red-card cooldown is owed (previous event
@@ -241,15 +282,8 @@ export function lastSettledAttempt(lines: string[]): SettledAttempt | null {
   for (let i = lines.length - 1; i >= 0; i--) {
     const parsed = entryBlocks(lines[i] ?? "")
     if (!parsed || parsed.entry.type !== "assistant") continue
-    for (let j = parsed.blocks.length - 1; j >= 0; j--) {
-      const block = parsed.blocks[j]
-      if (!block || block.type !== "tool_use") continue
-      const result = results.get(String(block.id ?? ""))
-      if (!result) continue
-      const key = attemptKey(String(block.name ?? ""), block.input)
-      if (!key) continue
-      return { key, denied: result.denied, isCooldown: result.isCooldown }
-    }
+    const attempt = findSettledAttemptInBlocks(parsed.blocks, results)
+    if (attempt) return attempt
   }
   return null
 }
@@ -401,7 +435,7 @@ export function standingWantedLevel(
 /** Resolve the current PreToolUse call into a comparable attempt, or null if it has no key. */
 export function resolveCurrentAttempt(input: {
   tool_name?: string
-  tool_input?: Record<string, unknown>
+  tool_input?: object | null | undefined
 }): CurrentAttempt | null {
   const toolName = String(input.tool_name ?? "")
   if (!toolName) return null
