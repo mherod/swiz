@@ -182,10 +182,13 @@ const COMMON_PATH_KEYS = [
   "target_file",
   "TargetFile",
   "path",
+  "file",
   "AbsolutePath",
   "notebook_path",
   "notebookPath",
 ] as const
+
+const COMMON_NESTED_PATH_KEYS = ["files", "paths", "file_paths", "filePaths"] as const
 
 export function extractFileEditTargetPaths(toolInput: ToolMatcherValue | object): string[] {
   if (!isRecord(toolInput)) return []
@@ -197,6 +200,9 @@ export function extractFileEditTargetPaths(toolInput: ToolMatcherValue | object)
 
   addNestedPathRecords(paths, toolInput.edits)
   addNestedPathRecords(paths, toolInput.changes)
+  for (const key of COMMON_NESTED_PATH_KEYS) {
+    addNestedPathRecords(paths, toolInput[key])
+  }
 
   if (typeof toolInput.command === "string") {
     for (const filePath of extractApplyPatchFilePaths(toolInput.command)) {
@@ -216,7 +222,9 @@ export function extractFileReadTargetPaths(toolInput: ToolMatcherValue | object)
     addPath(paths, toolInput[key])
   }
 
-  addNestedPathRecords(paths, toolInput.files)
+  for (const key of COMMON_NESTED_PATH_KEYS) {
+    addNestedPathRecords(paths, toolInput[key])
+  }
   return [...paths]
 }
 
