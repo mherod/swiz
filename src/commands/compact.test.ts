@@ -15,6 +15,7 @@ async function runCompact(
   const proc = Bun.spawn(["bun", "run", SWIZ_ENTRY, COMPACT_MEMORY_SKILL_ID, ...args], {
     stdout: "pipe",
     stderr: "pipe",
+    env: { ...process.env, SWIZ_DIRECT: "1" },
   })
   const [stdout, stderr] = await Promise.all([
     new Response(proc.stdout).text(),

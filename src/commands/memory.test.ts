@@ -45,6 +45,7 @@ async function runMemory(
       env[k] = v
     }
   }
+  env.SWIZ_DIRECT = "1"
 
   const proc = Bun.spawn(["bun", "run", SWIZ_ENTRY, "memory", ...args], {
     stdout: "pipe",

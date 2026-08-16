@@ -10,7 +10,12 @@ const CLI_PROCESS_STARTED_AT = performance.now()
 const invokedAs = process.env._ ?? ""
 const isSwizBinary =
   invokedAs.endsWith("/swiz") || invokedAs.endsWith("\\swiz") || invokedAs === "swiz"
-if (!isSwizBinary && !process.env.SWIZ_DIRECT) {
+// MCP clients spawn `swiz mcp` directly instead of through a shell, so `_`
+// still names the parent client even when the linked swiz binary was executed.
+// A stdio MCP server is only useful with piped stdout, which keeps this
+// exception narrower than ordinary direct checkout invocations.
+const isMcpStdioServer = process.argv[2] === "mcp" && process.stdout.isTTY !== true
+if (!isSwizBinary && !isMcpStdioServer && !process.env.SWIZ_DIRECT) {
   process.stderr.write(
     "Error: swiz must be invoked via the globally linked command.\n" +
       "\n" +

@@ -36,7 +36,7 @@ async function runStatus(envOverrides: Record<string, string | undefined>): Prom
   const proc = Bun.spawn(["bun", "run", SWIZ_ENTRY, "status", "--no-health"], {
     stdout: "pipe",
     stderr: "pipe",
-    env: { ...base, SWIZ_STATUS_SKIP_CI: "1" },
+    env: { ...base, SWIZ_DIRECT: "1", SWIZ_STATUS_SKIP_CI: "1" },
   })
   const [output] = await Promise.all([
     new Response(proc.stdout).text(),
