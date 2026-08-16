@@ -151,6 +151,45 @@ function translateMergedTaskText(text: string, agent: AgentDef | null): string {
   return translateMatcher(text, agent) ?? text
 }
 
+function resolveStepText(
+  text: string | undefined,
+  translate: boolean,
+  agent: AgentDef | null
+): string | undefined {
+  if (text === undefined) return undefined
+  return translate ? translateMergedTaskText(text, agent) : text
+}
+
+interface MergeTaskContext {
+  sessionId: string
+  cwd: string
+  translate: boolean
+  agent: AgentDef | null
+}
+
+async function tryCreateMergedStepTask(
+  ctx: MergeTaskContext,
+  step: MergeStep,
+  incomplete: Task[]
+): Promise<Task | null> {
+  const subject = resolveStepText(step.subject, ctx.translate, ctx.agent) ?? step.subject
+  if (findCollidingTask(subject, incomplete)) return null
+
+  try {
+    const description = resolveStepText(step.description, ctx.translate, ctx.agent)
+    return await createTaskInProcess({
+      sessionId: ctx.sessionId,
+      subject,
+      description: description ?? subject,
+      cwd: ctx.cwd,
+      skipSubjectValidation: true,
+    })
+  } catch (err) {
+    if (err instanceof Error && err.message.startsWith("Duplicate task:")) return null
+    throw err
+  }
+}
+
 /**
  * Merge a list of steps into the session's task list, skipping any step whose
  * subject overlaps with an existing pending or in_progress task.
@@ -172,31 +211,12 @@ export async function mergeIntoTasks(
 
   const existing = await readTasks(sessionId)
   const incomplete = existing.filter((t) => isIncompleteTaskStatus(t.status))
+  const ctx: MergeTaskContext = { sessionId, cwd, translate, agent }
 
   const created: Task[] = []
   for (const step of steps) {
-    const subject = translate ? translateMergedTaskText(step.subject, agent) : step.subject
-    if (findCollidingTask(subject, incomplete)) continue
-
-    try {
-      const description =
-        step.description === undefined
-          ? undefined
-          : translate
-            ? translateMergedTaskText(step.description, agent)
-            : step.description
-      const task = await createTaskInProcess({
-        sessionId,
-        subject: subject,
-        description: description ?? subject,
-        cwd,
-        skipSubjectValidation: true,
-      })
-      created.push(task)
-    } catch (err) {
-      if (err instanceof Error && err.message.startsWith("Duplicate task:")) continue
-      throw err
-    }
+    const task = await tryCreateMergedStepTask(ctx, step, incomplete)
+    if (task) created.push(task)
   }
   return created
 }

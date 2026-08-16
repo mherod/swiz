@@ -43,24 +43,19 @@ export async function getSessionIdsForProject(
   return ids
 }
 
-/** Collect all session IDs referenced by any project transcript directory. */
-async function getAllProjectSessionIds(
-  projectsDir = createDefaultTaskStore().projectsDir
-): Promise<Set<string>> {
+async function collectJunieSessionIds(projectsDir: string): Promise<Set<string>> {
   const ids = new Set<string>()
+  try {
+    const files = await readdir(projectsDir)
+    for (const f of files) {
+      if (f.startsWith("session-")) ids.add(f)
+    }
+  } catch {}
+  return ids
+}
 
-  const normProjectsDir = projectsDir.endsWith("/") ? projectsDir.slice(0, -1) : projectsDir
-  // Junie: projectsDir is sessions/
-  if (normProjectsDir.endsWith("/sessions")) {
-    try {
-      const files = await readdir(projectsDir)
-      for (const f of files) {
-        if (f.startsWith("session-")) ids.add(f)
-      }
-    } catch {}
-    return ids
-  }
-
+async function collectStandardProjectSessionIds(projectsDir: string): Promise<Set<string>> {
+  const ids = new Set<string>()
   let projectDirs: string[]
   try {
     projectDirs = await readdir(projectsDir)
@@ -68,17 +63,25 @@ async function getAllProjectSessionIds(
     return ids
   }
   for (const projectDir of projectDirs) {
-    let files: string[]
     try {
-      files = await readdir(join(projectsDir, projectDir))
-    } catch {
-      continue
-    }
-    for (const f of files) {
-      if (f.endsWith(".jsonl")) ids.add(f.slice(0, -6))
-    }
+      const files = await readdir(join(projectsDir, projectDir))
+      for (const f of files) {
+        if (f.endsWith(".jsonl")) ids.add(f.slice(0, -6))
+      }
+    } catch {}
   }
   return ids
+}
+
+/** Collect all session IDs referenced by any project transcript directory. */
+async function getAllProjectSessionIds(
+  projectsDir = createDefaultTaskStore().projectsDir
+): Promise<Set<string>> {
+  const normProjectsDir = projectsDir.endsWith("/") ? projectsDir.slice(0, -1) : projectsDir
+  if (normProjectsDir.endsWith("/sessions")) {
+    return collectJunieSessionIds(projectsDir)
+  }
+  return collectStandardProjectSessionIds(projectsDir)
 }
 
 /** Check if a transcript file's first 10 lines contain a matching cwd field. */
@@ -111,51 +114,84 @@ async function partitionByMeta(
   return { matched, remaining }
 }
 
-/** Scan transcript directories for sessions matching filterCwd. */
-async function scanTranscriptsForCwd(
+function matchesJunieEventCwd(entry: Record<string, any>, filterCwd: string): boolean {
+  if (
+    (entry.kind !== "SessionA2uxEvent" && entry.kind !== "SessionEvent") ||
+    entry.event?.agentEvent?.kind !== "AgentStateUpdatedEvent" ||
+    !entry.event.agentEvent.blob
+  ) {
+    return false
+  }
+  try {
+    const blob = JSON.parse(entry.event.agentEvent.blob)
+    return blob.currentDirectory === filterCwd
+  } catch {
+    return false
+  }
+}
+
+async function scanJunieEventsForCwd(eventsPath: string, filterCwd: string): Promise<boolean> {
+  try {
+    const text = await readFile(eventsPath, "utf-8")
+    const schema = z.looseObject({
+      kind: z.string(),
+      event: z.looseObject({
+        agentEvent: z.looseObject({
+          kind: z.string(),
+          blob: z.string().optional(),
+        }),
+      }),
+    })
+    const entries = parseJsonl(text, schema)
+    return entries.some((entry) => matchesJunieEventCwd(entry, filterCwd))
+  } catch {
+    return false
+  }
+}
+
+async function scanJunieTranscriptsForCwd(
   remaining: Set<string>,
   filterCwd: string,
   projectsDir: string,
   ids: Set<string>
 ): Promise<void> {
-  const normProjectsDir = projectsDir.endsWith("/") ? projectsDir.slice(0, -1) : projectsDir
-  // Junie: projectsDir is sessions/
-  if (normProjectsDir.endsWith("/sessions")) {
-    for (const sessionId of remaining) {
-      const eventsPath = join(projectsDir, sessionId, "events.jsonl")
-      try {
-        const text = await readFile(eventsPath, "utf-8")
-        const schema = z.looseObject({
-          kind: z.string(),
-          event: z.looseObject({
-            agentEvent: z.looseObject({
-              kind: z.string(),
-              blob: z.string().optional(),
-            }),
-          }),
-        })
-        const entries = parseJsonl(text, schema)
-        // Similar to findJunieSessions in transcript-sessions-discovery.ts
-        for (const entry of entries) {
-          if (
-            (entry.kind === "SessionA2uxEvent" || entry.kind === "SessionEvent") &&
-            entry.event?.agentEvent?.kind === "AgentStateUpdatedEvent" &&
-            entry.event.agentEvent.blob
-          ) {
-            const blob = JSON.parse(entry.event.agentEvent.blob)
-            if (blob.currentDirectory === filterCwd) {
-              ids.add(sessionId)
-              break
-            }
-          }
-        }
-      } catch (_e) {
-        // Silent
-      }
+  for (const sessionId of remaining) {
+    const eventsPath = join(projectsDir, sessionId, "events.jsonl")
+    if (await scanJunieEventsForCwd(eventsPath, filterCwd)) {
+      ids.add(sessionId)
     }
+  }
+}
+
+async function scanProjectDirFiles(
+  dirPath: string,
+  remaining: Set<string>,
+  filterCwd: string,
+  ids: Set<string>
+): Promise<void> {
+  let files: string[]
+  try {
+    files = await readdir(dirPath)
+  } catch {
     return
   }
+  for (const f of files) {
+    if (!f.endsWith(".jsonl")) continue
+    const sessionId = f.slice(0, -6)
+    if (!remaining.has(sessionId)) continue
+    if (await transcriptMatchesCwd(join(dirPath, f), filterCwd)) {
+      ids.add(sessionId)
+      remaining.delete(sessionId)
+    }
+  }
+}
 
+async function scanStandardTranscriptsForCwd(
+  remaining: Set<string>,
+  filterCwd: string,
+  projectsDir: string,
+  ids: Set<string>
+): Promise<void> {
   let dirs: string[]
   try {
     dirs = await readdir(projectsDir)
@@ -164,22 +200,23 @@ async function scanTranscriptsForCwd(
   }
   for (const dir of dirs) {
     if (remaining.size === 0) break
-    let files: string[]
-    try {
-      files = await readdir(join(projectsDir, dir))
-    } catch {
-      continue
-    }
-    for (const f of files) {
-      if (!f.endsWith(".jsonl")) continue
-      const sessionId = f.slice(0, -6)
-      if (!remaining.has(sessionId)) continue
-      if (await transcriptMatchesCwd(join(projectsDir, dir, f), filterCwd)) {
-        ids.add(sessionId)
-        remaining.delete(sessionId)
-      }
-    }
+    await scanProjectDirFiles(join(projectsDir, dir), remaining, filterCwd, ids)
   }
+}
+
+/** Scan transcript directories for sessions matching filterCwd. */
+async function scanTranscriptsForCwd(
+  remaining: Set<string>,
+  filterCwd: string,
+  projectsDir: string,
+  ids: Set<string>
+): Promise<void> {
+  const normProjectsDir = projectsDir.endsWith("/") ? projectsDir.slice(0, -1) : projectsDir
+  if (normProjectsDir.endsWith("/sessions")) {
+    await scanJunieTranscriptsForCwd(remaining, filterCwd, projectsDir, ids)
+    return
+  }
+  await scanStandardTranscriptsForCwd(remaining, filterCwd, projectsDir, ids)
 }
 
 /**

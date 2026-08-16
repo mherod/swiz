@@ -290,6 +290,38 @@ export async function findLatestTaskId(tasksDir: string): Promise<string | null>
   return maxId >= 0 ? String(maxId) : null
 }
 
+async function applyTaskCreateAudit(
+  cache: NonNullable<ReturnType<typeof getGlobalTaskStateCache>>,
+  sessionId: string,
+  toolInput: Record<string, unknown>
+): Promise<void> {
+  const tasksDir = getSessionTasksDir(sessionId)
+  if (!tasksDir) return
+  const taskId = await findLatestTaskId(tasksDir)
+  if (!taskId) return
+  cache.applyTaskAuditSnapshot(sessionId, {
+    taskId,
+    action: "create",
+    newStatus: "pending",
+    subject: String(toolInput.subject ?? ""),
+  })
+}
+
+function applyTaskUpdateAudit(
+  cache: NonNullable<ReturnType<typeof getGlobalTaskStateCache>>,
+  sessionId: string,
+  toolInput: Record<string, unknown>
+): void {
+  const taskId = String(toolInput.taskId ?? toolInput.id ?? "")
+  if (!taskId) return
+  cache.applyTaskAuditSnapshot(sessionId, {
+    taskId,
+    action: "status_change",
+    newStatus: toolInput.status ? String(toolInput.status) : undefined,
+    subject: toolInput.subject ? String(toolInput.subject) : undefined,
+  })
+}
+
 /**
  * Apply a task tool event (TaskCreate / TaskUpdate / TodoWrite) to the global
  * TaskStateCache. No-op when the cache is absent or the sessionId is empty.
@@ -304,25 +336,9 @@ export async function applyCacheAuditWriteThrough(
   if (!cache) return
   try {
     if (toolName === "TaskCreate") {
-      const tasksDir = getSessionTasksDir(sessionId)
-      if (!tasksDir) return
-      const taskId = await findLatestTaskId(tasksDir)
-      if (!taskId) return
-      cache.applyTaskAuditSnapshot(sessionId, {
-        taskId,
-        action: "create",
-        newStatus: "pending",
-        subject: String(toolInput.subject ?? ""),
-      })
+      await applyTaskCreateAudit(cache, sessionId, toolInput)
     } else if (toolName === "TaskUpdate" || toolName === "TodoWrite") {
-      const taskId = String(toolInput.taskId ?? toolInput.id ?? "")
-      if (!taskId) return
-      cache.applyTaskAuditSnapshot(sessionId, {
-        taskId,
-        action: "status_change",
-        newStatus: toolInput.status ? String(toolInput.status) : undefined,
-        subject: toolInput.subject ? String(toolInput.subject) : undefined,
-      })
+      applyTaskUpdateAudit(cache, sessionId, toolInput)
     }
   } catch (err) {
     debugLog("[task-recovery] applyCacheAuditWriteThrough error:", err)

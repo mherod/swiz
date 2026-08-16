@@ -300,6 +300,172 @@ async function incrementalRefresh(
   return { tasks: merged, maxMtimeMs }
 }
 
+function applyIntermediateTransitionSteps(
+  task: SessionTask,
+  path: string[],
+  sessionId: string,
+  caller: string
+): void {
+  debugLog(
+    `[task-transition] ${caller}: auto-transitioning task #${task.id} ` +
+      `${task.status} → ${path.join(" → ")} (session ${sessionId.slice(0, 8)}…)`
+  )
+  for (const step of path.slice(0, -1)) {
+    applyTimingEffects(task, step)
+    task.status = step
+  }
+}
+
+function reconcileTaskTransition(
+  existing: SessionTask,
+  incomingStatus: string,
+  sessionId: string,
+  caller: string
+): boolean {
+  if (existing.status === incomingStatus) return false
+  if (isValidTransition(existing.status, incomingStatus)) {
+    applyTimingEffects(existing, incomingStatus)
+    return false
+  }
+
+  const path = computeTransitionPath(existing.status, incomingStatus)
+  if (path && path.length > 1) {
+    applyIntermediateTransitionSteps(existing, path, sessionId, caller)
+    applyTimingEffects(existing, incomingStatus)
+    return false
+  }
+
+  warnRevertedInvalidTransition(caller, sessionId, existing.id, incomingStatus, existing.status)
+  queueDiskRevert(sessionId, existing.id, existing.status, incomingStatus)
+  return true
+}
+
+function buildHeldTaskOnRevert(existing: SessionTask, incoming: SessionTask): SessionTask {
+  const held: SessionTask = { ...incoming, status: existing.status }
+  held.elapsedMs = existing.elapsedMs
+  held.startedAt = existing.startedAt
+  held.statusChangedAt = existing.statusChangedAt
+  held.completedAt = existing.completedAt
+  return held
+}
+
+function buildMergedTaskOnSuccess(existing: SessionTask, incoming: SessionTask): SessionTask {
+  const merged = { ...incoming }
+  if (existing.status !== incoming.status) {
+    merged.elapsedMs = existing.elapsedMs
+    merged.startedAt = existing.startedAt
+    merged.statusChangedAt = existing.statusChangedAt
+  }
+  return merged
+}
+
+function updateExistingTaskInEntry(
+  entry: SessionTaskState,
+  idx: number,
+  task: SessionTask,
+  sessionId: string
+): void {
+  const existing = entry.tasks[idx]!
+  const reverted = reconcileTaskTransition(existing, task.status, sessionId, "cache-update")
+  entry.tasks[idx] = reverted
+    ? buildHeldTaskOnRevert(existing, task)
+    : buildMergedTaskOnSuccess(existing, task)
+}
+
+function reconcileSnapshotTasks(
+  existingTasks: SessionTask[],
+  sortedIncoming: SessionTask[],
+  sessionId: string
+): void {
+  if (existingTasks.length === 0) return
+  const oldById = new Map(existingTasks.map((t) => [t.id, t]))
+  for (const incoming of sortedIncoming) {
+    const old = oldById.get(incoming.id)
+    if (!old || old.status === incoming.status) continue
+    const reverted = reconcileTaskTransition(old, incoming.status, sessionId, "cache-snapshot")
+    if (reverted) {
+      incoming.status = old.status
+    }
+    incoming.elapsedMs = old.elapsedMs
+    incoming.startedAt = old.startedAt
+    incoming.statusChangedAt = old.statusChangedAt
+  }
+}
+
+function applyAuditCreate(
+  cached: SessionTaskState,
+  entry: { taskId: string; newStatus?: string; subject?: string }
+): void {
+  if (!entry.subject) return
+  const exists = cached.tasks.some((t) => t.id === entry.taskId)
+  if (exists) return
+  const stub: SessionTask = {
+    id: entry.taskId,
+    subject: entry.subject,
+    status: entry.newStatus ?? "pending",
+    statusChangedAt: new Date().toISOString(),
+    elapsedMs: 0,
+    startedAt: entry.newStatus === "in_progress" ? Date.now() : null,
+    completedAt: null,
+  }
+  cached.tasks.push(stub)
+  cached.tasks.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+}
+
+function applyAuditStatusChange(
+  cached: SessionTaskState,
+  sessionId: string,
+  entry: { taskId: string; newStatus?: string }
+): void {
+  if (!entry.newStatus) return
+  const task = cached.tasks.find((t) => t.id === entry.taskId)
+  if (!task) return
+
+  if (!isValidTransition(task.status, entry.newStatus)) {
+    const path = computeTransitionPath(task.status, entry.newStatus)
+    if (path && path.length > 1) {
+      debugLog(
+        `[task-transition] cache-audit: auto-transitioning task #${entry.taskId} ` +
+          `${task.status} → ${path.join(" → ")} (session ${sessionId.slice(0, 8)}…)`
+      )
+      for (const step of path) {
+        applyTimingEffects(task, step)
+        task.status = step
+      }
+    } else {
+      warnRevertedInvalidTransition(
+        "cache-audit",
+        sessionId,
+        entry.taskId,
+        entry.newStatus,
+        task.status
+      )
+      queueDiskRevert(sessionId, entry.taskId, task.status, entry.newStatus)
+    }
+  } else {
+    applyTimingEffects(task, entry.newStatus)
+    task.status = entry.newStatus
+  }
+}
+
+function applyAuditMutation(
+  cached: SessionTaskState,
+  sessionId: string,
+  entry: { taskId: string; action: string; newStatus?: string; subject?: string }
+): void {
+  switch (entry.action) {
+    case "create":
+      applyAuditCreate(cached, entry)
+      break
+    case "status_change":
+      applyAuditStatusChange(cached, sessionId, entry)
+      break
+    case "delete":
+      cached.tasks = cached.tasks.filter((t) => t.id !== entry.taskId)
+      break
+  }
+}
+
 // ─── Cache ──────────────────────────────────────────────────────────────────
 
 export class TaskStateCache {
@@ -497,63 +663,7 @@ export class TaskStateCache {
 
     const idx = entry.tasks.findIndex((t) => t.id === task.id)
     if (idx >= 0) {
-      const existing = entry.tasks[idx]!
-      let reverted = false
-      if (existing.status !== task.status) {
-        if (!isValidTransition(existing.status, task.status)) {
-          // Auto-transition through intermediate states for timing effects
-          const path = computeTransitionPath(existing.status, task.status)
-          if (path && path.length > 1) {
-            debugLog(
-              `[task-transition] cache-update: auto-transitioning task #${task.id} ` +
-                `${existing.status} → ${path.join(" → ")} (session ${sessionId.slice(0, 8)}…)`
-            )
-            for (const step of path.slice(0, -1)) {
-              applyTimingEffects(existing, step)
-              existing.status = step
-            }
-          } else {
-            // No valid path back through the state machine — the transition
-            // slipped past the PreToolUse gate (native TaskUpdate race, daemon
-            // dispatch, or external write). Hold the prior status, queue a
-            // disk revert, and flag for reconciliation rather than letting
-            // the bad state propagate.
-            warnRevertedInvalidTransition(
-              "cache-update",
-              sessionId,
-              task.id,
-              task.status,
-              existing.status
-            )
-            queueDiskRevert(sessionId, task.id, existing.status, task.status)
-            reverted = true
-          }
-        }
-        if (!reverted) {
-          // Apply timing for the final target status before replacing
-          applyTimingEffects(existing, task.status)
-        }
-      }
-      if (reverted) {
-        // Keep existing in place; do not adopt the incoming bad status.
-        // Only non-status fields from incoming are accepted.
-        const held: SessionTask = { ...task, status: existing.status }
-        held.elapsedMs = existing.elapsedMs
-        held.startedAt = existing.startedAt
-        held.statusChangedAt = existing.statusChangedAt
-        held.completedAt = existing.completedAt
-        entry.tasks[idx] = held
-      } else {
-        // Replace with the incoming task but preserve timing from intermediate steps
-        const merged = { ...task }
-        if (existing.status !== task.status) {
-          // Incoming task has the final status; keep accumulated timing from intermediates
-          merged.elapsedMs = existing.elapsedMs
-          merged.startedAt = existing.startedAt
-          merged.statusChangedAt = existing.statusChangedAt
-        }
-        entry.tasks[idx] = merged
-      }
+      updateExistingTaskInEntry(entry, idx, task, sessionId)
     } else {
       entry.tasks.push(task)
       entry.tasks.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
@@ -587,47 +697,8 @@ export class TaskStateCache {
     const now = Date.now()
     const existing = this.entries.get(sessionId)
 
-    // When prior state exists, reconcile each task's status incrementally
-    if (existing && existing.tasks.length > 0) {
-      const oldById = new Map(existing.tasks.map((t) => [t.id, t]))
-      for (const incoming of sorted) {
-        const old = oldById.get(incoming.id)
-        if (!old || old.status === incoming.status) continue
-        let reverted = false
-        if (!isValidTransition(old.status, incoming.status)) {
-          const path = computeTransitionPath(old.status, incoming.status)
-          if (path && path.length > 1) {
-            debugLog(
-              `[task-transition] cache-snapshot: auto-transitioning task #${incoming.id} ` +
-                `${old.status} → ${path.join(" → ")} (session ${sessionId.slice(0, 8)}…)`
-            )
-            for (const step of path.slice(0, -1)) {
-              applyTimingEffects(old, step)
-              old.status = step
-            }
-          } else {
-            warnRevertedInvalidTransition(
-              "cache-snapshot",
-              sessionId,
-              incoming.id,
-              incoming.status,
-              old.status
-            )
-            queueDiskRevert(sessionId, incoming.id, old.status, incoming.status)
-            // Hold the prior status on the incoming object so the snapshot
-            // reflects last-valid known state until the disk revert lands.
-            incoming.status = old.status
-            reverted = true
-          }
-        }
-        if (!reverted) {
-          // Apply final timing and carry forward accumulated values
-          applyTimingEffects(old, incoming.status)
-        }
-        incoming.elapsedMs = old.elapsedMs
-        incoming.startedAt = old.startedAt
-        incoming.statusChangedAt = old.statusChangedAt
-      }
+    if (existing) {
+      reconcileSnapshotTasks(existing.tasks, sorted, sessionId)
     }
 
     const counts = computeCounts(sorted)
@@ -656,57 +727,7 @@ export class TaskStateCache {
     const cached = this.entries.get(sessionId)
     if (!cached) return
 
-    if (entry.action === "create" && entry.subject) {
-      const exists = cached.tasks.some((t) => t.id === entry.taskId)
-      if (!exists) {
-        const stub: SessionTask = {
-          id: entry.taskId,
-          subject: entry.subject,
-          status: entry.newStatus ?? "pending",
-          statusChangedAt: new Date().toISOString(),
-          elapsedMs: 0,
-          startedAt: entry.newStatus === "in_progress" ? Date.now() : null,
-          completedAt: null,
-        }
-        cached.tasks.push(stub)
-        cached.tasks.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
-      }
-    } else if (entry.action === "status_change" && entry.newStatus) {
-      const task = cached.tasks.find((t) => t.id === entry.taskId)
-      if (task) {
-        if (!isValidTransition(task.status, entry.newStatus)) {
-          // Auto-transition through valid intermediate states so timing
-          // effects (elapsedMs, startedAt, completedAt) are tracked at each step.
-          const path = computeTransitionPath(task.status, entry.newStatus)
-          if (path && path.length > 1) {
-            debugLog(
-              `[task-transition] cache-audit: auto-transitioning task #${entry.taskId} ` +
-                `${task.status} → ${path.join(" → ")} (session ${sessionId.slice(0, 8)}…)`
-            )
-            for (const step of path) {
-              applyTimingEffects(task, step)
-              task.status = step
-            }
-          } else {
-            warnRevertedInvalidTransition(
-              "cache-audit",
-              sessionId,
-              entry.taskId,
-              entry.newStatus,
-              task.status
-            )
-            queueDiskRevert(sessionId, entry.taskId, task.status, entry.newStatus)
-            // Hold the prior status — do not apply the bad transition or
-            // its timing effects.
-          }
-        } else {
-          applyTimingEffects(task, entry.newStatus)
-          task.status = entry.newStatus
-        }
-      }
-    } else if (entry.action === "delete") {
-      cached.tasks = cached.tasks.filter((t) => t.id !== entry.taskId)
-    }
+    applyAuditMutation(cached, sessionId, entry)
 
     const counts = computeCounts(cached.tasks)
     cached.openCount = counts.openCount
