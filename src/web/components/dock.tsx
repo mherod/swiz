@@ -57,10 +57,10 @@ export function Dock({
   return (
     <motion.nav
       aria-label="Dashboard views"
-      onMouseMove={(e) => {
-        if (!magnificationDisabled) mouseX.set(e.pageX)
+      onPointerMove={(e) => {
+        if (!magnificationDisabled && e.pointerType === "mouse") mouseX.set(e.clientX)
       }}
-      onMouseLeave={() => mouseX.set(Infinity)}
+      onPointerLeave={() => mouseX.set(Infinity)}
       className={cn("dock", directionClass, className)}
     >
       {rendered}
@@ -91,7 +91,7 @@ export function DockIcon({
   ...props
 }: DockIconProps): ReactElement {
   const ref = useRef<HTMLButtonElement>(null)
-  const padding = Math.max(5, size * 0.13)
+  const padding = Math.max(4, size * 0.1)
   const defaultMouseX = useMotionValue(Infinity)
 
   const distanceCalc = useTransform(mouseX ?? defaultMouseX, (val: number) => {
@@ -99,20 +99,16 @@ export function DockIcon({
     return val - bounds.x - bounds.width / 2
   })
 
-  const targetSize = disableMagnification ? size : magnification
+  const targetScale = disableMagnification ? 1 : magnification / size
 
-  const sizeTransform = useTransform(
-    distanceCalc,
-    [-distance, 0, distance],
-    [size, targetSize, size]
-  )
-  const scaleSize = useSpring(sizeTransform, { mass: 0.1, stiffness: 150, damping: 12 })
+  const scaleTransform = useTransform(distanceCalc, [-distance, 0, distance], [1, targetScale, 1])
+  const scale = useSpring(scaleTransform, { mass: 0.1, stiffness: 150, damping: 12 })
 
   return (
     <motion.button
       ref={ref}
       type="button"
-      style={{ width: scaleSize, height: scaleSize, padding }}
+      style={{ width: size, height: size, padding, scale }}
       className={cn("dock-icon", className)}
       {...props}
     >

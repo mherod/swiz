@@ -13,18 +13,98 @@ import { LogsView } from "./views/logs-view.tsx"
 import { TasksView } from "./views/tasks-view.tsx"
 import { TranscriptView } from "./views/transcript-view.tsx"
 
+type DockView = "dashboard" | "issues" | "tasks" | "transcript" | "logs" | "settings"
+
 const TAB_LABELS: Array<{
-  view: "dashboard" | "issues" | "tasks" | "transcript" | "logs" | "settings"
+  view: DockView
   label: string
-  icon: string
 }> = [
-  { view: "dashboard", label: "Dashboard", icon: "◩" },
-  { view: "issues", label: "Issues", icon: "◉" },
-  { view: "tasks", label: "Tasks", icon: "☑" },
-  { view: "transcript", label: "Transcript", icon: "❯" },
-  { view: "logs", label: "Logs", icon: "▤" },
-  { view: "settings", label: "Settings", icon: "⚙" },
+  { view: "dashboard", label: "Dashboard" },
+  { view: "issues", label: "Issues" },
+  { view: "tasks", label: "Tasks" },
+  { view: "transcript", label: "Transcript" },
+  { view: "logs", label: "Logs" },
+  { view: "settings", label: "Settings" },
 ]
+
+const DOCK_GLYPH_PROPS = {
+  width: 20,
+  height: 20,
+  viewBox: "0 0 24 24",
+  fill: "none",
+  stroke: "currentColor",
+  strokeWidth: 1.75,
+  strokeLinecap: "round",
+  strokeLinejoin: "round",
+  focusable: "false",
+} as const
+
+function DockViewGlyph({ view }: { view: DockView }): ReactElement {
+  if (view === "dashboard") {
+    return (
+      <svg {...DOCK_GLYPH_PROPS} aria-hidden="true">
+        <rect x="4" y="4" width="6" height="6" rx="1.4" />
+        <rect x="14" y="4" width="6" height="6" rx="1.4" />
+        <rect x="4" y="14" width="6" height="6" rx="1.4" />
+        <rect x="14" y="14" width="6" height="6" rx="1.4" />
+      </svg>
+    )
+  }
+  if (view === "issues") {
+    return (
+      <svg {...DOCK_GLYPH_PROPS} aria-hidden="true">
+        <circle cx="12" cy="12" r="8.5" />
+        <path d="M12 7.7v5.2" />
+        <path d="M12 16.3h.01" strokeWidth="2.4" />
+      </svg>
+    )
+  }
+  if (view === "tasks") {
+    return (
+      <svg {...DOCK_GLYPH_PROPS} aria-hidden="true">
+        <rect x="3.5" y="4" width="17" height="16" rx="2" />
+        <path d="m7 11 2 2 3.5-4" />
+        <path d="M14.5 10h3" />
+        <path d="M14.5 14h3" />
+      </svg>
+    )
+  }
+  if (view === "transcript") {
+    return (
+      <svg {...DOCK_GLYPH_PROPS} aria-hidden="true">
+        <rect x="3.5" y="4" width="17" height="16" rx="2" />
+        <path d="m7.5 9 3 3-3 3" />
+        <path d="M13 15h3.5" />
+      </svg>
+    )
+  }
+  if (view === "logs") {
+    return (
+      <svg {...DOCK_GLYPH_PROPS} aria-hidden="true">
+        <path d="M7 6.5h11" />
+        <path d="M7 12h11" />
+        <path d="M7 17.5h11" />
+        <circle cx="4.5" cy="6.5" r="0.7" fill="currentColor" stroke="none" />
+        <circle cx="4.5" cy="12" r="0.7" fill="currentColor" stroke="none" />
+        <circle cx="4.5" cy="17.5" r="0.7" fill="currentColor" stroke="none" />
+      </svg>
+    )
+  }
+  return <DockSettingsGlyph />
+}
+
+function DockSettingsGlyph(): ReactElement {
+  return (
+    <svg {...DOCK_GLYPH_PROPS} aria-hidden="true">
+      <path d="M4 6.5h16" />
+      <path d="M4 12h16" />
+      <path d="M4 17.5h16" />
+      <circle cx="9" cy="6.5" r="1.6" fill="currentColor" stroke="none" />
+      <circle cx="15" cy="12" r="1.6" fill="currentColor" stroke="none" />
+      <circle cx="11" cy="17.5" r="1.6" fill="currentColor" stroke="none" />
+    </svg>
+  )
+}
 
 function buildMessagesProps(state: DashboardState) {
   return {
@@ -49,15 +129,9 @@ function buildMessagesProps(state: DashboardState) {
 }
 
 function DashboardDock({ state }: { state: DashboardState }) {
-  const activeProjectName = state.activeProject?.name
   return (
-    <Dock className="dock-fixed" iconSize={44} iconMagnification={52} iconDistance={140}>
-      {activeProjectName ? (
-        <span className="dock-project-label" title={`Current project: ${activeProjectName}`}>
-          {activeProjectName}
-        </span>
-      ) : null}
-      {TAB_LABELS.map(({ view, label, icon }) => (
+    <Dock className="dock-fixed" iconSize={44} iconMagnification={50} iconDistance={140}>
+      {TAB_LABELS.map(({ view, label }) => (
         <DockIcon
           key={view}
           onClick={() => state.setActiveView(view)}
@@ -67,7 +141,7 @@ function DashboardDock({ state }: { state: DashboardState }) {
           className={cn(state.activeView === view && "dock-icon-active")}
         >
           <span className="dock-icon-glyph" aria-hidden="true">
-            {icon}
+            <DockViewGlyph view={view} />
           </span>
           <span className="dock-icon-label">{label}</span>
         </DockIcon>

@@ -2879,10 +2879,10 @@ tbody tr:hover {
   justify-content: center;
   gap: var(--space-1);
   min-height: 60px;
-  padding: 6px var(--space-2);
+  padding: 6px var(--space-2) 7px;
   border-radius: var(--radius-lg);
   border: 1px solid var(--border-strong);
-  background: rgba(25, 35, 55, 0.85);
+  background: linear-gradient(180deg, rgba(35, 48, 73, 0.9), rgba(22, 31, 49, 0.9));
   backdrop-filter: blur(16px);
   max-width: min(calc(100vw - 24px), 840px);
 }
@@ -2922,10 +2922,20 @@ tbody tr:hover {
   align-items: center;
   justify-content: center;
   border-radius: var(--radius-pill);
+  transition:
+    background-color 140ms ease,
+    box-shadow 140ms ease,
+    color 140ms ease;
 }
 
-.dock-icon:hover {
-  background: rgba(110, 147, 223, 0.18);
+@media (hover: hover) and (pointer: fine) {
+  .dock-icon:hover {
+    background: rgba(110, 147, 223, 0.14);
+  }
+}
+
+.dock-icon:active {
+  background: rgba(110, 147, 223, 0.22);
 }
 
 .dock-icon:focus-visible {
@@ -2934,24 +2944,26 @@ tbody tr:hover {
 }
 
 .dock-icon-active {
-  background: rgba(110, 147, 223, 0.38);
-  box-shadow: inset 0 0 0 1px rgba(177, 202, 255, 0.28);
+  background: rgba(110, 147, 223, 0.26);
+  box-shadow:
+    inset 0 0 0 1px rgba(177, 202, 255, 0.24),
+    inset 0 1px 0 rgba(213, 226, 255, 0.08);
 }
 
 .dock-icon-active::after {
   content: "";
   position: absolute;
-  bottom: -5px;
-  width: 18px;
-  height: 3px;
+  bottom: -4px;
+  width: 14px;
+  height: 2px;
   border-radius: var(--radius-pill);
   background: var(--color-blue-400);
 }
 
 .dock-icon-label {
-  font-size: 0.58rem;
+  font-size: 0.6rem;
   font-weight: 600;
-  letter-spacing: 0.02em;
+  letter-spacing: 0.01em;
   color: var(--color-blue-200);
   white-space: nowrap;
   text-align: center;
@@ -2963,31 +2975,23 @@ tbody tr:hover {
 }
 
 .dock-icon-glyph {
-  font-size: 1.1rem;
+  display: grid;
+  width: 20px;
+  height: 20px;
+  place-items: center;
   line-height: 1;
+}
+
+.dock-icon-glyph svg {
+  width: 20px;
+  height: 20px;
 }
 
 .dock-icon > div {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: var(--space-1);
-}
-
-.dock-project-label {
-  display: inline-flex;
-  align-items: center;
-  min-height: 30px;
-  max-width: 110px;
-  border-right: 1px solid var(--border-subtle);
-  padding: 0 var(--space-3) 0 var(--space-1);
-  margin-right: var(--space-1);
-  font-size: 0.65rem;
-  font-weight: 700;
-  color: var(--color-blue-400);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  gap: 3px;
 }
 
 .number-ticker {
@@ -3623,10 +3627,6 @@ tbody tr:hover {
     white-space: normal;
   }
 
-  .dock-project-label {
-    display: none;
-  }
-
   .dock {
     gap: 2px;
     padding-inline: 6px;
@@ -3634,8 +3634,14 @@ tbody tr:hover {
 }
 
 @media (max-width: 380px) {
+  .dock {
+    gap: 0;
+    padding-inline: 4px;
+  }
+
   .dock-icon-label {
-    display: none;
+    font-size: 0.5rem;
+    letter-spacing: -0.01em;
   }
 }
 
