@@ -2118,6 +2118,9 @@ tbody tr:hover {
 .tool-call-exec {
   padding: 0;
   overflow: hidden;
+  border: 1px solid rgba(99, 129, 204, 0.25);
+  border-radius: var(--radius-sm);
+  background: rgba(17, 24, 38, 0.38);
 }
 
 .tool-call-exec-summary {
@@ -2151,6 +2154,39 @@ tbody tr:hover {
   font-size: 0.72rem;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.tool-calls-more {
+  margin-top: var(--space-1);
+  border-top: 1px solid var(--border-subtle);
+  padding-top: var(--space-1);
+}
+
+.tool-calls-more > summary {
+  width: fit-content;
+  cursor: pointer;
+  color: var(--color-blue-200);
+  font-size: 0.72rem;
+  font-weight: 600;
+  list-style: none;
+}
+
+.tool-calls-more > summary::-webkit-details-marker {
+  display: none;
+}
+
+.tool-calls-more > summary::before {
+  content: "▸";
+  display: inline-block;
+  margin-right: var(--space-1);
+}
+
+.tool-calls-more[open] > summary::before {
+  transform: rotate(90deg);
+}
+
+.tool-calls-more-list {
+  margin-top: var(--space-1);
 }
 
 @media (max-width: 639px) {
@@ -2457,13 +2493,32 @@ tbody tr:hover {
 /* ── Tool stats bar ── */
 
 .tool-stats-bar {
-  display: flex;
-  align-items: center;
-  gap: 8px;
   padding: 6px 0;
   margin-bottom: 8px;
   border-bottom: 1px solid rgba(46, 64, 101, 0.55);
-  flex-wrap: wrap;
+}
+
+.tool-stats-bar > summary {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: fit-content;
+  cursor: pointer;
+  list-style: none;
+}
+
+.tool-stats-bar > summary::-webkit-details-marker {
+  display: none;
+}
+
+.tool-stats-bar > summary::before {
+  content: "▸";
+  color: var(--color-blue-400);
+  font-size: 0.7rem;
+}
+
+.tool-stats-bar[open] > summary::before {
+  transform: rotate(90deg);
 }
 
 .tool-stats-total {
@@ -2477,6 +2532,12 @@ tbody tr:hover {
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
+  margin-top: var(--space-2);
+}
+
+.tool-stats-hint {
+  color: var(--text-subtle);
+  font-size: 0.68rem;
 }
 
 .tool-stat-pill {
@@ -3162,6 +3223,12 @@ tbody tr:hover {
   margin: 0 0 0 auto;
   color: #9ba6bc;
   font-size: 0.68rem;
+}
+
+.stats-group > .metric-note {
+  flex-basis: 100%;
+  margin-left: 0;
+  line-height: 1.45;
 }
 
 .metric-details {

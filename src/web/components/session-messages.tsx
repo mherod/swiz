@@ -49,8 +49,11 @@ function ToolStatsBar({ stats }: { stats: ToolStat[] }) {
   const total = useMemo(() => visibleStats.reduce((sum, s) => sum + s.count, 0), [visibleStats])
   if (visibleStats.length === 0) return null
   return (
-    <div className="tool-stats-bar">
-      <span className="tool-stats-total">{total} tool calls</span>
+    <details className="tool-stats-bar">
+      <summary>
+        <span className="tool-stats-total">{total} session-wide tool calls</span>
+        <span className="tool-stats-hint">View mix</span>
+      </summary>
       <div className="tool-stats-pills">
         {visibleStats.slice(0, 8).map((s) => (
           <span key={s.name} className="tool-stat-pill">
@@ -62,7 +65,7 @@ function ToolStatsBar({ stats }: { stats: ToolStat[] }) {
           <span className="tool-stat-pill tool-stat-more">+{visibleStats.length - 8} more</span>
         )}
       </div>
-    </div>
+    </details>
   )
 }
 
@@ -471,15 +474,7 @@ function ToolCallsList({
     }
     return [...groups.values()]
   }, [toolCalls])
-  if (verbose) {
-    return (
-      <div className="tool-calls tool-calls-verbose">
-        {groupedCalls.map(({ call, count }) => (
-          <VerboseToolCall key={`${call.name}-${call.detail}`} tc={call} count={count} />
-        ))}
-      </div>
-    )
-  }
+  if (verbose) return <VerboseToolCalls groupedCalls={groupedCalls} />
   return (
     <ul className="tool-calls">
       {groupedCalls.map(({ call: tc, count }) => {
@@ -501,6 +496,32 @@ function ToolCallsList({
         )
       })}
     </ul>
+  )
+}
+
+function VerboseToolCalls({
+  groupedCalls,
+}: {
+  groupedCalls: Array<{ call: { name: string; detail: string }; count: number }>
+}) {
+  const visibleCalls = groupedCalls.slice(0, 6)
+  const hiddenCalls = groupedCalls.slice(6)
+  return (
+    <div className="tool-calls tool-calls-verbose">
+      {visibleCalls.map(({ call, count }) => (
+        <VerboseToolCall key={`${call.name}-${call.detail}`} tc={call} count={count} />
+      ))}
+      {hiddenCalls.length > 0 ? (
+        <details className="tool-calls-more">
+          <summary>Show {hiddenCalls.length} more distinct calls</summary>
+          <div className="tool-calls-more-list">
+            {hiddenCalls.map(({ call, count }) => (
+              <VerboseToolCall key={`${call.name}-${call.detail}`} tc={call} count={count} />
+            ))}
+          </div>
+        </details>
+      ) : null}
+    </div>
   )
 }
 
