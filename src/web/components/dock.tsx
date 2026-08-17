@@ -1,5 +1,12 @@
 import type { MotionProps } from "motion/react"
-import { type MotionValue, motion, useMotionValue, useSpring, useTransform } from "motion/react"
+import {
+  type MotionValue,
+  motion,
+  useMotionValue,
+  useReducedMotion,
+  useSpring,
+  useTransform,
+} from "motion/react"
 import React, { type PropsWithChildren, type ReactElement, useRef } from "react"
 import { cn } from "../lib/cn.ts"
 
@@ -27,6 +34,8 @@ export function Dock({
   direction = "middle",
 }: DockProps): ReactElement {
   const mouseX = useMotionValue(Infinity)
+  const reduceMotion = useReducedMotion()
+  const magnificationDisabled = Boolean(disableMagnification || reduceMotion)
 
   const rendered = React.Children.map(children, (child) => {
     if (React.isValidElement<DockIconProps>(child) && child.type === DockIcon) {
@@ -35,7 +44,7 @@ export function Dock({
         mouseX,
         size: child.props.size ?? iconSize,
         magnification: child.props.magnification ?? iconMagnification,
-        disableMagnification: child.props.disableMagnification ?? disableMagnification,
+        disableMagnification: child.props.disableMagnification ?? magnificationDisabled,
         distance: child.props.distance ?? iconDistance,
       })
     }
@@ -48,7 +57,9 @@ export function Dock({
   return (
     <motion.nav
       aria-label="Dashboard views"
-      onMouseMove={(e) => mouseX.set(e.pageX)}
+      onMouseMove={(e) => {
+        if (!magnificationDisabled) mouseX.set(e.pageX)
+      }}
       onMouseLeave={() => mouseX.set(Infinity)}
       className={cn("dock", directionClass, className)}
     >
@@ -80,7 +91,7 @@ export function DockIcon({
   ...props
 }: DockIconProps): ReactElement {
   const ref = useRef<HTMLButtonElement>(null)
-  const padding = Math.max(6, size * 0.2)
+  const padding = Math.max(5, size * 0.13)
   const defaultMouseX = useMotionValue(Infinity)
 
   const distanceCalc = useTransform(mouseX ?? defaultMouseX, (val: number) => {

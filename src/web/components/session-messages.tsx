@@ -1,4 +1,4 @@
-import { type ReactElement, type ReactNode, useMemo } from "react"
+import { type KeyboardEvent, type ReactElement, type ReactNode, useMemo } from "react"
 import { cn } from "../lib/cn.ts"
 import type { EventMetric } from "../lib/dashboard-helpers.ts"
 import type { ActiveHookDispatch } from "../lib/dashboard-hooks.ts"
@@ -159,7 +159,10 @@ function TaskToolDisplay({
   return (
     <div className={cn("tool-first-party-call", className)}>
       <p className="tool-first-party-title">
-        <span className="tool-category-icon">☑</span> Task {task.action}
+        <span className="tool-category-icon" aria-hidden="true">
+          ☑
+        </span>{" "}
+        Task {task.action}
       </p>
       {task.subject ? <p className="tool-call-subject">{task.subject}</p> : null}
       <CommonFieldsList fields={fields} />
@@ -235,7 +238,10 @@ function FileToolDisplay({
   return (
     <div className={cn("tool-first-party-call", className)}>
       <p className="tool-first-party-title">
-        <span className="tool-category-icon">◇</span> {actionLabel}
+        <span className="tool-category-icon" aria-hidden="true">
+          ◇
+        </span>{" "}
+        {actionLabel}
       </p>
       <pre className="tool-command-block">{compactPath(file.filePath, 120)}</pre>
       <FileParamsDisplay offset={file.offset} limit={file.limit} />
@@ -332,7 +338,9 @@ function VerboseToolCall({ tc }: { tc: { name: string; detail: string } }) {
 
   return (
     <div className={`tool-call tool-call-verbose tool-category-${category}`}>
-      <span className="tool-category-icon">{icon}</span>
+      <span className="tool-category-icon" aria-hidden="true">
+        {icon}
+      </span>
       <span className="tool-name">{tc.name}</span>
       {isBash ? <BashToolBody parsedDetail={parsedDetail} /> : null}
       <CommonFieldsList fields={parsedDetail.commonFields} />
@@ -412,7 +420,9 @@ function ToolCallsList({
         const icon = toolCategoryIcon(category)
         return (
           <li key={`${tc.name}-${tc.detail}`} className={`tool-call tool-category-${category}`}>
-            <span className="tool-category-icon">{icon}</span>
+            <span className="tool-category-icon" aria-hidden="true">
+              {icon}
+            </span>
             <span className="tool-name">{tc.name}</span>
             {tc.detail && (
               <span className="tool-detail">
@@ -501,7 +511,12 @@ function MessageRow({
         <span className="message-role">{role}</span>
         <span className="message-meta-right">
           {count > 1 ? <span className="message-repeat-badge">x{count}</span> : null}
-          <span>{timestamp}</span>
+          <time
+            dateTime={message.timestamp ?? undefined}
+            title={message.timestamp ? new Date(message.timestamp).toLocaleString() : undefined}
+          >
+            {timestamp}
+          </time>
         </span>
       </div>
       <MessageTextContent message={message} adjacentSkillName={adjacentSkillName} />
@@ -728,7 +743,7 @@ function MessagesContent({
   }, [grouped, sorted, msgKey, newKeys])
 
   if (loading) {
-    return <p className="empty p-8 text-center text-zinc-500">Loading...</p>
+    return <output className="empty p-8 text-center text-zinc-500">Loading transcript…</output>
   }
   if (messages.length === 0) {
     return <p className="empty p-8 text-center text-zinc-500">No messages for this session.</p>
@@ -766,6 +781,41 @@ function SessionStatsBar({
   )
 }
 
+function handleTranscriptKeyDown(event: KeyboardEvent<HTMLElement>): void {
+  if (event.target !== event.currentTarget) return
+  const region = event.currentTarget
+  const lineStep = 40
+  const pageStep = Math.max(80, Math.round(region.clientHeight * 0.8))
+  const maxScroll = Math.max(0, region.scrollHeight - region.clientHeight)
+  let nextScroll: number | null = null
+
+  switch (event.key) {
+    case "ArrowDown":
+      nextScroll = Math.min(maxScroll, region.scrollTop + lineStep)
+      break
+    case "ArrowUp":
+      nextScroll = Math.max(0, region.scrollTop - lineStep)
+      break
+    case "PageDown":
+      nextScroll = Math.min(maxScroll, region.scrollTop + pageStep)
+      break
+    case "PageUp":
+      nextScroll = Math.max(0, region.scrollTop - pageStep)
+      break
+    case "Home":
+      nextScroll = 0
+      break
+    case "End":
+      nextScroll = maxScroll
+      break
+    default:
+      return
+  }
+
+  event.preventDefault()
+  region.scrollTo({ top: nextScroll })
+}
+
 export function SessionMessages(props: MessagesProps): ReactElement {
   const {
     messages,
@@ -791,9 +841,18 @@ export function SessionMessages(props: MessagesProps): ReactElement {
   const grouped = useMemo(() => groupMessages(sorted), [sorted])
 
   return (
-    <section className={cn("card bento-messages flex flex-col h-full max-h-full", props.className)}>
+    <section
+      className={cn("card bento-messages flex flex-col h-full max-h-full", props.className)}
+      aria-labelledby="transcript-title"
+      aria-busy={loading}
+      // biome-ignore lint/a11y/noNoninteractiveTabindex: This named region is an independent desktop scroller and needs a keyboard entry point.
+      tabIndex={0}
+      onKeyDown={handleTranscriptKeyDown}
+    >
       <header className="messages-header-row">
-        <h2 className="section-title">Transcript</h2>
+        <h2 id="transcript-title" className="section-title">
+          Transcript
+        </h2>
         <p className="section-subtitle">Conversation history for selected session</p>
       </header>
       <SessionStatsBar {...props} />

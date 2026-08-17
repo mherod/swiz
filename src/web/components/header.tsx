@@ -1,7 +1,6 @@
-import { motion } from "motion/react"
+import { useReducedMotion } from "motion/react"
 import type { ReactElement } from "react"
 import type { ActiveView } from "../lib/dashboard-state.ts"
-import { NumberTicker } from "./number-ticker.tsx"
 
 interface HeaderProps {
   lastUpdated: string
@@ -10,7 +9,6 @@ interface HeaderProps {
   projects: number
   activeWatches: number
   activeHooks: number
-  selectedProjectName: string | null
   activeView?: ActiveView
   onSelectView?: (view: ActiveView) => void
   cacheStatus?: Record<string, number> | null
@@ -52,99 +50,48 @@ function buildCacheEntries(cacheStatus: Record<string, number> | null | undefine
   return { totalCacheEntries: total, warmCaches: warm }
 }
 
-function AnimatedHeaderChip({ children, index }: { children: ReactElement; index: number }) {
+function CountHeaderChip({ value, label }: { value: number; label: string }) {
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 8 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ delay: index * 0.06, duration: 0.3, ease: "easeOut" }}
-    >
-      {children}
-    </motion.div>
-  )
-}
-
-function CountHeaderChip({ value, label, index }: { value: number; label: string; index: number }) {
-  return (
-    <AnimatedHeaderChip index={index}>
-      <output className="header-chip" aria-label={`${value} ${label}`}>
-        <strong>
-          <NumberTicker value={value} />
-        </strong>{" "}
-        {label}
-      </output>
-    </AnimatedHeaderChip>
-  )
-}
-
-function ProjectHeaderChip({
-  selectedProjectName,
-  index,
-}: {
-  selectedProjectName: string | null
-  index: number
-}) {
-  return (
-    <AnimatedHeaderChip index={index}>
-      <output
-        className="header-chip"
-        aria-label={`Selected project ${selectedProjectName ?? "none"}`}
-      >
-        project: <strong>{selectedProjectName ?? "none"}</strong>
-      </output>
-    </AnimatedHeaderChip>
+    <span className="header-chip">
+      <strong>{value}</strong> {label}
+    </span>
   )
 }
 
 function CacheHeaderChip({
   warmCaches,
   totalCacheEntries,
-  index,
 }: {
   warmCaches: number
   totalCacheEntries: number
-  index: number
 }) {
   if (totalCacheEntries <= 0) return null
   return (
-    <AnimatedHeaderChip index={index}>
-      <output
-        className="header-chip"
-        aria-label={`${warmCaches} warm daemon caches out of ${totalCacheEntries} total entries`}
-      >
-        daemon caches:{" "}
-        <strong>
-          <NumberTicker value={warmCaches} />
-        </strong>{" "}
-        warm /{" "}
-        <strong>
-          <NumberTicker value={totalCacheEntries} />
-        </strong>{" "}
-        total
-      </output>
-    </AnimatedHeaderChip>
+    <span className="header-chip">
+      <strong>
+        {warmCaches}/{totalCacheEntries}
+      </strong>{" "}
+      caches warm
+    </span>
   )
 }
 
 function HeaderChips({
   activeHooks,
   totalRunningAgents,
-  selectedProjectName,
   warmCaches,
   totalCacheEntries,
 }: {
   activeHooks: number
   totalRunningAgents: number
-  selectedProjectName: string | null
   warmCaches: number
   totalCacheEntries: number
 }) {
   return (
     <div className="header-chips">
-      <CountHeaderChip value={activeHooks} label="active hooks" index={0} />
-      <CountHeaderChip value={totalRunningAgents} label="running agents" index={1} />
-      <ProjectHeaderChip selectedProjectName={selectedProjectName} index={2} />
-      <CacheHeaderChip warmCaches={warmCaches} totalCacheEntries={totalCacheEntries} index={3} />
+      <CountHeaderChip value={activeHooks} label="active hooks" />
+      <CountHeaderChip value={totalRunningAgents} label="running agents" />
+      <CacheHeaderChip warmCaches={warmCaches} totalCacheEntries={totalCacheEntries} />
     </div>
   )
 }
@@ -156,47 +103,50 @@ export function Header({
   projects,
   activeWatches,
   activeHooks,
-  selectedProjectName,
   cacheStatus,
   activeAgentProcessProviders = {},
 }: HeaderProps): ReactElement {
+  const reduceMotion = useReducedMotion()
   const { totalCacheEntries, warmCaches } = buildCacheEntries(cacheStatus)
   const totalRunningAgents = Object.values(activeAgentProcessProviders).reduce(
     (sum, pids) => sum + pids.length,
     0
   )
   const isActive = totalRunningAgents > 0 || activeHooks > 0
-  const mascotSrc = isActive ? "/public/swiz-buzz-animated.svg" : "/public/swiz-buzz-flat.svg"
+  const mascotSrc =
+    isActive && !reduceMotion ? "/public/swiz-buzz-animated.svg" : "/public/swiz-buzz-flat.svg"
   const updated = formatLastUpdated(lastUpdated)
 
   return (
     <header className="bento-title">
-      <div className="title-row-left">
-        <img key={mascotSrc} src={mascotSrc} alt="swiz" className="title-mascot" />
-        <h1 className="topbar-title">swiz daemon</h1>
-        <output className="status-pill" aria-label="Daemon live">
-          <span className="status-pulse-dot" aria-hidden="true" />
-          <span className="status-symbol" aria-hidden="true">
-            ✓
+      <div className="topbar-primary">
+        <div className="title-row-left">
+          <img key={mascotSrc} src={mascotSrc} alt="" className="title-mascot" />
+          <h1 className="topbar-title">swiz daemon</h1>
+          <span className="status-pill">
+            <span className="status-pulse-dot" aria-hidden="true" />
+            <span className="status-symbol" aria-hidden="true">
+              ✓
+            </span>
+            <span>Live</span>
           </span>
-          <span>Live</span>
-        </output>
+        </div>
+        <time className="topbar-meta" dateTime={updated.dateTime} title={updated.title}>
+          Updated {updated.text}
+        </time>
       </div>
-      <time className="topbar-meta" dateTime={updated.dateTime} title={updated.title}>
-        Updated {updated.text}
-      </time>
-      <p className="topbar-summary">
-        {uptime} uptime · <NumberTicker value={totalDispatches} /> dispatches ·{" "}
-        <NumberTicker value={projects} /> active projects · <NumberTicker value={activeWatches} />{" "}
-        CI watches
-      </p>
-      <HeaderChips
-        activeHooks={activeHooks}
-        totalRunningAgents={totalRunningAgents}
-        selectedProjectName={selectedProjectName}
-        warmCaches={warmCaches}
-        totalCacheEntries={totalCacheEntries}
-      />
+      <div className="topbar-secondary">
+        <p className="topbar-summary">
+          {uptime} uptime · {totalDispatches} dispatches · {projects} active projects ·{" "}
+          {activeWatches} CI watches
+        </p>
+        <HeaderChips
+          activeHooks={activeHooks}
+          totalRunningAgents={totalRunningAgents}
+          warmCaches={warmCaches}
+          totalCacheEntries={totalCacheEntries}
+        />
+      </div>
     </header>
   )
 }

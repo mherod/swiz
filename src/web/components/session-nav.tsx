@@ -1,4 +1,4 @@
-import { type ReactElement, useCallback, useEffect, useMemo, useState } from "react"
+import { type ReactElement, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { cn } from "../lib/cn.ts"
 import type { ProjectSessions, SessionPreview } from "./session-browser-types.ts"
 import {
@@ -24,6 +24,8 @@ interface SessionNavProps {
   onDeleteSession: (cwd: string, sessionId: string) => void | Promise<void>
 }
 
+type KillConfirmation = { sessionId: string; pid: number } | null
+
 interface SessionRowProps {
   session: SessionPreview
   selectedSessionId: string | null
@@ -33,8 +35,8 @@ interface SessionRowProps {
   deletingSessionId: string | null
   confirmingDeleteId: string | null
   setConfirmingDeleteId: (id: string | null) => void
-  confirmingKillPid: number | null
-  setConfirmingKillPid: (pid: number | null) => void
+  confirmingKill: KillConfirmation
+  setConfirmingKill: (confirmation: KillConfirmation) => void
   groupKind: "active" | "recent"
   onSelectSession: (cwd: string, sessionId: string) => void
   onKillAgentPid: (pid: number) => void | Promise<void>
@@ -59,6 +61,36 @@ function resolveSessionAction(
   return { actionLabel, actionDisabled, actionIcon, actionTitle }
 }
 
+function SessionRowHeader({
+  session,
+  provider,
+  relativeTime,
+  sessionTime,
+}: {
+  session: SessionPreview
+  provider: string
+  relativeTime: string
+  sessionTime: number
+}) {
+  return (
+    <div className="session-header">
+      <span className="session-provider">{provider}</span>
+      <time
+        className="session-time"
+        dateTime={new Date(sessionTime).toISOString()}
+        title={new Date(sessionTime).toLocaleString()}
+      >
+        {relativeTime}
+      </time>
+      {session.dispatches ? (
+        <span className="session-dispatches" title={`${session.dispatches} dispatches`}>
+          {session.dispatches}
+        </span>
+      ) : null}
+    </div>
+  )
+}
+
 function SessionRowButton({
   session,
   selectedSessionId,
@@ -78,39 +110,32 @@ function SessionRowButton({
     : 0
   const relativeTime = formatRelativeTime(session.lastMessageAt ?? session.mtime)
   const provider = (session.provider ?? "unknown").toLowerCase()
-  const processSummary = processPids.length > 0 ? `, PIDs ${processPids.join(", ")}` : ""
   const stateSummary = session.processAlive ? "active" : "recent"
   const sessionTime = session.lastMessageAt ?? session.mtime
+  const processSummary = processPids.length > 0 ? `, process IDs ${processPids.join(", ")}` : ""
+  const dispatchSummary = session.dispatches ? `, ${session.dispatches} dispatches` : ""
 
   return (
     <button
       type="button"
+      data-session-select={session.id}
       className={cn(
         "session-btn session-btn-content",
         session.id === selectedSessionId && "selected"
       )}
       aria-pressed={session.id === selectedSessionId}
-      aria-label={`Open ${provider} session ${session.id}, ${stateSummary}, updated ${relativeTime}${processSummary}`}
+      aria-label={`Open ${provider} session ${session.id}, ${stateSummary}, updated ${relativeTime}${dispatchSummary}${processSummary}`}
       onClick={() => {
         if (!selectedProjectCwd) return
         onSelectSession(selectedProjectCwd, session.id)
       }}
     >
-      <div className="session-header">
-        <span className="session-provider">{provider}</span>
-        <time
-          className="session-time"
-          dateTime={new Date(sessionTime).toISOString()}
-          title={new Date(sessionTime).toLocaleString()}
-        >
-          {relativeTime}
-        </time>
-        {session.dispatches ? (
-          <span className="session-dispatches" title={`${session.dispatches} dispatches`}>
-            {session.dispatches}
-          </span>
-        ) : null}
-      </div>
+      <SessionRowHeader
+        session={session}
+        provider={provider}
+        relativeTime={relativeTime}
+        sessionTime={sessionTime}
+      />
       <SessionDetailsRow
         session={session}
         activeRuntimeSeconds={activeRuntimeSeconds}
@@ -119,6 +144,11 @@ function SessionRowButton({
       />
     </button>
   )
+}
+
+function compactSessionId(sessionId: string): string {
+  if (sessionId.length <= 20) return sessionId
+  return `${sessionId.slice(0, 8)}…${sessionId.slice(-7)}`
 }
 
 function SessionDetailsRow({
@@ -148,7 +178,7 @@ function SessionDetailsRow({
         />
       ) : (
         <span className="session-id-text" title={session.id}>
-          {session.id}
+          {compactSessionId(session.id)}
         </span>
       )}
     </div>
@@ -180,9 +210,17 @@ function ActiveDispatchLabel({
   )
 }
 
-function copyText(value: string): void {
-  if (!navigator.clipboard) return
-  void navigator.clipboard.writeText(value)
+async function copyText(value: string): Promise<void> {
+  if (!navigator.clipboard) throw new Error("Clipboard access is unavailable")
+  await navigator.clipboard.writeText(value)
+}
+
+type CopyResult = "copied" | "failed" | null
+
+function copyPresentation(result: CopyResult, label: string, defaultTitle: string) {
+  if (result === "copied") return { glyph: "✓", message: `${label} copied.`, title: "Copied" }
+  if (result === "failed") return { glyph: "!", message: `${label} failed.`, title: "Copy failed" }
+  return { glyph: "⧉", message: "", title: defaultTitle }
 }
 
 function SessionCopyButton({
@@ -194,16 +232,47 @@ function SessionCopyButton({
   label: string
   title: string
 }) {
+  const copyAttempt = useRef(0)
+  const [status, setStatus] = useState<{
+    attempt: number
+    result: Exclude<CopyResult, null>
+    value: string
+  } | null>(null)
+  const currentStatus = status?.value === value ? status : null
+  const presentation = copyPresentation(currentStatus?.result ?? null, label, title)
+
+  const handleCopy = useCallback(async () => {
+    const attempt = copyAttempt.current + 1
+    copyAttempt.current = attempt
+    setStatus(null)
+    try {
+      await copyText(value)
+      if (copyAttempt.current === attempt) setStatus({ attempt, result: "copied", value })
+    } catch {
+      if (copyAttempt.current === attempt) setStatus({ attempt, result: "failed", value })
+    }
+  }, [value])
+
   return (
-    <button
-      type="button"
-      className="session-action-btn session-action-copy"
-      onClick={() => copyText(value)}
-      title={title}
-      aria-label={label}
-    >
-      <span aria-hidden="true">⧉</span>
-    </button>
+    <>
+      <button
+        type="button"
+        className="session-action-btn session-action-copy"
+        onClick={() => void handleCopy()}
+        title={presentation.title}
+        aria-label={label}
+      >
+        <span aria-hidden="true">{presentation.glyph}</span>
+      </button>
+      <output
+        key={currentStatus?.attempt ?? 0}
+        className="sr-only"
+        aria-live="polite"
+        aria-atomic="true"
+      >
+        {presentation.message}
+      </output>
+    </>
   )
 }
 
@@ -214,8 +283,14 @@ function KillConfirmationButton({
 }: {
   pid: number
   onKill: (pid: number) => void | Promise<void>
-  onDismiss: () => void
+  onDismiss: (restoreFocus?: boolean) => void
 }) {
+  const confirmRef = useRef<HTMLButtonElement>(null)
+
+  useEffect(() => {
+    confirmRef.current?.focus()
+  }, [])
+
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") onDismiss()
@@ -231,11 +306,17 @@ function KillConfirmationButton({
     >
       <legend className="session-action-confirm-text">Kill {pid}?</legend>
       <button
+        ref={confirmRef}
         type="button"
         className="session-action-btn session-action-kill session-action-delete-confirm"
         onClick={() => {
-          onDismiss()
+          const sessionButton =
+            confirmRef.current
+              ?.closest(".session-row")
+              ?.querySelector<HTMLButtonElement>(".session-btn") ?? null
+          onDismiss(false)
           void onKill(pid)
+          requestAnimationFrame(() => sessionButton?.focus())
         }}
         title={`Confirm kill process ${pid}`}
       >
@@ -244,11 +325,26 @@ function KillConfirmationButton({
       <button
         type="button"
         className="session-action-btn session-action-cancel session-action-delete-confirm"
-        onClick={onDismiss}
+        onClick={() => onDismiss()}
       >
         Cancel
       </button>
     </fieldset>
+  )
+}
+
+function findSessionRemovalFocusTarget(
+  confirmButton: HTMLButtonElement | null
+): HTMLElement | null {
+  const row = confirmButton?.closest<HTMLElement>(".session-row")
+  const list = row?.parentElement
+  if (!row || !list) return document.getElementById("sessions-heading")
+  const rows = Array.from(list.querySelectorAll<HTMLElement>(".session-row"))
+  const index = rows.indexOf(row)
+  const targetRow = rows[index + 1] ?? rows[index - 1]
+  return (
+    targetRow?.querySelector<HTMLElement>(".session-btn") ??
+    document.getElementById("sessions-heading")
   )
 }
 
@@ -261,8 +357,14 @@ function DeleteConfirmationButton({
   sessionId: string
   selectedProjectCwd: string | null
   onDelete: (cwd: string, sessionId: string) => void | Promise<void>
-  onDismiss: () => void
+  onDismiss: (restoreFocus?: boolean) => void
 }) {
+  const confirmRef = useRef<HTMLButtonElement>(null)
+
+  useEffect(() => {
+    confirmRef.current?.focus()
+  }, [])
+
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") onDismiss()
@@ -275,12 +377,15 @@ function DeleteConfirmationButton({
     <fieldset className="session-action-confirm" aria-label="Confirm deleting session">
       <legend className="session-action-confirm-text">Delete?</legend>
       <button
+        ref={confirmRef}
         type="button"
         className="session-action-btn session-action-delete session-action-delete-confirm"
         onClick={() => {
           if (!selectedProjectCwd) return
-          onDismiss()
+          const focusTarget = findSessionRemovalFocusTarget(confirmRef.current)
+          onDismiss(false)
           void onDelete(selectedProjectCwd, sessionId)
+          requestAnimationFrame(() => focusTarget?.focus())
         }}
         title="Confirm delete"
       >
@@ -289,7 +394,7 @@ function DeleteConfirmationButton({
       <button
         type="button"
         className="session-action-btn session-action-cancel session-action-delete-confirm"
-        onClick={onDismiss}
+        onClick={() => onDismiss()}
       >
         Cancel
       </button>
@@ -303,6 +408,7 @@ function SessionActionButton({
   actionIcon,
   actionTitle,
   hasLiveProcess,
+  buttonRef,
   onClick,
 }: {
   actionLabel: string
@@ -310,10 +416,12 @@ function SessionActionButton({
   actionIcon: React.ReactNode
   actionTitle: string
   hasLiveProcess: boolean
+  buttonRef: React.RefObject<HTMLButtonElement | null>
   onClick: () => void
 }) {
   return (
     <button
+      ref={buttonRef}
       type="button"
       className={cn(
         "session-action-btn",
@@ -323,7 +431,6 @@ function SessionActionButton({
       disabled={actionDisabled}
       title={actionTitle}
       aria-label={actionTitle}
-      aria-haspopup="dialog"
     >
       <span className="session-action-icon" aria-hidden="true">
         {actionIcon}
@@ -340,10 +447,10 @@ type SessionRowActionsProps = {
   isKilling: boolean
   isDeleting: boolean
   confirmingDeleteId: string | null
-  confirmingKillPid: number | null
+  confirmingKill: KillConfirmation
   selectedProjectCwd: string | null
   setConfirmingDeleteId: (id: string | null) => void
-  setConfirmingKillPid: (pid: number | null) => void
+  setConfirmingKill: (confirmation: KillConfirmation) => void
   onKillAgentPid: (pid: number) => void | Promise<void>
   onDeleteSession: (cwd: string, sessionId: string) => void | Promise<void>
 }
@@ -354,7 +461,7 @@ function useSessionActionClick({
   primaryPid,
   selectedProjectCwd,
   setConfirmingDeleteId,
-  setConfirmingKillPid,
+  setConfirmingKill,
 }: Pick<
   SessionRowActionsProps,
   | "session"
@@ -362,15 +469,15 @@ function useSessionActionClick({
   | "primaryPid"
   | "selectedProjectCwd"
   | "setConfirmingDeleteId"
-  | "setConfirmingKillPid"
+  | "setConfirmingKill"
 >) {
   return useCallback(() => {
     if (hasLiveProcess && primaryPid) {
-      setConfirmingKillPid(primaryPid)
+      setConfirmingKill({ sessionId: session.id, pid: primaryPid })
       return
     }
     if (!selectedProjectCwd) return
-    setConfirmingKillPid(null)
+    setConfirmingKill(null)
     setConfirmingDeleteId(session.id)
   }, [
     hasLiveProcess,
@@ -378,19 +485,25 @@ function useSessionActionClick({
     selectedProjectCwd,
     session.id,
     setConfirmingDeleteId,
-    setConfirmingKillPid,
+    setConfirmingKill,
   ])
 }
 
 function renderSessionRowActionConfirmation(
-  props: Omit<SessionRowActionsProps, "isKilling" | "isDeleting">
+  props: Omit<SessionRowActionsProps, "isKilling" | "isDeleting">,
+  onDismiss: (restoreFocus?: boolean) => void
 ): ReactElement | null {
-  if (props.hasLiveProcess && props.primaryPid && props.confirmingKillPid === props.primaryPid) {
+  if (
+    props.hasLiveProcess &&
+    props.primaryPid &&
+    props.confirmingKill?.sessionId === props.session.id &&
+    props.confirmingKill.pid === props.primaryPid
+  ) {
     return (
       <KillConfirmationButton
         pid={props.primaryPid}
         onKill={props.onKillAgentPid}
-        onDismiss={() => props.setConfirmingKillPid(null)}
+        onDismiss={onDismiss}
       />
     )
   }
@@ -401,51 +514,29 @@ function renderSessionRowActionConfirmation(
       sessionId={props.session.id}
       selectedProjectCwd={props.selectedProjectCwd}
       onDelete={props.onDeleteSession}
-      onDismiss={() => props.setConfirmingDeleteId(null)}
+      onDismiss={onDismiss}
     />
   )
 }
 
-function SessionRowActions({
-  session,
-  hasLiveProcess,
-  primaryPid,
-  isKilling,
-  isDeleting,
-  confirmingDeleteId,
-  confirmingKillPid,
-  selectedProjectCwd,
-  setConfirmingDeleteId,
-  setConfirmingKillPid,
-  onKillAgentPid,
-  onDeleteSession,
-}: SessionRowActionsProps) {
+function SessionRowActions(props: SessionRowActionsProps) {
+  const actionTriggerRef = useRef<HTMLButtonElement>(null)
   const { actionLabel, actionDisabled, actionIcon, actionTitle } = resolveSessionAction(
-    hasLiveProcess,
-    isKilling,
-    isDeleting,
-    primaryPid
+    props.hasLiveProcess,
+    props.isKilling,
+    props.isDeleting,
+    props.primaryPid
   )
-  const handleClick = useSessionActionClick({
-    session,
-    hasLiveProcess,
-    primaryPid,
-    selectedProjectCwd,
-    setConfirmingDeleteId,
-    setConfirmingKillPid,
-  })
-  const confirmation = renderSessionRowActionConfirmation({
-    session,
-    hasLiveProcess,
-    primaryPid,
-    confirmingDeleteId,
-    confirmingKillPid,
-    selectedProjectCwd,
-    setConfirmingDeleteId,
-    setConfirmingKillPid,
-    onKillAgentPid,
-    onDeleteSession,
-  })
+  const handleClick = useSessionActionClick(props)
+  const dismissConfirmation = useCallback(
+    (restoreFocus = true) => {
+      props.setConfirmingDeleteId(null)
+      props.setConfirmingKill(null)
+      if (restoreFocus) requestAnimationFrame(() => actionTriggerRef.current?.focus())
+    },
+    [props.setConfirmingDeleteId, props.setConfirmingKill]
+  )
+  const confirmation = renderSessionRowActionConfirmation(props, dismissConfirmation)
 
   if (confirmation) return confirmation
   return (
@@ -454,7 +545,8 @@ function SessionRowActions({
       actionDisabled={actionDisabled}
       actionIcon={actionIcon}
       actionTitle={actionTitle}
-      hasLiveProcess={hasLiveProcess}
+      hasLiveProcess={props.hasLiveProcess}
+      buttonRef={actionTriggerRef}
       onClick={handleClick}
     />
   )
@@ -488,20 +580,6 @@ function SessionRow(props: SessionRowProps) {
         processLabel={processLabel}
       />
       <div className="session-actions">
-        <SessionRowActions
-          session={session}
-          hasLiveProcess={hasLiveProcess}
-          primaryPid={primaryPid}
-          isKilling={isKilling}
-          isDeleting={isDeleting}
-          confirmingDeleteId={props.confirmingDeleteId}
-          confirmingKillPid={props.confirmingKillPid}
-          selectedProjectCwd={props.selectedProjectCwd}
-          setConfirmingDeleteId={props.setConfirmingDeleteId}
-          setConfirmingKillPid={props.setConfirmingKillPid}
-          onKillAgentPid={props.onKillAgentPid}
-          onDeleteSession={props.onDeleteSession}
-        />
         <SessionCopyButton
           value={session.id}
           label={`Copy session ID ${session.id}`}
@@ -514,6 +592,20 @@ function SessionRow(props: SessionRowProps) {
             title="Copy process IDs"
           />
         ) : null}
+        <SessionRowActions
+          session={session}
+          hasLiveProcess={hasLiveProcess}
+          primaryPid={primaryPid}
+          isKilling={isKilling}
+          isDeleting={isDeleting}
+          confirmingDeleteId={props.confirmingDeleteId}
+          confirmingKill={props.confirmingKill}
+          selectedProjectCwd={props.selectedProjectCwd}
+          setConfirmingDeleteId={props.setConfirmingDeleteId}
+          setConfirmingKill={props.setConfirmingKill}
+          onKillAgentPid={props.onKillAgentPid}
+          onDeleteSession={props.onDeleteSession}
+        />
       </div>
     </li>
   )
@@ -554,7 +646,7 @@ function ProjectListItem({
           </span>
           <span aria-hidden="true"> · </span>
           <span>
-            Last active:{" "}
+            Active{" "}
             <time dateTime={lastSeenIso} title={new Date(project.lastSeenAt).toLocaleString()}>
               {lastSeenLabel}
             </time>
@@ -721,7 +813,9 @@ function ProjectSessionsHeader({
   return (
     <>
       <div className="nav-inline-header nav-inline-header-sessions">
-        <h2 className="section-title nav-section-title">Sessions</h2>
+        <h2 id="sessions-heading" className="section-title nav-section-title" tabIndex={-1}>
+          Sessions
+        </h2>
         <span className="nav-count-badge">{counts.total}</span>
       </div>
       <p className="nav-inline-project">
@@ -771,13 +865,16 @@ function SelectedProjectPanel({
   return (
     <>
       <ProjectSessionsHeader project={selectedProject} counts={counts} />
+      <label className="session-filter-label" htmlFor="session-filter">
+        Find a session
+      </label>
       <input
+        id="session-filter"
         type="search"
         className="session-filter-input"
-        placeholder="Filter sessions…"
+        placeholder="ID, provider, or tool"
         value={filterQuery}
         onChange={(e) => onFilterChange(e.target.value)}
-        aria-label="Filter sessions by keyword"
       />
       <ul className="session-list" aria-label="Sessions for selected project">
         <SessionGroupList
@@ -795,12 +892,47 @@ function SelectedProjectPanel({
   )
 }
 
+function useSelectedSessionScroll(
+  navRef: React.RefObject<HTMLElement | null>,
+  selectedSessionId: string | null,
+  selectedSessionVisible: boolean
+): void {
+  useEffect(() => {
+    if (
+      !selectedSessionId ||
+      !selectedSessionVisible ||
+      !window.matchMedia("(min-width: 900px)").matches
+    )
+      return
+    const selectedButton = Array.from(
+      navRef.current?.querySelectorAll<HTMLButtonElement>("[data-session-select]") ?? []
+    ).find((button) => button.dataset.sessionSelect === selectedSessionId)
+    selectedButton?.scrollIntoView({ block: "nearest" })
+  }, [navRef, selectedSessionId, selectedSessionVisible])
+}
+
+function sessionMatches(
+  sessions: SessionPreview[] | null,
+  selectedSessionId: string | null,
+  filterQuery: string
+): boolean {
+  return Boolean(
+    sessions?.some(
+      (session) =>
+        session.id === selectedSessionId && (!filterQuery || matchesFilter(session, filterQuery))
+    )
+  )
+}
+
 export function SessionNav(props: SessionNavProps): ReactElement {
   const { selectedProjectCwd, selectedSessionId, onSelectProject } = props
+  const navRef = useRef<HTMLElement>(null)
   const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(null)
-  const [confirmingKillPid, setConfirmingKillPid] = useState<number | null>(null)
+  const [confirmingKill, setConfirmingKill] = useState<KillConfirmation>(null)
   const [filterQuery, setFilterQuery] = useState("")
   const navState = useSessionNavState(props.projects, selectedProjectCwd)
+  const isSelectedVisible = sessionMatches(navState.sortedSessions, selectedSessionId, filterQuery)
+  useSelectedSessionScroll(navRef, selectedSessionId, isSelectedVisible)
 
   const sessionRowProps = {
     selectedSessionId,
@@ -810,15 +942,15 @@ export function SessionNav(props: SessionNavProps): ReactElement {
     deletingSessionId: props.deletingSessionId,
     confirmingDeleteId,
     setConfirmingDeleteId,
-    confirmingKillPid,
-    setConfirmingKillPid,
+    confirmingKill,
+    setConfirmingKill,
     onSelectSession: props.onSelectSession,
     onKillAgentPid: props.onKillAgentPid,
     onDeleteSession: props.onDeleteSession,
   }
 
   return (
-    <nav className="card bento-nav">
+    <nav ref={navRef} className="card bento-nav" aria-label="Projects and sessions">
       <div className="nav-inline-header">
         <h2 className="section-title">Projects</h2>
         <span className="nav-count-badge">{navState.sortedProjects.length}</span>

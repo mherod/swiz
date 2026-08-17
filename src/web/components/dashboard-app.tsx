@@ -49,7 +49,7 @@ function buildMessagesProps(state: DashboardState) {
 function DashboardDock({ state }: { state: DashboardState }) {
   const activeProjectName = state.activeProject?.name
   return (
-    <Dock className="dock-fixed" iconSize={36} iconMagnification={54} iconDistance={140}>
+    <Dock className="dock-fixed" iconSize={44} iconMagnification={52} iconDistance={140}>
       {activeProjectName ? (
         <span className="dock-project-label" title={`Current project: ${activeProjectName}`}>
           {activeProjectName}
@@ -60,6 +60,7 @@ function DashboardDock({ state }: { state: DashboardState }) {
           key={view}
           onClick={() => state.setActiveView(view)}
           aria-label={`Show ${label} view`}
+          title={label}
           aria-current={state.activeView === view ? "page" : undefined}
           className={cn(state.activeView === view && "dock-icon-active")}
         >
@@ -106,15 +107,6 @@ export function DashboardApp(): ReactElement {
 
   return (
     <div className={`bento ${state.activeView === "settings" ? "bento-view-settings" : ""}`}>
-      <p className="sr-only" aria-live="polite" aria-atomic="true">
-        Dashboard updated at {state.lastUpdated}.
-      </p>
-      {state.error ? (
-        <section className="card bento-error" role="alert" aria-live="assertive">
-          <h2>Error</h2>
-          <p>{state.error}</p>
-        </section>
-      ) : null}
       <Header
         lastUpdated={state.lastUpdated}
         uptime={state.m.uptimeHuman ?? "starting"}
@@ -122,10 +114,10 @@ export function DashboardApp(): ReactElement {
         projects={state.projectCount}
         activeWatches={state.watchCount}
         activeHooks={state.activeHookDispatches.length}
-        selectedProjectName={state.activeProject?.name ?? null}
         cacheStatus={state.cacheStatus}
         activeAgentProcessProviders={state.optimisticAgentProcessProviders}
       />
+      <DashboardDock state={state} />
       <SessionNav
         projects={state.visibleProjects}
         activeAgentPidsByProvider={state.optimisticAgentProcessProviders}
@@ -138,8 +130,20 @@ export function DashboardApp(): ReactElement {
         onKillAgentPid={state.handleKillAgentPid}
         onDeleteSession={state.handleDeleteSession}
       />
-      <DashboardContent state={state} />
-      <DashboardDock state={state} />
+      <main
+        id="main-content"
+        tabIndex={-1}
+        className={cn("bento-main", state.activeView === "settings" && "bento-main-settings")}
+      >
+        {state.error ? (
+          <section className="card bento-error" role="alert" aria-live="assertive">
+            <h2>Error</h2>
+            <p>{state.error}</p>
+          </section>
+        ) : (
+          <DashboardContent state={state} />
+        )}
+      </main>
     </div>
   )
 }

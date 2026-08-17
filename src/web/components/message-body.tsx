@@ -37,7 +37,9 @@ function BlockTitle({ block }: { block: ParsedBlock }) {
   if (block.kind === "localCommandCaveat") {
     return (
       <div className="local-command-caveat-header">
-        <span className="caveat-icon">ⓘ</span>
+        <span className="caveat-icon" aria-hidden="true">
+          ⓘ
+        </span>
         <p className="hook-context-title">{block.title}</p>
       </div>
     )
@@ -45,7 +47,9 @@ function BlockTitle({ block }: { block: ParsedBlock }) {
   if (block.kind === "localCommand") {
     return (
       <div className="local-command-header">
-        <span className="terminal-icon">›_</span>
+        <span className="terminal-icon" aria-hidden="true">
+          ›_
+        </span>
         <p className="hook-context-title">{block.title}</p>
       </div>
     )
@@ -53,7 +57,9 @@ function BlockTitle({ block }: { block: ParsedBlock }) {
   if (block.kind === "bashCommand") {
     return (
       <div className="local-command-header">
-        <span className="terminal-icon">❯</span>
+        <span className="terminal-icon" aria-hidden="true">
+          ❯
+        </span>
         <p className="hook-context-title">{block.title}</p>
       </div>
     )
@@ -61,7 +67,9 @@ function BlockTitle({ block }: { block: ParsedBlock }) {
   if (block.kind === "taskNotification") {
     return (
       <div className="local-command-header">
-        <span className="terminal-icon">☑</span>
+        <span className="terminal-icon" aria-hidden="true">
+          ☑
+        </span>
         <p className="hook-context-title">{block.title}</p>
       </div>
     )
@@ -69,7 +77,9 @@ function BlockTitle({ block }: { block: ParsedBlock }) {
   if (block.kind === "persistedOutput") {
     return (
       <div className="local-command-header">
-        <span className="terminal-icon">📄</span>
+        <span className="terminal-icon" aria-hidden="true">
+          📄
+        </span>
         <p className="hook-context-title">{block.title}</p>
       </div>
     )
@@ -125,8 +135,16 @@ function MetadataBlockItem({ block, unwrap }: { block: ParsedBlock; unwrap: bool
       className={cn("hook-context-box hook-context-collapsible", blockKindClassName(block.kind))}
     >
       <summary className="hook-context-summary">
-        {block.kind === "localCommandCaveat" && <span className="caveat-icon">ⓘ </span>}
-        {block.kind === "localCommand" && <span className="terminal-icon">›_ </span>}
+        {block.kind === "localCommandCaveat" && (
+          <span className="caveat-icon" aria-hidden="true">
+            ⓘ{" "}
+          </span>
+        )}
+        {block.kind === "localCommand" && (
+          <span className="terminal-icon" aria-hidden="true">
+            ›_{" "}
+          </span>
+        )}
         {block.title}
       </summary>
       <BlockDetails block={block} />

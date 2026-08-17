@@ -73,6 +73,16 @@ interface CurrentSessionStatsProps {
   activeRuntimeSeconds: number
 }
 
+function SessionActivityTime({ value }: { value: number | null }) {
+  if (value === null || !Number.isFinite(value)) return <>Unknown</>
+  const date = new Date(value)
+  return (
+    <time dateTime={date.toISOString()} title={date.toLocaleString()}>
+      {formatLastActivity(value)}
+    </time>
+  )
+}
+
 function SessionKpis({
   activeSession,
   loadedMessageCount,
@@ -160,7 +170,7 @@ function CurrentSessionStats({
       )}
       <p className="metric-note">
         Last activity:{" "}
-        {formatLastActivity(activeSession?.lastMessageAt ?? activeSession?.mtime ?? null)}
+        <SessionActivityTime value={activeSession?.lastMessageAt ?? activeSession?.mtime ?? null} />
       </p>
     </>
   )
@@ -206,7 +216,7 @@ export function DashboardStats({
   return (
     <div className="stats-grid">
       <div className="stats-group">
-        <h3 className="stats-group-title">Current Session</h3>
+        <h3 className="stats-group-title">Current session</h3>
         <CurrentSessionStats
           activeSession={activeSession}
           loadedMessageCount={loadedMessageCount}
@@ -215,17 +225,16 @@ export function DashboardStats({
           activeRuntimeSeconds={activeRuntimeSeconds}
         />
       </div>
-
-      <div className="stats-divider" />
-
-      <div className="stats-group">
-        <h3 className="stats-group-title">Project Performance</h3>
-        <ProjectPerformanceStats
-          totalDispatches={totalDispatches}
-          avgLatency={avgLatency}
-          hottestEvent={hottestEvent}
-        />
-      </div>
+      <details className="stats-diagnostics">
+        <summary>Project diagnostics</summary>
+        <div className="stats-diagnostics-content">
+          <ProjectPerformanceStats
+            totalDispatches={totalDispatches}
+            avgLatency={avgLatency}
+            hottestEvent={hottestEvent}
+          />
+        </div>
+      </details>
     </div>
   )
 }
