@@ -3208,6 +3208,30 @@ tbody tr:hover {
   margin-top: var(--space-2);
 }
 
+.diagnostic-breakdown {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin-top: 0.55rem;
+}
+
+.diagnostic-breakdown > span {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0.22rem 0.55rem;
+  color: var(--muted);
+  font-size: 0.76rem;
+}
+
+.diagnostic-breakdown strong {
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.session-token-stats {
+  margin-top: 0.45rem;
+}
+
 .stats-active-badge {
   display: inline-flex;
   align-items: center;

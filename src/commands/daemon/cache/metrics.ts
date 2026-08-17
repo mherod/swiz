@@ -43,7 +43,13 @@ export interface DaemonMetrics {
   startedAt: number
   dispatches: Map<string, EventMetrics>
   transcriptDispatch?: TranscriptDispatchMetrics
+  transcriptMonitor?: DistributionMetrics
   memoryUsage?: NodeJS.MemoryUsage
+}
+
+export function recordTranscriptMonitorCheck(metrics: DaemonMetrics, durationMs: number): void {
+  metrics.transcriptMonitor ??= createDistribution()
+  recordDistribution(metrics.transcriptMonitor, durationMs, "success", 0)
 }
 
 export interface SerializedDistributionMetrics {
@@ -74,6 +80,7 @@ export interface SerializedDaemonMetrics {
   totalDispatches: number
   byEvent: Record<string, SerializedEventMetrics>
   transcriptDispatch?: TranscriptDispatchMetrics
+  transcriptMonitor?: SerializedDistributionMetrics
   memoryUsage?: NodeJS.MemoryUsage
 }
 
@@ -229,6 +236,9 @@ export function serializeMetrics(metrics: DaemonMetrics): SerializedDaemonMetric
     totalDispatches,
     byEvent,
     ...(metrics.transcriptDispatch && { transcriptDispatch: metrics.transcriptDispatch }),
+    ...(metrics.transcriptMonitor && {
+      transcriptMonitor: serializeDistribution(metrics.transcriptMonitor),
+    }),
     ...(metrics.memoryUsage && { memoryUsage: metrics.memoryUsage }),
   }
 }

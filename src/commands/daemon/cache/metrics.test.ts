@@ -3,6 +3,7 @@ import {
   createMetrics,
   HISTOGRAM_BUCKET_COUNT,
   recordDispatch,
+  recordTranscriptMonitorCheck,
   serializeMetrics,
 } from "./metrics.ts"
 
@@ -59,6 +60,18 @@ describe("daemon histogram metrics", () => {
         expect(route.stages.size).toBeLessThanOrEqual(16)
       }
     }
+  })
+
+  test("serializes bounded transcript monitor latency", () => {
+    const metrics = createMetrics()
+    recordTranscriptMonitorCheck(metrics, 8)
+    recordTranscriptMonitorCheck(metrics, 16)
+
+    expect(serializeMetrics(metrics).transcriptMonitor).toMatchObject({
+      count: 2,
+      avgMs: 12,
+      maxMs: 16,
+    })
   })
 
   test("keeps instrumentation p50 below the two millisecond budget", () => {

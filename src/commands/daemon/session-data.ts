@@ -10,6 +10,7 @@ import {
   type TranscriptEntry,
 } from "../../transcript-utils.ts"
 import { CappedMap } from "../../utils/capped-map.ts"
+import { splitJsonlLines, tryParseJsonLine } from "../../utils/jsonl.ts"
 import {
   buildProjectTasksView,
   buildSessionTasksView,
@@ -50,6 +51,15 @@ interface CachedSessionData {
   lastToolCallFingerprint?: string
   /** Fingerprint of the last assistant message text detected in this session. */
   lastMessageFingerprint?: string
+  tokenStats?: SessionTokenStats
+}
+
+export interface SessionTokenStats {
+  totalTokens: number
+  inputTokens: number
+  outputTokens: number
+  cachedInputTokens: number
+  outputTokensPerMinute: number
 }
 
 export interface SessionPreview {
@@ -65,6 +75,45 @@ export interface SessionPreview {
 interface SessionData {
   messages: SessionMessage[]
   toolStats: Array<{ name: string; count: number }>
+  tokenStats?: SessionTokenStats
+}
+
+// eslint-disable-next-line complexity -- tolerant parsing keeps malformed telemetry fail-open
+function readTokenStats(text: string): SessionTokenStats | undefined {
+  let firstTotal: number | null = null
+  let firstOutput: number | null = null
+  let firstAt = 0
+  let latest: SessionTokenStats | undefined
+  let latestAt = 0
+  for (const line of splitJsonlLines(text)) {
+    const record = tryParseJsonLine(line) as Record<string, any> | undefined
+    const usage =
+      record?.payload?.type === "token_count" ? record.payload.info?.total_token_usage : null
+    const totalTokens = usage?.total_tokens
+    if (typeof totalTokens !== "number" || !Number.isFinite(totalTokens)) continue
+    const at = typeof record?.timestamp === "string" ? new Date(record.timestamp).getTime() : 0
+    if (firstTotal === null) {
+      firstTotal = totalTokens
+      firstOutput = typeof usage.output_tokens === "number" ? usage.output_tokens : 0
+      firstAt = Number.isFinite(at) ? at : 0
+    }
+    latestAt = Number.isFinite(at) ? at : latestAt
+    latest = {
+      totalTokens,
+      inputTokens: typeof usage.input_tokens === "number" ? usage.input_tokens : 0,
+      outputTokens: typeof usage.output_tokens === "number" ? usage.output_tokens : 0,
+      cachedInputTokens:
+        typeof usage.cached_input_tokens === "number" ? usage.cached_input_tokens : 0,
+      outputTokensPerMinute: 0,
+    }
+  }
+  if (!latest || firstTotal === null) return undefined
+  const elapsedMinutes = Math.max((latestAt - firstAt) / 60_000, 0)
+  latest.outputTokensPerMinute =
+    elapsedMinutes > 0 && firstOutput !== null
+      ? Math.round((latest.outputTokens - firstOutput) / elapsedMinutes)
+      : 0
+  return latest
 }
 
 function messageFallbackKey(message: SessionMessage, occurrence: number): string {
@@ -301,6 +350,7 @@ class SessionDataCache {
       const text = await file.text()
       const parsed = parseTranscriptEntries(text, session.format)
       const next = this.buildFromEntries(parsed, mtimeMs, cached)
+      next.tokenStats = readTokenStats(text)
       next.size = size
       this.entries.set(session.path, next)
       return next
@@ -473,13 +523,14 @@ export async function getSessionData(
     detail: entry.detail,
   }))
   if (captured.length === 0 || hasToolCalls || session.format !== "cursor-agent-jsonl") {
-    return { messages, toolStats: cached.toolStats }
+    return { messages, toolStats: cached.toolStats, tokenStats: cached.tokenStats }
   }
 
   const supplemented = supplementMessagesWithCapturedToolCalls(messages, effectiveToolCalls)
   return {
     messages: supplemented.slice(-limit),
     toolStats: mergeToolStats(cached.toolStats, captured),
+    tokenStats: cached.tokenStats,
   }
 }
 

@@ -1,5 +1,5 @@
 import { resolveRegisterableProjectCwd } from "./route-helpers.ts"
-import type { SessionPreview } from "./session-data.ts"
+import type { SessionPreview, SessionTokenStats } from "./session-data.ts"
 import type { SessionMessage, SessionTaskSummary } from "./types.ts"
 import type { ProjectTaskPreview, SessionTaskPreview } from "./utils.ts"
 
@@ -18,6 +18,7 @@ export interface SessionRoutesListResult {
 export interface SessionRoutesMessagesResult {
   messages: SessionMessage[]
   toolStats: Array<{ name: string; count: number }>
+  tokenStats?: SessionTokenStats
 }
 
 /** `getSessionTasks` payload exposed through session HTTP routes */
@@ -206,7 +207,11 @@ async function handleSessionMessages(req: Request, ctx: SessionRoutesContext): P
   if (projectCwd) ctx.touchProject(projectCwd)
   const limit = Math.max(1, Math.min(100, body?.limit ?? 30))
   const data = await ctx.getSessionData(cwd, sessionId, limit)
-  return Response.json({ messages: data.messages, toolStats: data.toolStats })
+  return Response.json({
+    messages: data.messages,
+    toolStats: data.toolStats,
+    tokenStats: data.tokenStats,
+  })
 }
 
 async function handleSessionTasks(req: Request, ctx: SessionRoutesContext): Promise<Response> {

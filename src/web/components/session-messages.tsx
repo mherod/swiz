@@ -1,7 +1,7 @@
 import { type KeyboardEvent, type ReactElement, type ReactNode, useMemo } from "react"
 import { cn } from "../lib/cn.ts"
 import type { EventMetric } from "../lib/dashboard-helpers.ts"
-import type { ActiveHookDispatch } from "../lib/dashboard-hooks.ts"
+import type { ActiveHookDispatch, SessionTokenStats } from "../lib/dashboard-hooks.ts"
 import { DashboardStats } from "./dashboard-stats.tsx"
 import { InlineMarkdown } from "./inline-markdown.tsx"
 import { MessageBody } from "./message-body.tsx"
@@ -453,6 +453,8 @@ interface MessagesProps {
   cacheStatus?: Record<string, number> | null
   activeSession?: SessionHealth | null
   activeHookDispatches?: ActiveHookDispatch[]
+  sessionTokenStats?: SessionTokenStats | null
+  monitorMetric?: { count?: number; avgMs?: number; p95Ms?: number } | null
   hideTasks?: boolean
 }
 
@@ -756,6 +758,7 @@ function MessagesContent({
   )
 }
 
+// eslint-disable-next-line complexity -- optional diagnostic props are intentionally independent
 function SessionStatsBar({
   events,
   cacheStatus,
@@ -763,9 +766,18 @@ function SessionStatsBar({
   activeHookDispatches,
   messages,
   toolStats,
+  sessionTokenStats,
+  monitorMetric,
 }: Pick<
   MessagesProps,
-  "events" | "cacheStatus" | "activeSession" | "activeHookDispatches" | "messages" | "toolStats"
+  | "events"
+  | "cacheStatus"
+  | "activeSession"
+  | "activeHookDispatches"
+  | "messages"
+  | "toolStats"
+  | "sessionTokenStats"
+  | "monitorMetric"
 >) {
   const hasStats = events || cacheStatus || activeSession || activeHookDispatches
   if (!hasStats) return null
@@ -777,6 +789,8 @@ function SessionStatsBar({
       activeHookDispatches={activeHookDispatches ?? []}
       loadedMessageCount={messages.length}
       sessionToolStats={toolStats ?? []}
+      sessionTokenStats={sessionTokenStats ?? null}
+      monitorMetric={monitorMetric ?? null}
     />
   )
 }

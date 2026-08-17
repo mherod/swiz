@@ -4,16 +4,27 @@ export interface EventMetric {
   name: string
   count: number
   avgMs: number
+  routes?: Record<string, { count?: number; stages?: Record<string, { avgMs?: number }> }>
 }
 
 export function toSortedEvents(
-  byEvent: Record<string, { count?: number; avgMs?: number }> | undefined
+  byEvent:
+    | Record<
+        string,
+        {
+          count?: number
+          avgMs?: number
+          routes?: Record<string, { count?: number; stages?: Record<string, { avgMs?: number }> }>
+        }
+      >
+    | undefined
 ): EventMetric[] {
   return Object.entries(byEvent ?? {})
     .map(([name, data]) => ({
       name,
       count: data.count ?? 0,
       avgMs: data.avgMs ?? 0,
+      routes: data.routes,
     }))
     .sort((a, b) => b.count - a.count)
 }

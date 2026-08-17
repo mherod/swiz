@@ -16,7 +16,23 @@ export type { ActiveHookDispatch } from "../../commands/daemon/types.ts"
 export interface MetricsResponse {
   uptimeHuman?: string
   totalDispatches?: number
-  byEvent?: Record<string, { count?: number; avgMs?: number }>
+  byEvent?: Record<
+    string,
+    {
+      count?: number
+      avgMs?: number
+      routes?: Record<string, { count?: number; stages?: Record<string, { avgMs?: number }> }>
+    }
+  >
+  transcriptMonitor?: { count?: number; avgMs?: number; p95Ms?: number }
+}
+
+export interface SessionTokenStats {
+  totalTokens: number
+  inputTokens: number
+  outputTokens: number
+  cachedInputTokens: number
+  outputTokensPerMinute: number
 }
 
 export interface WatchesResponse {
@@ -155,11 +171,13 @@ export function useDashboardOverviewPolling(deps: OverviewPollingDeps): void {
 
 export function useProjectMetricsPolling(
   selectedProjectCwd: string | null,
-  setProjectEvents: (events: Array<{ name: string; count: number; avgMs: number }>) => void
+  setProjectEvents: (events: Array<{ name: string; count: number; avgMs: number }>) => void,
+  setProjectMonitor: (metric: MetricsResponse["transcriptMonitor"] | null) => void
 ): void {
   useEffect(() => {
     if (!selectedProjectCwd) {
       setProjectEvents([])
+      setProjectMonitor(null)
       return
     }
     const cwd = selectedProjectCwd
@@ -167,20 +185,26 @@ export function useProjectMetricsPolling(
       try {
         const pm = await fetchJson<MetricsResponse>(`/metrics?project=${encodeURIComponent(cwd)}`)
         setProjectEvents(toSortedEvents(pm.byEvent))
+        setProjectMonitor(pm.transcriptMonitor ?? null)
       } catch {
         setProjectEvents([])
+        setProjectMonitor(null)
       }
     })
     void fetchProjectMetrics()
     const id = setInterval(() => void fetchProjectMetrics(), 5000)
     return () => clearInterval(id)
-  }, [selectedProjectCwd, setProjectEvents])
+  }, [selectedProjectCwd, setProjectEvents, setProjectMonitor])
 }
 
 interface SessionPollingDeps {
   selectedProjectCwd: string | null
   selectedSessionId: string | null
-  onMessages: (messages: SessionMessage[], toolStats: ToolStat[]) => void
+  onMessages: (
+    messages: SessionMessage[],
+    toolStats: ToolStat[],
+    tokenStats?: SessionTokenStats
+  ) => void
   onTasks: (tasks: SessionTask[], summary: SessionTaskSummary | null) => void
   onProjectTasks: (tasks: ProjectTask[], summary: SessionTaskSummary | null) => void
   onNewMessageKeys: (keys: Set<string>) => void
@@ -214,11 +238,12 @@ export function useSessionPolling(deps: SessionPollingDeps): void {
     function handleMessagesUpdate(
       msgs: SessionMessage[],
       toolStats: ToolStat[] | undefined,
-      fresh: Set<string>
+      fresh: Set<string>,
+      tokenStats: SessionTokenStats | undefined
     ): void {
       const currentDeps = depsRef.current
       currentDeps.onNewMessageKeys(fresh)
-      currentDeps.onMessages(msgs, toolStats ?? [])
+      currentDeps.onMessages(msgs, toolStats ?? [], tokenStats)
       if (fresh.size > 0) {
         setTimeout(() => depsRef.current.onNewMessageKeys(new Set()), 500)
       }
@@ -227,7 +252,11 @@ export function useSessionPolling(deps: SessionPollingDeps): void {
     const pollSessionData = createSingleFlight(async () => {
       try {
         const [messagesResult, tasksResult, projectTasksResult] = await Promise.all([
-          postJson<{ messages: SessionMessage[]; toolStats?: ToolStat[] }>("/sessions/messages", {
+          postJson<{
+            messages: SessionMessage[]
+            toolStats?: ToolStat[]
+            tokenStats?: SessionTokenStats
+          }>("/sessions/messages", {
             cwd,
             sessionId: sid,
             limit: 30,
@@ -249,7 +278,7 @@ export function useSessionPolling(deps: SessionPollingDeps): void {
           messagesPrevSnapshotRef.current = snap
           const fresh = computeFreshMessageKeys(msgs, knownKeysRef.current)
           knownKeysRef.current = new Set(msgs.map(msgKey))
-          handleMessagesUpdate(msgs, messagesResult.toolStats, fresh)
+          handleMessagesUpdate(msgs, messagesResult.toolStats, fresh, messagesResult.tokenStats)
         }
 
         const currentDeps = depsRef.current

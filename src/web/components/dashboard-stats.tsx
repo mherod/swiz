@@ -1,6 +1,6 @@
 import { type ReactElement, useMemo } from "react"
 import { formatLastActivity } from "../lib/dashboard-helpers.ts"
-import type { ActiveHookDispatch } from "../lib/dashboard-hooks.ts"
+import type { ActiveHookDispatch, SessionTokenStats } from "../lib/dashboard-hooks.ts"
 import { NumberTicker } from "./number-ticker.tsx"
 import type { ToolStat } from "./session-browser.tsx"
 import type { SessionHealth } from "./session-browser-types.ts"
@@ -10,6 +10,13 @@ interface EventMetric {
   name: string
   count: number
   avgMs: number
+  routes?: Record<string, { count?: number; stages?: Record<string, { avgMs?: number }> }>
+}
+
+interface MonitorMetric {
+  count?: number
+  avgMs?: number
+  p95Ms?: number
 }
 
 interface CacheSummary {
@@ -27,12 +34,16 @@ interface ProjectPerformanceStatsProps {
   totalDispatches: number
   avgLatency: number
   hottestEvent: string
+  hookRuntimeMs: number
+  monitor?: MonitorMetric
 }
 
 function ProjectPerformanceStats({
   totalDispatches,
   avgLatency,
   hottestEvent,
+  hookRuntimeMs,
+  monitor,
 }: ProjectPerformanceStatsProps) {
   return (
     <>
@@ -61,6 +72,17 @@ function ProjectPerformanceStats({
         )}
       </div>
       <p className="metric-note">Performance metrics for the current project scope.</p>
+      <div className="diagnostic-breakdown" title="Bounded daemon timing samples">
+        <span>
+          <strong>{hookRuntimeMs}ms</strong> hooks avg
+        </span>
+        <span>
+          <strong>{Math.round(monitor?.avgMs ?? 0)}ms</strong> monitor avg
+        </span>
+        <span>
+          <strong>{Math.round(monitor?.p95Ms ?? 0)}ms</strong> monitor p95
+        </span>
+      </div>
     </>
   )
 }
@@ -176,6 +198,7 @@ function CurrentSessionStats({
   )
 }
 
+// eslint-disable-next-line max-lines-per-function -- compact diagnostics composition stays readable as one panel
 export function DashboardStats({
   events = [],
   cache: _cache = {},
@@ -183,6 +206,8 @@ export function DashboardStats({
   activeHookDispatches,
   loadedMessageCount,
   sessionToolStats,
+  sessionTokenStats,
+  monitorMetric,
 }: {
   events?: EventMetric[]
   cache?: CacheSummary
@@ -190,6 +215,8 @@ export function DashboardStats({
   activeHookDispatches: ActiveHookDispatch[]
   loadedMessageCount: number
   sessionToolStats: ToolStat[]
+  sessionTokenStats?: SessionTokenStats | null
+  monitorMetric?: MonitorMetric | null
 }): ReactElement {
   // Performance logic
   const totalDispatches = useMemo(
@@ -204,6 +231,25 @@ export function DashboardStats({
     [events]
   )
   const hottestEvent = events[0]?.name ?? "n/a"
+  const hookRuntimeMs = useMemo(
+    () =>
+      Math.round(
+        events.reduce((sum, event) => {
+          const stages = event.routes
+          return (
+            sum +
+            Object.values(stages ?? {}).reduce(
+              (routeSum, route) =>
+                routeSum +
+                ((route.stages?.syncHooks?.avgMs ?? 0) + (route.stages?.asyncHooks?.avgMs ?? 0)) *
+                  (route.count ?? 0),
+              0
+            )
+          )
+        }, 0) / Math.max(totalDispatches, 1)
+      ),
+    [events, totalDispatches]
+  )
 
   // Session logic
   const visibleToolStats = sessionToolStats.filter((stat) => !isInternalToolName(stat.name))
@@ -224,6 +270,31 @@ export function DashboardStats({
           activeDispatch={activeDispatch}
           activeRuntimeSeconds={activeRuntimeSeconds}
         />
+        {sessionTokenStats && (
+          <div
+            className="diagnostic-breakdown session-token-stats"
+            title="Cumulative processed tokens and generated-token rate from this session transcript"
+          >
+            <span>
+              <strong>
+                <NumberTicker value={sessionTokenStats.totalTokens} />
+              </strong>{" "}
+              processed
+            </span>
+            <span>
+              <strong>
+                <NumberTicker value={sessionTokenStats.outputTokensPerMinute} />
+              </strong>{" "}
+              output tok/min
+            </span>
+            <span>
+              <strong>
+                <NumberTicker value={sessionTokenStats.outputTokens} />
+              </strong>{" "}
+              generated
+            </span>
+          </div>
+        )}
       </div>
       <details className="stats-diagnostics">
         <summary>Project diagnostics</summary>
@@ -232,6 +303,8 @@ export function DashboardStats({
             totalDispatches={totalDispatches}
             avgLatency={avgLatency}
             hottestEvent={hottestEvent}
+            hookRuntimeMs={hookRuntimeMs}
+            monitor={monitorMetric ?? undefined}
           />
         </div>
       </details>

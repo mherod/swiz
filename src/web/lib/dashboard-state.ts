@@ -18,6 +18,7 @@ import {
   type ActiveHookDispatch,
   applyInitialSelection,
   type MetricsResponse,
+  type SessionTokenStats,
   useDashboardOverviewPolling,
   useProjectMetricsPolling,
   useSessionPolling,
@@ -150,6 +151,7 @@ function cacheSummary(status: Record<string, number> | null): { total: number; w
 function useSessionDataLoaders() {
   const [sessionMessages, setSessionMessages] = useState<SessionMessage[]>([])
   const [sessionToolStats, setSessionToolStats] = useState<ToolStat[]>([])
+  const [sessionTokenStats, setSessionTokenStats] = useState<SessionTokenStats | null>(null)
   const [sessionTasks, setSessionTasks] = useState<SessionTask[]>([])
   const [sessionTaskSummary, setSessionTaskSummary] = useState<SessionTaskSummary | null>(null)
   const [projectTasks, setProjectTasks] = useState<ProjectTask[]>([])
@@ -165,10 +167,12 @@ function useSessionDataLoaders() {
       const result = await postJson<{
         messages: SessionMessage[]
         toolStats?: ToolStat[]
+        tokenStats?: SessionTokenStats
       }>("/sessions/messages", { cwd, sessionId, limit: 30 })
       setNewMessageKeys(new Set())
       setSessionMessages(result.messages ?? [])
       setSessionToolStats(result.toolStats ?? [])
+      setSessionTokenStats(result.tokenStats ?? null)
     } finally {
       setMessagesLoading(false)
     }
@@ -204,6 +208,7 @@ function useSessionDataLoaders() {
 
   const clearSession = useCallback(() => {
     setSessionMessages([])
+    setSessionTokenStats(null)
     setSessionTasks([])
     setSessionTaskSummary(null)
   }, [])
@@ -213,6 +218,8 @@ function useSessionDataLoaders() {
     setSessionMessages,
     sessionToolStats,
     setSessionToolStats,
+    sessionTokenStats,
+    setSessionTokenStats,
     sessionTasks,
     setSessionTasks,
     sessionTaskSummary,
@@ -613,7 +620,7 @@ function useDerivedDashboardState(input: DerivedStateInput) {
 export type DashboardState = ReturnType<typeof useDashboardState>
 
 // Return type is `DashboardState` (alias above); an explicit annotation would be circular with `ReturnType`.
-// eslint-disable-next-line @typescript-eslint/explicit-module-boundary-types -- circular with DashboardState alias
+// eslint-disable-next-line @typescript-eslint/explicit-module-boundary-types, max-lines-per-function -- circular return type and centralized dashboard wiring
 export function useDashboardState() {
   const [metrics, setMetrics] = useState<MetricsResponse | null>(null)
   const { cacheStatus, onCacheStatus } = useCacheStatusWithJitterFilter()
@@ -625,6 +632,9 @@ export function useDashboardState() {
   const [projectEvents, setProjectEvents] = useState<
     Array<{ name: string; count: number; avgMs: number }>
   >([])
+  const [projectMonitor, setProjectMonitor] = useState<MetricsResponse["transcriptMonitor"] | null>(
+    null
+  )
   const [deletingSessionId, setDeletingSessionId] = useState<string | null>(null)
   const [activeHookDispatches, setActiveHookDispatches] = useState<ActiveHookDispatch[]>([])
   const [activeView, _setActiveView] = useState<ActiveView>(
@@ -670,14 +680,15 @@ export function useDashboardState() {
       }),
   })
 
-  useProjectMetricsPolling(os.selectedProjectCwd, setProjectEvents)
+  useProjectMetricsPolling(os.selectedProjectCwd, setProjectEvents, setProjectMonitor)
 
   useSessionPolling({
     selectedProjectCwd: os.selectedProjectCwd,
     selectedSessionId: os.selectedSessionId,
-    onMessages: (messages, toolStats) => {
+    onMessages: (messages, toolStats, tokenStats) => {
       loaders.setSessionMessages(messages)
       loaders.setSessionToolStats(toolStats)
+      loaders.setSessionTokenStats(tokenStats ?? null)
     },
     onTasks: (tasks, summary) => {
       loaders.setSessionTasks(tasks)
@@ -710,6 +721,7 @@ export function useDashboardState() {
     setActiveView,
     deletingSessionId,
     cacheStatus,
+    projectMonitor,
     ...derived,
     ...actions,
     optimisticAgentProcessProviders: os.optimisticAgentProcessProviders,
@@ -720,6 +732,7 @@ export function useDashboardState() {
     messagesLoading: loaders.messagesLoading,
     newMessageKeys: loaders.newMessageKeys,
     sessionToolStats: loaders.sessionToolStats,
+    sessionTokenStats: loaders.sessionTokenStats,
     sessionTasks: loaders.sessionTasks,
     sessionTaskSummary: loaders.sessionTaskSummary,
     sessionTasksLoading: loaders.sessionTasksLoading,

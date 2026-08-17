@@ -18,6 +18,7 @@ import { invalidateTurnsCache } from "../transcript-turns.ts"
 import { findAllProviderSessions, type Session } from "../transcript-utils.ts"
 import type { Command } from "../types.ts"
 import { clearFileCache } from "../utils/file-cache.ts"
+import { recordTranscriptMonitorCheck } from "./daemon/cache/metrics.ts"
 import type { TranscriptMonitor } from "./daemon/cache/transcript-monitor.ts"
 import { WorkerTranscriptMonitor } from "./daemon/cache/worker-transcript-monitor.ts"
 import { CiWatchRegistry, notifyCiCompletion } from "./daemon/ci-watch-registry.ts"
@@ -524,6 +525,7 @@ export async function hydratePersistedSessionToolState(
   return hydratedCount
 }
 
+// eslint-disable-next-line max-lines-per-function -- daemon startup intentionally keeps lifecycle wiring together
 async function startDaemonProcess(_args: string[], port: number): Promise<void> {
   // The thin CLI bootstrap deliberately skips loading the manifest on daemon
   // success. Validate the same routing contract once when the long-lived
@@ -653,7 +655,12 @@ async function startDaemonProcess(_args: string[], port: number): Promise<void> 
   // Register initial project for periodic upstream sync
   void caches.upstreamSyncRegistry.register(projectRoot)
 
-  startTranscriptMonitoring(registeredProjects, transcriptMonitor, state.globalMetrics)
+  startTranscriptMonitoring(
+    registeredProjects,
+    transcriptMonitor,
+    state.globalMetrics,
+    state.getProjectMetrics
+  )
 
   console.log(`Daemon listening on ${server.url}`)
 }
@@ -661,7 +668,8 @@ async function startDaemonProcess(_args: string[], port: number): Promise<void> 
 function startTranscriptMonitoring(
   registeredProjects: Set<string>,
   transcriptMonitor: TranscriptMonitor,
-  globalMetrics: DaemonMetrics
+  globalMetrics: DaemonMetrics,
+  getProjectMetrics: (cwd: string) => DaemonMetrics
 ) {
   // Start periodic transcript monitoring for all registered projects
   void logPseudoHook("Transcript monitor starting")
@@ -672,7 +680,13 @@ function startTranscriptMonitoring(
     void (async () => {
       try {
         await Promise.allSettled(
-          [...registeredProjects].map((cwd) => transcriptMonitor.checkProject(cwd))
+          [...registeredProjects].map(async (cwd) => {
+            const startedAt = performance.now()
+            await transcriptMonitor.checkProject(cwd)
+            const durationMs = performance.now() - startedAt
+            recordTranscriptMonitorCheck(globalMetrics, durationMs)
+            recordTranscriptMonitorCheck(getProjectMetrics(cwd), durationMs)
+          })
         )
         // Update global metrics with current transcript dispatch concurrency state
         const metricsPromise = transcriptMonitor.getDispatchConcurrencyMetrics()

@@ -43,6 +43,8 @@ function buildMessagesProps(state: DashboardState) {
     cacheStatus: state.cacheStatus,
     activeSession: state.activeSession,
     activeHookDispatches: state.activeHookDispatches,
+    sessionTokenStats: state.sessionTokenStats,
+    monitorMetric: state.projectMonitor,
   }
 }
 
