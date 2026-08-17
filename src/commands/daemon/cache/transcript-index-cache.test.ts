@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, test } from "bun:test"
-import { rm } from "node:fs/promises"
+import { appendFile, rm } from "node:fs/promises"
 import { join } from "node:path"
 import { type TranscriptIndex, TranscriptIndexCache } from "./transcript-index-cache.ts"
 
@@ -233,6 +233,42 @@ describe("TranscriptIndexCache", () => {
     mtimeMs = 2
     expect((await cache.getSummary("/mock/mtime.jsonl"))?.sessionLines).toEqual(["2"])
     expect(buildCalls).toBe(2)
+  })
+
+  test("reduces only appended complete lines and resets on a new session boundary", async () => {
+    const path = testTranscript("append")
+    const initialLines = [
+      JSON.stringify({ type: "system", content: "Compacted" }),
+      JSON.stringify({
+        type: "assistant",
+        message: { content: [{ type: "tool_use", name: "Bash", input: { command: "ls" } }] },
+      }),
+    ]
+    await Bun.write(path, `${initialLines.join("\n")}\n`)
+    let size = (await Bun.file(path).stat()).size
+    let mtimeMs = 1
+    const cache = new TranscriptIndexCache({
+      readMetadata: () => Promise.resolve({ size, mtimeMs, dev: 1, ino: 1 }),
+    })
+
+    expect((await cache.getSummary(path))?.toolNames).toEqual(["Bash"])
+    const appended = `${JSON.stringify({
+      type: "assistant",
+      message: { content: [{ type: "tool_use", name: "Read", input: { file_path: "x.ts" } }] },
+    })}\n`
+    await appendFile(path, appended)
+    size += new TextEncoder().encode(appended).length
+    mtimeMs++
+    expect((await cache.getSummary(path))?.toolNames).toEqual(["Bash", "Read"])
+    expect(cache.appendedBytes).toBe(new TextEncoder().encode(appended).length)
+
+    const reset = `${JSON.stringify({ type: "system", content: "Compacted again" })}\n`
+    await appendFile(path, reset)
+    size += new TextEncoder().encode(reset).length
+    mtimeMs++
+    expect((await cache.getSummary(path))?.toolNames).toEqual([])
+    expect(cache.resets).toBe(1)
+    void rm(path, { force: true }).catch(() => {})
   })
 
   test("does not retain a full summary larger than the character budget", async () => {

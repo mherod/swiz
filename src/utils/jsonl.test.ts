@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, it } from "bun:test"
-import { mkdir, rm } from "node:fs/promises"
+import { appendFile, mkdir, rm } from "node:fs/promises"
 import { join } from "node:path"
 import { TMP_ROOT } from "../temp-paths.ts"
 import {
+  JsonlAppendCursor,
   parseJsonlUntyped,
   readJsonlFileTailUntyped,
   readJsonlTailText,
@@ -107,5 +108,51 @@ describe("jsonl utilities", () => {
     )
 
     await expect(readJsonlFileTailUntyped(path, 2)).resolves.toEqual([{ id: 4 }, { id: 5 }])
+  })
+
+  it("emits an append record only once its newline and split UTF-8 bytes arrive", async () => {
+    await resetTestDir()
+    const path = join(TEST_DIR, "append.jsonl")
+    await Bun.write(path, '{"id":1}\n')
+    const cursor = new JsonlAppendCursor()
+    const initial = await Bun.file(path).stat()
+    const metadata = {
+      size: initial.size,
+      mtimeMs: initial.mtimeMs,
+      dev: (initial as { dev?: number }).dev,
+      ino: (initial as { ino?: number }).ino,
+    }
+    expect((await cursor.read(path, metadata)).kind).toBe("cold")
+    cursor.reset(metadata)
+
+    const encoded = new TextEncoder().encode('{"value":"café"}\n')
+    const splitAt = encoded.indexOf(0xc3) + 1
+    await appendFile(path, encoded.slice(0, splitAt))
+    const partialStat = await Bun.file(path).stat()
+    const partial = await cursor.read(path, {
+      size: partialStat.size,
+      mtimeMs: partialStat.mtimeMs,
+      dev: (partialStat as { dev?: number }).dev,
+      ino: (partialStat as { ino?: number }).ino,
+    })
+    expect(partial).toMatchObject({ kind: "append", lines: [] })
+
+    await appendFile(path, encoded.slice(splitAt))
+    const completeStat = await Bun.file(path).stat()
+    const complete = await cursor.read(path, {
+      size: completeStat.size,
+      mtimeMs: completeStat.mtimeMs,
+      dev: (completeStat as { dev?: number }).dev,
+      ino: (completeStat as { ino?: number }).ino,
+    })
+    expect(complete.lines).toEqual(['{"value":"café"}'])
+  })
+
+  it("requires a cold rebuild for a same-size rewrite without stable identity", async () => {
+    const cursor = new JsonlAppendCursor()
+    cursor.reset({ size: 10, mtimeMs: 1 })
+    await expect(cursor.read("/missing", { size: 10, mtimeMs: 2 })).resolves.toMatchObject({
+      kind: "cold",
+    })
   })
 })

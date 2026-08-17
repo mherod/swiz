@@ -104,6 +104,11 @@ describe("metrics routes", () => {
       totalDurationMs: expect.any(Number),
       maxDurationMs: expect.any(Number),
     })
+    expect(body.caches.transcriptIndex).toMatchObject({
+      appendedBytes: expect.any(Number),
+      coldRebuilds: expect.any(Number),
+      resets: expect.any(Number),
+    })
     expect(body.hookLogs).toMatchObject({
       currentBytes: 1024,
       retainedRecords: 12,

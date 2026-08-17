@@ -10,7 +10,9 @@
  * Hooks that need tool-name translation must remain file-based.
  */
 
+import { LRUCache } from "lru-cache"
 import type { PostToolHookInput, ToolHookInput } from "../schemas.ts"
+import { JsonlAppendCursor, type JsonlAppendMetadata } from "./jsonl.ts"
 import { shellTokenCommandRe } from "./shell-patterns.ts"
 
 // ─── Issue guidance ──────────────────────────────────────────────────────────
@@ -149,6 +151,7 @@ export function isNativeTaskToolName(name: string): boolean {
  * `unknown` — no qualifying evidence; callers must fail open.
  */
 export type NativeTaskToolAvailability = "present" | "absent" | "unknown"
+const NATIVE_TASK_AVAILABILITY_CACHE_SIZE = 50
 
 /** ToolSearch evidence as captured in `_toolSearch` by the incoming-capture JSONL summary. */
 export interface ToolSearchEvidence {
@@ -237,17 +240,19 @@ export async function readNativeTaskToolAvailabilityFromTranscript(
 ): Promise<NativeTaskToolAvailability> {
   if (!transcriptPath) return "unknown"
   try {
-    const file = Bun.file(transcriptPath)
-    if (!(await file.exists())) return "unknown"
-    const text = await file.text()
-    let verdict: NativeTaskToolAvailability = "unknown"
-    for (const line of text.split("\n")) {
-      if (!line.includes("Task")) continue
-      // A successful native invocation settles it outright.
-      if (NATIVE_TASK_TOOL_USE_RE.test(line)) return "present"
-      if (NATIVE_TASK_TOOL_MISSING_RE.test(line)) verdict = "absent"
+    const state = transcriptAvailabilityByPath.get(transcriptPath) ?? createAvailabilityState()
+    const metadata = await readAppendMetadata(transcriptPath)
+    if (!metadata) return "unknown"
+    const update = await state.cursor.read(transcriptPath, metadata)
+    const lines =
+      update.kind === "cold" ? (await Bun.file(transcriptPath).text()).split("\n") : update.lines
+    if (update.kind === "cold") {
+      state.verdict = "unknown"
+      state.cursor.reset(metadata)
     }
-    return verdict
+    state.verdict = applyTranscriptEvidence(state.verdict, lines)
+    transcriptAvailabilityByPath.set(transcriptPath, state)
+    return state.verdict
   } catch {
     return "unknown"
   }
@@ -257,21 +262,17 @@ export async function readNativeTaskToolAvailabilityFromTranscript(
 async function readToolSearchEvidenceFile(
   path: string,
   sessionId: string
-): Promise<ToolSearchEvidence[]> {
+): Promise<NativeTaskToolAvailability> {
   const file = Bun.file(path)
-  if (!(await file.exists())) return []
-  const records: ToolSearchEvidence[] = []
-  for (const line of (await file.text()).split("\n")) {
-    if (!line.includes('"_toolSearch"')) continue
-    try {
-      const record = JSON.parse(line) as Record<string, any>
-      if (record.session_id !== sessionId) continue
-      if (record._toolSearch) records.push(record._toolSearch as ToolSearchEvidence)
-    } catch {
-      // Malformed capture lines carry no evidence; absence of proof is not proof of absence.
-    }
-  }
-  return records
+  if (!(await file.exists())) return "unknown"
+  const metadata = await readAppendMetadata(path)
+  if (!metadata) return "unknown"
+  const state = captureAvailabilityByPath.get(path) ?? createCaptureAvailabilityState()
+  const update = await state.cursor.read(path, metadata)
+  const lines = await readCaptureCursorLines(file, state, update.kind, update.lines, metadata)
+  for (const line of lines) applyToolSearchCaptureLine(line, state)
+  captureAvailabilityByPath.set(path, state)
+  return state.verdicts.get(sessionId) ?? "unknown"
 }
 
 /**
@@ -283,11 +284,102 @@ async function readToolSearchEvidenceFile(
  * Resolved verdicts are cached per session: a session's tool registry is fixed for its lifetime.
  * `unknown` is never cached — later ToolSearch calls may still settle the question.
  */
-const nativeTaskToolAvailabilityBySession = new Map<string, NativeTaskToolAvailability>()
+const nativeTaskToolAvailabilityBySession = new LRUCache<string, NativeTaskToolAvailability>({
+  max: NATIVE_TASK_AVAILABILITY_CACHE_SIZE,
+})
+
+interface AvailabilityState {
+  cursor: JsonlAppendCursor
+  verdict: NativeTaskToolAvailability
+}
+
+interface CaptureAvailabilityState {
+  cursor: JsonlAppendCursor
+  verdicts: LRUCache<string, NativeTaskToolAvailability>
+}
+
+const transcriptAvailabilityByPath = new LRUCache<string, AvailabilityState>({
+  max: NATIVE_TASK_AVAILABILITY_CACHE_SIZE,
+})
+const captureAvailabilityByPath = new LRUCache<string, CaptureAvailabilityState>({
+  max: NATIVE_TASK_AVAILABILITY_CACHE_SIZE,
+})
+
+function createAvailabilityState(): AvailabilityState {
+  return { cursor: new JsonlAppendCursor(), verdict: "unknown" }
+}
+
+function createCaptureAvailabilityState(): CaptureAvailabilityState {
+  return {
+    cursor: new JsonlAppendCursor(),
+    verdicts: new LRUCache({ max: NATIVE_TASK_AVAILABILITY_CACHE_SIZE }),
+  }
+}
+
+async function readCaptureCursorLines(
+  file: Bun.BunFile,
+  state: CaptureAvailabilityState,
+  kind: "hit" | "append" | "cold",
+  appendedLines: string[],
+  metadata: JsonlAppendMetadata
+): Promise<string[]> {
+  if (kind !== "cold") return appendedLines
+  state.verdicts.clear()
+  state.cursor.reset(metadata)
+  return (await file.text()).split("\n")
+}
+
+function applyToolSearchCaptureLine(line: string, state: CaptureAvailabilityState): void {
+  if (!line.includes('"_toolSearch"')) return
+  try {
+    const record = JSON.parse(line) as Record<string, any>
+    if (typeof record.session_id !== "string" || !record._toolSearch) return
+    const current = state.verdicts.get(record.session_id) ?? "unknown"
+    const next = resolveNativeTaskToolAvailability([currentEvidence(current), record._toolSearch])
+    state.verdicts.set(record.session_id, next)
+  } catch {
+    // Malformed capture lines carry no evidence; absence of proof is not proof of absence.
+  }
+}
+
+async function readAppendMetadata(path: string): Promise<JsonlAppendMetadata | null> {
+  try {
+    const stat = await Bun.file(path).stat()
+    return {
+      size: stat.size,
+      mtimeMs: stat.mtimeMs,
+      dev: (stat as { dev?: number }).dev,
+      ino: (stat as { ino?: number }).ino,
+    }
+  } catch {
+    return null
+  }
+}
+
+function applyTranscriptEvidence(
+  existing: NativeTaskToolAvailability,
+  lines: string[]
+): NativeTaskToolAvailability {
+  let verdict = existing
+  for (const line of lines) {
+    if (!line.includes("Task")) continue
+    if (NATIVE_TASK_TOOL_USE_RE.test(line)) return "present"
+    if (NATIVE_TASK_TOOL_MISSING_RE.test(line)) verdict = "absent"
+  }
+  return verdict
+}
+
+function currentEvidence(verdict: NativeTaskToolAvailability): ToolSearchEvidence | null {
+  if (verdict === "present") return { query: "select:TaskCreate", matches: ["TaskCreate"] }
+  if (verdict === "absent") return { query: "select:TaskCreate", matches: [] }
+  return null
+}
 
 /** Test seam: drop memoized verdicts. */
 export function resetNativeTaskToolAvailabilityCache(): void {
   nativeTaskToolAvailabilityBySession.clear()
+  transcriptAvailabilityByPath.clear()
+  captureAvailabilityByPath.clear()
 }
 
 export async function readNativeTaskToolAvailability(
@@ -309,7 +401,7 @@ export async function readNativeTaskToolAvailability(
         readToolSearchEvidenceFile(`${dir}/${event}.jsonl`, sessionId)
       )
     )
-    const availability = resolveNativeTaskToolAvailability(perFile.flat())
+    const availability = resolveNativeTaskToolAvailability(perFile.map(currentEvidence))
     if (availability !== "unknown") {
       nativeTaskToolAvailabilityBySession.set(sessionId, availability)
     }

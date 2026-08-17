@@ -1,10 +1,15 @@
 import { LRUCache } from "lru-cache"
 import { projectKeyFromCwd } from "../../../project-key.ts"
 import {
+  collectSessionToolUsage,
   computeSummaryFromSessionLines,
+  createEmptySummaryAccumulator,
+  type SummaryAccumulator,
   type TranscriptSummary,
 } from "../../../transcript-summary.ts"
 import {
+  JsonlAppendCursor,
+  type JsonlAppendMetadata,
   readJsonlTailTextFromFile,
   splitJsonlLines,
   tryParseJsonLine,
@@ -18,12 +23,18 @@ export interface TranscriptIndex {
 }
 
 export interface TranscriptIndexCacheDependencies {
-  readMetadata?: (transcriptPath: string) => Promise<{ mtimeMs: number; size: number } | null>
+  readMetadata?: (transcriptPath: string) => Promise<JsonlAppendMetadata | null>
   buildIndex?: (
     transcriptPath: string,
     fileSize: number,
     mtimeMs: number
   ) => Promise<TranscriptIndex | null>
+}
+
+interface IncrementalTranscriptIndex {
+  index: TranscriptIndex
+  accumulator: SummaryAccumulator
+  cursor: JsonlAppendCursor
 }
 
 const MAX_TRANSCRIPT_INDEX_ENTRIES = 50
@@ -97,13 +108,21 @@ function splitSessionLinesAfterLatestSystem(text: string): {
   const lines = splitJsonlLines(text)
   let latestSystemIndex = -1
   for (let index = 0; index < lines.length; index++) {
-    const parsed = tryParseJsonLine(lines[index]!) as { type?: string } | undefined
-    if (parsed?.type === "system") latestSystemIndex = index
+    if (isSessionBoundary(lines[index]!)) latestSystemIndex = index
   }
   return {
     sessionLines: latestSystemIndex === -1 ? lines : lines.slice(latestSystemIndex + 1),
     sawSystem: latestSystemIndex !== -1,
   }
+}
+
+function isSessionBoundary(line: string): boolean {
+  const entry = tryParseJsonLine(line) as { type?: string; payload?: { type?: string } } | undefined
+  return (
+    entry?.type === "system" ||
+    entry?.type === "compacted" ||
+    (entry?.type === "event_msg" && entry.payload?.type === "context_compacted")
+  )
 }
 
 export class TranscriptIndexCache {
@@ -113,9 +132,17 @@ export class TranscriptIndexCache {
     maxSize: MAX_CACHED_SESSION_LINE_CHARS,
     sizeCalculation: sessionLineCharCount,
   })
+  private incrementalEntries = new LRUCache<string, IncrementalTranscriptIndex>({
+    max: MAX_TRANSCRIPT_INDEX_ENTRIES,
+    maxSize: MAX_CACHED_SESSION_LINE_CHARS,
+    sizeCalculation: (entry) => sessionLineCharCount(entry.index),
+  })
   private inFlight = new Map<string, Promise<TranscriptIndex | null>>()
   private _hits = 0
   private _misses = 0
+  private _appendedBytes = 0
+  private _coldRebuilds = 0
+  private _resets = 0
 
   constructor(private readonly dependencies: TranscriptIndexCacheDependencies = {}) {}
 
@@ -123,16 +150,16 @@ export class TranscriptIndexCache {
     try {
       const metadata = await this.readMetadata(transcriptPath)
       if (!metadata) return null
-
-      const mtimeMs = metadata.mtimeMs ?? 0
-      const cached = this.entries.get(transcriptPath)
-      if (cached && cached.mtimeMs === mtimeMs) {
-        cached.computedAt = Date.now()
-        this._hits++
-        return cached
+      if (this.dependencies.buildIndex) {
+        const cached = this.entries.get(transcriptPath)
+        if (cached && cached.mtimeMs === metadata.mtimeMs) {
+          cached.computedAt = Date.now()
+          this._hits++
+          return cached
+        }
       }
 
-      const built = await this.getOrBuild(transcriptPath, metadata.size, mtimeMs)
+      const built = await this.getOrBuild(transcriptPath, metadata)
       return built ? (this.entries.get(transcriptPath) ?? compactTranscriptIndex(built)) : null
     } catch {
       return null
@@ -143,25 +170,23 @@ export class TranscriptIndexCache {
     try {
       const metadata = await this.readMetadata(transcriptPath)
       if (!metadata) return null
-
-      const mtimeMs = metadata.mtimeMs ?? 0
-      const cached = this.summaryEntries.get(transcriptPath)
-      if (cached && cached.mtimeMs === mtimeMs) {
-        cached.computedAt = Date.now()
-        this._hits++
-        return cached.summary
+      if (this.dependencies.buildIndex) {
+        const cached = this.summaryEntries.get(transcriptPath)
+        if (cached && cached.mtimeMs === metadata.mtimeMs) {
+          cached.computedAt = Date.now()
+          this._hits++
+          return cached.summary
+        }
       }
 
-      const built = await this.getOrBuild(transcriptPath, metadata.size, mtimeMs)
+      const built = await this.getOrBuild(transcriptPath, metadata)
       return built?.summary ?? null
     } catch {
       return null
     }
   }
 
-  private async readMetadata(
-    transcriptPath: string
-  ): Promise<{ mtimeMs: number; size: number } | null> {
+  private async readMetadata(transcriptPath: string): Promise<JsonlAppendMetadata | null> {
     return this.dependencies.readMetadata
       ? await this.dependencies.readMetadata(transcriptPath)
       : await Bun.file(transcriptPath).stat()
@@ -169,23 +194,22 @@ export class TranscriptIndexCache {
 
   private async getOrBuild(
     transcriptPath: string,
-    fileSize: number,
-    mtimeMs: number
+    metadata: JsonlAppendMetadata
   ): Promise<TranscriptIndex | null> {
-    const inFlightKey = `${transcriptPath}\0${mtimeMs}`
+    const inFlightKey = `${transcriptPath}\0${metadata.size}\0${metadata.mtimeMs}`
     const existing = this.inFlight.get(inFlightKey)
     if (existing) return await existing
 
     this._misses++
     let computation: Promise<TranscriptIndex | null>
     const build = this.dependencies.buildIndex
-      ? this.dependencies.buildIndex(transcriptPath, fileSize, mtimeMs)
-      : this.buildIndex(Bun.file(transcriptPath), fileSize, mtimeMs)
+      ? this.dependencies.buildIndex(transcriptPath, metadata.size, metadata.mtimeMs)
+      : this.buildOrAppendIndex(transcriptPath, metadata)
     computation = build
       .then((index) => {
         if (index && this.inFlight.get(inFlightKey) === computation) {
           this.entries.set(transcriptPath, compactTranscriptIndex(index))
-          this.summaryEntries.set(transcriptPath, index)
+          if (this.dependencies.buildIndex) this.summaryEntries.set(transcriptPath, index)
         }
         return index
       })
@@ -196,6 +220,56 @@ export class TranscriptIndexCache {
       })
     this.inFlight.set(inFlightKey, computation)
     return await computation
+  }
+
+  private async buildOrAppendIndex(
+    transcriptPath: string,
+    metadata: JsonlAppendMetadata
+  ): Promise<TranscriptIndex | null> {
+    const existing = this.incrementalEntries.get(transcriptPath)
+    if (existing) {
+      const update = await existing.cursor.read(transcriptPath, metadata)
+      if (update.kind === "hit") {
+        existing.index.computedAt = Date.now()
+        existing.index.mtimeMs = metadata.mtimeMs
+        this._hits++
+        return existing.index
+      }
+      if (update.kind === "append") {
+        this._appendedBytes += update.bytesRead
+        let accumulator = existing.accumulator
+        let sessionLines = existing.index.summary.sessionLines
+        let blockedIds = existing.index.blockedToolUseIds
+        for (const line of update.lines) {
+          if (isSessionBoundary(line)) {
+            accumulator = createEmptySummaryAccumulator()
+            sessionLines = []
+            blockedIds = []
+            this._resets++
+            continue
+          }
+          sessionLines.push(line)
+          collectSessionToolUsage([line], accumulator)
+          collectBlockedIdsFromEntry(line, blockedIds)
+        }
+        const index = this.createIndex(sessionLines, accumulator, blockedIds, metadata.mtimeMs)
+        this.incrementalEntries.set(transcriptPath, {
+          index,
+          accumulator,
+          cursor: existing.cursor,
+        })
+        return index
+      }
+    }
+
+    this._coldRebuilds++
+    const built = await this.buildIndex(Bun.file(transcriptPath), metadata.size, metadata.mtimeMs)
+    if (!built) return null
+    const accumulator = collectSessionToolUsage(built.summary.sessionLines)
+    const cursor = new JsonlAppendCursor()
+    cursor.reset(metadata)
+    this.incrementalEntries.set(transcriptPath, { index: built, accumulator, cursor })
+    return built
   }
 
   private async buildIndex(
@@ -227,6 +301,20 @@ export class TranscriptIndexCache {
     }
   }
 
+  private createIndex(
+    sessionLines: string[],
+    accumulator: SummaryAccumulator,
+    blockedToolUseIds: string[],
+    mtimeMs: number
+  ): TranscriptIndex {
+    return {
+      summary: computeSummaryFromSessionLines(sessionLines, accumulator),
+      blockedToolUseIds,
+      mtimeMs,
+      computedAt: Date.now(),
+    }
+  }
+
   /** Invalidate only entries whose transcript path contains the project key for `cwd`. */
   invalidateProject(cwd: string): void {
     const projectKey = projectKeyFromCwd(cwd)
@@ -236,6 +324,9 @@ export class TranscriptIndexCache {
     for (const key of this.summaryEntries.keys()) {
       if (key.includes(projectKey)) this.summaryEntries.delete(key)
     }
+    for (const key of this.incrementalEntries.keys()) {
+      if (key.includes(projectKey)) this.incrementalEntries.delete(key)
+    }
     for (const key of this.inFlight.keys()) {
       if (key.includes(projectKey)) this.inFlight.delete(key)
     }
@@ -244,6 +335,7 @@ export class TranscriptIndexCache {
   invalidateAll(): void {
     this.entries.clear()
     this.summaryEntries.clear()
+    this.incrementalEntries.clear()
     this.inFlight.clear()
   }
 
@@ -252,7 +344,7 @@ export class TranscriptIndexCache {
   }
 
   get summarySize(): number {
-    return this.summaryEntries.size
+    return this.summaryEntries.size + this.incrementalEntries.size
   }
 
   get hits(): number {
@@ -263,12 +355,27 @@ export class TranscriptIndexCache {
     return this._misses
   }
 
+  get appendedBytes(): number {
+    return this._appendedBytes
+  }
+
+  get coldRebuilds(): number {
+    return this._coldRebuilds
+  }
+
+  get resets(): number {
+    return this._resets
+  }
+
   pruneOlderThan(cutoffMs: number): void {
     for (const [path, entry] of this.entries) {
       if (entry.computedAt < cutoffMs) this.entries.delete(path)
     }
     for (const [path, entry] of this.summaryEntries) {
       if (entry.computedAt < cutoffMs) this.summaryEntries.delete(path)
+    }
+    for (const [path, entry] of this.incrementalEntries) {
+      if (entry.index.computedAt < cutoffMs) this.incrementalEntries.delete(path)
     }
   }
 }

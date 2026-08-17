@@ -15,6 +15,98 @@ const NEWLINE_BYTE = 0x0a
 type JsonlBuffer = Uint8Array<ArrayBufferLike>
 const JSONL_TMP_SUFFIX = ".swiz-jsonl.tmp"
 const DEFAULT_JSONL_TAIL_INITIAL_BYTES = 256 * 1024
+const MAX_JSONL_APPEND_REMAINDER_BYTES = 1024 * 1024
+
+/** Metadata needed to safely continue a JSONL append scan. */
+export interface JsonlAppendMetadata {
+  size: number
+  mtimeMs: number
+  dev?: number
+  ino?: number
+}
+
+export interface JsonlAppendRead {
+  kind: "hit" | "append" | "cold"
+  lines: string[]
+  bytesRead: number
+}
+
+/**
+ * Stateful, byte-oriented cursor for append-only JSONL files.
+ *
+ * It only exposes newline-terminated records. Callers own their derived state
+ * and rebuild it when `kind` is `cold`; this keeps transcript and hook-capture
+ * consumers on one byte-accurate primitive without coupling their reducers.
+ */
+export class JsonlAppendCursor {
+  private offset = 0
+  private metadata: JsonlAppendMetadata | null = null
+  private remainder: JsonlBuffer = new Uint8Array(0)
+
+  reset(metadata: JsonlAppendMetadata): void {
+    this.offset = metadata.size
+    this.metadata = { ...metadata }
+    this.remainder = new Uint8Array(0)
+  }
+
+  clear(): void {
+    this.offset = 0
+    this.metadata = null
+    this.remainder = new Uint8Array(0)
+  }
+
+  async read(path: string, metadata: JsonlAppendMetadata): Promise<JsonlAppendRead> {
+    if (this.requiresColdRebuild(metadata)) {
+      this.clear()
+      return { kind: "cold", lines: [], bytesRead: 0 }
+    }
+
+    if (metadata.size === this.offset) {
+      this.metadata = { ...metadata }
+      return { kind: "hit", lines: [], bytesRead: 0 }
+    }
+
+    try {
+      const bytes = new Uint8Array(
+        await Bun.file(path).slice(this.offset, metadata.size).arrayBuffer()
+      )
+      const combined = concatUint8Arrays(this.remainder, bytes)
+      const lastNewline = combined.lastIndexOf(NEWLINE_BYTE)
+      const complete = lastNewline === -1 ? new Uint8Array(0) : combined.slice(0, lastNewline)
+      const remainder = lastNewline === -1 ? combined : combined.slice(lastNewline + 1)
+      if (remainder.length > MAX_JSONL_APPEND_REMAINDER_BYTES) {
+        this.clear()
+        return { kind: "cold", lines: [], bytesRead: 0 }
+      }
+      this.remainder = remainder
+      this.offset = metadata.size
+      this.metadata = { ...metadata }
+      const text = new TextDecoder().decode(complete)
+      return { kind: "append", lines: text ? text.split("\n") : [], bytesRead: bytes.length }
+    } catch {
+      this.clear()
+      return { kind: "cold", lines: [], bytesRead: 0 }
+    }
+  }
+
+  private requiresColdRebuild(next: JsonlAppendMetadata): boolean {
+    const previous = this.metadata
+    if (!previous) return true
+    if (next.size < this.offset) return true
+    const previousIdentity = identityOf(previous)
+    const nextIdentity = identityOf(next)
+    if (previousIdentity && nextIdentity && previousIdentity !== nextIdentity) return true
+    // Without a stable device/inode pair, a changed file is indistinguishable
+    // from replacement and must not retain derived state.
+    return !previousIdentity && (next.size !== this.offset || next.mtimeMs !== previous.mtimeMs)
+  }
+}
+
+function identityOf(metadata: JsonlAppendMetadata): string | null {
+  return Number.isFinite(metadata.dev) && Number.isFinite(metadata.ino)
+    ? `${metadata.dev}:${metadata.ino}`
+    : null
+}
 
 // ── Streaming / parsed-object reading ────────────────────────────────────────
 

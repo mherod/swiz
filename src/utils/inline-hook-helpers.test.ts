@@ -1,11 +1,12 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { mkdtemp } from "node:fs/promises"
+import { appendFile, mkdtemp } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import {
   classifyToolSearchTaskEvidence,
   isNativeTaskToolName,
   readNativeTaskToolAvailability,
+  readNativeTaskToolAvailabilityFromTranscript,
   resetNativeTaskToolAvailabilityCache,
   resolveNativeTaskToolAvailability,
   shouldEnforceTaskGovernance,
@@ -203,6 +204,34 @@ describe("readNativeTaskToolAvailability", () => {
     expect(await readNativeTaskToolAvailability("session-a", join(tmpdir(), "swiz-gone"))).toBe(
       "absent"
     )
+  })
+
+  test("keeps an unknown transcript verdict incremental until new task evidence arrives", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "swiz-task-transcript-"))
+    const transcript = join(dir, "session.jsonl")
+    await Bun.write(transcript, '{"type":"user","message":{"content":"hello"}}\n')
+    expect(await readNativeTaskToolAvailabilityFromTranscript(transcript)).toBe("unknown")
+    expect(await readNativeTaskToolAvailabilityFromTranscript(transcript)).toBe("unknown")
+    await appendFile(
+      transcript,
+      '{"type":"assistant","message":"No such tool available: TaskList"}\n'
+    )
+    expect(await readNativeTaskToolAvailabilityFromTranscript(transcript)).toBe("absent")
+  })
+
+  test("keeps an unknown capture verdict incremental until a targeted search settles it", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "swiz-toolsearch-append-"))
+    const capture = join(dir, "postToolUse.jsonl")
+    await Bun.write(capture, `${JSON.stringify({ session_id: "other", _toolSearch: {} })}\n`)
+    expect(await readNativeTaskToolAvailability("session-a", dir)).toBe("unknown")
+    await appendFile(
+      capture,
+      `${JSON.stringify({
+        session_id: "session-a",
+        _toolSearch: { query: "select:TaskCreate", matches: [] },
+      })}\n`
+    )
+    expect(await readNativeTaskToolAvailability("session-a", dir)).toBe("absent")
   })
 })
 

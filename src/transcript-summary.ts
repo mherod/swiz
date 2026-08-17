@@ -317,7 +317,7 @@ function parseAssistantToolBlocks(line: string): ToolBlock[] {
   return Array.isArray(content) ? content : []
 }
 
-interface SummaryAccumulator {
+export interface SummaryAccumulator {
   toolNames: string[]
   bashCommands: string[]
   skillInvocations: string[]
@@ -328,7 +328,7 @@ interface SummaryAccumulator {
   lastTimestamp: string | null
 }
 
-function createEmptySummaryAccumulator(): SummaryAccumulator {
+export function createEmptySummaryAccumulator(): SummaryAccumulator {
   return {
     toolNames: [],
     bashCommands: [],
