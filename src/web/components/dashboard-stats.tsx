@@ -38,6 +38,25 @@ interface ProjectPerformanceStatsProps {
   monitor?: MonitorMetric
 }
 
+function ProjectMetricExplainers() {
+  return (
+    <dl className="metric-explainers">
+      <div>
+        <dt>Total / avg / hottest</dt>
+        <dd>Project dispatches since daemon start, weighted mean latency, and most-used event.</dd>
+      </div>
+      <div>
+        <dt>Hooks avg</dt>
+        <dd>Dispatch-weighted time spent inside synchronous and asynchronous Swiz hooks.</dd>
+      </div>
+      <div>
+        <dt>Monitor avg / p95</dt>
+        <dd>Transcript scan duration; p95 is the slow-end threshold for 95% of scans.</dd>
+      </div>
+    </dl>
+  )
+}
+
 function ProjectPerformanceStats({
   totalDispatches,
   avgLatency,
@@ -83,6 +102,7 @@ function ProjectPerformanceStats({
           <strong>{Math.round(monitor?.p95Ms ?? 0)}ms</strong> monitor p95
         </span>
       </div>
+      <ProjectMetricExplainers />
     </>
   )
 }
@@ -225,10 +245,12 @@ export function DashboardStats({
   )
   const avgLatency = useMemo(
     () =>
-      events.length
-        ? Math.round(events.reduce((sum, event) => sum + event.avgMs, 0) / events.length)
+      totalDispatches > 0
+        ? Math.round(
+            events.reduce((sum, event) => sum + event.avgMs * event.count, 0) / totalDispatches
+          )
         : 0,
-    [events]
+    [events, totalDispatches]
   )
   const hottestEvent = events[0]?.name ?? "n/a"
   const hookRuntimeMs = useMemo(
@@ -271,29 +293,36 @@ export function DashboardStats({
           activeRuntimeSeconds={activeRuntimeSeconds}
         />
         {sessionTokenStats && (
-          <div
-            className="diagnostic-breakdown session-token-stats"
-            title="Cumulative processed tokens and generated-token rate from this session transcript"
-          >
-            <span>
-              <strong>
-                <NumberTicker value={sessionTokenStats.totalTokens} />
-              </strong>{" "}
-              processed
-            </span>
-            <span>
-              <strong>
-                <NumberTicker value={sessionTokenStats.outputTokensPerMinute} />
-              </strong>{" "}
-              output tok/min
-            </span>
-            <span>
-              <strong>
-                <NumberTicker value={sessionTokenStats.outputTokens} />
-              </strong>{" "}
-              generated
-            </span>
-          </div>
+          <>
+            <div
+              className="diagnostic-breakdown session-token-stats"
+              title="Cumulative processed tokens and generated-token rate from this session transcript"
+            >
+              <span>
+                <strong>
+                  <NumberTicker value={sessionTokenStats.totalTokens} />
+                </strong>{" "}
+                processed
+              </span>
+              <span>
+                <strong>
+                  <NumberTicker value={sessionTokenStats.outputTokensPerMinute} />
+                </strong>{" "}
+                output tok/min
+              </span>
+              <span>
+                <strong>
+                  <NumberTicker value={sessionTokenStats.outputTokens} />
+                </strong>{" "}
+                generated
+              </span>
+            </div>
+            <p className="metric-note metric-token-note">
+              Processed includes repeatedly reused cached input. Output tok/min is generated-token
+              growth between the first and latest session telemetry samples; generated is cumulative
+              output only.
+            </p>
+          </>
         )}
       </div>
       <details className="stats-diagnostics">

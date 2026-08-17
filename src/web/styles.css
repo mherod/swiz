@@ -3232,6 +3232,42 @@ tbody tr:hover {
   margin-top: 0.45rem;
 }
 
+.metric-token-note {
+  max-width: 72ch;
+}
+
+.metric-explainers {
+  display: grid;
+  gap: 0.45rem;
+  margin: 0.75rem 0 0;
+}
+
+.metric-explainers > div {
+  display: grid;
+  grid-template-columns: minmax(7.5rem, 0.35fr) 1fr;
+  gap: 0.55rem;
+}
+
+.metric-explainers dt {
+  color: var(--text);
+  font-size: 0.76rem;
+  font-weight: 600;
+}
+
+.metric-explainers dd {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.76rem;
+  line-height: 1.45;
+}
+
+@media (max-width: 600px) {
+  .metric-explainers > div {
+    grid-template-columns: 1fr;
+    gap: 0.15rem;
+  }
+}
+
 .stats-active-badge {
   display: inline-flex;
   align-items: center;
