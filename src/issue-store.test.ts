@@ -1063,11 +1063,43 @@ describe("ghListToRestFallback", () => {
     expect(result[0]!.updatedAt).toBe("2024-06-01T00:00:00Z")
   })
 
-  test("maps run list args to REST actions/runs endpoint with normalize", () => {
-    const mapping = ghListToRestFallback(["run", "list", "--json", "headSha,databaseId"])
-    expect(mapping).not.toBeNull()
-    expect(mapping!.endpoint).toContain("actions/runs")
-    expect(mapping!.normalize).toBeTypeOf("function")
+  test("maps run list args to REST actions/runs endpoint with branch and limit parameters", () => {
+    const branchMapping = ghListToRestFallback([
+      "run",
+      "list",
+      "--branch",
+      "feature/foo",
+      "--limit",
+      "10",
+      "--json",
+      "headSha,databaseId",
+    ])
+    expect(branchMapping).not.toBeNull()
+    expect(branchMapping!.endpoint).toBe(
+      "repos/{owner}/{repo}/actions/runs?branch=feature%2Ffoo&per_page=10"
+    )
+    expect(branchMapping!.normalize).toBeTypeOf("function")
+
+    const nestedBranchMapping = ghListToRestFallback([
+      "run",
+      "list",
+      "--branch",
+      "feature/slash/nested",
+      "--limit",
+      "50",
+    ])
+    expect(nestedBranchMapping).not.toBeNull()
+    expect(nestedBranchMapping!.endpoint).toBe(
+      "repos/{owner}/{repo}/actions/runs?branch=feature%2Fslash%2Fnested&per_page=50"
+    )
+
+    const defaultMapping = ghListToRestFallback(["run", "list"])
+    expect(defaultMapping).not.toBeNull()
+    expect(defaultMapping!.endpoint).toBe("repos/{owner}/{repo}/actions/runs?per_page=20")
+
+    const invalidLimitMapping = ghListToRestFallback(["run", "list", "--limit", "invalid"])
+    expect(invalidLimitMapping).not.toBeNull()
+    expect(invalidLimitMapping!.endpoint).toBe("repos/{owner}/{repo}/actions/runs?per_page=20")
   })
 
   test("normalize converts REST run shape to gh CLI shape", () => {
@@ -1764,67 +1796,331 @@ describe("syncUpstreamState with labels, milestones, and branch data", () => {
     }
   })
 
-  test("syncs PR branch detail fetches in parallel for multiple changed PRs", async () => {
+  test("enforces bounded concurrency cap of at most 4 across all raw enrichment requests", async () => {
     const store = createStore()
-    const callLog: string[] = []
-    const wait = () => new Promise((resolve) => setTimeout(resolve, 40))
+    let inFlight = 0
+    let maxInFlight = 0
+    const delay = () =>
+      new Promise((resolve) => {
+        inFlight++
+        if (inFlight > maxInFlight) maxInFlight = inFlight
+        setTimeout(() => {
+          inFlight--
+          resolve(null)
+        }, 20)
+      })
 
     const client: GitHubClient = {
       listIssues: async () => [],
       listPullRequests: async (_cwd, state) => {
         if (state === "open") {
           return [
-            { number: 11, title: "PR 11", headRefName: "feat/three" },
-            {
-              number: 22,
-              title: "PR 22",
-              headRefName: "feat/two",
-              requestedReviewers: [{ login: "alice" }],
-            },
-            { number: 33, title: "PR 33", headRefName: "feat/one" },
+            { number: 1, title: "PR 1", headRefName: "feat/1" },
+            { number: 2, title: "PR 2", headRefName: "feat/2" },
+            { number: 3, title: "PR 3", headRefName: "feat/3" },
+            { number: 4, title: "PR 4", headRefName: "feat/4" },
+            { number: 5, title: "PR 5", headRefName: "feat/5" },
           ]
         }
         return []
       },
       listWorkflowRuns: async () => [],
-      listIssueComments: async (_cwd, issueNumber) => {
-        callLog.push(`comment-start:${issueNumber}`)
-        await wait()
-        callLog.push(`comment-end:${issueNumber}`)
+      listIssueComments: async () => {
+        await delay()
         return [{ id: 1 }]
       },
       listLabels: async () => [],
       listMilestones: async () => [],
-      listBranchWorkflowRuns: async () => [],
-      getBranchProtection: async () => null,
+      listBranchWorkflowRuns: async () => {
+        await delay()
+        return []
+      },
+      getBranchProtection: async () => {
+        await delay()
+        return null
+      },
       listIssueEventsSince: async () => null,
-      listPullRequestReviews: async (_cwd, prNumber) => {
-        callLog.push(`review-start:${prNumber}`)
-        await wait()
-        callLog.push(`review-end:${prNumber}`)
+      listPullRequestReviews: async () => {
+        await delay()
         return []
       },
     }
 
     try {
       const result = await syncUpstreamState("test/repo", "/tmp", { store, client })
-      const firstFetchEnd = Math.min(
-        callLog.indexOf("comment-end:11"),
-        callLog.indexOf("review-end:11"),
-        callLog.indexOf("comment-end:22"),
-        callLog.indexOf("review-end:22")
-      )
+      expect(result.prBranchDetail.upserted).toBe(5)
+      expect(maxInFlight).toBeLessThanOrEqual(4)
+      expect(maxInFlight).toBeGreaterThan(0)
+    } finally {
+      store.close()
+    }
+  })
 
+  test("enriches only changed PRs and their head branches during refresh", async () => {
+    const store = createStore()
+    const branchRunCalls: string[] = []
+    const branchProtectionCalls: string[] = []
+    const commentCalls: number[] = []
+    const reviewCalls: number[] = []
+
+    let prs: Array<{
+      number: number
+      title: string
+      headRefName: string
+      requestedReviewers?: Array<{ login: string }>
+    }> = [
+      { number: 11, title: "PR 11", headRefName: "feat/three" },
+      { number: 22, title: "PR 22", headRefName: "feat/two" },
+      { number: 33, title: "PR 33", headRefName: "feat/one" },
+    ]
+
+    const client: GitHubClient = {
+      listIssues: async () => [],
+      listPullRequests: async (_cwd, state) => (state === "open" ? prs : []),
+      listWorkflowRuns: async () => [],
+      listIssueComments: async (_cwd, issueNumber) => {
+        commentCalls.push(issueNumber)
+        return [{ id: 1 }]
+      },
+      listLabels: async () => [],
+      listMilestones: async () => [],
+      listBranchWorkflowRuns: async (_cwd, branch) => {
+        branchRunCalls.push(branch)
+        return []
+      },
+      getBranchProtection: async (_cwd, branch) => {
+        branchProtectionCalls.push(branch)
+        return null
+      },
+      listIssueEventsSince: async () => null,
+      listPullRequestReviews: async (_cwd, prNumber) => {
+        reviewCalls.push(prNumber)
+        return []
+      },
+    }
+
+    try {
+      // First sync: all 3 PRs are new
+      const firstResult = await syncUpstreamState("test/repo", "/tmp", { store, client })
+      expect(firstResult.prBranchDetail.upserted).toBe(3)
+      expect(commentCalls).toEqual([11, 22, 33])
+      expect(reviewCalls).toEqual([11, 22, 33])
+      expect(branchRunCalls).toContain("main")
+      expect(branchRunCalls).toContain("feat/three")
+      expect(branchRunCalls).toContain("feat/two")
+      expect(branchRunCalls).toContain("feat/one")
+
+      // Clear call trackers
+      branchRunCalls.length = 0
+      branchProtectionCalls.length = 0
+      commentCalls.length = 0
+      reviewCalls.length = 0
+
+      // Second sync: modify only PR 22
+      prs = [
+        { number: 11, title: "PR 11", headRefName: "feat/three" },
+        {
+          number: 22,
+          title: "PR 22 updated",
+          headRefName: "feat/two",
+          requestedReviewers: [{ login: "alice" }],
+        },
+        { number: 33, title: "PR 33", headRefName: "feat/one" },
+      ]
+
+      const secondResult = await syncUpstreamState("test/repo", "/tmp", { store, client })
+      expect(secondResult.prBranchDetail.upserted).toBe(1)
+      expect(secondResult.prBranchDetail.changes.map((c) => c.key)).toEqual(["feat/two"])
+
+      // Only PR 22 and its head branch (+ default branch) were requested
+      expect(commentCalls).toEqual([22])
+      expect(reviewCalls).toEqual([22])
+      expect(branchRunCalls).toEqual(["main", "feat/two"])
+      expect(branchProtectionCalls).toEqual(["main", "feat/two"])
+    } finally {
+      store.close()
+    }
+  })
+
+  test("refreshes default branch CI runs and protection when no PRs changed", async () => {
+    const store = createStore()
+    const branchRunCalls: string[] = []
+    const branchProtectionCalls: string[] = []
+    const prCommentCalls: number[] = []
+    const reviewCalls: number[] = []
+
+    const prs = [{ number: 11, title: "PR 11", headRefName: "feat/three" }]
+
+    let issues = [{ number: 1, title: "Issue 1", updatedAt: "2024-01-01T00:00:00Z" }]
+
+    const client: GitHubClient = {
+      listIssues: async () => issues,
+      listPullRequests: async (_cwd, state) => (state === "open" ? prs : []),
+      listWorkflowRuns: async () => [],
+      listIssueComments: async (_cwd, issueNumber) => {
+        if (prs.some((p) => p.number === issueNumber)) {
+          prCommentCalls.push(issueNumber)
+        }
+        return []
+      },
+      listLabels: async () => [],
+      listMilestones: async () => [],
+      listBranchWorkflowRuns: async (_cwd, branch) => {
+        branchRunCalls.push(branch)
+        return []
+      },
+      getBranchProtection: async (_cwd, branch) => {
+        branchProtectionCalls.push(branch)
+        return null
+      },
+      listIssueEventsSince: async () => null,
+      listPullRequestReviews: async (_cwd, prNumber) => {
+        reviewCalls.push(prNumber)
+        return []
+      },
+    }
+
+    try {
+      await syncUpstreamState("test/repo", "/tmp", { store, client })
+
+      branchRunCalls.length = 0
+      branchProtectionCalls.length = 0
+      prCommentCalls.length = 0
+      reviewCalls.length = 0
+
+      // Update issues to trigger sync, keeping PRs unchanged
+      issues = [{ number: 1, title: "Issue 1 updated", updatedAt: "2024-01-02T00:00:00Z" }]
+
+      await syncUpstreamState("test/repo", "/tmp", { store, client })
+
+      // Default branch should be synced, but not unchanged PR branch
+      expect(branchRunCalls).toEqual(["main"])
+      expect(branchProtectionCalls).toEqual(["main"])
+      expect(prCommentCalls).toEqual([])
+      expect(reviewCalls).toEqual([])
+    } finally {
+      store.close()
+    }
+  })
+
+  test("applies results in deterministic branch and PR order regardless of fetch completion order", async () => {
+    const store = createStore()
+
+    const prs = [
+      { number: 11, title: "PR 11", headRefName: "feat/three" },
+      { number: 22, title: "PR 22", headRefName: "feat/two" },
+      { number: 33, title: "PR 33", headRefName: "feat/one" },
+    ]
+
+    // Complete in reverse order (PR 33 finishes first, PR 11 finishes last)
+    const client: GitHubClient = {
+      listIssues: async () => [],
+      listPullRequests: async (_cwd, state) => (state === "open" ? prs : []),
+      listWorkflowRuns: async () => [],
+      listIssueComments: async (_cwd, num) => {
+        const delay = num === 11 ? 50 : num === 22 ? 25 : 5
+        await new Promise((r) => setTimeout(r, delay))
+        return [{ id: num }]
+      },
+      listLabels: async () => [],
+      listMilestones: async () => [],
+      listBranchWorkflowRuns: async (_cwd, branch) => {
+        const delay = branch === "main" ? 40 : 10
+        await new Promise((r) => setTimeout(r, delay))
+        return [
+          {
+            headSha: `sha-${branch}`,
+            databaseId: 100,
+            status: "completed",
+            conclusion: "success",
+            url: `url-${branch}`,
+          },
+        ]
+      },
+      getBranchProtection: async () => null,
+      listIssueEventsSince: async () => null,
+      listPullRequestReviews: async (_cwd, num) => {
+        const delay = num === 11 ? 45 : num === 22 ? 20 : 5
+        await new Promise((r) => setTimeout(r, delay))
+        return []
+      },
+    }
+
+    try {
+      const result = await syncUpstreamState("test/repo", "/tmp", { store, client })
       expect(result.prBranchDetail.upserted).toBe(3)
-      expect(result.prBranchDetail.changes.map((change) => change.key)).toEqual([
+      expect(result.prBranchDetail.changes.map((c) => c.key)).toEqual([
         "feat/three",
         "feat/two",
         "feat/one",
       ])
-      expect(callLog.indexOf("comment-start:22")).toBeLessThan(firstFetchEnd)
-      expect(callLog.indexOf("review-start:22")).toBeLessThan(firstFetchEnd)
-      expect(callLog.indexOf("comment-start:33")).toBeLessThan(firstFetchEnd)
-      expect(callLog.indexOf("review-start:33")).toBeLessThan(firstFetchEnd)
+      expect(result.branchCi.changes.map((c) => c.key)).toEqual([
+        "main",
+        "feat/three",
+        "feat/two",
+        "feat/one",
+      ])
+    } finally {
+      store.close()
+    }
+  })
+
+  test("preserves existing cached details when enrichment returns null (fail-open)", async () => {
+    const store = createStore()
+    const prs = [{ number: 11, title: "PR 11", headRefName: "feat/three" }]
+
+    const client1: GitHubClient = {
+      listIssues: async () => [],
+      listPullRequests: async (_cwd, state) => (state === "open" ? prs : []),
+      listWorkflowRuns: async () => [],
+      listIssueComments: async () => [{ id: 101, body: "hello" }],
+      listLabels: async () => [],
+      listMilestones: async () => [],
+      listBranchWorkflowRuns: async () => [
+        { headSha: "sha1", databaseId: 1, status: "completed", conclusion: "success", url: "u" },
+      ],
+      getBranchProtection: async () => ({
+        branch: "main",
+        enforceAdmins: true,
+        requiredLinearHistory: false,
+        allowForcePushes: false,
+        allowDeletions: false,
+      }),
+      listIssueEventsSince: async () => null,
+      listPullRequestReviews: async () => [],
+    }
+
+    try {
+      await syncUpstreamState("test/repo", "/tmp", { store, client: client1 })
+      const initialRuns = store.getCiBranchRuns("test/repo", "main")
+      expect(initialRuns).toHaveLength(1)
+      const initialDetail = store.getPrBranchDetail("test/repo", "feat/three")
+      expect(initialDetail).not.toBeNull()
+      expect(initialDetail!.commentCount).toBe(1)
+
+      // Second client returns null for branch runs and branch protection
+      const client2: GitHubClient = {
+        listIssues: async () => [],
+        listPullRequests: async (_cwd, state) =>
+          state === "open"
+            ? [{ number: 11, title: "PR 11 modified", headRefName: "feat/three" }]
+            : [],
+        listWorkflowRuns: async () => [],
+        listIssueComments: async () => null,
+        listLabels: async () => [],
+        listMilestones: async () => [],
+        listBranchWorkflowRuns: async () => null,
+        getBranchProtection: async () => null,
+        listIssueEventsSince: async () => null,
+        listPullRequestReviews: async () => null,
+      }
+
+      await syncUpstreamState("test/repo", "/tmp", { store, client: client2 })
+      // Previously cached runs and protection remain
+      const preservedRuns = store.getCiBranchRuns("test/repo", "main")
+      expect(preservedRuns).toHaveLength(1)
+      const preservedProtection = store.getBranchProtection("test/repo", "main")
+      expect(preservedProtection).not.toBeNull()
     } finally {
       store.close()
     }

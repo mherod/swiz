@@ -363,17 +363,19 @@ interface LefthookConfig {
 }
 
 describe("lefthook.yml config integrity", () => {
-  test("existing pre-commit commands (lint, typecheck) are still present", async () => {
+  test("existing pre-commit commands (lint, typecheck, daemon-restart) are still present", async () => {
     const raw = await Bun.file("lefthook.yml").text()
     const config = parseYaml(raw) as LefthookConfig
     expect(config["pre-commit"]?.commands).toHaveProperty("lint")
     expect(config["pre-commit"]?.commands).toHaveProperty("typecheck")
+    expect(config["pre-commit"]?.commands).toHaveProperty("daemon-restart")
   })
 
-  test("existing pre-push test command is still present", async () => {
+  test("existing pre-push commands (test, daemon-restart) are still present", async () => {
     const raw = await Bun.file("lefthook.yml").text()
     const config = parseYaml(raw) as LefthookConfig
     expect(config["pre-push"]?.commands).toHaveProperty("test")
+    expect(config["pre-push"]?.commands).toHaveProperty("daemon-restart")
   })
 })
 

@@ -61,6 +61,35 @@ function buildRepoListEndpoint(
   return `repos/{owner}/{repo}/${resource}?${params.toString()}`
 }
 
+function buildWorkflowRunsEndpoint(args: string[], fallbackPerPage = 20): string {
+  const params = new URLSearchParams()
+  const branch = getGhFlagValue(args, "--branch")
+  if (branch) {
+    params.set("branch", branch)
+  }
+  params.set("per_page", String(getRestPerPage(args, fallbackPerPage)))
+  return `repos/{owner}/{repo}/actions/runs?${params.toString()}`
+}
+
+function normalizeRestWorkflowRuns(raw: unknown) {
+  const data = raw as {
+    workflow_runs?: Array<{
+      head_sha: string
+      id: number
+      status: string
+      conclusion: string | null
+      html_url: string
+    }>
+  }
+  return (data?.workflow_runs ?? []).map((r) => ({
+    headSha: r.head_sha,
+    databaseId: r.id,
+    status: r.status,
+    conclusion: r.conclusion ?? "",
+    url: r.html_url,
+  }))
+}
+
 function normalizeRestUser(user: unknown): { login: string } | null {
   const record = asRecord(user)
   const login = typeof record?.login === "string" ? record.login : null
@@ -266,27 +295,6 @@ function normalizeRestPullRequests(raw: unknown): Array<{
  * The `normalize` function adapts REST response shapes to match gh CLI output shapes.
  */
 const REST_FALLBACK_MAP: Record<string, RestFallbackMapping> = {
-  "run:list": {
-    endpoint: "repos/{owner}/{repo}/actions/runs?per_page=20",
-    normalize: (raw) => {
-      const data = raw as {
-        workflow_runs?: Array<{
-          head_sha: string
-          id: number
-          status: string
-          conclusion: string | null
-          html_url: string
-        }>
-      }
-      return (data.workflow_runs ?? []).map((r) => ({
-        headSha: r.head_sha,
-        databaseId: r.id,
-        status: r.status,
-        conclusion: r.conclusion ?? "",
-        url: r.html_url,
-      }))
-    },
-  },
   "release:list": {
     endpoint: "repos/{owner}/{repo}/releases?per_page=30",
     normalize: (raw) => {
@@ -444,6 +452,12 @@ export function ghListToRestFallback(args: string[]): RestFallbackMapping | null
     return {
       endpoint: buildRepoListEndpoint("pulls", args),
       normalize: normalizeRestPullRequests,
+    }
+  }
+  if (args[0] === "run" && args[1] === "list") {
+    return {
+      endpoint: buildWorkflowRunsEndpoint(args),
+      normalize: normalizeRestWorkflowRuns,
     }
   }
   return REST_FALLBACK_MAP[`${args[0]}:${args[1]}`] ?? null

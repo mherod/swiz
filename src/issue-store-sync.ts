@@ -1,14 +1,18 @@
 import { debugLog } from "./debug.ts"
 import { getRepoSlug } from "./git-helpers.ts"
 import type {
+  GitHubBranchProtectionRecord,
   GitHubCiRunRecord,
   GitHubClient,
+  GitHubCommentRecord,
   GitHubIssueRecord,
   GitHubLabelRecord,
   GitHubMilestoneRecord,
   GitHubPullRequestRecord,
+  GitHubReviewRecord,
   IssueStore,
 } from "./issue-store.ts"
+import { runWithLimit } from "./issue-store-replay.ts"
 import { mapSyncedPrBranchDetail } from "./pr-branch-detail.ts"
 import { getDefaultBranch } from "./utils/git-utils.ts"
 
@@ -252,6 +256,13 @@ interface EntitySyncOps {
   getRaw: (repo: string, number: number) => string | null
 }
 
+/** Shared concurrency cap for raw enrichment requests (branch runs, protection, comments, reviews). */
+const RAW_ENRICHMENT_CONCURRENCY = 4
+
+export interface EntitySyncOutcome {
+  changedNumbers: Set<number>
+}
+
 /**
  * Sync an entity group with change detection. Only upserts entities whose
  * serialized JSON differs from the stored version.
@@ -262,7 +273,8 @@ function syncEntityGroup(
   closed: { number: number }[] | null,
   ops: EntitySyncOps,
   bucket: SyncBucket
-): void {
+): EntitySyncOutcome {
+  const changedNumbers = new Set<number>()
   if (open) {
     const changed: { number: number }[] = []
     for (const item of open) {
@@ -273,6 +285,7 @@ function syncEntityGroup(
       } else {
         const isNew = existingJson === null
         changed.push(item)
+        changedNumbers.add(item.number)
         bucket.changes.push({
           kind: isNew ? "new" : "updated",
           key: `#${item.number}`,
@@ -294,6 +307,7 @@ function syncEntityGroup(
     )
     bucket.removed += closed.length
   }
+  return { changedNumbers }
 }
 
 type CiRunInput = {
@@ -423,16 +437,19 @@ function syncMilestones(
   }
 }
 
-/** Collect unique branch names: default branch + branches from open PRs. */
+/** Collect unique branch names: default branch + head branches from changed PRs. */
 function collectSyncBranches(
-  prs: { headRefName?: string }[] | null,
+  prs: { number: number; headRefName?: string }[] | null,
+  changedPrNumbers: Set<number>,
   defaultBranch: string
 ): string[] {
   const branches = new Set<string>()
   branches.add(defaultBranch)
   if (prs) {
     for (const pr of prs) {
-      if (pr.headRefName) branches.add(pr.headRefName)
+      if (changedPrNumbers.has(pr.number) && pr.headRefName) {
+        branches.add(pr.headRefName)
+      }
     }
   }
   return [...branches]
@@ -497,61 +514,87 @@ function syncBranchProtectionResults(
   }
 }
 
-/** Sync CI runs and PR review detail for branches with open PRs plus the default branch. */
-async function syncBranchData(
+function applyPrBranchDetailResults(
   ctx: SyncContext,
-  prs: { number: number; headRefName?: string }[] | null,
-  prsChanged: boolean
-): Promise<void> {
-  // Always sync the default branch CI and protection (cheap, changes frequently).
-  // Only sync PR-specific branches when PRs have changed.
-  const defaultBranch = await getDefaultBranch(ctx.cwd)
-  const branches = prsChanged ? collectSyncBranches(prs, defaultBranch) : [defaultBranch]
-
-  const [branchRunResults, branchProtectionResults] = await Promise.all([
-    Promise.all(branches.map((branch) => ctx.client.listBranchWorkflowRuns(ctx.cwd, branch))),
-    Promise.all(branches.map((branch) => ctx.client.getBranchProtection(ctx.cwd, branch))),
-  ])
-  upsertBranchCiRuns(ctx.store, ctx.repo, branches, branchRunResults, ctx.result)
-  syncBranchProtectionResults(ctx, branches, branchProtectionResults)
-
-  // Sync PR branch detail only for PRs that actually changed
-  if (!prs || !prsChanged) return
-  // Start all per-PR detail fetches together, then apply results in PR order.
-  const prSyncTasks = prs
-    .filter((pr): pr is { number: number; headRefName: string } => Boolean(pr.headRefName))
-    .map(async (pr) => {
-      const [comments, reviews] = await Promise.all([
-        ctx.client.listIssueComments(ctx.cwd, pr.number),
-        ctx.client.listPullRequestReviews(ctx.cwd, pr.number),
-      ])
-      const prData = pr as {
-        reviewDecision?: string
-        requestedReviewers?: Array<{ login: string }>
-        mergeable?: string
-      }
-      const detail = mapSyncedPrBranchDetail(prData, comments, reviews)
-      const newJson = JSON.stringify(detail)
-      const existingJson = ctx.store.getPrBranchDetailRaw(ctx.repo, pr.headRefName)
-      if (existingJson === newJson) return null
-      return { headRefName: pr.headRefName, pr, detail, newJson, existingJson }
-    })
-
-  const resolvedPrDetails = await Promise.all(prSyncTasks)
-  for (const resolved of resolvedPrDetails) {
-    if (!resolved) continue
-    const { headRefName, pr, detail, newJson, existingJson } = resolved
-    ctx.store.upsertPrBranchDetail(ctx.repo, headRefName, detail)
+  changedPrs: { number: number; headRefName: string }[],
+  prCommentResults: Map<number, GitHubCommentRecord[] | null>,
+  prReviewResults: Map<number, GitHubReviewRecord[] | null>
+): void {
+  for (const pr of changedPrs) {
+    const comments = prCommentResults.get(pr.number) ?? null
+    const reviews = prReviewResults.get(pr.number) ?? null
+    const prData = pr as {
+      reviewDecision?: string
+      requestedReviewers?: Array<{ login: string }>
+      mergeable?: string
+    }
+    const detail = mapSyncedPrBranchDetail(prData, comments, reviews)
+    const newJson = JSON.stringify(detail)
+    const existingJson = ctx.store.getPrBranchDetailRaw(ctx.repo, pr.headRefName)
+    if (existingJson === newJson) continue
+    ctx.store.upsertPrBranchDetail(ctx.repo, pr.headRefName, detail)
     ctx.result.prBranchDetail.upserted++
     ctx.result.prBranchDetail.changes.push({
       kind: existingJson === null ? "new" : "updated",
-      key: headRefName,
+      key: pr.headRefName,
       reason:
         existingJson === null
           ? `PR #${pr.number}`
           : describeChanges(existingJson, newJson) || "review/comments changed",
     })
   }
+}
+
+/** Sync CI runs and PR review detail for branches with open PRs plus the default branch. */
+async function syncBranchData(
+  ctx: SyncContext,
+  prs: { number: number; headRefName?: string }[] | null,
+  changedPrNumbers: Set<number>
+): Promise<void> {
+  // Always sync the default branch CI and protection (cheap, changes frequently).
+  // Only sync PR-specific branches when PRs have changed.
+  const defaultBranch = await getDefaultBranch(ctx.cwd)
+  const branches = collectSyncBranches(prs, changedPrNumbers, defaultBranch)
+
+  const changedPrs = (prs ?? []).filter(
+    (pr): pr is { number: number; headRefName: string } =>
+      changedPrNumbers.has(pr.number) && Boolean(pr.headRefName)
+  )
+
+  const branchRunResults = new Array<GitHubCiRunRecord[] | null>(branches.length)
+  const branchProtectionResults = new Array<GitHubBranchProtectionRecord | null>(branches.length)
+  const prCommentResults = new Map<number, GitHubCommentRecord[] | null>()
+  const prReviewResults = new Map<number, GitHubReviewRecord[] | null>()
+
+  const tasks: (() => Promise<void>)[] = []
+
+  for (let i = 0; i < branches.length; i++) {
+    const branch = branches[i]!
+    const index = i
+    tasks.push(async () => {
+      branchRunResults[index] = await ctx.client.listBranchWorkflowRuns(ctx.cwd, branch)
+    })
+    tasks.push(async () => {
+      branchProtectionResults[index] = await ctx.client.getBranchProtection(ctx.cwd, branch)
+    })
+  }
+
+  for (const pr of changedPrs) {
+    tasks.push(async () => {
+      const comments = await ctx.client.listIssueComments(ctx.cwd, pr.number)
+      prCommentResults.set(pr.number, comments)
+    })
+    tasks.push(async () => {
+      const reviews = await ctx.client.listPullRequestReviews(ctx.cwd, pr.number)
+      prReviewResults.set(pr.number, reviews)
+    })
+  }
+
+  await runWithLimit(RAW_ENRICHMENT_CONCURRENCY, tasks)
+
+  upsertBranchCiRuns(ctx.store, ctx.repo, branches, branchRunResults, ctx.result)
+  syncBranchProtectionResults(ctx, branches, branchProtectionResults)
+  applyPrBranchDetailResults(ctx, changedPrs, prCommentResults, prReviewResults)
 }
 
 /** Identify which issue numbers need comment sync: label-gated + recently-updated. */
@@ -654,13 +697,18 @@ interface PrimarySyncPayloads {
   closedPrs: GitHubPullRequestRecord[] | null
 }
 
+export interface PrimarySyncOutcome {
+  changedIssueNumbers: Set<number>
+  changedPrNumbers: Set<number>
+}
+
 function syncPrimaryEntities(
   s: IssueStore,
   repo: string,
   payloads: PrimarySyncPayloads,
   result: UpstreamSyncResult
-): void {
-  syncEntityGroup(
+): PrimarySyncOutcome {
+  const issuesOutcome = syncEntityGroup(
     repo,
     payloads.issues,
     payloads.closedIssues,
@@ -672,7 +720,7 @@ function syncPrimaryEntities(
     },
     result.issues
   )
-  syncEntityGroup(
+  const prsOutcome = syncEntityGroup(
     repo,
     payloads.prs,
     payloads.closedPrs,
@@ -687,6 +735,10 @@ function syncPrimaryEntities(
   syncCiRuns(s, repo, payloads.runs, result)
   syncLabels(s, repo, payloads.labels, result)
   syncMilestones(s, repo, payloads.milestones, result)
+  return {
+    changedIssueNumbers: issuesOutcome.changedNumbers,
+    changedPrNumbers: prsOutcome.changedNumbers,
+  }
 }
 
 function checkAllPrimaryListsCached(
@@ -747,24 +799,29 @@ async function fetchOpenEntities(
   ])
 }
 
+interface PrimarySyncState {
+  payloads: PrimarySyncPayloads
+  issuesChanged: boolean
+  prsChanged: boolean
+  changedPrNumbers: Set<number>
+}
+
 async function syncSecondaryEntities(
   ctx: SyncContext,
-  payloads: PrimarySyncPayloads,
-  issuesChanged: boolean,
-  prsChanged: boolean,
+  primary: PrimarySyncState,
   signal?: AbortSignal
 ): Promise<void> {
   const allPrimaryListsCached = checkAllPrimaryListsCached(
     ctx.result.restCache.notModified,
-    payloads,
-    issuesChanged,
-    prsChanged
+    primary.payloads,
+    primary.issuesChanged,
+    primary.prsChanged
   )
   if (allPrimaryListsCached) return
 
-  await syncBranchData(ctx, payloads.prs, prsChanged)
+  await syncBranchData(ctx, primary.payloads.prs, primary.changedPrNumbers)
   if (signal?.aborted) return
-  await syncComments(ctx, payloads.issues, issuesChanged)
+  await syncComments(ctx, primary.payloads.issues, primary.issuesChanged)
   if (signal?.aborted) return
   await syncIssueEvents(ctx.store, ctx.client, ctx.repo, ctx.result)
 }
@@ -772,7 +829,7 @@ async function syncSecondaryEntities(
 async function syncPrimaryData(
   ctx: SyncContext,
   signal?: AbortSignal
-): Promise<{ payloads: PrimarySyncPayloads; issuesChanged: boolean; prsChanged: boolean } | null> {
+): Promise<PrimarySyncState | null> {
   const [issues, prs, runs, labels, milestones] = await fetchOpenEntities(ctx.client, ctx.cwd)
   if (signal?.aborted) return null
 
@@ -798,8 +855,13 @@ async function syncPrimaryData(
     closedPrs,
   }
 
-  syncPrimaryEntities(ctx.store, ctx.repo, payloads, ctx.result)
-  return { payloads, issuesChanged, prsChanged }
+  const outcome = syncPrimaryEntities(ctx.store, ctx.repo, payloads, ctx.result)
+  return {
+    payloads,
+    issuesChanged,
+    prsChanged,
+    changedPrNumbers: outcome.changedPrNumbers,
+  }
 }
 
 async function resolveSyncSetup(
@@ -836,13 +898,7 @@ export async function syncUpstreamState(
   const primary = await syncPrimaryData(ctx, signal)
   if (!primary || signal?.aborted) return ctx.result
 
-  await syncSecondaryEntities(
-    ctx,
-    primary.payloads,
-    primary.issuesChanged,
-    primary.prsChanged,
-    signal
-  )
+  await syncSecondaryEntities(ctx, primary, signal)
   if (signal?.aborted) return ctx.result
 
   updateSyncFreshnessCursor(ctx, primary.payloads.issues !== null && primary.payloads.prs !== null)

@@ -106,7 +106,10 @@ function invalidateLocalCache(store: IssueStore, repo: string, mutation: Mutatio
 }
 
 /** Simple concurrency-limited promise pool. */
-async function runWithLimit(concurrency: number, tasks: (() => Promise<void>)[]): Promise<void> {
+export async function runWithLimit(
+  concurrency: number,
+  tasks: (() => Promise<void>)[]
+): Promise<void> {
   let nextTaskIndex = 0
   async function worker() {
     while (nextTaskIndex < tasks.length) {

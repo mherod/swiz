@@ -35,9 +35,19 @@ pre-commit:
       skip:
         - merge
         - rebase
+    daemon-restart:
+      run: SWIZ_DIRECT=1 swiz daemon --restart
+      skip:
+        - merge
+        - rebase
 
 pre-push:
   commands:
+    daemon-restart:
+      run: SWIZ_DIRECT=1 swiz daemon --restart
+      skip:
+        - merge
+        - rebase
     test:
       glob: "*.{ts,tsx,js,jsx,json}"
       run: |
