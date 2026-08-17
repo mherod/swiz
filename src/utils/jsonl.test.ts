@@ -8,6 +8,7 @@ import {
   readJsonlTailText,
   splitJsonlLines,
   streamJsonlEntries,
+  streamJsonlEntriesFromFile,
   tryParseJsonLine,
 } from "./jsonl.ts"
 
@@ -57,6 +58,27 @@ describe("jsonl utilities", () => {
       { id: 2, name: "Bob" },
       { id: 3, name: "Charlie" },
     ])
+  })
+
+  it("cancels the file stream when a consumer stops before EOF", async () => {
+    let cancelCalls = 0
+    const encoder = new TextEncoder()
+    const file = {
+      exists: async () => true,
+      stream: () =>
+        new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(encoder.encode('{"id":1}\n{"id":2}\n'))
+          },
+          cancel() {
+            cancelCalls++
+          },
+        }),
+    } as Bun.BunFile
+
+    for await (const _entry of streamJsonlEntriesFromFile(file)) break
+
+    expect(cancelCalls).toBe(1)
   })
 
   it("readJsonlTailText returns complete records from the suffix", async () => {

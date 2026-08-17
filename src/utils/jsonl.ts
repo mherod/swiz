@@ -59,43 +59,63 @@ function consumeJsonlChunk(
   return { remaining: current, waitingForMore: false }
 }
 
+function parseRemainingJsonlBuffer(buffer: JsonlBuffer): unknown[] {
+  if (buffer.length === 0) return []
+  const values: unknown[] = []
+  const result = consumeJsonlChunk(buffer, (value) => values.push(value))
+  if (!result.waitingForMore || result.remaining.length === 0) return values
+  values.push(...Bun.JSONL.parseChunk(result.remaining).values)
+  return values
+}
+
+async function closeStreamReader(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  reachedEnd: boolean
+): Promise<void> {
+  if (!reachedEnd) await reader.cancel().catch(() => {})
+  reader.releaseLock()
+}
+
 /**
  * Returns an async iterator that yields parsed JSONL objects from a file.
  * Uses Bun's native JSONL streaming parser. The file is never fully loaded
  * into memory, and malformed lines are silently skipped.
  */
-export async function* streamJsonlEntries(path: string): AsyncIterableIterator<unknown> {
-  const file = Bun.file(path)
+export async function* streamJsonlEntriesFromFile(
+  file: Bun.BunFile
+): AsyncIterableIterator<unknown> {
   if (!(await file.exists())) return
 
   let buffer: JsonlBuffer = new Uint8Array(0)
   const reader = file.stream().getReader()
+  let reachedEnd = false
 
-  while (true) {
-    const { done, value } = await reader.read()
-    if (done) break
-    buffer = concatUint8Arrays(buffer, value)
-    const values: unknown[] = []
-    const result = consumeJsonlChunk(buffer, (value) => values.push(value))
-    buffer = result.remaining
-    for (const value of values) {
-      yield value
-    }
-  }
-
-  if (buffer.length > 0) {
-    const values: unknown[] = []
-    const result = consumeJsonlChunk(buffer, (value) => values.push(value))
-    if (result.waitingForMore && result.remaining.length > 0) {
-      const final = Bun.JSONL.parseChunk(result.remaining)
-      for (const value of final.values) {
-        values.push(value)
+  try {
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) {
+        reachedEnd = true
+        break
+      }
+      buffer = concatUint8Arrays(buffer, value)
+      const values: unknown[] = []
+      const result = consumeJsonlChunk(buffer, (value) => values.push(value))
+      buffer = result.remaining
+      for (const parsed of values) {
+        yield parsed
       }
     }
-    for (const value of values) {
-      yield value
+
+    for (const parsed of parseRemainingJsonlBuffer(buffer)) {
+      yield parsed
     }
+  } finally {
+    await closeStreamReader(reader, reachedEnd)
   }
+}
+
+export async function* streamJsonlEntries(path: string): AsyncIterableIterator<unknown> {
+  yield* streamJsonlEntriesFromFile(Bun.file(path))
 }
 
 export async function* streamJsonlLinesFromFile(file: Bun.BunFile): AsyncIterableIterator<string> {
@@ -104,11 +124,15 @@ export async function* streamJsonlLinesFromFile(file: Bun.BunFile): AsyncIterabl
   const reader = file.stream().getReader()
   const decoder = new TextDecoder()
   let remaining = ""
+  let reachedEnd = false
 
   try {
     while (true) {
       const { done, value } = await reader.read()
-      if (done) break
+      if (done) {
+        reachedEnd = true
+        break
+      }
 
       const chunk = decoder.decode(value, { stream: true })
       const { lines, remainder } = splitJsonlChunk(remaining + chunk)
@@ -121,7 +145,7 @@ export async function* streamJsonlLinesFromFile(file: Bun.BunFile): AsyncIterabl
     const final = remaining + decoder.decode()
     if (final) yield final
   } finally {
-    reader.releaseLock()
+    await closeStreamReader(reader, reachedEnd)
   }
 }
 

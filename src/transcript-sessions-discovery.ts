@@ -186,6 +186,82 @@ function extractStringMeta(payload: Record<string, any>, key: string): string | 
 
 type CodexSessionSource = "primary" | "thread_spawn" | "guardian" | "unknown"
 
+interface CodexSessionMeta {
+  id: string | null
+  cwd: string | null
+  source: CodexSessionSource
+}
+
+interface CodexSessionFingerprint {
+  ino: number
+  mtimeMs: number
+  size: number
+}
+
+interface CachedCodexSessionMeta extends CodexSessionFingerprint {
+  meta: CodexSessionMeta
+}
+
+export interface CodexSessionDiscoveryMetrics {
+  cacheEntries: number
+  metadataEvictions: number
+  metadataHits: number
+  metadataMisses: number
+}
+
+const MAX_CODEX_SESSION_META_CACHE_ENTRIES = 4096
+const codexSessionMetaCache = new Map<string, CachedCodexSessionMeta>()
+const codexSessionDiscoveryMetrics = {
+  metadataEvictions: 0,
+  metadataHits: 0,
+  metadataMisses: 0,
+}
+
+export function getCodexSessionDiscoveryMetrics(): CodexSessionDiscoveryMetrics {
+  return {
+    cacheEntries: codexSessionMetaCache.size,
+    ...codexSessionDiscoveryMetrics,
+  }
+}
+
+function fingerprintMatches(
+  cached: CachedCodexSessionMeta,
+  fingerprint: CodexSessionFingerprint
+): boolean {
+  return (
+    cached.ino === fingerprint.ino &&
+    cached.mtimeMs === fingerprint.mtimeMs &&
+    cached.size === fingerprint.size
+  )
+}
+
+function cacheCodexSessionMeta(
+  sessionPath: string,
+  fingerprint: CodexSessionFingerprint,
+  meta: CodexSessionMeta
+): void {
+  codexSessionMetaCache.delete(sessionPath)
+  codexSessionMetaCache.set(sessionPath, { ...fingerprint, meta })
+  while (codexSessionMetaCache.size > MAX_CODEX_SESSION_META_CACHE_ENTRIES) {
+    const oldestPath = codexSessionMetaCache.keys().next().value
+    if (typeof oldestPath !== "string") break
+    codexSessionMetaCache.delete(oldestPath)
+    codexSessionDiscoveryMetrics.metadataEvictions++
+  }
+}
+
+function getCachedCodexSessionMeta(
+  sessionPath: string,
+  fingerprint: CodexSessionFingerprint
+): CodexSessionMeta | null {
+  const cached = codexSessionMetaCache.get(sessionPath)
+  if (!cached || !fingerprintMatches(cached, fingerprint)) return null
+  codexSessionDiscoveryMetrics.metadataHits++
+  codexSessionMetaCache.delete(sessionPath)
+  codexSessionMetaCache.set(sessionPath, cached)
+  return cached.meta
+}
+
 function classifyCodexSessionSource(payload: Record<string, any>): CodexSessionSource {
   const source = payload.source
   if (typeof source === "string") return "primary"
@@ -199,8 +275,13 @@ function classifyCodexSessionSource(payload: Record<string, any>): CodexSessionS
 }
 
 async function readCodexSessionMeta(
-  sessionPath: string
-): Promise<{ id: string | null; cwd: string | null; source: CodexSessionSource }> {
+  sessionPath: string,
+  fingerprint: CodexSessionFingerprint
+): Promise<CodexSessionMeta> {
+  const cached = getCachedCodexSessionMeta(sessionPath, fingerprint)
+  if (cached) return cached
+  codexSessionDiscoveryMetrics.metadataMisses++
+
   let id: string | null = null
   let cwd: string | null = null
   let source: CodexSessionSource = "unknown"
@@ -218,7 +299,9 @@ async function readCodexSessionMeta(
     if (recordsRead >= 16) break
   }
 
-  return { id, cwd, source }
+  const meta = { id, cwd, source }
+  cacheCodexSessionMeta(sessionPath, fingerprint, meta)
+  return meta
 }
 
 async function processCodexFileEntry(
@@ -228,11 +311,19 @@ async function processCodexFileEntry(
   sessions: Session[],
   limit?: number
 ): Promise<void> {
-  const { id: parsedId, cwd, source } = await readCodexSessionMeta(entryPath)
-  if (source === "guardian") return
-  if (!cwd || resolve(cwd) !== targetPath) return
   try {
     const s = await stat(entryPath)
+    const {
+      id: parsedId,
+      cwd,
+      source,
+    } = await readCodexSessionMeta(entryPath, {
+      ino: s.ino,
+      mtimeMs: s.mtimeMs,
+      size: s.size,
+    })
+    if (source === "guardian") return
+    if (!cwd || resolve(cwd) !== targetPath) return
     pushLimitedSession(
       sessions,
       {

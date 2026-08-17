@@ -116,6 +116,16 @@ function parseProjectsListBody(raw: Record<string, any> | null) {
   }
 }
 
+async function resolveSelectedProjectCwd(
+  selectedProjectCwd: string | undefined,
+  touchProject: (cwd: string) => void
+): Promise<string | null> {
+  if (!selectedProjectCwd) return null
+  const resolved = await resolveRegisterableProjectCwd(selectedProjectCwd)
+  if (resolved) touchProject(resolved)
+  return resolved
+}
+
 async function handleProjectsList(req: Request, ctx: SessionRoutesContext): Promise<Response> {
   try {
     const rawBody = (await req.json().catch(() => null)) as Record<string, any> | null
@@ -123,7 +133,13 @@ async function handleProjectsList(req: Request, ctx: SessionRoutesContext): Prom
 
     const limitProjects = Math.max(1, Math.min(30, body?.limitProjects ?? 8))
     const limitSessions = Math.max(1, Math.min(30, body?.limitSessionsPerProject ?? 8))
-    const projectCwds = [...new Set(ctx.getKnownProjects())]
+    const selectedProjectCwd = await resolveSelectedProjectCwd(
+      body?.selectedProjectCwd,
+      ctx.touchProject
+    )
+    const projectCwds = [
+      ...new Set([...ctx.getKnownProjects(), ...(selectedProjectCwd ? [selectedProjectCwd] : [])]),
+    ]
     const ordered = projectCwds
       .map((cwd) => ({ cwd, lastSeenAt: ctx.getProjectLastSeen(cwd) }))
       .sort((a, b) => b.lastSeenAt - a.lastSeenAt)
@@ -134,8 +150,7 @@ async function handleProjectsList(req: Request, ctx: SessionRoutesContext): Prom
     const allProjects = await Promise.all(
       ordered.map(async ({ cwd, lastSeenAt }) => {
         try {
-          const pinnedSessionId =
-            body?.selectedProjectCwd === cwd ? body?.selectedSessionId : undefined
+          const pinnedSessionId = selectedProjectCwd === cwd ? body?.selectedSessionId : undefined
           const sessions = await ctx.listProjectSessions(cwd, limitSessions, pinnedSessionId)
           const firstSession = sessions.sessions[0]
           const statusLine = await ctx.getProjectStatusLine(

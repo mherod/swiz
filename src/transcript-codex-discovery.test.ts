@@ -2,7 +2,10 @@ import { mkdir, mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, describe, expect, it } from "vitest"
-import { findCodexSessions } from "./transcript-sessions-discovery.ts"
+import {
+  findCodexSessions,
+  getCodexSessionDiscoveryMetrics,
+} from "./transcript-sessions-discovery.ts"
 
 const tempRoots: string[] = []
 
@@ -117,5 +120,36 @@ describe("Codex transcript discovery", () => {
     expect(ids).toContain(primaryId)
     expect(ids).toContain(spawnedId)
     expect(ids).not.toContain(guardianId)
+  })
+
+  it("reuses unchanged metadata and invalidates it when modified time changes", async () => {
+    const firstId = "019fb700-0000-7000-8000-000000000005"
+    const { home, targetDir } = await createCodexRollout({ id: firstId, source: "vscode" })
+    const sessionDir = join(home, ".codex", "sessions", "2026", "07", "31")
+    const sessionPath = join(sessionDir, `rollout-2026-07-31T12-00-00-${firstId}.jsonl`)
+    const before = getCodexSessionDiscoveryMetrics()
+
+    await findCodexSessions(targetDir, home)
+    const afterFirst = getCodexSessionDiscoveryMetrics()
+    await findCodexSessions(targetDir, home)
+    const afterUnchanged = getCodexSessionDiscoveryMetrics()
+
+    expect(afterFirst.metadataMisses - before.metadataMisses).toBe(1)
+    expect(afterUnchanged.metadataHits - afterFirst.metadataHits).toBe(1)
+
+    await Bun.sleep(5)
+    const secondId = "019fb700-0000-7000-8000-000000000006"
+    await Bun.write(
+      sessionPath,
+      `${JSON.stringify({
+        type: "session_meta",
+        payload: { id: secondId, cwd: targetDir, source: "vscode" },
+      })}\n`
+    )
+
+    const sessions = await findCodexSessions(targetDir, home)
+    const afterModified = getCodexSessionDiscoveryMetrics()
+    expect(afterModified.metadataMisses - afterUnchanged.metadataMisses).toBe(1)
+    expect(sessions.map((session) => session.id)).toContain(secondId)
   })
 })
