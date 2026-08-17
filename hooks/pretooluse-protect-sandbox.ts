@@ -23,6 +23,7 @@ import { isFileEditTool, isShellTool } from "../src/tool-matchers.ts"
 import { buildIssueGuidance, isSettingDisableCommand } from "../src/utils/inline-hook-helpers.ts"
 import {
   buildProtectedTaskStorageDenyReason,
+  isAllowedMarkdownShellReadCommand,
   isAllowedSharedSkillShellCommand,
   isAllowedTrashMoveCommand,
   isCodexHomePath,
@@ -67,6 +68,7 @@ const MEMORY_DIR_RE = /\.claude[/\\]projects[/\\][^/\\]+[/\\]memory[/\\]/
 type BlockedShellPath =
   | { kind: "task-storage"; path: string }
   | { kind: "hidden-home"; path: string }
+  | { kind: "markdown-read"; path: string }
 
 function isPathLikeFragment(value: string): boolean {
   return (
@@ -214,18 +216,45 @@ async function allowedHiddenHomeCandidate(
   return isSharedSkill && isAllowedSharedSkillShellCommand(ctx.command, candidate)
 }
 
+interface DirectShellClassification {
+  matched: boolean
+  blocked: BlockedShellPath | null
+}
+
+async function classifyDirectShellCandidate(
+  candidate: string,
+  resolved: string | null,
+  ctx: ShellPathContext
+): Promise<DirectShellClassification> {
+  const isTaskStorage = Boolean(resolved && isProtectedTaskStoragePath(resolved))
+  const isHiddenHome = await isHiddenHomePathInCommand(
+    candidate,
+    ctx.cwd,
+    ctx.homeDir,
+    ctx.allowCodexHome
+  )
+  if (!isTaskStorage && !isHiddenHome) return { matched: false, blocked: null }
+
+  if (isAllowedMarkdownShellReadCommand(ctx.command, candidate)) {
+    return { matched: true, blocked: { kind: "markdown-read", path: candidate } }
+  }
+  if (isTaskStorage && resolved) {
+    return { matched: true, blocked: { kind: "task-storage", path: resolved } }
+  }
+  const allowed = await allowedHiddenHomeCandidate(candidate, resolved, ctx)
+  return {
+    matched: true,
+    blocked: allowed ? null : { kind: "hidden-home", path: candidate },
+  }
+}
+
 async function classifyShellCandidate(
   candidate: string,
   ctx: ShellPathContext
 ): Promise<BlockedShellPath | null> {
   const resolved = await normalizeShellPath(candidate, ctx.cwd, ctx.homeDir)
-  if (resolved && isProtectedTaskStoragePath(resolved)) {
-    return { kind: "task-storage", path: resolved }
-  }
-  if (await isHiddenHomePathInCommand(candidate, ctx.cwd, ctx.homeDir, ctx.allowCodexHome)) {
-    if (await allowedHiddenHomeCandidate(candidate, resolved, ctx)) return null
-    return { kind: "hidden-home", path: candidate }
-  }
+  const direct = await classifyDirectShellCandidate(candidate, resolved, ctx)
+  if (direct.matched) return direct.blocked
   if (!ctx.hasHomeReference || !ctx.hasPathBuilder) return null
   const hiddenViaBuilder = await isHiddenHomePathInCommand(
     candidate,
@@ -331,7 +360,7 @@ function blockedShellOutput(blocked: BlockedShellPath, command: string) {
   if (blocked.kind === "task-storage") {
     return preToolUseDeny(buildProtectedTaskStorageDenyReason(blocked.path))
   }
-  if (isSafeReadOnlyShellCommand(command)) {
+  if (blocked.kind === "markdown-read" || isSafeReadOnlyShellCommand(command)) {
     return preToolUseAllowWithContext(
       "Read-only inspection command is allowed.",
       buildSafeReadOnlyAllowMessage(blocked.path)

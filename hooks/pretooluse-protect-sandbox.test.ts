@@ -137,6 +137,11 @@ describe("pretooluse-protect-sandbox (shell commands)", () => {
     expect(result.decision).toBe("deny")
   })
 
+  test("allows read-only shell commands against markdown task files", async () => {
+    const result = await runPinnedHomeBashHook("shasum ~/.claude/tasks/session/task.md")
+    expect(result.decision).not.toBe("deny")
+  })
+
   test("allows grep and sed read-only pipelines against hidden home paths", async () => {
     const result = await runPinnedHomeBashHook(
       `grep sandboxedEdits ${join(TEST_HOME, ".swiz", "settings.json")} | head -n 5`
@@ -326,6 +331,34 @@ describe("pretooluse-protect-sandbox (skill file reads #607)", () => {
       `wc -l ${reference}; find ${join(skillRoot, "presets")} -maxdepth 1 -type f -print; sed -n '1,320p' ${reference}`
     )
     expect(result.decision).toBe("allow")
+  })
+
+  test("allows a markdown checksum inside a compound read-only command", async () => {
+    const reference = join(
+      TEST_HOME,
+      ".agents",
+      "skills",
+      "generate-requirements",
+      "references",
+      "requirements-document-contract.md"
+    )
+    const result = await runPinnedHomeBashHook(
+      `wc -l -w -c REQUIREMENTS.md .requirements-status.json; shasum -a 256 ${reference} REQUIREMENTS.md .requirements-status.json; git status --short; git branch --show-current; git rev-parse HEAD`
+    )
+    expect(result.decision).not.toBe("deny")
+  })
+
+  test("blocks a checksum command that writes to its markdown input", async () => {
+    const reference = join(
+      TEST_HOME,
+      ".agents",
+      "skills",
+      "generate-requirements",
+      "references",
+      "requirements-document-contract.md"
+    )
+    const result = await runPinnedHomeBashHook(`shasum ${reference} > ${reference}`)
+    expect(result.decision).toBe("deny")
   })
 
   test("blocks write-capable find actions under the shared ~/.agents root", async () => {

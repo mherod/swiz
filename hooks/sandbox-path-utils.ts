@@ -2,6 +2,7 @@ import { lstat, realpath } from "node:fs/promises"
 import { basename, dirname, join as joinPath, resolve } from "node:path"
 import { normalizeCommand, stripHeredocs } from "../src/command-utils.ts"
 import { expandHomeVars, getHomeDirOrNull } from "../src/home.ts"
+import { isMarkdownPath } from "../src/tool-matchers.ts"
 import {
   splitShellSegments,
   stripQuotedShellStrings,
@@ -20,6 +21,7 @@ const SAFE_READ_ONLY_COMMANDS = new Set([
   "ls",
   "stat",
   "wc",
+  "shasum",
   "cut",
   "sort",
   "uniq",
@@ -229,6 +231,26 @@ export function isSafeReadOnlyShellCommand(command: string): boolean {
   return commands.every(
     (readCommand) => !readCommand.includes("&") && isSafeReadOnlyPipeline(readCommand)
   )
+}
+
+/**
+ * Return true when every use of one Markdown path occurs in a read-only shell
+ * segment. Other command segments are intentionally ignored: this guard owns
+ * access to the hidden path, not unrelated operations inside the dispatch cwd.
+ */
+export function isAllowedMarkdownShellReadCommand(command: string, markdownPath: string): boolean {
+  if (!command.trim() || !isMarkdownPath(normalizeShellPathToken(markdownPath))) return false
+  const normalized = command.normalize("NFKC")
+  if (normalized.includes("`") || normalized.includes("$(")) return false
+
+  let matched = false
+  for (const segment of splitShellSegments(normalized)) {
+    const tokens = tokenizeShellSegment(segment)
+    if (!tokens.some((token) => tokenReferencesPath(token, markdownPath))) continue
+    matched = true
+    if (!isSafeReadOnlyShellCommand(segment)) return false
+  }
+  return matched
 }
 
 function normalizeShellPathToken(token: string): string {
