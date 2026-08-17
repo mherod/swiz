@@ -337,13 +337,10 @@ function codeFieldFromJson(rawJson: string | null): string | null {
 }
 
 function CodeToolCall({ code, count, name }: { code: string; count: number; name: string }) {
-  const preview = summarizeText(code.replace(/\s+/g, " ").trim())
+  const preview = summarizeCodeCall(code)
   return (
     <details className="tool-call tool-call-verbose tool-call-exec tool-category-shell">
       <summary className="tool-call-exec-summary">
-        <span className="tool-category-icon" aria-hidden="true">
-          ❯
-        </span>
         <span className="tool-name">{name}</span>
         {count > 1 ? <span className="message-repeat-badge">x{count}</span> : null}
         <code className="tool-call-exec-preview">{preview}</code>
@@ -351,6 +348,16 @@ function CodeToolCall({ code, count, name }: { code: string; count: number; name
       <pre className="tool-command-block">{code}</pre>
     </details>
   )
+}
+
+function summarizeCodeCall(code: string): string {
+  const normalized = code.replace(/\s+/g, " ").trim()
+  if (/tools\.update_plan\b/.test(normalized)) return "Update plan"
+  if (/tools\.write_stdin\b/.test(normalized)) return "Poll running command"
+  if (/tools\.apply_patch\b/.test(normalized)) return "Apply patch"
+  const commandMatch = /cmd:\s*["']([^"']+)["']/.exec(normalized)
+  if (commandMatch?.[1]) return summarizeText(commandMatch[1])
+  return summarizeText(normalized)
 }
 
 // eslint-disable-next-line complexity -- tool-specific renderers intentionally branch by payload shape

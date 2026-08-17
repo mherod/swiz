@@ -19,6 +19,15 @@ interface MonitorMetric {
   p95Ms?: number
 }
 
+function CompactMetricValue({ value }: { value: number }) {
+  const exact = value.toLocaleString()
+  const compact = new Intl.NumberFormat(undefined, {
+    notation: "compact",
+    maximumFractionDigits: 1,
+  }).format(value)
+  return <strong title={exact}>{compact}</strong>
+}
+
 interface CacheSummary {
   snapshotCacheSize?: number
   ghCacheSize?: number
@@ -302,10 +311,7 @@ export function DashboardStats({
               title="Cumulative processed tokens and generated-token rate from this session transcript"
             >
               <span>
-                <strong>
-                  <NumberTicker value={sessionTokenStats.totalTokens} />
-                </strong>{" "}
-                processed
+                <CompactMetricValue value={sessionTokenStats.totalTokens} /> processed
               </span>
               <span>
                 <strong>
@@ -314,10 +320,7 @@ export function DashboardStats({
                 output tok/min
               </span>
               <span>
-                <strong>
-                  <NumberTicker value={sessionTokenStats.outputTokens} />
-                </strong>{" "}
-                generated
+                <CompactMetricValue value={sessionTokenStats.outputTokens} /> generated
               </span>
             </div>
             <p className="metric-note metric-token-note">
