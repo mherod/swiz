@@ -286,6 +286,8 @@ describe("swiz doctor", () => {
   <dict>
     <key>EnvironmentVariables</key>
     <dict>
+      <key>SWIZ_DIRECT</key>
+      <string>1</string>
       <key>OPENROUTER_API_KEY</key>
       <string>secret-doctor-key</string>
     </dict>
@@ -297,6 +299,30 @@ describe("swiz doctor", () => {
 
     expect(result.stdout).toContain("Daemon LaunchAgent env")
     expect(result.stdout).toContain("OPENROUTER_API_KEY present")
+    expect(result.stdout).not.toContain("secret-doctor-key")
+  }, 60_000)
+
+  test("fails the daemon LaunchAgent check when the SWIZ_DIRECT bypass is missing", async () => {
+    const home = await createTempHome()
+    const launchAgentsDir = join(home, "Library", "LaunchAgents")
+    await mkdir(launchAgentsDir, { recursive: true })
+    await writeFile(
+      join(launchAgentsDir, "com.swiz.daemon.plist"),
+      `<?xml version="1.0" encoding="UTF-8"?>
+<plist version="1.0">
+  <dict>
+    <key>EnvironmentVariables</key>
+    <dict>
+      <key>OPENROUTER_API_KEY</key>
+      <string>secret-doctor-key</string>
+    </dict>
+  </dict>
+</plist>`
+    )
+
+    const result = await runDoctor(home)
+
+    expect(result.stdout).toContain("SWIZ_DIRECT missing")
     expect(result.stdout).not.toContain("secret-doctor-key")
   }, 60_000)
 

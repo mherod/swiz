@@ -41,12 +41,23 @@ function daemonEnvironmentEntry(key: string, value: string): string {
 }
 
 function buildDaemonEnvironmentVariables(envPath: string): string {
-  const entries = [daemonEnvironmentEntry("PATH", envPath)]
+  const entries = [
+    daemonEnvironmentEntry("PATH", envPath),
+    // The LaunchAgent execs `bun run <indexPath> daemon` directly, which trips the
+    // globally-linked-command guard and makes launchd crash-loop the daemon every
+    // ThrottleInterval. SWIZ_DIRECT is that guard's documented bypass.
+    daemonEnvironmentEntry("SWIZ_DIRECT", "1"),
+  ]
   const openRouterApiKey = process.env[DAEMON_OPENROUTER_API_KEY_ENV]
   if (openRouterApiKey) {
     entries.push(daemonEnvironmentEntry(DAEMON_OPENROUTER_API_KEY_ENV, openRouterApiKey))
   }
   return entries.join("\n")
+}
+
+/** True when the plist carries the `SWIZ_DIRECT` bypass the daemon needs to start at all. */
+export function daemonLaunchAgentPlistHasDirectBypass(plist: string): boolean {
+  return /<key>SWIZ_DIRECT<\/key>\s*<string>\s*1\s*<\/string>/.test(plist)
 }
 
 export function daemonLaunchAgentPlistHasOpenRouterApiKey(plist: string): boolean {
