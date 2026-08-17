@@ -46,6 +46,7 @@ import {
   buildSnapshotFingerprint,
   type CachedSnapshot,
   hasSnapshotInvalidated,
+  type SnapshotFingerprint,
 } from "./daemon/snapshot.ts"
 import type { ActiveHookDispatch } from "./daemon/types.ts"
 import { UpstreamSyncRegistry } from "./daemon/upstream-sync.ts"
@@ -207,34 +208,41 @@ function createDaemonCaches() {
   }
 }
 
-function buildSnapshotResolver(snapshots: LRUCache<string, CachedSnapshot>) {
+export interface SnapshotResolverOptions {
+  buildFingerprint?: (cwd: string) => Promise<SnapshotFingerprint>
+  computeSnapshot?: (cwd: string, sessionId?: string | null) => Promise<WarmStatusLineSnapshot>
+}
+
+export function buildSnapshotResolver(
+  snapshots: LRUCache<string, CachedSnapshot>,
+  opts?: SnapshotResolverOptions
+) {
+  const buildFingerprint = opts?.buildFingerprint ?? buildSnapshotFingerprint
+  const computeSnapshot = opts?.computeSnapshot ?? computeWarmStatusLineSnapshot
   // In-flight coalescing: concurrent requests for the same cwd+session share one computation.
   const inFlight = new Map<string, Promise<WarmStatusLineSnapshot>>()
 
-  return async (
-    cwd: string,
-    sessionId: string | null | undefined
-  ): Promise<WarmStatusLineSnapshot> => {
+  return (cwd: string, sessionId: string | null | undefined): Promise<WarmStatusLineSnapshot> => {
     const key = snapshotCacheKey(cwd, sessionId)
 
     // Coalesce concurrent callers before doing any expensive work.
     const inflight = inFlight.get(key)
     if (inflight) return inflight
 
-    const nextFingerprint = await buildSnapshotFingerprint(cwd)
-    const existing = snapshots.get(key)
-    if (existing && !hasSnapshotInvalidated(existing.fingerprint, nextFingerprint)) {
-      return existing.snapshot
-    }
+    const computation = (async (): Promise<WarmStatusLineSnapshot> => {
+      const nextFingerprint = await buildFingerprint(cwd)
+      const existing = snapshots.get(key)
+      if (existing && !hasSnapshotInvalidated(existing.fingerprint, nextFingerprint)) {
+        return existing.snapshot
+      }
 
-    const computation = computeWarmStatusLineSnapshot(cwd, sessionId)
-      .then((snapshot) => {
-        snapshots.set(key, { snapshot, fingerprint: nextFingerprint })
-        return snapshot
-      })
-      .finally(() => {
-        inFlight.delete(key)
-      })
+      const snapshot = await computeSnapshot(cwd, sessionId)
+      snapshots.set(key, { snapshot, fingerprint: nextFingerprint })
+      return snapshot
+    })().finally(() => {
+      inFlight.delete(key)
+    })
+
     inFlight.set(key, computation)
     return computation
   }

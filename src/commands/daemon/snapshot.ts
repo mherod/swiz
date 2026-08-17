@@ -1,4 +1,3 @@
-import { getGitBranchStatus } from "../../git-helpers.ts"
 import { getIssueStoreDbPath } from "../../issue-store.ts"
 import { getProjectSettingsPath, getStatePath, getSwizSettingsPath } from "../../settings.ts"
 import type { WarmStatusLineSnapshot } from "../status-line.ts"
@@ -6,7 +5,6 @@ import type { WarmStatusLineSnapshot } from "../status-line.ts"
 const GITHUB_REFRESH_WINDOW_MS = 20_000
 
 export interface SnapshotFingerprint {
-  git: string
   projectSettingsMtimeMs: number
   projectStateMtimeMs: number
   globalSettingsMtimeMs: number
@@ -25,7 +23,6 @@ export function hasSnapshotInvalidated(
 ): boolean {
   if (!previous) return true
   return (
-    previous.git !== next.git ||
     previous.projectSettingsMtimeMs !== next.projectSettingsMtimeMs ||
     previous.projectStateMtimeMs !== next.projectStateMtimeMs ||
     previous.globalSettingsMtimeMs !== next.globalSettingsMtimeMs ||
@@ -46,29 +43,23 @@ async function safeMtime(path: string | null): Promise<number> {
   }
 }
 
-export async function buildSnapshotFingerprint(cwd: string): Promise<SnapshotFingerprint> {
+export async function buildSnapshotFingerprint(
+  cwd: string,
+  nowMs = Date.now()
+): Promise<SnapshotFingerprint> {
   const globalSettingsPath = getSwizSettingsPath()
-  const [
-    gitStatus,
-    projectSettingsMtimeMs,
-    projectStateMtimeMs,
-    globalSettingsMtimeMs,
-    ghCacheMtimeMs,
-  ] = await Promise.all([
-    getGitBranchStatus(cwd),
-    safeMtime(getProjectSettingsPath(cwd)),
-    safeMtime(getStatePath(cwd)),
-    safeMtime(globalSettingsPath),
-    safeMtime(getIssueStoreDbPath()),
-  ])
+  const [projectSettingsMtimeMs, projectStateMtimeMs, globalSettingsMtimeMs, ghCacheMtimeMs] =
+    await Promise.all([
+      safeMtime(getProjectSettingsPath(cwd)),
+      safeMtime(getStatePath(cwd)),
+      safeMtime(globalSettingsPath),
+      safeMtime(getIssueStoreDbPath()),
+    ])
   return {
-    git: gitStatus
-      ? `${gitStatus.branch}:${gitStatus.ahead}:${gitStatus.behind}:${gitStatus.staged}:${gitStatus.unstaged}:${gitStatus.untracked}:${gitStatus.conflicts}:${gitStatus.stash}:${gitStatus.changedFallback}`
-      : "not-git",
     projectSettingsMtimeMs,
     projectStateMtimeMs,
     globalSettingsMtimeMs,
     ghCacheMtimeMs,
-    githubBucket: Math.floor(Date.now() / GITHUB_REFRESH_WINDOW_MS),
+    githubBucket: Math.floor(nowMs / GITHUB_REFRESH_WINDOW_MS),
   }
 }

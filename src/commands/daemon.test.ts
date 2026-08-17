@@ -19,15 +19,18 @@ import {
   serializeMetrics,
   TranscriptIndexCache,
 } from "./daemon/runtime-cache.ts"
-import { hasSnapshotInvalidated } from "./daemon/snapshot.ts"
+import type { CachedSnapshot, SnapshotFingerprint } from "./daemon/snapshot.ts"
+import { buildSnapshotFingerprint, hasSnapshotInvalidated } from "./daemon/snapshot.ts"
 import type { CapturedToolCall, SessionToolUsageState } from "./daemon/utils.ts"
 import { resolveComplianceDurationLabel } from "./daemon/web-server.ts"
 import { DaemonWorkerRuntime } from "./daemon/worker-runtime.ts"
 import {
+  buildSnapshotResolver,
   deleteProjectSnapshots,
   hydratePersistedSessionToolState,
   snapshotCacheKey,
 } from "./daemon.ts"
+import type { WarmStatusLineSnapshot } from "./status-line.ts"
 
 describe("project snapshot eviction", () => {
   it("keeps sibling project snapshots that share a path prefix", () => {
@@ -45,137 +48,204 @@ describe("project snapshot eviction", () => {
   })
 })
 
-describe("snapshot resolver .finally() cleanup", () => {
-  it("cleans up inFlight map after successful snapshot computation", async () => {
-    // Reconstruct the buildSnapshotResolver logic to test .finally() cleanup
-    const snapshots: LRUCache<string, object> = new LRUCache({ max: 10 })
-    const inFlight = new Map<string, Promise<object>>()
+describe("buildSnapshotResolver", () => {
+  const dummySnapshot: WarmStatusLineSnapshot = {
+    shortCwd: "/workspace/project",
+    gitInfo: "main",
+    gitBranch: "main",
+    activeSegments: [],
+    issueCount: 0,
+    prCount: 0,
+    fetchStatus: "ok",
+    reviewDecision: "",
+    commentCount: 0,
+    projectState: null,
+    settingsParts: [],
+  }
 
-    // Mock computeWarmStatusLineSnapshot
+  const baseFingerprint: SnapshotFingerprint = {
+    projectSettingsMtimeMs: 100,
+    projectStateMtimeMs: 200,
+    globalSettingsMtimeMs: 300,
+    ghCacheMtimeMs: 400,
+    githubBucket: 10,
+  }
+
+  it("serves warm hits without recomputing snapshot when fingerprint is unchanged", async () => {
+    const snapshots = new LRUCache<string, CachedSnapshot>({ max: 10 })
     let computeCount = 0
-    const mockCompute = async (_cwd: string, _sessionId?: string) => {
-      computeCount += 1
-      return {
-        shortCwd: "/test",
-        gitInfo: "main",
-        gitBranch: "main",
-        activeSegments: [],
-        issueCount: null,
-        prCount: null,
-      }
-    }
+    let fingerprintCount = 0
 
-    // NOT async — returns the promise directly without wrapping
-    const resolver = (cwd: string, sessionId?: string): Promise<object> => {
-      const inflight = inFlight.get(cwd)
-      if (inflight) return inflight
+    const resolver = buildSnapshotResolver(snapshots, {
+      buildFingerprint: async () => {
+        fingerprintCount++
+        return { ...baseFingerprint }
+      },
+      computeSnapshot: async () => {
+        computeCount++
+        return { ...dummySnapshot }
+      },
+    })
 
-      const computation = mockCompute(cwd, sessionId)
-        .then((snapshot) => {
-          snapshots.set(`${cwd}\x00${sessionId ?? ""}`, snapshot)
-          return snapshot
-        })
-        .finally(() => {
-          inFlight.delete(cwd)
-        })
-      inFlight.set(cwd, computation)
-      return computation
-    }
-
-    // First call: adds to inFlight
-    const p1 = resolver("/cwd", "sess1")
-
-    // Concurrent call should coalesce
-    const p2 = resolver("/cwd", "sess1")
-    expect(p1).toBe(p2)
-    expect(inFlight.has("/cwd")).toBeTrue()
-
-    // Wait for computation
-    await p1
+    // Cold miss
+    const res1 = await resolver("/workspace/project", "sess1")
+    expect(res1.gitBranch).toBe("main")
     expect(computeCount).toBe(1)
+    expect(fingerprintCount).toBe(1)
 
-    // After completion, inFlight should be cleared by .finally()
-    expect(inFlight.has("/cwd")).toBeFalse()
-
-    // Second resolver call should trigger new computation (no coalescing)
-    const p3 = resolver("/cwd", "sess1")
-    expect(p3).not.toBe(p1)
-    expect(inFlight.has("/cwd")).toBeTrue()
-
-    await p3
-    expect(computeCount).toBe(2)
-    expect(inFlight.has("/cwd")).toBeFalse()
+    // Warm hit: cheap fingerprint checked, zero computeSnapshot / Git work
+    const res2 = await resolver("/workspace/project", "sess1")
+    expect(res2).toEqual(res1)
+    expect(computeCount).toBe(1)
+    expect(fingerprintCount).toBe(2)
   })
 
-  it("cleans up inFlight map after rejected snapshot computation", async () => {
-    const snapshots: LRUCache<string, object> = new LRUCache({ max: 10 })
-    const inFlight = new Map<string, Promise<object>>()
-
+  it("recomputes when non-Git mtime changes", async () => {
+    const snapshots = new LRUCache<string, CachedSnapshot>({ max: 10 })
     let computeCount = 0
-    const testError = new Error("test failure")
-    const mockCompute = async (_cwd: string, _sessionId?: string) => {
-      computeCount += 1
-      throw testError
-    }
+    let currentFingerprint = { ...baseFingerprint }
 
-    // NOT async — returns the promise directly without wrapping
-    const resolver = (cwd: string, sessionId?: string): Promise<object> => {
-      const inflight = inFlight.get(cwd)
-      if (inflight) return inflight
+    const resolver = buildSnapshotResolver(snapshots, {
+      buildFingerprint: async () => ({ ...currentFingerprint }),
+      computeSnapshot: async () => {
+        computeCount++
+        return { ...dummySnapshot, issueCount: computeCount }
+      },
+    })
 
-      const computation = mockCompute(cwd, sessionId)
-        .then((snapshot) => {
-          snapshots.set(`${cwd}\x00${sessionId ?? ""}`, snapshot)
-          return snapshot
-        })
-        .catch((err) => {
-          // Re-throw after .finally() runs to ensure inFlight cleanup happens
-          throw err
-        })
-        .finally(() => {
-          inFlight.delete(cwd)
-        })
-      inFlight.set(cwd, computation)
-      return computation
-    }
-
-    // First call: adds to inFlight
-    const p1 = resolver("/cwd", "sess1")
-
-    // Concurrent call should coalesce on same (rejected) promise
-    const p2 = resolver("/cwd", "sess1")
-    expect(p1).toBe(p2)
-    expect(inFlight.has("/cwd")).toBeTrue()
-
-    // Wait for rejection
-    try {
-      await p1
-    } catch (e) {
-      expect(e).toBe(testError)
-    }
+    await resolver("/workspace/project", "sess1")
     expect(computeCount).toBe(1)
 
-    // After rejection, .finally() should still clean up inFlight
-    expect(inFlight.has("/cwd")).toBeFalse()
-
-    // Second resolver call should trigger new computation (no coalescing)
-    const p3 = resolver("/cwd", "sess1")
-    expect(p3).not.toBe(p1)
-    expect(inFlight.has("/cwd")).toBeTrue()
-
-    try {
-      await p3
-    } catch (e) {
-      expect(e).toBe(testError)
-    }
+    // Modify project settings mtime
+    currentFingerprint = { ...baseFingerprint, projectSettingsMtimeMs: 101 }
+    const res2 = await resolver("/workspace/project", "sess1")
     expect(computeCount).toBe(2)
-    expect(inFlight.has("/cwd")).toBeFalse()
+    expect(res2.issueCount).toBe(2)
+  })
+
+  it("recomputes when 20s githubBucket changes", async () => {
+    const snapshots = new LRUCache<string, CachedSnapshot>({ max: 10 })
+    let computeCount = 0
+    let currentFingerprint = { ...baseFingerprint }
+
+    const resolver = buildSnapshotResolver(snapshots, {
+      buildFingerprint: async () => ({ ...currentFingerprint }),
+      computeSnapshot: async () => {
+        computeCount++
+        return { ...dummySnapshot, prCount: computeCount }
+      },
+    })
+
+    await resolver("/workspace/project", "sess1")
+    expect(computeCount).toBe(1)
+
+    // Advance bucket from 10 to 11
+    currentFingerprint = { ...baseFingerprint, githubBucket: 11 }
+    const res2 = await resolver("/workspace/project", "sess1")
+    expect(computeCount).toBe(2)
+    expect(res2.prCount).toBe(2)
+  })
+
+  it("recomputes after watcher deletes project snapshots", async () => {
+    const snapshots = new LRUCache<string, CachedSnapshot>({ max: 10 })
+    let computeCount = 0
+
+    const resolver = buildSnapshotResolver(snapshots, {
+      buildFingerprint: async () => ({ ...baseFingerprint }),
+      computeSnapshot: async (_cwd, _sess) => {
+        computeCount++
+        return { ...dummySnapshot, gitBranch: computeCount === 1 ? "main" : "feature" }
+      },
+    })
+
+    const res1 = await resolver("/workspace/project", "sess1")
+    expect(res1.gitBranch).toBe("main")
+    expect(computeCount).toBe(1)
+
+    // Simulate .git/ watcher event triggering project flush
+    deleteProjectSnapshots(snapshots, "/workspace/project")
+
+    const res2 = await resolver("/workspace/project", "sess1")
+    expect(res2.gitBranch).toBe("feature")
+    expect(computeCount).toBe(2)
+  })
+
+  it("coalesces concurrent in-flight requests into one computation", async () => {
+    const snapshots = new LRUCache<string, CachedSnapshot>({ max: 10 })
+    let computeCount = 0
+
+    const resolver = buildSnapshotResolver(snapshots, {
+      buildFingerprint: async () => ({ ...baseFingerprint }),
+      computeSnapshot: async () => {
+        computeCount++
+        await Bun.sleep(20)
+        return { ...dummySnapshot }
+      },
+    })
+
+    const p1 = resolver("/workspace/project", "sess1")
+    await Bun.sleep(2)
+    const p2 = resolver("/workspace/project", "sess1")
+
+    expect(p2).toBe(p1)
+    const [res1, res2] = await Promise.all([p1, p2])
+    expect(res1).toEqual(res2)
+    expect(computeCount).toBe(1)
+  })
+
+  it("cleans up inFlight map after rejected computation and permits retries", async () => {
+    const snapshots = new LRUCache<string, CachedSnapshot>({ max: 10 })
+    let computeCount = 0
+    const testError = new Error("disk failure")
+
+    const resolver = buildSnapshotResolver(snapshots, {
+      buildFingerprint: async () => ({ ...baseFingerprint }),
+      computeSnapshot: async () => {
+        computeCount++
+        if (computeCount === 1) throw testError
+        return { ...dummySnapshot }
+      },
+    })
+
+    // First attempt fails
+    let err: unknown
+    try {
+      await resolver("/workspace/project", "sess1")
+    } catch (e) {
+      err = e
+    }
+    expect(err).toBe(testError)
+    expect(computeCount).toBe(1)
+
+    // Second attempt retries and succeeds because inFlight was cleaned up
+    const res2 = await resolver("/workspace/project", "sess1")
+    expect(res2.gitBranch).toBe("main")
+    expect(computeCount).toBe(2)
+  })
+
+  it("differentiates sessions under the same cwd", async () => {
+    const snapshots = new LRUCache<string, CachedSnapshot>({ max: 10 })
+    let computeCount = 0
+
+    const resolver = buildSnapshotResolver(snapshots, {
+      buildFingerprint: async () => ({ ...baseFingerprint }),
+      computeSnapshot: async (_cwd, sessionId) => {
+        computeCount++
+        return { ...dummySnapshot, shortCwd: `${sessionId}` }
+      },
+    })
+
+    const res1 = await resolver("/workspace/project", "sess-1")
+    const res2 = await resolver("/workspace/project", "sess-2")
+
+    expect(res1.shortCwd).toBe("sess-1")
+    expect(res2.shortCwd).toBe("sess-2")
+    expect(computeCount).toBe(2)
   })
 })
 
 describe("hasSnapshotInvalidated", () => {
-  const base = {
-    git: '{"branch":"main"}',
+  const base: SnapshotFingerprint = {
     projectSettingsMtimeMs: 100,
     projectStateMtimeMs: 200,
     globalSettingsMtimeMs: 300,
@@ -189,10 +259,6 @@ describe("hasSnapshotInvalidated", () => {
 
   it("keeps warm snapshot when fingerprint is unchanged", () => {
     expect(hasSnapshotInvalidated(base, { ...base })).toBeFalse()
-  })
-
-  it("invalidates when git state changes", () => {
-    expect(hasSnapshotInvalidated(base, { ...base, git: '{"branch":"feat"}' })).toBeTrue()
   })
 
   it("invalidates when project settings mtime changes", () => {
@@ -213,6 +279,21 @@ describe("hasSnapshotInvalidated", () => {
 
   it("invalidates on github refresh bucket change", () => {
     expect(hasSnapshotInvalidated(base, { ...base, githubBucket: 11 })).toBeTrue()
+  })
+})
+
+describe("buildSnapshotFingerprint", () => {
+  it("computes fingerprint with non-Git mtimes and 20s githubBucket", async () => {
+    const fixedNow = 1_700_000_000_000
+    const expectedBucket = Math.floor(fixedNow / 20_000)
+    const fp = await buildSnapshotFingerprint(process.cwd(), fixedNow)
+
+    expect(fp.githubBucket).toBe(expectedBucket)
+    expect(typeof fp.projectSettingsMtimeMs).toBe("number")
+    expect(typeof fp.projectStateMtimeMs).toBe("number")
+    expect(typeof fp.globalSettingsMtimeMs).toBe("number")
+    expect(typeof fp.ghCacheMtimeMs).toBe("number")
+    expect((fp as any).git).toBeUndefined()
   })
 })
 
