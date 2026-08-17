@@ -205,7 +205,7 @@ async function handleSessionMessages(req: Request, ctx: SessionRoutesContext): P
   }
   const projectCwd = await resolveRegisterableProjectCwd(cwd)
   if (projectCwd) ctx.touchProject(projectCwd)
-  const limit = Math.max(1, Math.min(100, body?.limit ?? 30))
+  const limit = Math.max(1, Math.min(300, body?.limit ?? 150))
   const data = await ctx.getSessionData(cwd, sessionId, limit)
   return Response.json({
     messages: data.messages,

@@ -35,6 +35,8 @@ export interface SessionTokenStats {
   outputTokensPerMinute: number
 }
 
+export const SESSION_MESSAGE_LIMIT = 150
+
 export interface WatchesResponse {
   active?: unknown[]
 }
@@ -259,7 +261,7 @@ export function useSessionPolling(deps: SessionPollingDeps): void {
           }>("/sessions/messages", {
             cwd,
             sessionId: sid,
-            limit: 30,
+            limit: SESSION_MESSAGE_LIMIT,
           }),
           postJson<{ tasks: SessionTask[]; summary?: SessionTaskSummary }>("/sessions/tasks", {
             cwd,

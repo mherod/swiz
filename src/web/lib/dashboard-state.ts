@@ -18,6 +18,7 @@ import {
   type ActiveHookDispatch,
   applyInitialSelection,
   type MetricsResponse,
+  SESSION_MESSAGE_LIMIT,
   type SessionTokenStats,
   useDashboardOverviewPolling,
   useProjectMetricsPolling,
@@ -168,7 +169,7 @@ function useSessionDataLoaders() {
         messages: SessionMessage[]
         toolStats?: ToolStat[]
         tokenStats?: SessionTokenStats
-      }>("/sessions/messages", { cwd, sessionId, limit: 30 })
+      }>("/sessions/messages", { cwd, sessionId, limit: SESSION_MESSAGE_LIMIT })
       setNewMessageKeys(new Set())
       setSessionMessages(result.messages ?? [])
       setSessionToolStats(result.toolStats ?? [])

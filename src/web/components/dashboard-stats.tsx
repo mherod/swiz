@@ -214,6 +214,9 @@ function CurrentSessionStats({
         Last activity:{" "}
         <SessionActivityTime value={activeSession?.lastMessageAt ?? activeSession?.mtime ?? null} />
       </p>
+      <p className="metric-note">
+        Tool calls are session-wide; the transcript below shows the latest bounded message window.
+      </p>
     </>
   )
 }

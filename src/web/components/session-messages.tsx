@@ -1,7 +1,11 @@
 import { type KeyboardEvent, type ReactElement, type ReactNode, useMemo } from "react"
 import { cn } from "../lib/cn.ts"
 import type { EventMetric } from "../lib/dashboard-helpers.ts"
-import type { ActiveHookDispatch, SessionTokenStats } from "../lib/dashboard-hooks.ts"
+import {
+  type ActiveHookDispatch,
+  SESSION_MESSAGE_LIMIT,
+  type SessionTokenStats,
+} from "../lib/dashboard-hooks.ts"
 import { DashboardStats } from "./dashboard-stats.tsx"
 import { InlineMarkdown } from "./inline-markdown.tsx"
 import { MessageBody } from "./message-body.tsx"
@@ -816,7 +820,10 @@ function MessagesContent({
   }
 
   return (
-    <ul className="messages-list flex-1 pb-16" aria-label="Last 30 transcript messages">
+    <ul
+      className="messages-list flex-1 pb-16"
+      aria-label={`Latest ${SESSION_MESSAGE_LIMIT} transcript messages`}
+    >
       {listItems}
     </ul>
   )

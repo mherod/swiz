@@ -36,7 +36,7 @@ interface SessionScanResult {
 /** Max transcripts to parse per session. */
 const MAX_TRANSCRIPT_ENTRIES = 2000
 /** Max messages cached per session. */
-const MAX_SESSION_MESSAGES = 100
+const MAX_SESSION_MESSAGES = 300
 
 interface CachedSessionData {
   mtimeMs: number
