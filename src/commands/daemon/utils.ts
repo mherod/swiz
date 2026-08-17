@@ -143,6 +143,7 @@ function isFileTool(name: string): boolean {
 }
 
 const FILE_DETAIL_STRING_TRUNCATE = 2000
+const GENERIC_TOOL_DETAIL_TRUNCATE = 2000
 
 /**
  * File tool inputs (Read/Edit/Write/NotebookEdit) keep their path plus a bounded
@@ -188,7 +189,14 @@ export function summarizeToolInput(input: Record<string, any> | undefined, name?
   if (!input) return ""
   if (name && isTaskTool(name)) return taskToolDetail(input)
   if (name && isFileTool(name)) return fileToolDetail(input)
-  return summarizeFileOrCommandInput(input) ?? ""
+  const summary = summarizeFileOrCommandInput(input)
+  if (summary) return summary
+  // Keep unknown provider-specific payloads inspectable without retaining unbounded blobs.
+  try {
+    return truncate(JSON.stringify(input), GENERIC_TOOL_DETAIL_TRUNCATE)
+  } catch {
+    return ""
+  }
 }
 
 export function captureSessionToolCall(

@@ -19,6 +19,7 @@ import {
   type SessionToolUsageState,
   seedSessionToolUsage,
   stripAnsi,
+  summarizeToolInput,
   supplementMessagesWithCapturedToolCalls,
   transcriptWatchPathsForProject,
 } from "./utils.ts"
@@ -76,6 +77,18 @@ describe("transcriptWatchPathsForProject", () => {
     const paths = transcriptWatchPathsForProject(cwd)
     const hasLabel = paths.some((p) => p.label.includes(":") && p.label.includes("my-project"))
     expect(hasLabel).toBe(true)
+  })
+})
+
+describe("summarizeToolInput", () => {
+  test("keeps bounded generic Codex exec payloads visible", () => {
+    const detail = summarizeToolInput(
+      { code: "await tools.exec_command({ cmd: 'bun test' })" },
+      "exec"
+    )
+
+    expect(detail).toContain('"code"')
+    expect(detail).toContain("bun test")
   })
 })
 
