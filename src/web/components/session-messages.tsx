@@ -319,6 +319,33 @@ function RawToolInput({ detail }: { detail: string }) {
   )
 }
 
+function toolCodeFromJson(rawJson: string | null): string | null {
+  if (!rawJson) return null
+  try {
+    const parsed = JSON.parse(rawJson) as Record<string, unknown>
+    return typeof parsed.code === "string" ? parsed.code : null
+  } catch {
+    return null
+  }
+}
+
+function ExecToolCall({ code, count }: { code: string; count: number }) {
+  const preview = summarizeText(code.replace(/s+/g, " ").trim())
+  return (
+    <details className="tool-call tool-call-verbose tool-call-exec tool-category-shell">
+      <summary className="tool-call-exec-summary">
+        <span className="tool-category-icon" aria-hidden="true">
+          ❯
+        </span>
+        <span className="tool-name">exec</span>
+        {count > 1 ? <span className="message-repeat-badge">x{count}</span> : null}
+        <code className="tool-call-exec-preview">{preview}</code>
+      </summary>
+      <pre className="tool-command-block">{code}</pre>
+    </details>
+  )
+}
+
 // eslint-disable-next-line complexity -- tool-specific renderers intentionally branch by payload shape
 function VerboseToolCall({
   tc,
@@ -334,6 +361,9 @@ function VerboseToolCall({
   const searchParams = !isBash ? parseSearchToolParams(tc.name, tc.detail) : null
   const taskTool = category === "task" ? parseTaskToolCall(tc.name, tc.detail) : null
   const fileTool = category === "file" ? parseFileToolCall(tc.name, tc.detail) : null
+  const execCode = tc.name.toLowerCase() === "exec" ? toolCodeFromJson(parsedDetail.rawJson) : null
+
+  if (execCode) return <ExecToolCall code={execCode} count={count} />
 
   if (taskTool) {
     return (

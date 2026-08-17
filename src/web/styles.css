@@ -2115,6 +2115,42 @@ tbody tr:hover {
   border: none;
 }
 
+.tool-call-exec {
+  padding: 0;
+  overflow: hidden;
+}
+
+.tool-call-exec-summary {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.55rem 0.65rem;
+  cursor: pointer;
+  list-style: none;
+}
+
+.tool-call-exec-summary::-webkit-details-marker {
+  display: none;
+}
+
+.tool-call-exec-summary::before {
+  content: "▸";
+  color: var(--muted);
+  font-size: 0.7rem;
+}
+
+.tool-call-exec[open] .tool-call-exec-summary::before {
+  content: "▾";
+}
+
+.tool-call-exec-preview {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 0.72rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .tool-call-details {
   border: 1px solid rgba(99, 129, 204, 0.28);
   border-radius: 8px;
