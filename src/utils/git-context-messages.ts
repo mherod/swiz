@@ -19,6 +19,9 @@ interface BranchStateSettings {
   collaborationMode: string
 }
 
+const BRANCH_POLICY_CONFLICT_MESSAGE =
+  "Trunk mode and strict no-direct-main are both enabled; we should resolve that workflow conflict before pushing."
+
 export interface GitContextLineOptions {
   collaborationMode?: string
   trunkMode?: boolean
@@ -53,16 +56,23 @@ function describeWorkingTree(uncommitted: number): string {
   ].join(" ")
 }
 
-function describeSyncState(ahead: number, behind: number): string {
+function hasBranchPolicyConflict(options: GitContextLineOptions): boolean {
+  return Boolean(options.trunkMode && options.strictNoDirectMain)
+}
+
+function describeSyncState(ahead: number, behind: number, branchPolicyConflict = false): string {
   if (ahead > 0 && behind > 0) {
     return [
       ` Branch has diverged: ${plural(ahead, "local commit")} not pushed`,
       `and ${plural(behind, "remote commit")} not pulled.`,
-      "We should pull or rebase, resolve any conflicts, then push.",
+      branchPolicyConflict
+        ? "We should pull or rebase and resolve any content conflicts without choosing a push path until the workflow conflict is resolved."
+        : "We should pull or rebase, resolve any conflicts, then push.",
     ].join(" ")
   }
   if (ahead > 0) {
-    return ` ${plural(ahead, "commit")} not yet pushed. We should push ${thisThese(ahead, "commit")}.`
+    const guidance = branchPolicyConflict ? "" : ` We should push ${thisThese(ahead, "commit")}.`
+    return ` ${plural(ahead, "commit")} not yet pushed.${guidance}`
   }
   if (behind > 0) {
     return ` ${plural(behind, "commit")} behind remote. We should pull or rebase before pushing.`
@@ -93,11 +103,14 @@ function normalizeGitContextLineOptions(
 function describeBranchWorkflow(options: GitContextLineOptions): string {
   const defaultBranch = options.defaultBranch ?? "the default branch"
 
-  if (options.trunkMode && options.strictNoDirectMain) {
-    return "Trunk mode and strict no-direct-main are both enabled; we should resolve that workflow conflict before pushing."
+  if (hasBranchPolicyConflict(options)) {
+    return BRANCH_POLICY_CONFLICT_MESSAGE
   }
   if (options.trunkMode) {
-    return `Trunk mode is active: keep work on ${defaultBranch} and push directly when ready.`
+    return (
+      `Project trunk mode is authoritative: keep work on ${defaultBranch} and push directly when ready. ` +
+      "Do not create a feature branch or PR because of repository ownership or collaboration heuristics."
+    )
   }
   if (options.strictNoDirectMain) {
     return `Strict no-direct-main is active: use a feature branch and PR before pushing to ${defaultBranch}.`
@@ -151,7 +164,7 @@ export function buildGitContextLine(
   let line = branch === "(detached)" ? "HEAD is detached" : `On branch ${branch}`
   line += describeUpstream(upstream, upstreamGone)
   line += describeWorkingTree(uncommitted)
-  line += describeSyncState(ahead, behind)
+  line += describeSyncState(ahead, behind, hasBranchPolicyConflict(options))
   line += describeUnpushedCommitSummaries(ahead, unpushedCommitSummaries)
 
   if (branch === "(detached)") {
@@ -163,46 +176,58 @@ export function buildGitContextLine(
   return line
 }
 
+function describeBranchStateUncommitted(
+  branch: string,
+  uncommitted: number,
+  effective: BranchStateSettings,
+  branchPolicyConflict: boolean
+): string {
+  if (uncommitted <= 0) return ""
+  if (branchPolicyConflict) {
+    return `We should preserve these ${plural(uncommitted, "uncommitted file")} while resolving the workflow conflict.`
+  }
+  if (effective.trunkMode) {
+    return `We should commit these ${plural(uncommitted, "uncommitted file")} directly to ${branch} with /commit; trunk mode is active.`
+  }
+  if (effective.strictNoDirectMain && (branch === "main" || branch === "master")) {
+    return `We should move these ${plural(uncommitted, "uncommitted file")} onto a feature branch and open a PR; strictNoDirectMain is enabled on ${branch}.`
+  }
+  return `We should commit these ${plural(uncommitted, "uncommitted file")} with /commit before switching branches or stopping.`
+}
+
+function describeBranchStateAhead(
+  branch: string,
+  ahead: number,
+  effective: BranchStateSettings,
+  branchPolicyConflict: boolean
+): string {
+  if (ahead <= 0 || branchPolicyConflict) return ""
+  if (effective.trunkMode) {
+    return `We should push ${thisThese(ahead, "commit")} to ${branch} with /push.`
+  }
+  if (effective.collaborationMode === "team") {
+    return `We should open a PR for these ${plural(ahead, "local commit")}; team collaboration mode does not expect a direct push.`
+  }
+  return `We should push ${thisThese(ahead, "commit")} with /push when ready.`
+}
+
+function describeBranchStateBehind(behind: number): string {
+  if (behind <= 0) return ""
+  return `We should pull or rebase the ${plural(behind, "remote commit")} before pushing. If conflicts appear, resolve them before continuing.`
+}
+
 export function buildBranchStateSystemMessage(
   gitStatus: GitContextMessageStatus,
   effective: BranchStateSettings
 ): string {
   const { branch, total: uncommitted, ahead, behind } = gitStatus
-  const parts: string[] = []
-
-  if (uncommitted > 0) {
-    if (effective.trunkMode) {
-      parts.push(
-        `We should commit these ${plural(uncommitted, "uncommitted file")} directly to ${branch} with /commit; trunk mode is active.`
-      )
-    } else if (effective.strictNoDirectMain && (branch === "main" || branch === "master")) {
-      parts.push(
-        `We should move these ${plural(uncommitted, "uncommitted file")} onto a feature branch and open a PR; strictNoDirectMain is enabled on ${branch}.`
-      )
-    } else {
-      parts.push(
-        `We should commit these ${plural(uncommitted, "uncommitted file")} with /commit before switching branches or stopping.`
-      )
-    }
-  }
-
-  if (ahead > 0) {
-    if (effective.collaborationMode === "team") {
-      parts.push(
-        `We should open a PR for these ${plural(ahead, "local commit")}; team collaboration mode does not expect a direct push.`
-      )
-    } else if (effective.trunkMode) {
-      parts.push(`We should push ${thisThese(ahead, "commit")} to ${branch} with /push.`)
-    } else {
-      parts.push(`We should push ${thisThese(ahead, "commit")} with /push when ready.`)
-    }
-  }
-
-  if (behind > 0) {
-    parts.push(
-      `We should pull or rebase the ${plural(behind, "remote commit")} before pushing. If conflicts appear, resolve them before continuing.`
-    )
-  }
+  const branchPolicyConflict = hasBranchPolicyConflict(effective)
+  const parts = [
+    branchPolicyConflict ? BRANCH_POLICY_CONFLICT_MESSAGE : "",
+    describeBranchStateUncommitted(branch, uncommitted, effective, branchPolicyConflict),
+    describeBranchStateAhead(branch, ahead, effective, branchPolicyConflict),
+    describeBranchStateBehind(behind),
+  ].filter(Boolean)
 
   return parts.join(" ")
 }

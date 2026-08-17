@@ -264,6 +264,7 @@ interface ProjectPolicyInfo {
   memoryWordThreshold: number
   memoryWordSource: "project" | "user" | "default"
   trunkMode: boolean
+  strictNoDirectMain: boolean
   auditStrictness: string
   auditStrictnessSource: "project" | "user" | "default"
   source: "project" | "default"
@@ -501,6 +502,30 @@ function printProjectPolicy(projectPolicyInfo: ProjectPolicyInfo, detectedStacks
       value: boolToEnabledDisabled(projectPolicyInfo.trunkMode),
       scope,
     },
+    ...(projectPolicyInfo.trunkMode && projectPolicyInfo.strictNoDirectMain
+      ? [
+          {
+            label: "branch-policy:",
+            value: "conflict",
+            scope: "(project)",
+            description:
+              "Project trunk mode conflicts with strict-no-direct-main; resolve trunk-mode and strict-no-direct-main before pushing.",
+          },
+        ]
+      : projectPolicyInfo.trunkMode
+        ? [
+            {
+              label: "branch-policy:",
+              value:
+                projectPolicyInfo.defaultBranchSource === "auto"
+                  ? "direct push to the detected default branch"
+                  : `direct push to ${projectPolicyInfo.defaultBranch}`,
+              scope: "(project)",
+              description:
+                "Project trunk mode is authoritative; repository ownership and collaboration heuristics cannot require a feature branch or PR.",
+            },
+          ]
+        : []),
     {
       label: "audit-strictness:",
       value: projectPolicyInfo.auditStrictness,
@@ -609,6 +634,7 @@ function buildProjectPolicyInfo(
     memoryWordThreshold: memoryThresholds.memoryWordThreshold,
     memoryWordSource: memoryThresholds.memoryWordSource,
     trunkMode: projectSettings?.trunkMode ?? false,
+    strictNoDirectMain: projectSettings?.strictNoDirectMain ?? settings.strictNoDirectMain,
     ...resolveAuditStrictness(settings, projectSettings),
     source: policy.source,
     autoSteerTranscriptWatching:

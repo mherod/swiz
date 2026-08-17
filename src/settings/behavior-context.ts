@@ -83,7 +83,12 @@ function describeWorkflowMode(
   if (settings.trunkMode && settings.strictNoDirectMain) {
     return "trunk mode conflicts with strict no-direct-main; resolve that before pushing"
   }
-  if (settings.trunkMode) return `trunk mode keeps work on ${branch} with direct pushes when ready`
+  if (settings.trunkMode) {
+    return (
+      `project trunk mode is authoritative: keep work on ${branch} and push directly when ready; ` +
+      "repository ownership and collaboration heuristics cannot require a feature branch or PR"
+    )
+  }
   if (settings.strictNoDirectMain) {
     return `strict no-direct-main requires a feature branch and PR before ${branch} pushes`
   }
@@ -101,7 +106,7 @@ function describeWorkflowMode(
 }
 
 function describePrMergePolicy(settings: EffectiveSwizSettings): string {
-  if (!settings.prMergeMode) return ""
+  if (!settings.prMergeMode || settings.trunkMode) return ""
   const age =
     settings.prAgeGateMinutes > 0 ? ` with a ${settings.prAgeGateMinutes} minute PR age gate` : ""
   return `PR merge guidance is active${age}`
@@ -131,8 +136,8 @@ function describeCiGate(settings: EffectiveSwizSettings): string {
 function enabledGateRows(settings: EffectiveSwizSettings): Array<[boolean, string]> {
   return [
     [settings.gitStatusGate, "clean git state before stop"],
-    [settings.nonDefaultBranchGate, "default-branch sync for feature work"],
-    [settings.changesRequestedGate, "addressed PR review feedback"],
+    [settings.nonDefaultBranchGate, "default-branch sync for any already-existing feature work"],
+    [settings.changesRequestedGate, "review feedback on any already-existing PR"],
     [settings.personalRepoIssuesGate, "triaged actionable GitHub issues"],
     [settings.issueCloseGate, "explicit approval before closing issues"],
     [settings.qualityChecksGate, "lint/typecheck quality checks"],

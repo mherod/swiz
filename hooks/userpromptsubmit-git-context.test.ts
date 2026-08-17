@@ -1,4 +1,5 @@
 import { describe, expect, mock, test } from "bun:test"
+import { mkdir } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { hookOutputSchema } from "../src/schemas.ts"
@@ -85,6 +86,49 @@ describe("userpromptsubmit-git-context", () => {
     const context = additionalContext(result)
     expect(context).toContain("On branch main tracking origin/main. The working tree is clean.")
     expect(context).not.toContain("Uncommitted files:")
+  })
+
+  test("passively preserves authoritative project trunk guidance", async () => {
+    const cwd = testCwd(`trunk-authority-${crypto.randomUUID()}`)
+    await mkdir(join(cwd, ".swiz"), { recursive: true })
+    await Bun.write(
+      join(cwd, ".swiz", "config.json"),
+      JSON.stringify({ defaultBranch: "main", trunkMode: true, strictNoDirectMain: false })
+    )
+    mockGitStatusByCwd.set(cwd, gitStatus({ ahead: 1, total: 0 }))
+
+    const result = await evaluateUserpromptsubmitGitContext({
+      session_id: "passive-trunk-guidance",
+      cwd,
+    })
+    const parsed = hookOutputSchema.parse(result)
+
+    expect(parsed.systemMessage).toContain("Project trunk mode is authoritative")
+    expect(parsed.systemMessage).toContain(
+      "Do not create a feature branch or PR because of repository ownership or collaboration heuristics."
+    )
+    expect(parsed.systemMessage).not.toContain("PR merge guidance is active")
+    expect(parsed.systemMessage).not.toContain("open a PR")
+  })
+
+  test("preserves explicit project branch policy when git status is unavailable", async () => {
+    const cwd = testCwd(`unavailable-status-trunk-authority-${crypto.randomUUID()}`)
+    await mkdir(join(cwd, ".swiz"), { recursive: true })
+    await Bun.write(
+      join(cwd, ".swiz", "config.json"),
+      JSON.stringify({ defaultBranch: "main", trunkMode: true, strictNoDirectMain: false })
+    )
+    mockGitStatusByCwd.set(cwd, null)
+
+    const result = await evaluateUserpromptsubmitGitContext({
+      session_id: "passive-trunk-guidance-without-status",
+      cwd,
+    })
+    const parsed = hookOutputSchema.parse(result)
+
+    expect(parsed.systemMessage).toContain(
+      "project trunk mode is authoritative: keep work on main and push directly when ready; repository ownership and collaboration heuristics cannot require a feature branch or PR"
+    )
   })
 
   test("includes uncommitted file list when working tree has changes", async () => {

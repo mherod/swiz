@@ -20,6 +20,7 @@ import { getCollaborationModePolicy } from "../src/collaboration-policy.ts"
 import { detectForkTopology, git } from "../src/git-helpers.ts"
 import {
   preToolUseAllow,
+  preToolUseAllowWithContext,
   preToolUseDeny,
   runSwizHookAsMain,
   type SwizHookOutput,
@@ -291,48 +292,126 @@ async function checkLargeFiles(
   return { block: null, warn: warnItems }
 }
 
-function checkMissingPriorChecks(
+interface PushCheckSettings {
+  collaborationMode: string
+  ignoreCi?: boolean
+  strictNoDirectMain?: boolean
+  trunkMode?: boolean
+}
+
+interface PriorCheckStatus {
+  hasBranchCheck: boolean
+  hasCICheck: boolean
+  hasPRCheck: boolean
+  isAuthoritativeTrunkMode: boolean
+}
+
+const TRUNK_BRANCH_POLICY_GUIDANCE =
+  "Project trunk mode is authoritative: push directly to the configured default branch when ready.\n" +
+  "Do not create a feature branch or PR because of repository ownership or collaboration heuristics."
+
+function resolvePriorCheckStatus(
   priorCommands: string[],
-  eff: { collaborationMode: string; ignoreCi?: boolean },
-  largeFileWarnItems: string[]
-): SwizHookOutput {
+  eff: PushCheckSettings
+): PriorCheckStatus {
   const modePolicy = getCollaborationModePolicy(
     eff.collaborationMode as "solo" | "team" | "auto" | "relaxed-collab"
   )
-  const hasBranchCheck = priorCommands.some((c) => BRANCH_CHECK_RE.test(c))
-  const hasPRCheck = priorCommands.some((c) => PR_CHECK_RE.test(c))
-  const hasCICheck =
-    eff.ignoreCi || !modePolicy.prHooksActive ? true : priorCommands.some((c) => CI_WAIT_RE.test(c))
-
-  if (hasBranchCheck && hasPRCheck && hasCICheck && largeFileWarnItems.length === 0) {
-    return preToolUseAllow(
-      "Continue in pre-push verified mode: All pre-push checks found in transcript (branch, PR, CI)."
-    )
+  const isAuthoritativeTrunkMode = eff.trunkMode === true && eff.strictNoDirectMain !== true
+  return {
+    hasBranchCheck: priorCommands.some((command) => BRANCH_CHECK_RE.test(command)),
+    hasCICheck:
+      eff.ignoreCi || !modePolicy.prHooksActive
+        ? true
+        : priorCommands.some((command) => CI_WAIT_RE.test(command)),
+    hasPRCheck:
+      isAuthoritativeTrunkMode || priorCommands.some((command) => PR_CHECK_RE.test(command)),
+    isAuthoritativeTrunkMode,
   }
+}
 
+function collectMissingChecks(
+  status: PriorCheckStatus,
+  collaborationMode: string,
+  largeFileWarnItems: string[]
+): string[] {
   const missing: string[] = [...largeFileWarnItems]
-  if (!hasBranchCheck) missing.push("Branch check (not run yet): `git branch --show-current`")
-  if (!hasPRCheck) {
+  if (!status.hasBranchCheck) {
+    missing.push("Branch check (not run yet): `git branch --show-current`")
+  }
+  if (!status.hasPRCheck) {
     missing.push(
       "Open-PR check (not run yet): " +
         "`gh pr list --state open --head $(git branch --show-current)`"
     )
   }
-  if (!hasCICheck) {
+  if (!status.hasCICheck) {
     missing.push(
-      `CI check (not run yet, required for ${eff.collaborationMode} mode): ` +
+      `CI check (not run yet, required for ${collaborationMode} mode): ` +
         "`swiz ci-wait $(git rev-parse HEAD) --timeout 300`"
     )
   }
+  return missing
+}
 
+function buildVerifiedChecksOutput(isAuthoritativeTrunkMode: boolean): SwizHookOutput {
+  if (isAuthoritativeTrunkMode) {
+    const reason =
+      `Continue in pre-push verified mode: All applicable pre-push checks found (branch, CI).\n\n` +
+      TRUNK_BRANCH_POLICY_GUIDANCE
+    return preToolUseAllowWithContext(reason, TRUNK_BRANCH_POLICY_GUIDANCE, {
+      rephrase: false,
+    })
+  }
   return preToolUseAllow(
-    `Pre-push advisory mode: branch/PR/CI verification is incomplete.\n\n` +
-      formatActionPlan(missing, {
-        header: `The following checks have not been run recently (${formatCurrentSessionUsageWindow()}):`,
-      }) +
-      `\n\nConsider running these checks to avoid pushing large work directly\n` +
-      `to main in a collaborative repo, or creating duplicate PRs.`
+    "Continue in pre-push verified mode: All pre-push checks found in transcript (branch, PR, CI)."
   )
+}
+
+function buildMissingChecksOutput(
+  missing: string[],
+  isAuthoritativeTrunkMode: boolean
+): SwizHookOutput {
+  const verificationScope = isAuthoritativeTrunkMode ? "branch/CI" : "branch/PR/CI"
+  const advisoryFooter = isAuthoritativeTrunkMode
+    ? TRUNK_BRANCH_POLICY_GUIDANCE
+    : `Consider running these checks to avoid pushing large work directly\n` +
+      `to main in a collaborative repo, or creating duplicate PRs.`
+
+  const advisoryReason =
+    `Pre-push advisory mode: ${verificationScope} verification is incomplete.\n\n` +
+    formatActionPlan(missing, {
+      header: `The following checks have not been run recently (${formatCurrentSessionUsageWindow()}):`,
+    }) +
+    `\n\n${advisoryFooter}`
+
+  if (isAuthoritativeTrunkMode) {
+    return preToolUseAllowWithContext(advisoryReason, TRUNK_BRANCH_POLICY_GUIDANCE, {
+      rephrase: false,
+    })
+  }
+
+  return preToolUseAllow(advisoryReason)
+}
+
+function checkMissingPriorChecks(
+  priorCommands: string[],
+  eff: PushCheckSettings,
+  largeFileWarnItems: string[]
+): SwizHookOutput {
+  const status = resolvePriorCheckStatus(priorCommands, eff)
+  const allChecksFound =
+    status.hasBranchCheck &&
+    status.hasPRCheck &&
+    status.hasCICheck &&
+    largeFileWarnItems.length === 0
+
+  if (allChecksFound) {
+    return buildVerifiedChecksOutput(status.isAuthoritativeTrunkMode)
+  }
+
+  const missing = collectMissingChecks(status, eff.collaborationMode, largeFileWarnItems)
+  return buildMissingChecksOutput(missing, status.isAuthoritativeTrunkMode)
 }
 
 const pretoolusePushChecksGate: SwizToolHook = {

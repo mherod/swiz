@@ -171,8 +171,9 @@ const posttoolusGitContext: SwizHook = {
     const additionalContext = [statusLine, ...directives].filter(Boolean).join("\n")
     if (!additionalContext) return {}
     const systemMsg = gitStatus ? buildBranchStateSystemMessage(gitStatus, effective) : undefined
+    const hasExplicitBranchPolicy = Boolean(effective.trunkMode || effective.strictNoDirectMain)
     return buildSplitContextHookOutput("PostToolUse", additionalContext, systemMsg, {
-      rephrase: !containsConcurrentWorkGuidance(additionalContext),
+      rephrase: !hasExplicitBranchPolicy && !containsConcurrentWorkGuidance(additionalContext),
     })
   },
 }

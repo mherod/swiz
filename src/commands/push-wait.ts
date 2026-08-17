@@ -188,8 +188,14 @@ async function assertPeerReviewAllowsDefaultPush(
   targetBranch: string,
   effective: EffectiveSwizSettings
 ): Promise<void> {
+  if (effective.trunkMode && effective.strictNoDirectMain) {
+    throw new Error(
+      "Trunk mode and strict no-direct-main are both enabled; resolve that workflow conflict before pushing."
+    )
+  }
   const defaultBranch = await getDefaultBranch(cwd)
   if (!isDefaultBranch(targetBranch, defaultBranch)) return
+  if (effective.trunkMode) return
   if (!requiresPeerReview(effective.collaborationMode)) return
   throw new Error(
     `Collaboration mode "${effective.collaborationMode}" requires peer review — ` +

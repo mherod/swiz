@@ -411,4 +411,77 @@ describe("executePushFlow", () => {
       result.commitSha
     )
   })
+
+  it("allows trunk mode to push the default branch when collaboration mode requires peer review", async () => {
+    const root = mkdtempSync(join(tmpdir(), "swiz-push-flow-trunk-team-"))
+    const repo = join(root, "repo")
+    const remote = join(root, "remote.git")
+    mkdirSync(repo)
+    runGit(root, ["init", "--bare", remote])
+    runGit(repo, ["init", "-b", "main"])
+    runGit(repo, ["config", "user.name", "Swiz Test"])
+    runGit(repo, ["config", "user.email", "swiz-test@example.test"])
+    writeFileSync(join(repo, "tracked.txt"), "trunk team push flow\n")
+    runGit(repo, ["add", "tracked.txt"])
+    runGit(repo, ["commit", "-m", "test: seed trunk team push flow"])
+    runGit(repo, ["remote", "add", "origin", remote])
+    mkdirSync(join(repo, ".swiz"))
+    writeFileSync(
+      join(repo, ".swiz", "config.json"),
+      JSON.stringify({ ignoreCi: true, collaborationMode: "team", trunkMode: true })
+    )
+
+    const result = await executePushFlow({
+      remote: "origin",
+      branch: "main",
+      cooldownTimeout: 1,
+      ciTimeout: 1,
+      waitForCi: true,
+      cwd: repo,
+    })
+
+    expect(result.commitSha).toBe(runGit(repo, ["rev-parse", "HEAD"]))
+    expect(result.ciRunId).toBeNull()
+    expect(runGit(repo, ["ls-remote", "--heads", "origin", "refs/heads/main"])).toContain(
+      result.commitSha
+    )
+  })
+
+  it("blocks pushes when trunk mode conflicts with strict no-direct-main", async () => {
+    const root = mkdtempSync(join(tmpdir(), "swiz-push-flow-policy-conflict-"))
+    const repo = join(root, "repo")
+    const remote = join(root, "remote.git")
+    mkdirSync(repo)
+    runGit(root, ["init", "--bare", remote])
+    runGit(repo, ["init", "-b", "main"])
+    runGit(repo, ["config", "user.name", "Swiz Test"])
+    runGit(repo, ["config", "user.email", "swiz-test@example.test"])
+    writeFileSync(join(repo, "tracked.txt"), "conflicting branch policy\n")
+    runGit(repo, ["add", "tracked.txt"])
+    runGit(repo, ["commit", "-m", "test: seed conflicting branch policy"])
+    runGit(repo, ["remote", "add", "origin", remote])
+    mkdirSync(join(repo, ".swiz"))
+    writeFileSync(
+      join(repo, ".swiz", "config.json"),
+      JSON.stringify({
+        ignoreCi: true,
+        collaborationMode: "team",
+        trunkMode: true,
+        strictNoDirectMain: true,
+      })
+    )
+
+    await expect(
+      executePushFlow({
+        remote: "origin",
+        branch: "main",
+        cooldownTimeout: 1,
+        ciTimeout: 1,
+        waitForCi: true,
+        cwd: repo,
+      })
+    ).rejects.toThrow("Trunk mode and strict no-direct-main are both enabled")
+
+    expect(runGit(repo, ["ls-remote", "--heads", "origin", "refs/heads/main"])).toBe("")
+  })
 })

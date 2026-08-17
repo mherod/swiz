@@ -938,7 +938,7 @@ describe("buildGitContextLine", () => {
       trunkMode: true,
       defaultBranch: "main",
     })
-    expect(result).toContain("Trunk mode is active")
+    expect(result).toContain("Project trunk mode is authoritative")
     expect(result).toContain("keep work on main")
     expect(result).toContain("Collaboration mode: solo")
   })

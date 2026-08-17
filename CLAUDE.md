@@ -156,16 +156,16 @@ alwaysApply: false
 - **DON'T** close as `duplicate`/`wontfix` without file+line evidence per acceptance criterion.
 - **DO** check issue state before resolving: `gh api repos/:owner/:repo/issues/{number} --jq '.state'`; `Fixes #N` auto-closes on push.
 ## Push and CI
-- **DO**: Run `swiz settings show --project` before `/commit`, `/push`, or `/rebase-and-merge-into-main`.
-- **DO**: Treat `.swiz/config.json` as the baseline policy for `mherod/swiz` (solo + trunk). Live `/push` signals override it: if `OPEN_PRS_FROM_OTHERS>0`, other contributors are active, or collaboration state is unknown, create a feature branch and PR. Output such as `Open PRs from others: 1` for PR #732 is a signal, not an exception.
+- **DO**: Run `swiz settings show --project` before `/commit`, `/push`, or `/rebase-and-merge-into-main`; its effective project settings are the branch-policy authority.
+- **DO**: When project `trunk-mode` is enabled and `strict-no-direct-main` is disabled, remain on the configured default branch and push it directly. Repository owner type, contributor or PR activity, and unknown collaboration auto-detection may affect synchronization or timing, but must not select a feature branch or PR flow. An actual remote or branch-protection rejection remains authoritative.
 - Run `/push` before `git push`; PreToolUse push gate requires it.
 - CI `paths-ignore`: `.claude/**`, `docs/**` — only those paths skip; markdown triggers CI.
 - Pre-push checklist:
-  0. Run `/push` before every push and follow its collaboration decision.
+  0. Run `/push` before every push and reconcile its heuristics with `swiz settings show --project`; explicit project trunk mode wins the branch-model decision.
   1. `git log origin/main..HEAD --oneline`.
   2. `git branch --show-current`; `gh pr list --state open --head $(git branch --show-current)`.
   3. `SHA=$(git rev-parse HEAD)`.
-  4. `git push origin <permitted-branch>` (lefthook pre-push runs full `bun test`); use `main` only when Step 0 reports no collaboration signal.
+  4. `git push origin <permitted-branch>` (lefthook pre-push runs full `bun test`); with project trunk mode enabled, the permitted branch is the configured default branch.
   5. **CI** run id from `gh run list --commit "$SHA" --limit 15`—row `[0]` may be Dependabot (**MEMORY.md**).
   6. `gh run watch <run-id> --exit-status`.
   7. `gh run view <run-id> --json conclusion,status,jobs --jq '{conclusion,status,jobs:[.jobs[]|{name,conclusion,status}]}'`.

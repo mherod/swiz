@@ -64,6 +64,9 @@ export async function evaluateUserpromptsubmitGitContext(input: unknown): Promis
   const hookInput = userPromptSubmitHookInputSchema.parse(input)
   const cwd = hookInput.cwd ?? process.cwd()
   const behavior = await resolveBehaviorContext(cwd, hookInput.session_id)
+  const hasExplicitBranchPolicy = Boolean(
+    behavior.gitOptions.trunkMode || behavior.gitOptions.strictNoDirectMain
+  )
 
   // Dynamic import to avoid circular dep (manifest → git-utils → settings → manifest)
   const { getGitStatusV2 } = await import("../src/utils/git-utils.ts")
@@ -73,7 +76,9 @@ export async function evaluateUserpromptsubmitGitContext(input: unknown): Promis
     const branch = (await git(["branch", "--show-current"], cwd)).trim() || "(unknown)"
     const line =
       branch === "(unknown)" ? `HEAD is detached. ${DETACHED_HEAD_WARNING}` : `On branch ${branch}.`
-    return buildContextHookOutput("UserPromptSubmit", combineContext(line, behavior.context))
+    return buildContextHookOutput("UserPromptSubmit", combineContext(line, behavior.context), {
+      rephrase: !hasExplicitBranchPolicy,
+    })
   }
 
   let gitLine = buildGitContextLine(gitStatus, behavior.gitOptions)
@@ -84,7 +89,7 @@ export async function evaluateUserpromptsubmitGitContext(input: unknown): Promis
 
   const context = combineContext(gitLine, behavior.context)
   return buildContextHookOutput("UserPromptSubmit", context, {
-    rephrase: !containsConcurrentWorkGuidance(context),
+    rephrase: !hasExplicitBranchPolicy && !containsConcurrentWorkGuidance(context),
   })
 }
 

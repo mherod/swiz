@@ -328,6 +328,29 @@ describe("pretooluse-push-checks-gate", () => {
   })
 
   describe("advisory message content", () => {
+    test("explicit trunk mode omits PR-flow guidance and affirms direct push", async () => {
+      const result = await runHook({
+        command: "git push origin main",
+        transcriptContent: makeTranscript("git branch --show-current"),
+        effectiveSettings: {
+          collaborationMode: "team",
+          trunkMode: true,
+          strictNoDirectMain: false,
+        },
+      })
+
+      expect(result.blocked).toBe(false)
+      expect(result.advisory).toBe(true)
+      expect(result.reason).toContain("Project trunk mode is authoritative")
+      expect(result.reason).toContain("push directly to the configured default branch")
+      expect(result.reason).toContain(
+        "Do not create a feature branch or PR because of repository ownership or collaboration heuristics."
+      )
+      expect(result.reason).not.toContain("gh pr list")
+      expect(result.reason).not.toContain("branch/PR/CI verification is incomplete")
+      expect(result.reason).not.toContain("avoid pushing large work directly")
+    })
+
     test("advisory names the specific missing checks", async () => {
       const transcript = makeTranscript("git branch --show-current")
       const result = await runHook({

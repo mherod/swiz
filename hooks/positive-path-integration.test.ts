@@ -1240,9 +1240,14 @@ describe("stop-git-push: positive paths (now merged into stop-git-status)", () =
     expect(r.json?.decision).toBe("block")
     const reason = r.json?.reason as string
     expect(reason).toMatch(/\bgit push origin (main|master)\b/)
-    expect(reason).not.toContain("feature branch")
-    expect(reason).not.toContain("Move commits off")
-    expect(reason).not.toContain("gh pr create")
+    const negativeBranchGuidance =
+      "Do not create a feature branch or PR because of repository ownership or collaboration heuristics."
+    expect(reason).toContain(negativeBranchGuidance)
+    const reasonWithoutNegativeGuidance = reason.replace(negativeBranchGuidance, "")
+    expect(reasonWithoutNegativeGuidance).not.toContain("feature branch")
+    expect(reasonWithoutNegativeGuidance).not.toContain("Move commits off")
+    expect(reasonWithoutNegativeGuidance).not.toContain("gh pr create")
+    expect(reasonWithoutNegativeGuidance).not.toMatch(/\b(?:create|open|submit) (?:a )?PR\b/i)
   }, 15000)
 })
 

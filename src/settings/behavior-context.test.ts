@@ -31,7 +31,9 @@ describe("buildBehaviorSteeringContext", () => {
       { defaultBranch: "main" }
     )
 
-    expect(context).toContain("trunk mode keeps work on main with direct pushes when ready")
+    expect(context).toContain("project trunk mode is authoritative")
+    expect(context).toContain("repository ownership and collaboration heuristics cannot require")
+    expect(context).not.toContain("PR merge guidance is active")
   })
 
   test("calls out conflicting branch workflow settings", () => {

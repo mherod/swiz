@@ -627,6 +627,54 @@ describe("swiz settings", () => {
     expect(result.stdout).toMatch(/trivial-max-lines:\s+10/)
   })
 
+  test("states authoritative direct-push policy when project trunk mode is enabled", async () => {
+    const home = await createTempHome()
+    const projectDir = await _tmp.create("swiz-trunk-policy-test-")
+    const swizDir = join(projectDir, ".swiz")
+    await mkdir(swizDir, { recursive: true })
+    await writeFile(
+      join(swizDir, "config.json"),
+      JSON.stringify({ defaultBranch: "main", trunkMode: true })
+    )
+
+    const result = await runSwiz(["settings", "show", "--project", "--dir", projectDir], home)
+    expect(result.exitCode).toBe(0)
+    expect(result.stdout).toMatch(/branch-policy:\s+direct push to main/)
+    expect(result.stdout).toContain(
+      "repository ownership and collaboration heuristics cannot require a feature branch or PR"
+    )
+  })
+
+  test("describes an auto-detected trunk branch without naming auto-detect as the branch", async () => {
+    const home = await createTempHome()
+    const projectDir = await _tmp.create("swiz-auto-trunk-policy-test-")
+    const swizDir = join(projectDir, ".swiz")
+    await mkdir(swizDir, { recursive: true })
+    await writeFile(join(swizDir, "config.json"), JSON.stringify({ trunkMode: true }))
+
+    const result = await runSwiz(["settings", "show", "--project", "--dir", projectDir], home)
+    expect(result.exitCode).toBe(0)
+    expect(result.stdout).toMatch(/branch-policy:\s+direct push to the detected default branch/)
+    expect(result.stdout).not.toContain("direct push to auto-detect")
+  })
+
+  test("reports conflicting project branch settings instead of direct-push authority", async () => {
+    const home = await createTempHome()
+    const projectDir = await _tmp.create("swiz-conflicting-branch-policy-test-")
+    const swizDir = join(projectDir, ".swiz")
+    await mkdir(swizDir, { recursive: true })
+    await writeFile(
+      join(swizDir, "config.json"),
+      JSON.stringify({ defaultBranch: "main", strictNoDirectMain: true, trunkMode: true })
+    )
+
+    const result = await runSwiz(["settings", "show", "--project", "--dir", projectDir], home)
+    expect(result.exitCode).toBe(0)
+    expect(result.stdout).toMatch(/branch-policy:\s+conflict/)
+    expect(result.stdout).toContain("resolve trunk-mode and strict-no-direct-main before pushing")
+    expect(result.stdout).not.toMatch(/branch-policy:\s+direct push/)
+  })
+
   test("disable-hook adds filename to user-level disabledHooks", async () => {
     const home = await createTempHome()
     const result = await runSwiz(["settings", "disable-hook", "stop-ship-checklist.ts"], home)
