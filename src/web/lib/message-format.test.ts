@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { splitUserMessage } from "./message-format.ts"
+import { splitAssistantMessage, splitUserMessage } from "./message-format.ts"
 
 describe("ambient browser transcript context", () => {
   test("separates ambient page state from the user request", () => {
@@ -116,5 +116,67 @@ describe("inline skill links", () => {
 
     expect(parts.visibleText).toBe("Ship the change.")
     expect(parts.attachedSkills).toBeNull()
+  })
+})
+
+const validMemoryCitation = [
+  "<oai-mem-citation>",
+  "<citation_entries>",
+  "MEMORY.md:133-137|note=[located the prior OPS-023 requirements rollout]",
+  "rollout_summaries/2026-08-15T11-02-27-61tl-admin_requirements_contract_pr_166.md:24-35|note=[OPS-023 history and atomic requirements validation context]",
+  "</citation_entries>",
+  "<rollout_ids>",
+  "01a00516-6155-74a0-a90b-4dfcda82376f",
+  "</rollout_ids>",
+  "</oai-mem-citation>",
+].join("\n")
+
+describe("assistant memory citations", () => {
+  test("separates a valid trailing memory citation from assistant prose", () => {
+    const parts = splitAssistantMessage(
+      ["Committed all remaining changes.", "", validMemoryCitation].join("\n")
+    )
+
+    expect(parts.visibleText).toBe("Committed all remaining changes.")
+    expect(parts.memoryCitation).toEqual({
+      entries: [
+        {
+          path: "MEMORY.md",
+          lineStart: 133,
+          lineEnd: 137,
+          note: "located the prior OPS-023 requirements rollout",
+        },
+        {
+          path: "rollout_summaries/2026-08-15T11-02-27-61tl-admin_requirements_contract_pr_166.md",
+          lineStart: 24,
+          lineEnd: 35,
+          note: "OPS-023 history and atomic requirements validation context",
+        },
+      ],
+      rolloutIds: ["01a00516-6155-74a0-a90b-4dfcda82376f"],
+    })
+  })
+
+  test("allows an empty rollout id section", () => {
+    const withoutRollout = validMemoryCitation.replace("01a00516-6155-74a0-a90b-4dfcda82376f\n", "")
+
+    expect(splitAssistantMessage(withoutRollout).memoryCitation?.rolloutIds).toEqual([])
+  })
+
+  test("keeps malformed or unsafe memory citations visible", () => {
+    const fence = String.fromCharCode(96).repeat(3)
+    const malformedVariants = [
+      validMemoryCitation.replace("MEMORY.md", "/Users/me/MEMORY.md"),
+      validMemoryCitation.replace("01a00516-6155-74a0-a90b-4dfcda82376f", "not-a-rollout"),
+      validMemoryCitation.replace("133-137", "137-133"),
+      `${validMemoryCitation}\nFollow-up prose.`,
+      [`${fence}xml`, validMemoryCitation, fence].join("\n"),
+    ]
+
+    for (const text of malformedVariants) {
+      const parts = splitAssistantMessage(text)
+      expect(parts.memoryCitation).toBeNull()
+      expect(parts.visibleText).toContain("<oai-mem-citation>")
+    }
   })
 })

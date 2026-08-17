@@ -309,6 +309,58 @@ function ThoughtBlock({ thoughtText }: { thoughtText: string | null | undefined 
   )
 }
 
+function MemoryCitationBlock({
+  citation,
+}: {
+  citation: NonNullable<ReturnType<typeof splitAssistantMessage>["memoryCitation"]>
+}) {
+  return (
+    <details className="hook-context-box hook-context-collapsible">
+      <summary className="hook-context-summary">
+        <span className="tool-category-icon" aria-hidden="true">
+          ◇
+        </span>{" "}
+        Memory sources ({citation.entries.length})
+      </summary>
+      <ul className="hook-context-list">
+        {citation.entries.map((entry) => {
+          const location = `${entry.path}:${entry.lineStart}-${entry.lineEnd}`
+          return (
+            <li key={location} className="hook-context-item">
+              <span className="hook-context-label">source</span>
+              <code className="hook-context-value" title={location}>
+                {compactPath(location, 84)}
+              </code>
+              <span className="hook-context-note">{entry.note}</span>
+            </li>
+          )
+        })}
+        {citation.rolloutIds.map((rolloutId) => (
+          <li key={rolloutId} className="hook-context-item">
+            <span className="hook-context-label">rollout</span>
+            <code className="hook-context-value">{rolloutId}</code>
+          </li>
+        ))}
+      </ul>
+    </details>
+  )
+}
+
+function AssistantContextBlocks({
+  thoughtText,
+  memoryCitation,
+}: {
+  thoughtText: string | null | undefined
+  memoryCitation: ReturnType<typeof splitAssistantMessage>["memoryCitation"] | undefined
+}) {
+  return (
+    <>
+      <ThoughtBlock thoughtText={thoughtText} />
+      {memoryCitation ? <MemoryCitationBlock citation={memoryCitation} /> : null}
+    </>
+  )
+}
+
 function MessageContent({ text, asLog }: { text: string; asLog: boolean }) {
   if (!text) return null
   return asLog ? <pre className="message-log">{text}</pre> : <Markdown text={text} />
@@ -326,12 +378,13 @@ function AssistantBody({ text, parts }: { text: string; parts: AssistantParts })
   const hasCodeFence = preparedText.includes("```")
   const asLog = !hasCodeFence && looksLikeLogBlob(preparedText)
   const thoughtText = parts?.thoughtText
+  const memoryCitation = parts?.memoryCitation
 
   if (!shouldCollapse || hasCodeFence) {
     return (
       <>
         <MessageContent text={preparedText} asLog={asLog} />
-        <ThoughtBlock thoughtText={thoughtText} />
+        <AssistantContextBlocks thoughtText={thoughtText} memoryCitation={memoryCitation} />
       </>
     )
   }
@@ -349,7 +402,7 @@ function AssistantBody({ text, parts }: { text: string; parts: AssistantParts })
           <MessageContent text={preparedText} asLog={asLog} />
         </details>
       ) : null}
-      <ThoughtBlock thoughtText={thoughtText} />
+      <AssistantContextBlocks thoughtText={thoughtText} memoryCitation={memoryCitation} />
     </>
   )
 }

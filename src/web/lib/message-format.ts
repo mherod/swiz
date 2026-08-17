@@ -50,6 +50,19 @@ export interface UserMessageParts {
 export interface AssistantMessageParts {
   visibleText: string
   thoughtText: string | null
+  memoryCitation: ParsedMemoryCitation | null
+}
+
+export interface ParsedMemoryCitationEntry {
+  path: string
+  lineStart: number
+  lineEnd: number
+  note: string
+}
+
+export interface ParsedMemoryCitation {
+  entries: ParsedMemoryCitationEntry[]
+  rolloutIds: string[]
 }
 
 function isMarkdownLike(text: string): boolean {
@@ -70,10 +83,12 @@ export function normalizeAssistantText(text: string): string {
 }
 
 export function splitAssistantMessage(text: string): AssistantMessageParts {
+  const extractedMemoryCitation = extractTrailingMemoryCitation(text)
+  const citationFreeText = extractedMemoryCitation?.cleanedText ?? text
   const thoughts: string[] = []
   const visibleText = stripRolePrefix(
     sanitizeInternalNoise(
-      text
+      citationFreeText
         .replace(/<thought>([\s\S]*?)(?:<\/thought>|$)/gi, (_, inner: string) => {
           const cleaned = inner.trim()
           if (cleaned) thoughts.push(cleaned)
@@ -89,6 +104,79 @@ export function splitAssistantMessage(text: string): AssistantMessageParts {
   return {
     visibleText,
     thoughtText: thoughtText.length > 0 ? thoughtText : null,
+    memoryCitation: extractedMemoryCitation?.citation ?? null,
+  }
+}
+
+interface ExtractedMemoryCitation {
+  cleanedText: string
+  citation: ParsedMemoryCitation
+}
+
+const MEMORY_CITATION_BLOCK_RE =
+  /(?:\n{1,2})?<oai-mem-citation>\s*<citation_entries>\s*([\s\S]*?)\s*<\/citation_entries>\s*<rollout_ids>\s*([\s\S]*?)\s*<\/rollout_ids>\s*<\/oai-mem-citation>\s*$/i
+const MEMORY_CITATION_ENTRY_RE = /^([A-Za-z0-9._/-]+):([1-9]\d*)-([1-9]\d*)\|note=\[([^\]\r\n]+)\]$/
+const MEMORY_ROLLOUT_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+function isSafeMemoryCitationPath(path: string): boolean {
+  if (path.startsWith("/") || path.includes("\\")) return false
+  return path
+    .split("/")
+    .every((segment) => segment.length > 0 && segment !== "." && segment !== "..")
+}
+
+function parseMemoryCitationEntry(line: string): ParsedMemoryCitationEntry | null {
+  const match = MEMORY_CITATION_ENTRY_RE.exec(line)
+  if (!match) return null
+
+  const path = match[1]!
+  if (!isSafeMemoryCitationPath(path)) return null
+
+  const lineStart = Number.parseInt(match[2]!, 10)
+  const lineEnd = Number.parseInt(match[3]!, 10)
+  if (lineEnd < lineStart) return null
+  return { path, lineStart, lineEnd, note: match[4]! }
+}
+
+function parseMemoryCitationEntries(raw: string): ParsedMemoryCitationEntry[] | null {
+  const lines = raw
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+  if (lines.length === 0) return null
+
+  const entries: ParsedMemoryCitationEntry[] = []
+  for (const line of lines) {
+    const entry = parseMemoryCitationEntry(line)
+    if (!entry) return null
+    entries.push(entry)
+  }
+  return entries
+}
+
+function parseMemoryRolloutIds(raw: string): string[] | null {
+  const rolloutIds = raw
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+  return rolloutIds.every((id) => MEMORY_ROLLOUT_ID_RE.test(id)) ? rolloutIds : null
+}
+
+function extractTrailingMemoryCitation(text: string): ExtractedMemoryCitation | null {
+  const match = MEMORY_CITATION_BLOCK_RE.exec(text)
+  if (!match || match.index == null) return null
+
+  const start = match.index
+  const end = start + match[0].length
+  if (overlapsRange(start, end, collectMarkdownCodeRanges(text))) return null
+
+  const entries = parseMemoryCitationEntries(match[1] ?? "")
+  const rolloutIds = parseMemoryRolloutIds(match[2] ?? "")
+  if (!entries || !rolloutIds) return null
+
+  return {
+    cleanedText: text.slice(0, start).trimEnd(),
+    citation: { entries, rolloutIds },
   }
 }
 
