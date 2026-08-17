@@ -38,6 +38,33 @@ export async function git(args: string[], cwd: string): Promise<string> {
   }
 }
 
+export interface GitAttempt {
+  /** True when git executed and answered the question, even if the answer was "unset". */
+  ran: boolean
+  stdout: string
+  exitCode: number
+}
+
+/**
+ * Run a git query while preserving the difference between "git answered, the value is empty"
+ * and "git could not run at all".
+ *
+ * `git()` collapses both into `""`, which makes a spawn failure or an unusable cwd look exactly
+ * like unset configuration. Callers that gate on a value being absent need that distinction:
+ * reporting a missing identity because git exited 128 blocks work over a condition the user
+ * cannot fix. Exit 1 is a genuine "not set" for query subcommands such as `config --get`;
+ * anything higher (128 for a bad or non-repository cwd) means the invocation itself failed.
+ */
+export async function gitAttempt(args: string[], cwd: string): Promise<GitAttempt> {
+  try {
+    const proc = getGitClient().runSync(args, { cwd })
+    const exitCode = proc.exitCode
+    return { ran: exitCode === 0 || exitCode === 1, stdout: proc.stdout.trim(), exitCode }
+  } catch {
+    return { ran: false, stdout: "", exitCode: -1 }
+  }
+}
+
 function remoteTrackingTarget(upstream: string): { remote: string; branch: string } | null {
   const normalized = upstream.replace(/^refs\/remotes\//, "")
   const separator = normalized.indexOf("/")

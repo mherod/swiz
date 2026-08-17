@@ -1,4 +1,5 @@
-import { git } from "./git-helpers.ts"
+import { debugLog } from "./debug.ts"
+import { git, gitAttempt } from "./git-helpers.ts"
 import { type GitRepoResolver, isGitRepoForHookPayload } from "./repository-capability.ts"
 
 interface GitIdentity {
@@ -11,6 +12,8 @@ interface GitIdentityCheck {
   isGitRepo: boolean
   identity: GitIdentity
   problems: string[]
+  /** False when git config could not be read at all, making the result inconclusive. */
+  readable?: boolean
 }
 
 interface HeadCommitIdentityCheck extends GitIdentityCheck {
@@ -76,12 +79,15 @@ function validateGitIdentity(identity: GitIdentity, label = "git config"): strin
   return problems
 }
 
-async function readGitIdentity(cwd: string): Promise<GitIdentity> {
+async function readGitIdentity(cwd: string): Promise<{ identity: GitIdentity; readable: boolean }> {
   const [name, email] = await Promise.all([
-    git(["config", "--get", "user.name"], cwd),
-    git(["config", "--get", "user.email"], cwd),
+    gitAttempt(["config", "--get", "user.name"], cwd),
+    gitAttempt(["config", "--get", "user.email"], cwd),
   ])
-  return { name: normalize(name), email: normalize(email) }
+  return {
+    identity: { name: normalize(name.stdout), email: normalize(email.stdout) },
+    readable: name.ran && email.ran,
+  }
 }
 
 export async function checkGitIdentity(
@@ -90,9 +96,21 @@ export async function checkGitIdentity(
   resolveGitRepo?: GitRepoResolver
 ): Promise<GitIdentityCheck> {
   const repo = await isGitRepoForHookPayload(input, cwd, resolveGitRepo)
-  const identity = repo ? await readGitIdentity(cwd) : { name: "", email: "" }
-  const problems = repo ? validateGitIdentity(identity) : []
-  return { ok: problems.length === 0, isGitRepo: repo, identity, problems }
+  if (!repo) {
+    return { ok: true, isGitRepo: false, identity: { name: "", email: "" }, problems: [] }
+  }
+
+  const { identity, readable } = await readGitIdentity(cwd)
+  if (!readable) {
+    // git could not run here — an unusable cwd or a failed spawn, not absent configuration.
+    // Reporting "user.name is missing" would block the caller over a condition it cannot fix
+    // and that no config change resolves, so treat an unreadable config as inconclusive.
+    debugLog("[git-identity] git config unreadable; skipping identity validation for", cwd)
+    return { ok: true, isGitRepo: true, identity, problems: [], readable: false }
+  }
+
+  const problems = validateGitIdentity(identity)
+  return { ok: problems.length === 0, isGitRepo: true, identity, problems, readable: true }
 }
 
 function identitiesMatch(left: GitIdentity, right: GitIdentity): boolean {
