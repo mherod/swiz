@@ -498,6 +498,28 @@ export function toolCategoryIcon(category: ToolCategory): string {
   }
 }
 
+export interface WrappedToolPresentation {
+  name: string
+  category: ToolCategory
+}
+
+/**
+ * Codex records orchestrated browser/tool calls as an outer `exec` envelope.
+ * Relabel only a single direct `tools.<name>(...)` statement; ambiguous scripts,
+ * comments, and quoted examples should stay honest as `exec`.
+ */
+export function inferWrappedToolPresentation(code: string): WrappedToolPresentation | null {
+  const directCalls = [
+    ...code.matchAll(
+      /(?:^|[;\n])\s*(?:(?:const|let|var)\s+[A-Za-z_$][\w$]*\s*=\s*)?(?:await\s+)?tools\.(?:functions\.)?([A-Za-z_$][\w$]*)\s*\(/g
+    ),
+  ]
+  if (directCalls.length !== 1) return null
+  const name = directCalls[0]?.[1]
+  if (!name) return null
+  return { name, category: classifyTool(name) }
+}
+
 export interface ParsedTaskToolCall {
   action: string
   taskId?: string | null

@@ -25,6 +25,7 @@ import {
   compactPath,
   formatTime,
   groupMessages,
+  inferWrappedToolPresentation,
   isInternalToolName,
   parseFileToolCall,
   parseSearchToolParams,
@@ -336,11 +337,21 @@ function codeFieldFromJson(rawJson: string | null): string | null {
 }
 
 function CodeToolCall({ code, count, name }: { code: string; count: number; name: string }) {
-  const preview = summarizeCodeCall(code)
+  const wrappedTool =
+    name.trim().toLowerCase() === "exec" ? inferWrappedToolPresentation(code) : null
+  const category = wrappedTool?.category ?? "shell"
+  const displayName = wrappedTool?.name ?? name
+  const summary = summarizeCodeCall(code, wrappedTool?.name)
+  const preview = wrappedTool ? `via ${name} · ${summary}` : summary
   return (
-    <details className="tool-call tool-call-verbose tool-call-exec tool-category-shell">
+    <details className={`tool-call tool-call-verbose tool-call-exec tool-category-${category}`}>
       <summary className="tool-call-exec-summary">
-        <span className="tool-name">{name}</span>
+        {wrappedTool ? (
+          <span className="tool-category-icon" aria-hidden="true">
+            {toolCategoryIcon(category)}
+          </span>
+        ) : null}
+        <span className="tool-name">{displayName}</span>
         {count > 1 ? <span className="message-repeat-badge">x{count}</span> : null}
         <code className="tool-call-exec-preview">{preview}</code>
       </summary>
@@ -349,11 +360,17 @@ function CodeToolCall({ code, count, name }: { code: string; count: number; name
   )
 }
 
-function summarizeCodeCall(code: string): string {
+function summarizeCodeCall(code: string, wrappedToolName?: string | null): string {
   const normalized = code.replace(/\s+/g, " ").trim()
-  if (/tools\.update_plan\b/.test(normalized)) return "Update plan"
-  if (/tools\.write_stdin\b/.test(normalized)) return "Poll running command"
-  if (/tools\.apply_patch\b/.test(normalized)) return "Apply patch"
+  if (wrappedToolName === "update_plan" || /tools\.update_plan\b/.test(normalized)) {
+    return "Plan update"
+  }
+  if (wrappedToolName === "write_stdin" || /tools\.write_stdin\b/.test(normalized)) {
+    return "Poll running command"
+  }
+  if (wrappedToolName === "apply_patch" || /tools\.apply_patch\b/.test(normalized)) {
+    return "Apply patch"
+  }
   const commandMatch = /cmd:\s*["']([^"']+)["']/.exec(normalized)
   if (commandMatch?.[1]) return summarizeText(commandMatch[1])
   return summarizeText(normalized)
