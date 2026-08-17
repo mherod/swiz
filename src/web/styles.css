@@ -159,7 +159,7 @@ body::before {
 #app {
   /* Mobile/tablet: flow layout — the shell grows with content and the page
      scrolls. The fixed-viewport app shell (height: 100dvh) is restored at
-     >=900px, where the nav becomes an independently scrolling sidebar. */
+     >=768px, where the nav becomes an independently scrolling sidebar. */
   min-height: 100dvh;
   width: 100%;
   display: flex;
@@ -180,7 +180,7 @@ body::before {
   grid-template-columns: minmax(0, 1fr);
   /* Stacked mobile layout: nav sizes to content and the page scrolls.
      A dvh cap here would crush the primary navigation into a nested
-     scroller — the fixed-height cap only makes sense at >=900px. */
+     scroller — the fixed-height cap only makes sense at >=768px. */
   grid-template-rows: auto auto minmax(0, 1fr);
   grid-template-areas:
     "title"
@@ -2144,11 +2144,24 @@ tbody tr:hover {
 }
 
 .tool-call-exec-preview {
+  flex: 1 1 auto;
+  min-width: 0;
   overflow: hidden;
   color: var(--muted);
   font-size: 0.72rem;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+@media (max-width: 639px) {
+  .tool-call-exec-summary {
+    align-items: flex-start;
+  }
+
+  .tool-call-exec-preview {
+    display: block;
+    max-width: 100%;
+  }
 }
 
 .tool-call-details {
@@ -3303,6 +3316,15 @@ tbody tr:hover {
 }
 
 @media (max-width: 600px) {
+  .stats-group {
+    align-items: flex-start;
+  }
+
+  .stats-group .metric-note {
+    width: 100%;
+    margin-left: 0;
+  }
+
   .metric-explainers > div {
     grid-template-columns: 1fr;
     gap: 0.15rem;
@@ -3567,7 +3589,7 @@ tbody tr:hover {
   }
 }
 
-@media (min-width: 900px) {
+@media (min-width: 768px) {
   body {
     overflow: hidden;
     min-height: 100dvh;
@@ -3579,7 +3601,7 @@ tbody tr:hover {
   }
 
   .bento {
-    grid-template-columns: minmax(260px, 320px) minmax(0, 1fr);
+    grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
     grid-template-rows: auto minmax(0, 1fr);
     grid-template-areas:
       "title  title"
