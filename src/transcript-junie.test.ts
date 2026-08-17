@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest"
 import { parseJunieEvents } from "./transcript-analysis-parse-part1.ts"
+import type { ContentBlock, TextBlock, ToolResultBlock } from "./transcript-schemas.ts"
+
+function asContentBlocks(content: string | ContentBlock[] | undefined): ContentBlock[] {
+  if (Array.isArray(content)) return content
+  throw new Error(`Expected ContentBlock[], got ${typeof content}`)
+}
 
 describe("transcript-analysis-parse-part1.ts (Junie)", () => {
   describe("parseJunieEvents", () => {
@@ -40,7 +46,7 @@ describe("transcript-analysis-parse-part1.ts (Junie)", () => {
       })
       const entries = parseJunieEvents(jsonl)
       expect(entries).toHaveLength(1)
-      const content = entries[0]!.message?.content as any[]
+      const content = asContentBlocks(entries[0]!.message?.content)
       expect(content).toHaveLength(2)
       expect(content[0]).toEqual({ type: "text", text: "Thinking..." })
       expect(content[1]).toEqual({
@@ -64,7 +70,7 @@ describe("transcript-analysis-parse-part1.ts (Junie)", () => {
       const entries = parseJunieEvents(jsonl)
       expect(entries).toHaveLength(1)
       expect(entries[0]!.type).toBe("user")
-      const content = entries[0]!.message?.content as any[]
+      const content = asContentBlocks(entries[0]!.message?.content)
       expect(content).toHaveLength(1)
       expect(content[0]).toEqual({
         type: "tool_result",
@@ -127,9 +133,11 @@ describe("transcript-analysis-parse-part1.ts (Junie)", () => {
       expect(entries[1]!.type).toBe("assistant")
       expect(entries[1]!.message?.content).toBe("Streaming thought")
       expect(entries[2]!.type).toBe("assistant")
-      expect((entries[2]!.message?.content as any)[0].text).toBe("Running tool")
+      const entry2Content = asContentBlocks(entries[2]!.message?.content)
+      expect((entry2Content[0] as TextBlock).text).toBe("Running tool")
       expect(entries[3]!.type).toBe("user")
-      expect((entries[3]!.message?.content as any)[0].content).toBe("Tool output")
+      const entry3Content = asContentBlocks(entries[3]!.message?.content)
+      expect((entry3Content[0] as ToolResultBlock).content).toBe("Tool output")
     })
 
     it("parses AgentThoughtBlockUpdatedEvent stream events", () => {
@@ -179,7 +187,8 @@ describe("transcript-analysis-parse-part1.ts (Junie)", () => {
       expect(entries).toHaveLength(2)
       expect(entries[0]!.type).toBe("user")
       expect(entries[1]!.type).toBe("assistant")
-      expect((entries[1]!.message?.content as any)[0].text).toBe("History thought")
+      const entry1Content = asContentBlocks(entries[1]!.message?.content)
+      expect((entry1Content[0] as TextBlock).text).toBe("History thought")
     })
   })
 })
