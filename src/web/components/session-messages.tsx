@@ -326,18 +326,17 @@ function RawToolInput({ detail }: { detail: string }) {
   )
 }
 
-function toolCodeFromDetail(detail: string, rawJson: string | null): string | null {
-  if (!detail.trim()) return null
-  if (!rawJson) return detail
+function codeFieldFromJson(rawJson: string | null): string | null {
+  if (!rawJson) return null
   try {
     const parsed = JSON.parse(rawJson) as Record<string, unknown>
-    return typeof parsed.code === "string" ? parsed.code : detail
+    return typeof parsed.code === "string" ? parsed.code : null
   } catch {
-    return detail
+    return null
   }
 }
 
-function ExecToolCall({ code, count }: { code: string; count: number }) {
+function CodeToolCall({ code, count, name }: { code: string; count: number; name: string }) {
   const preview = summarizeText(code.replace(/\s+/g, " ").trim())
   return (
     <details className="tool-call tool-call-verbose tool-call-exec tool-category-shell">
@@ -345,7 +344,7 @@ function ExecToolCall({ code, count }: { code: string; count: number }) {
         <span className="tool-category-icon" aria-hidden="true">
           ❯
         </span>
-        <span className="tool-name">exec</span>
+        <span className="tool-name">{name}</span>
         {count > 1 ? <span className="message-repeat-badge">x{count}</span> : null}
         <code className="tool-call-exec-preview">{preview}</code>
       </summary>
@@ -369,10 +368,11 @@ function VerboseToolCall({
   const searchParams = !isBash ? parseSearchToolParams(tc.name, tc.detail) : null
   const taskTool = category === "task" ? parseTaskToolCall(tc.name, tc.detail) : null
   const fileTool = category === "file" ? parseFileToolCall(tc.name, tc.detail) : null
-  const execCode =
-    tc.name.toLowerCase() === "exec" ? toolCodeFromDetail(tc.detail, parsedDetail.rawJson) : null
+  const codeField = codeFieldFromJson(parsedDetail.rawJson)
+  const execCode = tc.name.toLowerCase() === "exec" && !codeField ? tc.detail : null
+  const code = codeField ?? execCode
 
-  if (execCode) return <ExecToolCall code={execCode} count={count} />
+  if (code) return <CodeToolCall code={code} count={count} name={tc.name} />
 
   if (taskTool) {
     return (
