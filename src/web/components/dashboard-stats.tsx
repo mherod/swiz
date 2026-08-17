@@ -223,9 +223,6 @@ function CurrentSessionStats({
         Last activity:{" "}
         <SessionActivityTime value={activeSession?.lastMessageAt ?? activeSession?.mtime ?? null} />
       </p>
-      <p className="metric-note">
-        Tool calls are session-wide; the transcript below shows the latest bounded message window.
-      </p>
     </>
   )
 }
@@ -305,31 +302,38 @@ export function DashboardStats({
           activeRuntimeSeconds={activeRuntimeSeconds}
         />
         {sessionTokenStats && (
-          <>
-            <div
-              className="diagnostic-breakdown session-token-stats"
-              title="Cumulative processed tokens and generated-token rate from this session transcript"
-            >
-              <span>
-                <CompactMetricValue value={sessionTokenStats.totalTokens} /> processed
-              </span>
-              <span>
-                <strong>
-                  <NumberTicker value={sessionTokenStats.outputTokensPerMinute} />
-                </strong>{" "}
-                output tok/min
-              </span>
-              <span>
-                <CompactMetricValue value={sessionTokenStats.outputTokens} /> generated
-              </span>
-            </div>
-            <p className="metric-note metric-token-note">
+          <div
+            className="diagnostic-breakdown session-token-stats"
+            title="Cumulative processed tokens and generated-token rate from this session transcript"
+          >
+            <span>
+              <CompactMetricValue value={sessionTokenStats.totalTokens} /> processed
+            </span>
+            <span>
+              <strong>
+                <NumberTicker value={sessionTokenStats.outputTokensPerMinute} />
+              </strong>{" "}
+              output tok/min
+            </span>
+            <span>
+              <CompactMetricValue value={sessionTokenStats.outputTokens} /> generated
+            </span>
+          </div>
+        )}
+        <details className="stats-help">
+          <summary>How these numbers work</summary>
+          <p>
+            Tool calls are session-wide; the transcript below shows the latest bounded message
+            window.
+          </p>
+          {sessionTokenStats ? (
+            <p>
               Processed includes repeatedly reused cached input. Output tok/min is generated-token
               growth between the first and latest session telemetry samples; generated is cumulative
               output only.
             </p>
-          </>
-        )}
+          ) : null}
+        </details>
       </div>
       <details className="stats-diagnostics">
         <summary>Project diagnostics</summary>

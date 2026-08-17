@@ -46,13 +46,12 @@ function ToolStatsBar({ stats }: { stats: ToolStat[] }) {
     () => stats.filter((stat) => !isInternalToolName(stat.name)),
     [stats]
   )
-  const total = useMemo(() => visibleStats.reduce((sum, s) => sum + s.count, 0), [visibleStats])
   if (visibleStats.length === 0) return null
   return (
     <details className="tool-stats-bar">
       <summary>
-        <span className="tool-stats-total">{total} session-wide tool calls</span>
-        <span className="tool-stats-hint">View mix</span>
+        <span className="tool-stats-total">Tool mix</span>
+        <span className="tool-stats-hint">View top {Math.min(visibleStats.length, 8)}</span>
       </summary>
       <div className="tool-stats-pills">
         {visibleStats.slice(0, 8).map((s) => (

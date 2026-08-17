@@ -1919,6 +1919,7 @@ tbody tr:hover {
 
 .message-row.user {
   border-color: rgba(108, 148, 229, 0.3);
+  justify-self: end;
 }
 
 .message-row.assistant {
@@ -1988,10 +1989,6 @@ tbody tr:hover {
 .message-collapsible > summary > .message-text {
   mask-image: linear-gradient(to bottom, #fff 60%, transparent 100%);
   -webkit-mask-image: linear-gradient(to bottom, #fff 60%, transparent 100%);
-}
-
-.message-collapsible[open] > summary {
-  display: none;
 }
 
 .message-expand-hint {
@@ -2100,6 +2097,8 @@ tbody tr:hover {
 
 .message-row-tool-only {
   border-color: rgba(99, 129, 204, 0.36);
+  border-left: 3px solid rgba(126, 182, 255, 0.55);
+  padding-block: 9px;
 }
 
 .tool-calls-verbose {
@@ -3355,6 +3354,40 @@ tbody tr:hover {
 
 .metric-token-note {
   max-width: 72ch;
+}
+
+.stats-help {
+  flex-basis: 100%;
+  color: var(--text-muted);
+  font-size: 0.68rem;
+}
+
+.stats-help > summary {
+  width: fit-content;
+  cursor: pointer;
+  color: var(--color-blue-200);
+  font-weight: 600;
+  list-style: none;
+}
+
+.stats-help > summary::-webkit-details-marker {
+  display: none;
+}
+
+.stats-help > summary::before {
+  content: "▸";
+  display: inline-block;
+  margin-right: var(--space-1);
+}
+
+.stats-help[open] > summary::before {
+  transform: rotate(90deg);
+}
+
+.stats-help p {
+  max-width: 72ch;
+  margin: var(--space-1) 0 0;
+  line-height: 1.45;
 }
 
 .metric-explainers {
