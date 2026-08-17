@@ -7,6 +7,8 @@ import {
   SWIZ_MCP_CHANNEL_HEARTBEAT_FRESH_MS,
   stopIncompleteTasksLogPath,
   swizDispatchLogPath,
+  swizFollowUpIssueBodyPath,
+  swizGhCacheDir,
   swizMcpChannelStatusPath,
   swizPseudoHookLogPath,
   TMP_ROOT,
@@ -60,5 +62,36 @@ describe("path builder functions use TMP_ROOT", () => {
 
   test("swizMcpChannelStatusPath starts with TMP_ROOT", () => {
     expect(swizMcpChannelStatusPath("project")).toStartWith(TMP_ROOT)
+  })
+
+  test("swizGhCacheDir defaults to TMP_ROOT/swiz-gh-cache", () => {
+    const original = process.env.SWIZ_GH_CACHE_DIR
+    try {
+      delete process.env.SWIZ_GH_CACHE_DIR
+      expect(swizGhCacheDir()).toBe(`${TMP_ROOT}/swiz-gh-cache`)
+    } finally {
+      if (original !== undefined) {
+        process.env.SWIZ_GH_CACHE_DIR = original
+      }
+    }
+  })
+
+  test("swizGhCacheDir honours SWIZ_GH_CACHE_DIR override", () => {
+    const original = process.env.SWIZ_GH_CACHE_DIR
+    try {
+      process.env.SWIZ_GH_CACHE_DIR = "/custom/gh/cache"
+      expect(swizGhCacheDir()).toBe("/custom/gh/cache")
+    } finally {
+      if (original !== undefined) {
+        process.env.SWIZ_GH_CACHE_DIR = original
+      } else {
+        delete process.env.SWIZ_GH_CACHE_DIR
+      }
+    }
+  })
+
+  test("swizFollowUpIssueBodyPath constructs timestamped path under TMP_ROOT", () => {
+    expect(swizFollowUpIssueBodyPath(1234567890)).toBe(`${TMP_ROOT}/swiz-follow-up-1234567890.md`)
+    expect(swizFollowUpIssueBodyPath("2026-08-17")).toBe(`${TMP_ROOT}/swiz-follow-up-2026-08-17.md`)
   })
 })

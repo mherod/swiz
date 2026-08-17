@@ -157,3 +157,19 @@ export function midSessionPrBaselinePath(safeSession: string): string {
 export function swizCeremonyDayFlagPath(skill: string, date: string): string {
   return `${TMP_ROOT}/swiz-ceremony-${skill}-${date}.flag`
 }
+
+/**
+ * Directory for caching GitHub API fallback responses.
+ * Respects SWIZ_GH_CACHE_DIR environment override.
+ */
+export function swizGhCacheDir(): string {
+  return process.env.SWIZ_GH_CACHE_DIR || `${TMP_ROOT}/swiz-gh-cache`
+}
+
+/**
+ * Temp markdown body file used when filing follow-up issues automatically.
+ * Takes a timestamp parameter for deterministic testing.
+ */
+export function swizFollowUpIssueBodyPath(stamp: number | string): string {
+  return `${TMP_ROOT}/swiz-follow-up-${stamp}.md`
+}

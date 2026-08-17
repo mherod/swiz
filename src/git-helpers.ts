@@ -12,6 +12,7 @@ import { currentEnv } from "./gh-rate-limit"
 import { acquireGhSlot, observeGhApiIncludeOutput } from "./gh-rate-limit.ts"
 import { getGitClient } from "./git/client.ts"
 import { getHomeDirOrNull } from "./home.ts"
+import { swizGhCacheDir } from "./temp-paths.ts"
 
 export const GIT_DIR_NAME = ".git"
 export const GIT_INDEX_LOCK = "index.lock"
@@ -113,7 +114,6 @@ export async function getUnpushedCommitCount(cwd: string): Promise<number> {
 
 const GH_API_CACHE_DURATION: string = process.env.GH_API_CACHE_DURATION || "20s"
 const GH_FALLBACK_CACHE_TTL_MS = Number(process.env.GH_FALLBACK_CACHE_TTL_MS) || 300_000
-const GH_FALLBACK_CACHE_DIR = process.env.SWIZ_GH_CACHE_DIR || "/tmp/swiz-gh-cache"
 
 /**
  * Returns true when the gh api arg list represents a read-only GET request.
@@ -209,7 +209,7 @@ export interface GhQueryOptions {
 
 function ensureGhFallbackCacheDir(): void {
   try {
-    mkdirSync(GH_FALLBACK_CACHE_DIR, { recursive: true })
+    mkdirSync(swizGhCacheDir(), { recursive: true })
   } catch {
     // Best-effort cache directory creation.
   }
@@ -217,7 +217,7 @@ function ensureGhFallbackCacheDir(): void {
 
 function ghFallbackCachePath(args: string[], cwd: string): string {
   const key = Bun.hash(`${cwd}\x00${args.join("\x00")}`).toString(16)
-  return join(GH_FALLBACK_CACHE_DIR, `${key}.json`)
+  return join(swizGhCacheDir(), `${key}.json`)
 }
 
 async function readGhFallbackCache<T>(

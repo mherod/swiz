@@ -5,6 +5,7 @@
 
 import { gh, git, hasGhCli } from "../git-helpers.ts"
 import type { HookOutput } from "../schemas.ts"
+import { swizFollowUpIssueBodyPath } from "../temp-paths.ts"
 import { blockStopObj, exitWithHookObject } from "./hook-response.ts"
 
 // Cross-repo issue-guidance text lives in inline-hook-helpers.ts; re-exported here so the
@@ -53,7 +54,7 @@ export async function tryFileFollowUpIssue(
   if (commitSha) contextLines.push(`Commit: ${commitSha}`)
   if (sessionId) contextLines.push(`Session: ${sessionId.slice(0, 12)}`)
 
-  const bodyFile = `/tmp/swiz-follow-up-${Date.now()}.md`
+  const bodyFile = swizFollowUpIssueBodyPath(Date.now())
   await Bun.write(bodyFile, contextLines.join("\n"))
 
   try {
