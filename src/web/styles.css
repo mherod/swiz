@@ -20,6 +20,14 @@
   --text-muted: #aeb8ca;
   --text-subtle: #8d98ac;
 
+  /* type roles: reading copy, normal UI, and true inspection labels */
+  --type-reading: 1rem;
+  --type-ui: 0.875rem;
+  --type-support: 0.8125rem;
+  --type-caption: 0.75rem;
+  --leading-reading: 1.6;
+  --leading-ui: 1.45;
+
   /* primary colors */
   --color-blue-50: #f0f6ff;
   --color-blue-100: #e2ecff;
@@ -237,11 +245,11 @@ body::before {
 .section-title {
   margin: 0 0 6px;
   font-family: "Bricolage Grotesque", "IBM Plex Sans", sans-serif;
-  font-size: clamp(0.95rem, 1.3vw, 1.1rem);
+  font-size: 1.125rem;
   letter-spacing: 0.02em;
   color: #8aa8ff;
   font-weight: 700;
-  line-height: 1.35;
+  line-height: 1.3;
   text-wrap: balance;
 }
 
@@ -286,8 +294,9 @@ body::before {
   padding: 3px 8px;
   border: 1px solid rgba(105, 138, 255, 0.26);
   border-radius: var(--radius-pill);
-  font-size: 0.68rem;
-  color: var(--color-blue-200);
+  color: var(--text-muted);
+  font-size: var(--type-caption);
+  line-height: var(--leading-ui);
   background: rgba(35, 58, 104, 0.26);
 }
 
@@ -300,7 +309,8 @@ body::before {
 .topbar-summary {
   margin: 0;
   color: var(--text-muted);
-  font-size: 0.72rem;
+  font-size: var(--type-ui);
+  line-height: var(--leading-ui);
   white-space: nowrap;
 }
 
@@ -310,6 +320,10 @@ body::before {
   align-items: center;
   gap: var(--space-3);
   min-width: 0;
+}
+
+.topbar-primary {
+  flex-shrink: 0;
 }
 
 .topbar-secondary {
@@ -331,9 +345,10 @@ body::before {
 
 .topbar-title {
   font-family: "Bricolage Grotesque", "IBM Plex Sans", sans-serif;
-  font-size: 1.2rem;
+  font-size: 1.375rem;
   font-weight: 800;
   letter-spacing: -0.02em;
+  line-height: 1.2;
   margin: 0;
   white-space: nowrap;
   background: linear-gradient(135deg, #f0f6ff 0%, #77b7ff 50%, #a78bfa 100%);
@@ -344,7 +359,8 @@ body::before {
 
 .topbar-meta {
   color: var(--text-muted);
-  font-size: 0.72rem;
+  font-size: var(--type-caption);
+  line-height: var(--leading-ui);
   white-space: nowrap;
 }
 
@@ -371,8 +387,9 @@ body::before {
   border: 1px solid rgba(41, 123, 111, 0.6);
   background: linear-gradient(135deg, rgba(32, 173, 155, 0.18) 0%, rgba(20, 100, 90, 0.12) 100%);
   color: #8de7dd;
-  font-size: 0.72rem;
+  font-size: var(--type-caption);
   font-weight: 700;
+  line-height: var(--leading-ui);
   backdrop-filter: blur(8px);
   box-shadow:
     inset 0 1px 0 rgba(139, 255, 198, 0.25),
@@ -616,7 +633,7 @@ tbody tr:hover {
   background: rgba(75, 106, 178, 0.25);
   color: var(--color-blue-200);
   padding: var(--space-1) var(--space-2);
-  font-size: 0.75rem;
+  font-size: var(--type-support);
   font-weight: 700;
   line-height: 1.5;
   font-variant-numeric: tabular-nums;
@@ -648,8 +665,8 @@ tbody tr:hover {
 .nav-inline-project {
   margin: var(--space-1) var(--space-1) 0;
   color: var(--text-muted);
-  font-size: 0.75rem;
-  line-height: 1.45;
+  font-size: var(--type-support);
+  line-height: var(--leading-ui);
   font-variant-numeric: tabular-nums;
 }
 
@@ -664,8 +681,9 @@ tbody tr:hover {
 .session-filter-label {
   margin: var(--space-1) 0 0;
   color: var(--text-muted);
-  font-size: 0.72rem;
+  font-size: var(--type-caption);
   font-weight: 600;
+  line-height: var(--leading-ui);
 }
 
 .session-filter-input {
@@ -676,7 +694,8 @@ tbody tr:hover {
   border-radius: var(--radius-sm);
   background: var(--bg-panel);
   color: var(--text-main);
-  font-size: 0.82rem;
+  font-size: var(--type-ui);
+  line-height: var(--leading-ui);
   font-family: inherit;
   box-sizing: border-box;
 }
@@ -841,7 +860,7 @@ tbody tr:hover {
 .session-id {
   font-weight: 700;
   letter-spacing: -0.01em;
-  font-size: 0.98rem;
+  font-size: var(--type-reading);
   line-height: 1.45;
   display: flex;
   align-items: center;
@@ -925,8 +944,8 @@ tbody tr:hover {
   flex-wrap: wrap;
   gap: 4px;
   color: #9eb1d7;
-  font-size: 0.8rem;
-  line-height: 1.5;
+  font-size: var(--type-support);
+  line-height: var(--leading-ui);
 }
 
 .project-status-chip {
@@ -937,7 +956,7 @@ tbody tr:hover {
   background: rgba(64, 82, 124, 0.22);
   color: #c9daf9;
   padding: 1px 7px;
-  font-size: 0.65rem;
+  font-size: 0.7rem;
   font-weight: 600;
   letter-spacing: 0.02em;
   line-height: 1.45;
@@ -984,7 +1003,7 @@ tbody tr:hover {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 0.85rem;
+  font-size: var(--type-ui);
   width: 100%;
 }
 
@@ -993,12 +1012,12 @@ tbody tr:hover {
   color: #c9daf9;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  font-size: 0.75rem;
+  font-size: var(--type-caption);
 }
 
 .session-time {
   color: #8c9baf;
-  font-size: 0.8rem;
+  font-size: var(--type-support);
   flex-grow: 1;
 }
 
@@ -1012,7 +1031,7 @@ tbody tr:hover {
 
 .session-id-text {
   font-family: var(--font-mono);
-  font-size: 0.75rem;
+  font-size: var(--type-support);
   color: #a8b5ca;
   background: rgba(43, 52, 72, 0.5);
   padding: 2px 6px;
@@ -1024,7 +1043,7 @@ tbody tr:hover {
 }
 
 .session-dispatches {
-  font-size: 0.72rem;
+  font-size: var(--type-caption);
   font-weight: 700;
   background: linear-gradient(90deg, #6794ff, #5ed7ff);
   color: #10131a;
@@ -1113,7 +1132,7 @@ tbody tr:hover {
   align-items: center;
   gap: 6px;
   color: #8fa8df;
-  font-size: 0.78rem;
+  font-size: var(--type-support);
   letter-spacing: 0.02em;
   line-height: 1.5;
   padding-top: 8px;
@@ -1130,7 +1149,7 @@ tbody tr:hover {
   border: 1px solid rgba(116, 157, 247, 0.34);
   background: rgba(75, 106, 178, 0.2);
   color: #bcd5ff;
-  font-size: 0.66rem;
+  font-size: var(--type-caption);
   font-variant-numeric: tabular-nums;
 }
 
@@ -1241,8 +1260,8 @@ tbody tr:hover {
 
 .project-meta {
   color: #aeb8ca;
-  font-size: 0.76rem;
-  line-height: 1.5;
+  font-size: var(--type-support);
+  line-height: var(--leading-ui);
   font-variant-numeric: tabular-nums;
 }
 
@@ -1269,6 +1288,7 @@ tbody tr:hover {
 
   .session-filter-input {
     min-height: 44px;
+    font-size: var(--type-reading);
   }
 
   .project-issues-repo-link {
@@ -1905,8 +1925,11 @@ tbody tr:hover {
 
 .messages-list {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 8px;
   justify-items: start;
+  min-width: 0;
+  width: 100%;
 }
 
 .message-row {
@@ -1914,6 +1937,8 @@ tbody tr:hover {
   border-radius: 12px;
   background: rgba(35, 39, 48, 0.72);
   padding: 11px 12px;
+  max-width: 100%;
+  min-width: 0;
   width: min(100%, 72ch);
 }
 
@@ -1932,7 +1957,8 @@ tbody tr:hover {
   justify-content: space-between;
   gap: 8px;
   color: #94a2bb;
-  font-size: 0.68rem;
+  font-size: var(--type-caption);
+  line-height: var(--leading-ui);
   margin-bottom: 6px;
 }
 
@@ -1953,7 +1979,7 @@ tbody tr:hover {
   background: rgba(118, 169, 255, 0.16);
   border: 1px solid rgba(118, 169, 255, 0.3);
   color: #a8c7ff;
-  font-size: 0.64rem;
+  font-size: 0.7rem;
   font-weight: 700;
   line-height: 1.2;
 }
@@ -1968,9 +1994,10 @@ tbody tr:hover {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   font-family: "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, sans-serif;
-  font-size: 0.88rem;
-  line-height: 1.56;
+  font-size: var(--type-reading);
+  line-height: var(--leading-reading);
   color: #d6dbe4;
+  text-wrap: pretty;
 }
 
 .message-collapsible {
@@ -2004,7 +2031,7 @@ tbody tr:hover {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   font-family: "IBM Plex Mono", ui-monospace, monospace;
-  font-size: 0.8rem;
+  font-size: var(--type-support);
   line-height: 1.55;
   color: #d8deea;
 }
@@ -2076,7 +2103,7 @@ tbody tr:hover {
   padding: 2px 7px;
   background: rgba(99, 129, 204, 0.13);
   border: 1px solid rgba(99, 129, 204, 0.28);
-  font-size: 0.7rem;
+  font-size: var(--type-caption);
   line-height: 1.3;
 }
 
@@ -2137,7 +2164,7 @@ tbody tr:hover {
 
 .tool-call-exec-summary::before {
   content: "▸";
-  color: var(--muted);
+  color: var(--text-muted);
   font-size: 0.7rem;
 }
 
@@ -2149,8 +2176,8 @@ tbody tr:hover {
   flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
-  color: var(--muted);
-  font-size: 0.72rem;
+  color: var(--text-muted);
+  font-size: var(--type-caption);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -2165,7 +2192,7 @@ tbody tr:hover {
   width: fit-content;
   cursor: pointer;
   color: var(--color-blue-200);
-  font-size: 0.72rem;
+  font-size: var(--type-caption);
   font-weight: 600;
   list-style: none;
 }
@@ -2223,7 +2250,7 @@ tbody tr:hover {
   border: 1px solid rgba(126, 182, 255, 0.18);
   color: #c8d6ee;
   font-family: "IBM Plex Mono", ui-monospace, monospace;
-  font-size: 0.72rem;
+  font-size: var(--type-caption);
   line-height: 1.4;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -2242,7 +2269,7 @@ tbody tr:hover {
   border: 1px solid rgba(126, 182, 255, 0.24);
   color: #d6e4fb;
   font-family: "IBM Plex Mono", ui-monospace, monospace;
-  font-size: 0.73rem;
+  font-size: var(--type-caption);
   line-height: 1.42;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -2521,7 +2548,7 @@ tbody tr:hover {
 }
 
 .tool-stats-total {
-  font-size: 0.75rem;
+  font-size: var(--type-caption);
   font-weight: 600;
   color: #8dbdff;
   white-space: nowrap;
@@ -2536,7 +2563,7 @@ tbody tr:hover {
 
 .tool-stats-hint {
   color: var(--text-subtle);
-  font-size: 0.68rem;
+  font-size: var(--type-caption);
 }
 
 .tool-stat-pill {
@@ -2547,7 +2574,7 @@ tbody tr:hover {
   padding: 1px 6px;
   background: rgba(99, 129, 204, 0.1);
   border: 1px solid rgba(99, 129, 204, 0.2);
-  font-size: 0.68rem;
+  font-size: var(--type-caption);
   line-height: 1.3;
 }
 
@@ -3212,20 +3239,20 @@ tbody tr:hover {
   border-radius: 999px;
   background: rgba(96, 126, 196, 0.12);
   color: var(--text-muted);
-  font-size: 0.66rem;
+  font-size: var(--type-caption);
   letter-spacing: 0.02em;
 }
 
 .metric-kpi strong {
   color: var(--text-main);
-  font-size: 0.75rem;
+  font-size: var(--type-ui);
   font-variant-numeric: tabular-nums;
 }
 
 .metric-note {
   margin: 0 0 0 auto;
   color: #9ba6bc;
-  font-size: 0.68rem;
+  font-size: var(--type-caption);
 }
 
 .stats-group > .metric-note {
@@ -3292,7 +3319,7 @@ tbody tr:hover {
 
 .stats-group-title {
   margin: 0;
-  font-size: 0.72rem;
+  font-size: var(--type-caption);
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: #a3afc4;
@@ -3308,7 +3335,7 @@ tbody tr:hover {
   width: fit-content;
   cursor: pointer;
   color: var(--color-blue-200);
-  font-size: 0.7rem;
+  font-size: var(--type-caption);
   font-weight: 600;
   list-style: none;
 }
@@ -3343,12 +3370,12 @@ tbody tr:hover {
   border: 1px solid var(--line);
   border-radius: 999px;
   padding: 0.22rem 0.55rem;
-  color: var(--muted);
-  font-size: 0.76rem;
+  color: var(--text-muted);
+  font-size: var(--type-caption);
 }
 
 .diagnostic-breakdown strong {
-  color: var(--text);
+  color: var(--text-main);
   font-variant-numeric: tabular-nums;
 }
 
@@ -3363,7 +3390,7 @@ tbody tr:hover {
 .stats-help {
   flex-basis: 100%;
   color: var(--text-muted);
-  font-size: 0.68rem;
+  font-size: var(--type-caption);
 }
 
 .stats-help > summary {
@@ -3407,15 +3434,15 @@ tbody tr:hover {
 }
 
 .metric-explainers dt {
-  color: var(--text);
-  font-size: 0.76rem;
+  color: var(--text-main);
+  font-size: var(--type-support);
   font-weight: 600;
 }
 
 .metric-explainers dd {
   margin: 0;
-  color: var(--muted);
-  font-size: 0.76rem;
+  color: var(--text-muted);
+  font-size: var(--type-support);
   line-height: 1.45;
 }
 
@@ -3447,7 +3474,7 @@ tbody tr:hover {
 }
 
 .stats-active-text {
-  font-size: 0.75rem;
+  font-size: var(--type-support);
   color: #77b7ff;
 }
 
@@ -3491,12 +3518,13 @@ tbody tr:hover {
 /* ── Markdown body ── */
 
 .md-body {
-  font-size: 0.88rem;
-  line-height: 1.6;
+  font-size: var(--type-reading);
+  line-height: var(--leading-reading);
   color: var(--text-main);
   word-wrap: break-word;
   overflow-wrap: break-word;
-  max-width: 78ch;
+  max-width: 68ch;
+  text-wrap: pretty;
 }
 
 .md-body p {
@@ -3505,13 +3533,16 @@ tbody tr:hover {
 
 .md-body .md-heading {
   font-family: "Bricolage Grotesque", sans-serif;
-  color: var(--accent);
+  color: var(--text-main);
   margin: 0.6em 0 0.25em;
-  font-size: 0.85rem;
+  font-size: var(--type-reading);
+  font-weight: 600;
+  line-height: 1.35;
 }
 
 .md-body h3.md-heading {
-  font-size: 0.9rem;
+  font-size: 1.125rem;
+  font-weight: 700;
 }
 
 .md-body .md-code {
@@ -3520,7 +3551,7 @@ tbody tr:hover {
   border-radius: 4px;
   padding: 1px 5px;
   font-family: "IBM Plex Mono", ui-monospace, monospace;
-  font-size: 0.78rem;
+  font-size: var(--type-support);
 }
 
 .md-body .md-codeblock {
@@ -3531,7 +3562,7 @@ tbody tr:hover {
   margin: 0.4em 0;
   overflow-x: auto;
   font-family: "IBM Plex Mono", ui-monospace, monospace;
-  font-size: 0.75rem;
+  font-size: var(--type-support);
   line-height: 1.5;
 }
 
