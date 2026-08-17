@@ -22,7 +22,10 @@ import { fetchGhJson } from "./issue-store.ts"
 import type { RestFallbackStats } from "./issue-store-rest-fallback.ts"
 
 export class GhCliGitHubClient implements GitHubClient {
-  constructor(private readonly restStats?: RestFallbackStats) {}
+  constructor(
+    private readonly restStats?: RestFallbackStats,
+    private readonly signal?: AbortSignal
+  ) {}
 
   /**
    * List issues via `gh issue list`. When `state` is `"closed"`, only the
@@ -36,7 +39,8 @@ export class GhCliGitHubClient implements GitHubClient {
     return fetchGhJson<GitHubIssueRecord[]>(
       ["issue", "list", "--state", state, "--json", fields, "--limit", limit],
       cwd,
-      this.restStats
+      this.restStats,
+      this.signal
     )
   }
 
@@ -57,7 +61,8 @@ export class GhCliGitHubClient implements GitHubClient {
     return fetchGhJson<GitHubPullRequestRecord[]>(
       ["pr", "list", "--state", state, "--json", fields, "--limit", limit],
       cwd,
-      this.restStats
+      this.restStats,
+      this.signal
     )
   }
 
@@ -65,14 +70,17 @@ export class GhCliGitHubClient implements GitHubClient {
     return fetchGhJson<GitHubCiRunRecord[]>(
       ["run", "list", "--json", "headSha,databaseId,status,conclusion,url", "--limit", "20"],
       cwd,
-      this.restStats
+      this.restStats,
+      this.signal
     )
   }
 
   async listIssueComments(cwd: string, issueNumber: number): Promise<GitHubCommentRecord[] | null> {
     return fetchGhJson<GitHubCommentRecord[]>(
       ["issue", "view", String(issueNumber), "--json", "comments", "--jq", ".comments"],
-      cwd
+      cwd,
+      undefined,
+      this.signal
     )
   }
 
@@ -82,7 +90,9 @@ export class GhCliGitHubClient implements GitHubClient {
   ): Promise<GitHubReviewRecord[] | null> {
     return fetchGhJson<GitHubReviewRecord[]>(
       ["api", `repos/{owner}/{repo}/pulls/${prNumber}/reviews`],
-      cwd
+      cwd,
+      undefined,
+      this.signal
     )
   }
 
@@ -90,7 +100,8 @@ export class GhCliGitHubClient implements GitHubClient {
     return fetchGhJson<GitHubLabelRecord[]>(
       ["label", "list", "--json", "name,color,description", "--limit", "100"],
       cwd,
-      this.restStats
+      this.restStats,
+      this.signal
     )
   }
 
@@ -105,7 +116,8 @@ export class GhCliGitHubClient implements GitHubClient {
         "100",
       ],
       cwd,
-      this.restStats
+      this.restStats,
+      this.signal
     )
   }
 
@@ -122,7 +134,8 @@ export class GhCliGitHubClient implements GitHubClient {
         "10",
       ],
       cwd,
-      this.restStats
+      this.restStats,
+      this.signal
     )
   }
 
@@ -130,7 +143,9 @@ export class GhCliGitHubClient implements GitHubClient {
     cwd: string,
     branch: string
   ): Promise<GitHubBranchProtectionRecord | null> {
+    if (this.signal?.aborted) return null
     await acquireGhSlot()
+    if (this.signal?.aborted) return null
     const proc = Bun.spawn(
       [
         "gh",
@@ -138,14 +153,14 @@ export class GhCliGitHubClient implements GitHubClient {
         "--include",
         `repos/{owner}/{repo}/branches/${encodeURIComponent(branch)}/protection`,
       ],
-      { cwd, stdout: "pipe", stderr: "pipe" }
+      { cwd, stdout: "pipe", stderr: "pipe", signal: this.signal }
     )
     const [stdout, stderr] = await Promise.all([
       new Response(proc.stdout).text(),
       new Response(proc.stderr).text(),
     ])
     await proc.exited
-    if (proc.exitCode !== 0) {
+    if (this.signal?.aborted || proc.exitCode !== 0) {
       // 404 = no protection rules configured; 403 = insufficient permissions
       if (stdout.trim()) observeGhApiIncludeOutput(stdout)
       void stderr
@@ -176,30 +191,40 @@ export class GhCliGitHubClient implements GitHubClient {
     repo: string,
     sinceIso: string | null
   ): Promise<GitHubIssueEventRecord[] | null> {
+    if (this.signal?.aborted) return null
     await acquireGhSlot()
+    if (this.signal?.aborted) return null
     const proc = Bun.spawn(["gh", "api", "--include", `repos/${repo}/issues/events?per_page=100`], {
       cwd: process.cwd(),
       stdout: "pipe",
       stderr: "pipe",
+      signal: this.signal,
     })
     const [stdout, stderr] = await Promise.all([
       new Response(proc.stdout).text(),
       new Response(proc.stderr).text(),
     ])
     await proc.exited
-    if (proc.exitCode !== 0) {
+    if (this.signal?.aborted || proc.exitCode !== 0) {
       if (stdout.trim()) observeGhApiIncludeOutput(stdout)
       void stderr
       return null
     }
-    try {
-      const events = JSON.parse(observeGhApiIncludeOutput(stdout)) as GitHubIssueEventRecord[]
-      if (!Array.isArray(events)) return null
-      if (!sinceIso) return events
-      return events.filter((e) => typeof e.created_at === "string" && e.created_at > sinceIso)
-    } catch {
-      return null
-    }
+    return parseAndFilterEvents(stdout, sinceIso)
+  }
+}
+
+function parseAndFilterEvents(
+  stdout: string,
+  sinceIso: string | null
+): GitHubIssueEventRecord[] | null {
+  try {
+    const events = JSON.parse(observeGhApiIncludeOutput(stdout)) as GitHubIssueEventRecord[]
+    if (!Array.isArray(events)) return null
+    if (!sinceIso) return events
+    return events.filter((e) => typeof e.created_at === "string" && e.created_at > sinceIso)
+  } catch {
+    return null
   }
 }
 

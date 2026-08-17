@@ -27,14 +27,16 @@ export async function replayPendingMutations(
   repo: string,
   cwd: string,
   store?: IssueStore,
-  concurrency = 5
+  concurrency = 5,
+  opts?: { signal?: AbortSignal } | AbortSignal
 ): Promise<ReplayResult> {
+  const signal = opts instanceof AbortSignal ? opts : opts?.signal
   const { getIssueStore } = await import("./issue-store.ts")
   const s = store ?? getIssueStore()
   const pending = s.getPendingMutations(repo)
   const result: ReplayResult = { replayed: 0, failed: 0, discarded: 0 }
 
-  if (pending.length === 0) return result
+  if (pending.length === 0 || signal?.aborted) return result
 
   // 1. Group by issue number to maintain per-issue ordering
   const mutationsByIssue = new Map<number, PendingMutation[]>()
@@ -48,6 +50,8 @@ export async function replayPendingMutations(
   // 2. Define per-issue worker task
   const issueTasks = Array.from(mutationsByIssue.values()).map((rows) => async () => {
     for (const row of rows) {
+      if (signal?.aborted) break
+
       const mutation: MutationPayload = JSON.parse(row.mutation)
 
       if (row.attempts >= MAX_ATTEMPTS) {
@@ -59,9 +63,14 @@ export async function replayPendingMutations(
         continue
       }
 
-      const ok = await executeMutation(mutation, cwd, repo)
+      const outcome = await executeMutation(mutation, cwd, repo, signal)
 
-      if (ok) {
+      if (outcome.aborted || signal?.aborted) {
+        // Interrupted by cancellation: leave mutation queued with same attempt count
+        break
+      }
+
+      if (outcome.ok) {
         s.removeMutation(row.id)
         invalidateLocalCache(s, repo, mutation)
         result.replayed++
@@ -114,24 +123,33 @@ async function executeCommentMutation(
   mutation: MutationPayload,
   num: string,
   cwd: string,
-  repo: string
-): Promise<boolean> {
-  if (!mutation.body) return true
-  return runGhCommand(["gh", "issue", "comment", num, "--body", mutation.body], cwd, repo, mutation)
+  repo: string,
+  signal?: AbortSignal
+): Promise<{ ok: boolean; aborted?: boolean }> {
+  if (!mutation.body) return { ok: true }
+  return runGhCommand(
+    ["gh", "issue", "comment", num, "--body", mutation.body],
+    cwd,
+    repo,
+    mutation,
+    signal
+  )
 }
 
 async function executeLabelAddMutation(
   mutation: MutationPayload,
   num: string,
   cwd: string,
-  repo: string
-): Promise<boolean> {
-  if (!mutation.labels?.length) return true
+  repo: string,
+  signal?: AbortSignal
+): Promise<{ ok: boolean; aborted?: boolean }> {
+  if (!mutation.labels?.length) return { ok: true }
   return runGhCommand(
     ["gh", "issue", "edit", num, ...mutation.labels.flatMap((l) => ["--add-label", l])],
     cwd,
     repo,
-    mutation
+    mutation,
+    signal
   )
 }
 
@@ -139,40 +157,43 @@ async function executeMilestoneSetMutation(
   mutation: MutationPayload,
   num: string,
   cwd: string,
-  repo: string
-): Promise<boolean> {
-  if (mutation.milestone == null) return true
+  repo: string,
+  signal?: AbortSignal
+): Promise<{ ok: boolean; aborted?: boolean }> {
+  if (mutation.milestone == null) return { ok: true }
   return runGhCommand(
     ["gh", "issue", "edit", num, "--milestone", String(mutation.milestone)],
     cwd,
     repo,
-    mutation
+    mutation,
+    signal
   )
 }
 
 async function executeMutation(
   mutation: MutationPayload,
   cwd: string,
-  repo: string
-): Promise<boolean> {
+  repo: string,
+  signal?: AbortSignal
+): Promise<{ ok: boolean; aborted?: boolean }> {
   const num = String(mutation.number)
   switch (mutation.type) {
     case "close":
-      return runGhCommand(["gh", "issue", "close", num], cwd, repo, mutation)
+      return runGhCommand(["gh", "issue", "close", num], cwd, repo, mutation, signal)
     case "comment":
-      return executeCommentMutation(mutation, num, cwd, repo)
+      return executeCommentMutation(mutation, num, cwd, repo, signal)
     case "resolve":
-      return executeResolveMutation(mutation, num, cwd, repo)
+      return executeResolveMutation(mutation, num, cwd, repo, signal)
     case "label_add":
-      return executeLabelAddMutation(mutation, num, cwd, repo)
+      return executeLabelAddMutation(mutation, num, cwd, repo, signal)
     case "milestone_set":
-      return executeMilestoneSetMutation(mutation, num, cwd, repo)
+      return executeMilestoneSetMutation(mutation, num, cwd, repo, signal)
     case "pr_comment":
     case "pr_merge":
     case "pr_review":
-      return executePrMutation(mutation, num, cwd, repo)
+      return executePrMutation(mutation, num, cwd, repo, signal)
     default:
-      return false
+      return { ok: false }
   }
 }
 
@@ -180,45 +201,56 @@ async function executeResolveMutation(
   mutation: MutationPayload,
   num: string,
   cwd: string,
-  repo: string
-): Promise<boolean> {
+  repo: string,
+  signal?: AbortSignal
+): Promise<{ ok: boolean; aborted?: boolean }> {
   if (mutation.body) {
-    const ok = await runGhCommand(
+    const commentRes = await runGhCommand(
       ["gh", "issue", "comment", num, "--body", mutation.body],
       cwd,
       repo,
-      { ...mutation, type: "comment" }
+      { ...mutation, type: "comment" },
+      signal
     )
-    if (!ok) return false
+    if (commentRes.aborted) return { ok: false, aborted: true }
+    if (!commentRes.ok) return { ok: false }
   }
-  return runGhCommand(["gh", "issue", "close", num], cwd, repo, { ...mutation, type: "close" })
+  return runGhCommand(
+    ["gh", "issue", "close", num],
+    cwd,
+    repo,
+    { ...mutation, type: "close" },
+    signal
+  )
 }
 
 async function executePrMutation(
   mutation: MutationPayload,
   num: string,
   cwd: string,
-  repo: string
-): Promise<boolean> {
+  repo: string,
+  signal?: AbortSignal
+): Promise<{ ok: boolean; aborted?: boolean }> {
   switch (mutation.type) {
     case "pr_comment":
-      if (!mutation.body) return true
+      if (!mutation.body) return { ok: true }
       return runGhCommand(
         ["gh", "pr", "comment", num, "--body", mutation.body],
         cwd,
         repo,
-        mutation
+        mutation,
+        signal
       )
     case "pr_merge":
-      return runGhCommand(["gh", "pr", "merge", num, "--squash"], cwd, repo, mutation)
+      return runGhCommand(["gh", "pr", "merge", num, "--squash"], cwd, repo, mutation, signal)
     case "pr_review": {
       const event = mutation.reviewEvent ?? "COMMENT"
       const args = ["gh", "pr", "review", num, `--${event.toLowerCase().replace("_", "-")}`]
       if (mutation.body) args.push("--body", mutation.body)
-      return runGhCommand(args, cwd, repo, mutation)
+      return runGhCommand(args, cwd, repo, mutation, signal)
     }
     default:
-      return false
+      return { ok: false }
   }
 }
 
@@ -226,12 +258,16 @@ async function runGhCommand(
   args: string[],
   cwd: string,
   repo: string,
-  mutationForLog: MutationPayload
-): Promise<boolean> {
+  mutationForLog: MutationPayload,
+  signal?: AbortSignal
+): Promise<{ ok: boolean; aborted?: boolean }> {
+  if (signal?.aborted) return { ok: false, aborted: true }
+
   const proc = Bun.spawn(args, {
     cwd,
     stdout: "pipe",
     stderr: "pipe",
+    signal,
   })
   const [, stderr] = await Promise.all([
     new Response(proc.stdout).text(),
@@ -239,16 +275,35 @@ async function runGhCommand(
   ])
   await proc.exited
 
-  if (proc.exitCode === 0) return true
+  if (signal?.aborted) return { ok: false, aborted: true }
 
-  // REST API fallback on GraphQL rate-limit for mutation types with REST equivalents
+  if (proc.exitCode === 0) return { ok: true }
+  return handleReplayFallbackOrLog(
+    { mutation: mutationForLog, cwd, repo, signal },
+    stderr,
+    proc.exitCode ?? 1
+  )
+}
+
+interface ReplayExecContext {
+  mutation: MutationPayload
+  cwd: string
+  repo: string
+  signal?: AbortSignal
+}
+
+async function handleReplayFallbackOrLog(
+  ctx: ReplayExecContext,
+  stderr: string,
+  exitCode: number
+): Promise<{ ok: boolean; aborted?: boolean }> {
   if (isGraphQLRateLimited(stderr)) {
-    const restResult = await tryMutationRestFallback(mutationForLog, cwd, repo)
-    if (restResult) return true
+    const restResult = await tryMutationRestFallback(ctx.mutation, ctx.cwd, ctx.repo, ctx.signal)
+    if (ctx.signal?.aborted) return { ok: false, aborted: true }
+    if (restResult) return { ok: true }
   }
-
-  logReplayExecFailed(repo, mutationForLog, proc.exitCode ?? 1, stderr)
-  return false
+  logReplayExecFailed(ctx.repo, ctx.mutation, exitCode, stderr)
+  return { ok: false }
 }
 
 /** Log a structured execution failure for a single mutation replay. */

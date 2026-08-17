@@ -1308,12 +1308,13 @@ export async function replayPendingMutations(
   repo: string,
   cwd: string,
   store?: IssueStore,
-  concurrency = 5
+  concurrency = 5,
+  opts?: { signal?: AbortSignal } | AbortSignal
 ): Promise<import("./issue-store-replay.ts").ReplayResult> {
   // Implementation delegated to the dedicated replay module.
   // (Issue #378 extraction: keep this file focused on storage + readers.)
   const mod = await import("./issue-store-replay.ts")
-  return await mod.replayPendingMutations(repo, cwd, store, concurrency)
+  return await mod.replayPendingMutations(repo, cwd, store, concurrency, opts)
 }
 
 /**
@@ -1340,7 +1341,7 @@ export type { UpstreamSyncResult } from "./issue-store-sync.ts"
 export async function syncUpstreamState(
   repo: string,
   cwd: string,
-  opts?: { store?: IssueStore; client?: GitHubClient }
+  opts?: { store?: IssueStore; client?: GitHubClient; signal?: AbortSignal }
 ): Promise<import("./issue-store-sync.ts").UpstreamSyncResult> {
   // Implementation delegated to the dedicated upstream-sync module.
   const mod = await import("./issue-store-sync.ts")
@@ -1377,9 +1378,77 @@ export async function tryRestFallback<T>(
   args: string[],
   cwd: string,
   store?: IssueStore,
-  stats?: RestFallbackStats
+  stats?: RestFallbackStats,
+  signal?: AbortSignal
 ): Promise<T | null> {
-  return await tryRestFallbackImpl<T>(args, cwd, store, stats)
+  return await tryRestFallbackImpl<T>(args, cwd, store, stats, signal)
+}
+
+async function tryRestPrimary<T>(
+  args: string[],
+  cwd: string,
+  restStats?: RestFallbackStats,
+  signal?: AbortSignal
+): Promise<{ ok: true; result: T } | { ok: false }> {
+  if (ghListToRestFallback(args) === null) return { ok: false }
+  const restResult = await tryRestFallback<T>(args, cwd, undefined, restStats, signal)
+  if (restResult !== null) {
+    debugLog(`[swiz] REST_PRIMARY for ${args.join(" ")}`)
+    return { ok: true, result: restResult }
+  }
+  if (!signal?.aborted) {
+    debugLog(`[swiz] REST_PRIMARY_FAILED for ${args.join(" ")}; falling back to gh`)
+  }
+  return { ok: false }
+}
+
+function buildEffectiveGhArgs(args: string[]): string[] {
+  if (args[0] === "api" && !args.includes("--include") && !args.includes("-i")) {
+    return ["api", "--include", ...args.slice(1)]
+  }
+  return args
+}
+
+function handleGhFetchFailure(
+  args: string[],
+  exitCode: number | null,
+  stderr: string,
+  signal?: AbortSignal
+): null {
+  if (!signal?.aborted) {
+    debugLog(
+      isGraphQLRateLimited(stderr)
+        ? `[swiz] GRAPHQL_RATE_LIMITED for ${args.join(" ")}`
+        : `[swiz] GH_FETCH_FAILED exit=${exitCode} for ${args.join(" ")}`
+    )
+  }
+  return null
+}
+
+async function spawnGhJsonProcess(
+  args: string[],
+  cwd: string,
+  signal?: AbortSignal
+): Promise<{ stdout: string; effectiveArgs: string[] } | null> {
+  if (signal?.aborted) return null
+  await acquireGhSlot()
+  if (signal?.aborted) return null
+  const effectiveArgs = buildEffectiveGhArgs(args)
+  const proc = Bun.spawn(["gh", ...effectiveArgs], {
+    cwd,
+    stdout: "pipe",
+    stderr: "pipe",
+    signal,
+  })
+  const [stdout, stderr] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+  ])
+  await proc.exited
+  if (signal?.aborted || proc.exitCode !== 0) {
+    return handleGhFetchFailure(args, proc.exitCode, stderr, signal)
+  }
+  return { stdout, effectiveArgs }
 }
 
 /** Run a gh subcommand and parse JSON output. Returns null on failure.
@@ -1387,49 +1456,24 @@ export async function tryRestFallback<T>(
 export async function fetchGhJson<T>(
   args: string[],
   cwd: string,
-  restStats?: RestFallbackStats
+  restStats?: RestFallbackStats,
+  signal?: AbortSignal
 ): Promise<T | null> {
-  const hasRestMapping = ghListToRestFallback(args) !== null
-  if (hasRestMapping) {
-    const restResult = await tryRestFallback<T>(args, cwd, undefined, restStats)
-    if (restResult !== null) {
-      debugLog(`[swiz] REST_PRIMARY for ${args.join(" ")}`)
-      return restResult
-    }
-    debugLog(`[swiz] REST_PRIMARY_FAILED for ${args.join(" ")}; falling back to gh`)
-  }
+  if (signal?.aborted) return null
+  const rest = await tryRestPrimary<T>(args, cwd, restStats, signal)
+  if (rest.ok) return rest.result
+  if (signal?.aborted) return null
 
-  await acquireGhSlot()
-  const effectiveArgs =
-    args[0] === "api" && !args.includes("--include") && !args.includes("-i")
-      ? ["api", "--include", ...args.slice(1)]
-      : args
-  const proc = Bun.spawn(["gh", ...effectiveArgs], {
-    cwd,
-    stdout: "pipe",
-    stderr: "pipe",
-  })
-  const [stdout, stderr] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-  ])
-  await proc.exited
-  if (proc.exitCode !== 0) {
-    debugLog(
-      isGraphQLRateLimited(stderr)
-        ? `[swiz] GRAPHQL_RATE_LIMITED for ${args.join(" ")}`
-        : `[swiz] GH_FETCH_FAILED exit=${proc.exitCode} for ${args.join(" ")}`
-    )
-    return null
-  }
-  const output = effectiveArgs[0] === "api" ? observeGhApiIncludeOutput(stdout) : stdout
-  let parsed: T | null = null
+  const spawned = await spawnGhJsonProcess(args, cwd, signal)
+  if (!spawned) return null
+
+  const output =
+    spawned.effectiveArgs[0] === "api" ? observeGhApiIncludeOutput(spawned.stdout) : spawned.stdout
   try {
-    parsed = JSON.parse(output) as T
+    return JSON.parse(output) as T
   } catch {
     return null
   }
-  return parsed
 }
 
 // ─── GhCliGitHubClient (extracted to issue-store-gh-client.ts) ─────────────

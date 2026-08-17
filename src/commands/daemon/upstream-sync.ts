@@ -224,6 +224,10 @@ export class UpstreamSyncRegistry {
     if (!canonicalRoot) return false
     let removed = false
     for (const entryKey of [canonicalRoot, `${canonicalRoot}::upstream`]) {
+      const inflight = this.inFlightSyncs.get(entryKey)
+      if (inflight) {
+        inflight.controller.abort(new Error("unregistered"))
+      }
       const entry = this.entries.get(entryKey)
       if (!entry) continue
       if (entry.timer) clearTimeout(entry.timer)
@@ -235,6 +239,9 @@ export class UpstreamSyncRegistry {
   }
 
   close(): void {
+    for (const inflight of this.inFlightSyncs.values()) {
+      inflight.controller.abort(new Error("registry closed"))
+    }
     for (const entry of this.entries.values()) {
       if (entry.timer) clearTimeout(entry.timer)
       entry.timer = null
@@ -251,33 +258,42 @@ export class UpstreamSyncRegistry {
   }
 
   // In-flight coalescing: concurrent doSync calls for the same entry share one computation.
-  private inFlightSyncs = new Map<string, Promise<UpstreamSyncResult>>()
+  private inFlightSyncs = new Map<
+    string,
+    { promise: Promise<UpstreamSyncResult>; controller: AbortController }
+  >()
 
   private async doSync(entryKey: string, entry: SyncEntry): Promise<UpstreamSyncResult> {
     // Join existing in-flight computation rather than firing a duplicate gh call.
     const inflight = this.inFlightSyncs.get(entryKey)
-    if (inflight) return inflight
+    if (inflight) return inflight.promise
 
-    const computation = this.runSync(entry)
-    this.inFlightSyncs.set(entryKey, computation)
+    const controller = new AbortController()
+    const computation = this.runSync(entry, controller.signal)
+    const record = { promise: computation, controller }
+    this.inFlightSyncs.set(entryKey, record)
     void computation.finally(() => {
-      if (this.inFlightSyncs.get(entryKey) === computation) {
+      if (this.inFlightSyncs.get(entryKey) === record) {
         this.inFlightSyncs.delete(entryKey)
       }
     })
-    return this.waitForSync(entry, computation)
+    return this.waitForSync(entry, computation, controller)
   }
 
   private async waitForSync(
     entry: SyncEntry,
-    computation: Promise<UpstreamSyncResult>
+    computation: Promise<UpstreamSyncResult>,
+    controller: AbortController
   ): Promise<UpstreamSyncResult> {
     let timeout: ReturnType<typeof setTimeout> | null = null
     try {
       return await Promise.race([
         computation,
         new Promise<UpstreamSyncResult>((_, reject) => {
-          timeout = setTimeout(() => reject(new Error("sync timeout")), this.timeoutMs)
+          timeout = setTimeout(() => {
+            controller.abort(new Error("sync timeout"))
+            reject(new Error("sync timeout"))
+          }, this.timeoutMs)
         }),
       ])
     } catch (err) {
@@ -288,31 +304,47 @@ export class UpstreamSyncRegistry {
     }
   }
 
-  private async runSync(entry: SyncEntry): Promise<UpstreamSyncResult> {
+  private async runSync(entry: SyncEntry, signal?: AbortSignal): Promise<UpstreamSyncResult> {
     entry.syncing = true
     try {
-      const result = await this.sync(entry.repo, entry.cwd, { store: this.store ?? undefined })
-      // Only stamp lastSyncAt on a real success — a sync where every fetch
-      // returned null must not report as fresh to status/staleness consumers (#715).
+      const store = this.store ?? undefined
+      if (signal?.aborted) return fallbackResult(entry)
+      const result = await this.sync(entry.repo, entry.cwd, { store, signal })
+      if (signal?.aborted) return fallbackResult(entry)
       if (result.fetchOk) entry.lastSyncAt = Date.now()
       entry.lastResult = result
-      debugLog(
-        `[swiz] UPSTREAM_SYNC repo=${entry.repo} issues=${result.issues.upserted} prs=${result.pullRequests.upserted} ci=${result.ciStatuses.upserted} labels=${result.labels.upserted} milestones=${result.milestones.upserted} branchCi=${result.branchCi.upserted} prBranchDetail=${result.prBranchDetail.upserted} removed_issues=${result.issues.removed} removed_prs=${result.pullRequests.removed}`
-      )
-      // Drain any queued offline mutations now that we have a live connection.
-      const store = this.store ?? getIssueStore()
-      const pending = store.pendingCount(entry.repo)
-      if (pending > 0) {
-        debugLog(`[swiz] UPSTREAM_SYNC replaying ${pending} pending mutations for ${entry.repo}`)
-        await replayPendingMutations(entry.repo, entry.cwd, store)
-      }
+      logSyncSummary(entry.repo, result)
+      await replayPendingMutationsIfAny(entry.repo, entry.cwd, store ?? getIssueStore(), signal)
       return result
     } catch (err) {
       debugLog(`[swiz] UPSTREAM_SYNC_ERROR repo=${entry.repo} ${messageFromUnknownError(err)}`)
-      return entry.lastResult ?? createEmptySyncResult()
+      return fallbackResult(entry)
     } finally {
       entry.syncing = false
     }
+  }
+}
+
+function fallbackResult(entry: SyncEntry): UpstreamSyncResult {
+  return entry.lastResult ?? createEmptySyncResult()
+}
+
+function logSyncSummary(repo: string, result: UpstreamSyncResult): void {
+  debugLog(
+    `[swiz] UPSTREAM_SYNC repo=${repo} issues=${result.issues.upserted} prs=${result.pullRequests.upserted} ci=${result.ciStatuses.upserted} labels=${result.labels.upserted} milestones=${result.milestones.upserted} branchCi=${result.branchCi.upserted} prBranchDetail=${result.prBranchDetail.upserted} removed_issues=${result.issues.removed} removed_prs=${result.pullRequests.removed}`
+  )
+}
+
+async function replayPendingMutationsIfAny(
+  repo: string,
+  cwd: string,
+  store: IssueStore,
+  signal?: AbortSignal
+): Promise<void> {
+  const pending = store.pendingCount(repo)
+  if (pending > 0 && !signal?.aborted) {
+    debugLog(`[swiz] UPSTREAM_SYNC replaying ${pending} pending mutations for ${repo}`)
+    await replayPendingMutations(repo, cwd, store, 5, { signal })
   }
 }
 

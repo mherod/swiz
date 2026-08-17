@@ -453,9 +453,12 @@ export function ghListToRestFallback(args: string[]): RestFallbackMapping | null
 async function fetchViaRest(
   endpoint: string,
   cwd: string,
-  etagValue?: string | null
+  etagValue?: string | null,
+  signal?: AbortSignal
 ): Promise<{ status: number | null; headers: Record<string, string>; body: string } | null> {
+  if (signal?.aborted) return null
   await acquireGhSlot()
+  if (signal?.aborted) return null
   const args = ["api", "--include", endpoint]
   if (etagValue) {
     args.push("-H", `If-None-Match: ${etagValue}`)
@@ -464,13 +467,21 @@ async function fetchViaRest(
     cwd,
     stdout: "pipe",
     stderr: "pipe",
+    signal,
   })
   const [stdout] = await Promise.all([
     new Response(proc.stdout).text(),
     new Response(proc.stderr).text(),
   ])
   await proc.exited
+  if (signal?.aborted) return null
+  return parseRestResponse(proc.exitCode, stdout)
+}
 
+function parseRestResponse(
+  exitCode: number | null,
+  stdout: string
+): { status: number | null; headers: Record<string, string>; body: string } | null {
   const parsed = parseGhApiIncludeOutput(stdout)
   if (parsed.headers.etag) {
     // Call observeGhApiIncludeOutput to update rate limit state from headers
@@ -479,7 +490,7 @@ async function fetchViaRest(
   if (parsed.status === 304) {
     return { status: 304, headers: parsed.headers, body: "" }
   }
-  if (proc.exitCode !== 0) return null
+  if (exitCode !== 0) return null
   if (parsed.status === null) {
     return { status: 200, headers: {}, body: parsed.body }
   }
@@ -534,18 +545,16 @@ function handleRestResponse<T>(
   return null
 }
 
-/**
- * Fetch a mapped gh list command via REST API.
- * Returns null if no REST mapping exists for the command or if REST fails.
- *
- * Exported for unit testing.
- */
-export async function tryRestFallback<T>(
+async function resolveRestContext(
   args: string[],
   cwd: string,
-  store?: IssueStore,
-  stats?: RestFallbackStats
-): Promise<T | null> {
+  store?: IssueStore
+): Promise<{
+  repo: string
+  mapping: RestFallbackMapping
+  store: IssueStore
+  endpoint: string
+} | null> {
   const mapping = ghListToRestFallback(args)
   if (!mapping) {
     debugLog(`[swiz] NO_REST_FALLBACK for ${args.join(" ")} — no REST endpoint mapping registered`)
@@ -557,16 +566,47 @@ export async function tryRestFallback<T>(
 
   const { getIssueStore } = await import("./issue-store.ts")
   const s = store ?? getIssueStore()
+  return { repo, mapping, store: s, endpoint: mapping.endpoint }
+}
 
-  const endpoint = mapping.endpoint
-  const cached = s.getHttpCache(repo, endpoint)
-
+async function executeRestQuery<T>(
+  args: string[],
+  cwd: string,
+  ctx: { repo: string; mapping: RestFallbackMapping; store: IssueStore; endpoint: string },
+  stats?: RestFallbackStats,
+  signal?: AbortSignal
+): Promise<T | null> {
+  const cached = ctx.store.getHttpCache(ctx.repo, ctx.endpoint)
   debugLog(`[swiz] REST_QUERY for ${args.join(" ")} (cached etag: ${cached?.etag})`)
   if (stats) stats.requests++
-  const result = await fetchViaRest(endpoint, cwd, cached?.etag)
-  if (result === null) return null
+  const result = await fetchViaRest(ctx.endpoint, cwd, cached?.etag, signal)
+  if (result === null || signal?.aborted) return null
 
-  return handleRestResponse<T>(result, cached, { repo, mapping, store: s, stats })
+  return handleRestResponse<T>(result, cached, {
+    repo: ctx.repo,
+    mapping: ctx.mapping,
+    store: ctx.store,
+    stats,
+  })
+}
+
+/**
+ * Fetch a mapped gh list command via REST API.
+ * Returns null if no REST mapping exists for the command or if REST fails.
+ *
+ * Exported for unit testing.
+ */
+export async function tryRestFallback<T>(
+  args: string[],
+  cwd: string,
+  store?: IssueStore,
+  stats?: RestFallbackStats,
+  signal?: AbortSignal
+): Promise<T | null> {
+  if (signal?.aborted) return null
+  const ctx = await resolveRestContext(args, cwd, store)
+  if (!ctx || signal?.aborted) return null
+  return executeRestQuery<T>(args, cwd, ctx, stats, signal)
 }
 
 // ─── Mutation REST fallback (used when GraphQL is rate-limited) ───────────
@@ -574,20 +614,25 @@ export async function tryRestFallback<T>(
 async function executeMutationCommand(
   args: string[],
   cwd: string,
-  stdin?: Response
+  stdin?: Response,
+  signal?: AbortSignal
 ): Promise<boolean> {
+  if (signal?.aborted) return false
   await acquireGhSlot()
+  if (signal?.aborted) return false
   const proc = Bun.spawn(["gh", "api", "--include", ...args], {
     cwd,
     stdout: "pipe",
     stderr: "pipe",
     ...(stdin && { stdin }),
+    signal,
   })
   const [stdout] = await Promise.all([
     new Response(proc.stdout).text(),
     new Response(proc.stderr).text(),
   ])
   await proc.exited
+  if (signal?.aborted) return false
   if (stdout.trim()) observeGhApiIncludeOutput(stdout)
   return proc.exitCode === 0
 }
@@ -654,13 +699,15 @@ function buildMutationArgs(
 export async function tryMutationRestFallback(
   mutation: MutationPayload,
   cwd: string,
-  repo: string
+  repo: string,
+  signal?: AbortSignal
 ): Promise<boolean> {
+  if (signal?.aborted) return false
   const num = String(mutation.number)
   debugLog(`[swiz] REST_FALLBACK_MUTATION repo=${repo} issue=#${num} type=${mutation.type}`)
 
   const cmd = buildMutationArgs(mutation, repo, num)
   if (!cmd) return mutation.type !== "create"
 
-  return executeMutationCommand(cmd.args, cwd, cmd.stdin)
+  return executeMutationCommand(cmd.args, cwd, cmd.stdin, signal)
 }

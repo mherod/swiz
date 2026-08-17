@@ -6,6 +6,8 @@ import { join } from "node:path"
 import {
   DaemonBackedIssueStore,
   DEFAULT_TTL_MS,
+  fetchGhJson,
+  GhCliGitHubClient,
   type GitHubClient,
   getIssueStore,
   ghListToRestFallback,
@@ -820,6 +822,31 @@ describe("replayPendingMutations", () => {
       Bun.spawn = originalSpawn
       store.close()
       releaseMutex()
+    }
+  })
+
+  test("leaves mutation queued with unchanged attempt count when cancelled via AbortSignal", async () => {
+    const store = createStore()
+    try {
+      store.queueMutation("owner/repo", { type: "close", number: 42 })
+      const pendingBefore = store.getPendingMutations("owner/repo")
+      expect(pendingBefore).toHaveLength(1)
+      expect(pendingBefore[0]!.attempts).toBe(0)
+
+      const controller = new AbortController()
+      controller.abort()
+
+      const result = await replayPendingMutations("owner/repo", "/tmp", store, 5, controller.signal)
+      expect(result.replayed).toBe(0)
+      expect(result.failed).toBe(0)
+      expect(result.discarded).toBe(0)
+
+      const pendingAfter = store.getPendingMutations("owner/repo")
+      expect(pendingAfter).toHaveLength(1)
+      expect(pendingAfter[0]!.attempts).toBe(0)
+      expect(pendingAfter[0]!.id).toBe(pendingBefore[0]!.id)
+    } finally {
+      store.close()
     }
   })
 })
@@ -2524,5 +2551,63 @@ describe("IssueStore event-sourced sync (#521)", () => {
     } finally {
       store.close()
     }
+  })
+
+  test("syncUpstreamState does not advance cursors or set fetchOk when cancelled via AbortSignal", async () => {
+    const store = createStore()
+    try {
+      const repo = "owner/repo"
+      const cwd = "/home/user/my-repo"
+
+      const controller = new AbortController()
+      controller.abort()
+
+      const client: GitHubClient = {
+        listIssues: async () => [{ number: 1, title: "Test", state: "open" }],
+        listPullRequests: async () => [],
+        listWorkflowRuns: async () => [],
+        listIssueComments: async () => null,
+        listLabels: async () => [],
+        listMilestones: async () => [],
+        listBranchWorkflowRuns: async () => null,
+        getBranchProtection: async () => null,
+        listPullRequestReviews: async () => null,
+        listIssueEventsSince: async () => [],
+      }
+
+      const result = await syncUpstreamState(repo, cwd, {
+        store,
+        client,
+        signal: controller.signal,
+      })
+
+      expect(result.fetchOk).toBe(false)
+      expect(store.getSyncCursor(repo, "last_synced")).toBeNull()
+      expect(store.getSyncCursor(repo, "cwd")).toBeNull()
+      expect(store.getSyncCursor(repo, "issue_events")).toBeNull()
+    } finally {
+      store.close()
+    }
+  })
+
+  test("GhCliGitHubClient and fetch helpers respect AbortSignal", async () => {
+    const controller = new AbortController()
+    controller.abort()
+
+    const client = new GhCliGitHubClient(undefined, controller.signal)
+    expect(await client.listIssues("/tmp", "open")).toBeNull()
+    expect(await client.listPullRequests("/tmp", "open")).toBeNull()
+    expect(await client.listWorkflowRuns("/tmp")).toBeNull()
+    expect(await client.listIssueComments("/tmp", 1)).toBeNull()
+    expect(await client.listPullRequestReviews("/tmp", 1)).toBeNull()
+    expect(await client.listLabels("/tmp")).toBeNull()
+    expect(await client.listMilestones("/tmp")).toBeNull()
+    expect(await client.listBranchWorkflowRuns("/tmp", "main")).toBeNull()
+    expect(await client.getBranchProtection("/tmp", "main")).toBeNull()
+    expect(await client.listIssueEventsSince("owner/repo", null)).toBeNull()
+    expect(
+      await tryRestFallback(["issue", "list"], "/tmp", undefined, undefined, controller.signal)
+    ).toBeNull()
+    expect(await fetchGhJson(["issue", "list"], "/tmp", undefined, controller.signal)).toBeNull()
   })
 })

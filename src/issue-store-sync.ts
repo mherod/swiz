@@ -4,6 +4,8 @@ import type {
   GitHubCiRunRecord,
   GitHubClient,
   GitHubIssueRecord,
+  GitHubLabelRecord,
+  GitHubMilestoneRecord,
   GitHubPullRequestRecord,
   IssueStore,
 } from "./issue-store.ts"
@@ -725,40 +727,67 @@ function updateSyncFreshnessCursor(ctx: SyncContext, isFetchOk: boolean): void {
   }
 }
 
-/**
- * Poll upstream GitHub state for a repo and refresh the local store.
- * Fetches open issues, open PRs, and recent workflow runs, then upserts
- * into the shared store. Safe to call on a cadence from the daemon.
- */
-export async function syncUpstreamState(
-  repo: string,
-  cwd: string,
-  opts?: { store?: IssueStore; client?: GitHubClient }
-): Promise<UpstreamSyncResult> {
-  const { getIssueStore, GhCliGitHubClient } = await import("./issue-store.ts")
-  const s = opts?.store ?? getIssueStore()
-  const result = createInitialSyncResult()
-  const gh = opts?.client ?? new GhCliGitHubClient(result.restCache)
-
-  const allowed = await verifyRepoOriginInvariant(repo, cwd, Boolean(opts?.client))
-  if (!allowed) return result
-
-  // ─── Snapshot existing state for fast-path decisions ────────────────────
-  const issueSnap = s.getIssueSnapshot(repo)
-  const prSnap = s.getPullRequestSnapshot(repo)
-
-  // ─── Fetch open entities (always needed to detect changes) ──────────────
-  const [issues, prs, runs, labels, milestones] = await Promise.all([
+async function fetchOpenEntities(
+  gh: GitHubClient,
+  cwd: string
+): Promise<
+  [
+    GitHubIssueRecord[] | null,
+    GitHubPullRequestRecord[] | null,
+    GitHubCiRunRecord[] | null,
+    GitHubLabelRecord[] | null,
+    GitHubMilestoneRecord[] | null,
+  ]
+> {
+  return await Promise.all([
     gh.listIssues(cwd, "open"),
     gh.listPullRequests(cwd, "open"),
     gh.listWorkflowRuns(cwd),
     gh.listLabels(cwd),
     gh.listMilestones(cwd),
   ])
+}
 
+async function syncSecondaryEntities(
+  ctx: SyncContext,
+  payloads: PrimarySyncPayloads,
+  issuesChanged: boolean,
+  prsChanged: boolean,
+  signal?: AbortSignal
+): Promise<void> {
+  const allPrimaryListsCached = checkAllPrimaryListsCached(
+    ctx.result.restCache.notModified,
+    payloads,
+    issuesChanged,
+    prsChanged
+  )
+  if (allPrimaryListsCached) return
+
+  await syncBranchData(ctx, payloads.prs, prsChanged)
+  if (signal?.aborted) return
+  await syncComments(ctx, payloads.issues, issuesChanged)
+  if (signal?.aborted) return
+  await syncIssueEvents(ctx.store, ctx.client, ctx.repo, ctx.result)
+}
+
+async function syncPrimaryData(
+  ctx: SyncContext,
+  signal?: AbortSignal
+): Promise<{ payloads: PrimarySyncPayloads; issuesChanged: boolean; prsChanged: boolean } | null> {
+  const [issues, prs, runs, labels, milestones] = await fetchOpenEntities(ctx.client, ctx.cwd)
+  if (signal?.aborted) return null
+
+  const issueSnap = ctx.store.getIssueSnapshot(ctx.repo)
+  const prSnap = ctx.store.getPullRequestSnapshot(ctx.repo)
   const issuesChanged = hasEntitySnapshotChanged(issues, issueSnap)
   const prsChanged = hasEntitySnapshotChanged(prs, prSnap)
-  const [closedIssues, closedPrs] = await fetchClosedEntities(gh, cwd, issuesChanged, prsChanged)
+  const [closedIssues, closedPrs] = await fetchClosedEntities(
+    ctx.client,
+    ctx.cwd,
+    issuesChanged,
+    prsChanged
+  )
+  if (signal?.aborted) return null
 
   const payloads: PrimarySyncPayloads = {
     issues,
@@ -770,24 +799,55 @@ export async function syncUpstreamState(
     closedPrs,
   }
 
-  syncPrimaryEntities(s, repo, payloads, result)
+  syncPrimaryEntities(ctx.store, ctx.repo, payloads, ctx.result)
+  return { payloads, issuesChanged, prsChanged }
+}
 
-  const ctx: SyncContext = { store: s, client: gh, repo, cwd, result }
-  const allPrimaryListsCached = checkAllPrimaryListsCached(
-    result.restCache.notModified,
-    payloads,
-    issuesChanged,
-    prsChanged
+async function resolveSyncSetup(
+  repo: string,
+  cwd: string,
+  opts?: { store?: IssueStore; client?: GitHubClient; signal?: AbortSignal }
+): Promise<{ ctx: SyncContext; signal?: AbortSignal } | null> {
+  const signal = opts?.signal
+  const { getIssueStore, GhCliGitHubClient } = await import("./issue-store.ts")
+  const store = opts?.store ?? getIssueStore()
+  const result = createInitialSyncResult()
+  const client = opts?.client ?? new GhCliGitHubClient(result.restCache, signal)
+
+  const allowed = await verifyRepoOriginInvariant(repo, cwd, Boolean(opts?.client))
+  if (!allowed || signal?.aborted) return null
+
+  return { ctx: { store, client, repo, cwd, result }, signal }
+}
+
+/**
+ * Poll upstream GitHub state for a repo and refresh the local store.
+ * Fetches open issues, open PRs, and recent workflow runs, then upserts
+ * into the shared store. Safe to call on a cadence from the daemon.
+ */
+export async function syncUpstreamState(
+  repo: string,
+  cwd: string,
+  opts?: { store?: IssueStore; client?: GitHubClient; signal?: AbortSignal }
+): Promise<UpstreamSyncResult> {
+  const setup = await resolveSyncSetup(repo, cwd, opts)
+  if (!setup) return createInitialSyncResult()
+
+  const { ctx, signal } = setup
+  const primary = await syncPrimaryData(ctx, signal)
+  if (!primary || signal?.aborted) return ctx.result
+
+  await syncSecondaryEntities(
+    ctx,
+    primary.payloads,
+    primary.issuesChanged,
+    primary.prsChanged,
+    signal
   )
+  if (signal?.aborted) return ctx.result
 
-  if (!allPrimaryListsCached) {
-    await syncBranchData(ctx, prs, prsChanged)
-    await syncComments(ctx, issues, issuesChanged)
-    await syncIssueEvents(s, gh, repo, result)
-  }
-
-  updateSyncFreshnessCursor(ctx, issues !== null && prs !== null)
-  return result
+  updateSyncFreshnessCursor(ctx, primary.payloads.issues !== null && primary.payloads.prs !== null)
+  return ctx.result
 }
 
 /**

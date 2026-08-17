@@ -114,18 +114,26 @@ describe("UpstreamSyncRegistry fork entries", () => {
 })
 
 describe("UpstreamSyncRegistry lifecycle", () => {
-  test("keeps a timed-out sync in flight so the next interval cannot overlap it", async () => {
-    const releaseSync = deferred()
+  test("aborts timed-out sync, resets syncing, and permits next interval without overlap", async () => {
     let syncCalls = 0
+    const observedSignals: AbortSignal[] = []
     const store = new IssueStore(":memory:")
     const registry = new UpstreamSyncRegistry({
-      intervalMs: 10,
-      timeoutMs: 5,
+      intervalMs: 30,
+      timeoutMs: 15,
       resolveSlug: async () => "owner/repo",
       resolveFork: async () => null,
-      sync: async () => {
+      sync: async (_repo, _cwd, opts) => {
         syncCalls++
-        await releaseSync.promise
+        if (opts?.signal) observedSignals.push(opts.signal)
+        if (syncCalls === 1) {
+          // First call hangs until aborted
+          await new Promise<void>((resolve) => {
+            if (opts?.signal?.aborted) return resolve()
+            opts?.signal?.addEventListener("abort", () => resolve(), { once: true })
+          })
+          return createSyncResult()
+        }
         return createSyncResult()
       },
       store,
@@ -133,14 +141,91 @@ describe("UpstreamSyncRegistry lifecycle", () => {
 
     try {
       await registry.register("/virtual/repo")
-      await Bun.sleep(40)
+      // Wait long enough for first sync to timeout and abort, and next interval to trigger
+      await Bun.sleep(100)
 
-      expect(syncCalls).toBe(1)
-      expect(registry.listActive()[0]?.syncing).toBe(true)
+      expect(syncCalls).toBeGreaterThanOrEqual(2)
+      expect(observedSignals[0]?.aborted).toBe(true)
+      // Once settled, syncing is false
+      expect(registry.listActive()[0]?.syncing).toBe(false)
     } finally {
       registry.close()
-      releaseSync.resolve()
-      await Bun.sleep(0)
+      store.close()
+    }
+  })
+
+  test("aborts in-flight computation when project is unregistered", async () => {
+    let capturedSignal: AbortSignal | null = null
+    const syncStarted = deferred()
+    const store = new IssueStore(":memory:")
+    const registry = new UpstreamSyncRegistry({
+      intervalMs: 5,
+      timeoutMs: 10_000,
+      resolveSlug: async () => "owner/repo",
+      resolveFork: async () => null,
+      sync: async (_repo, _cwd, opts) => {
+        capturedSignal = opts?.signal ?? null
+        syncStarted.resolve()
+        await new Promise<void>((resolve) => {
+          if (opts?.signal?.aborted) return resolve()
+          opts?.signal?.addEventListener("abort", () => resolve(), { once: true })
+        })
+        return createSyncResult()
+      },
+      store,
+    })
+
+    try {
+      await registry.register("/virtual/repo")
+      await syncStarted.promise
+
+      expect(capturedSignal).not.toBeNull()
+      expect(capturedSignal!.aborted).toBe(false)
+
+      expect(registry.unregister("/virtual/repo")).toBe(true)
+      expect(capturedSignal!.aborted).toBe(true)
+      expect(registry.listActive()).toHaveLength(0)
+    } finally {
+      registry.close()
+      store.close()
+    }
+  })
+
+  test("aborts all in-flight computations when registry closes", async () => {
+    const capturedSignals: AbortSignal[] = []
+    const syncsStarted = deferred()
+    let startedCount = 0
+    const store = new IssueStore(":memory:")
+    const registry = new UpstreamSyncRegistry({
+      intervalMs: 5,
+      timeoutMs: 10_000,
+      resolveSlug: async () => "owner/fork",
+      resolveFork: async () => ({ upstreamSlug: "org/upstream" }),
+      sync: async (_repo, _cwd, opts) => {
+        if (opts?.signal) capturedSignals.push(opts.signal)
+        startedCount++
+        if (startedCount === 2) syncsStarted.resolve()
+        await new Promise<void>((resolve) => {
+          if (opts?.signal?.aborted) return resolve()
+          opts?.signal?.addEventListener("abort", () => resolve(), { once: true })
+        })
+        return createSyncResult()
+      },
+      store,
+    })
+
+    try {
+      await registry.register("/virtual/fork")
+      await syncsStarted.promise
+
+      expect(capturedSignals).toHaveLength(2)
+      expect(capturedSignals.every((s) => !s.aborted)).toBe(true)
+
+      registry.close()
+      expect(capturedSignals.every((s) => s.aborted)).toBe(true)
+      expect(registry.listActive()).toHaveLength(0)
+    } finally {
+      registry.close()
       store.close()
     }
   })
