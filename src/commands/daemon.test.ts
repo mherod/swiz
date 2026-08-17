@@ -379,6 +379,7 @@ describe("hydratePersistedSessionToolState", () => {
     const count = await hydratePersistedSessionToolState("/repo", state, {
       listSessions: async () => sessions,
       readToolCalls: async (_cwd, sessionId) => (sessionId === "session-1" ? recoveredCalls : []),
+      nowMs: Date.parse("2026-04-03T10:05:00.000Z"),
     })
 
     expect(count).toBe(1)
@@ -417,6 +418,7 @@ describe("hydratePersistedSessionToolState", () => {
         },
       ],
       lastSeen: Date.parse("2026-04-03T10:01:00.000Z"),
+      nextTurnIndex: 2,
     })
     expect(state.sessionActivity.get("session-1")).toEqual({
       lastSeen: Date.parse("2026-04-03T10:01:00.000Z"),
@@ -462,6 +464,7 @@ describe("hydratePersistedSessionToolState", () => {
         { name: "Read", detail: "/tmp/file.ts", timestamp: "2026-04-03T10:00:00.000Z" },
         { name: "Bash", detail: "ls", timestamp: "2026-04-03T10:02:00.000Z" },
       ],
+      nowMs: Date.parse("2026-04-03T10:05:00.000Z"),
     })
 
     expect(count).toBe(1)
@@ -497,11 +500,171 @@ describe("hydratePersistedSessionToolState", () => {
         },
       ],
       lastSeen: Date.parse("2026-04-03T10:02:00.000Z"),
+      nextTurnIndex: 3,
     })
     expect(state.sessionActivity.get("session-1")).toEqual({
       lastSeen: Date.parse("2026-04-03T10:02:00.000Z"),
       dispatches: 2,
     })
+  })
+
+  it("discovers up to 30 sessions, limits read concurrency to 4, and inserts oldest-to-newest into CappedMaps", async () => {
+    const baseTime = Date.parse("2026-04-03T12:00:00.000Z")
+    // 100 sessions from s0 (newest, mtime = baseTime) down to s99 (oldest, mtime = baseTime - 99s)
+    const sessions: Session[] = Array.from({ length: 100 }, (_, i) => ({
+      id: `s${i}`,
+      path: `/tmp/session-${i}.jsonl`,
+      mtime: baseTime - i * 1_000,
+      provider: "claude",
+      format: "jsonl",
+    }))
+
+    const readSessions: string[] = []
+    let inFlight = 0
+    let peakConcurrency = 0
+
+    const readToolCalls = async (_cwd: string, sessionId: string): Promise<CapturedToolCall[]> => {
+      readSessions.push(sessionId)
+      inFlight++
+      peakConcurrency = Math.max(peakConcurrency, inFlight)
+      await Bun.sleep(5)
+      inFlight--
+      const idx = Number.parseInt(sessionId.slice(1), 10)
+      const ts = new Date(baseTime - idx * 1_000).toISOString()
+      return [{ name: "Read", detail: `/file-${idx}.ts`, timestamp: ts }]
+    }
+
+    const state = {
+      sessionActivity: new CappedMap<string, { lastSeen: number; dispatches: number }>(10),
+      sessionToolCalls: new CappedMap<string, CapturedToolCall[]>(10),
+      sessionToolUsage: new CappedMap<string, SessionToolUsageState>(30),
+    }
+
+    const count = await hydratePersistedSessionToolState("/repo", state, {
+      listSessions: async () => sessions,
+      readToolCalls,
+      nowMs: baseTime + 10_000,
+    })
+
+    expect(count).toBe(30)
+    expect(readSessions).toHaveLength(30)
+    expect(peakConcurrency).toBeLessThanOrEqual(4)
+
+    // sessionToolUsage (cap 30) should contain the newest 30 sessions: s29..s0
+    expect(state.sessionToolUsage.size).toBe(30)
+    const usageKeys = Array.from(state.sessionToolUsage.keys())
+    const expected30Newest = Array.from({ length: 30 }, (_, i) => `s${29 - i}`)
+    expect(usageKeys).toEqual(expected30Newest)
+
+    // sessionToolCalls (cap 10) should contain the newest 10 sessions (s9..s0), NOT the oldest (s29..s20)
+    expect(state.sessionToolCalls.size).toBe(10)
+    const toolCallKeys = Array.from(state.sessionToolCalls.keys())
+    const expected10Newest = Array.from({ length: 10 }, (_, i) => `s${9 - i}`)
+    expect(toolCallKeys).toEqual(expected10Newest)
+
+    // sessionActivity (cap 10) should also contain the newest 10 sessions
+    expect(state.sessionActivity.size).toBe(10)
+    const activityKeys = Array.from(state.sessionActivity.keys())
+    expect(activityKeys).toEqual(expected10Newest)
+  })
+
+  it("skips sessions older than the 30-minute retention cutoff", async () => {
+    const nowMs = Date.parse("2026-04-03T12:00:00.000Z")
+    const recentTime = nowMs - 5 * 60 * 1000 // 5 mins ago
+    const staleTime = nowMs - 35 * 60 * 1000 // 35 mins ago
+
+    const sessions: Session[] = [
+      {
+        id: "s-recent",
+        path: "/tmp/s-recent.jsonl",
+        mtime: recentTime,
+        provider: "claude",
+        format: "jsonl",
+      },
+      {
+        id: "s-stale",
+        path: "/tmp/s-stale.jsonl",
+        mtime: staleTime,
+        provider: "claude",
+        format: "jsonl",
+      },
+    ]
+
+    const state = {
+      sessionActivity: new CappedMap<string, { lastSeen: number; dispatches: number }>(10),
+      sessionToolCalls: new CappedMap<string, CapturedToolCall[]>(10),
+      sessionToolUsage: new CappedMap<string, SessionToolUsageState>(30),
+    }
+
+    const count = await hydratePersistedSessionToolState("/repo", state, {
+      listSessions: async () => sessions,
+      readToolCalls: async (_cwd, sessionId) => {
+        const ts =
+          sessionId === "s-recent"
+            ? new Date(recentTime).toISOString()
+            : new Date(staleTime).toISOString()
+        return [{ name: "Read", detail: "/file.ts", timestamp: ts }]
+      },
+      nowMs,
+    })
+
+    expect(count).toBe(1)
+    expect(state.sessionToolCalls.has("s-recent")).toBe(true)
+    expect(state.sessionToolCalls.has("s-stale")).toBe(false)
+    expect(state.sessionToolUsage.has("s-recent")).toBe(true)
+    expect(state.sessionToolUsage.has("s-stale")).toBe(false)
+    expect(state.sessionActivity.has("s-recent")).toBe(true)
+    expect(state.sessionActivity.has("s-stale")).toBe(false)
+  })
+
+  it("handles single-session read failure fail-open without disturbing insertion order of remaining sessions", async () => {
+    const baseTime = Date.parse("2026-04-03T12:00:00.000Z")
+    const sessions: Session[] = [
+      { id: "s0", path: "/tmp/s0.jsonl", mtime: baseTime, provider: "claude", format: "jsonl" },
+      {
+        id: "s1",
+        path: "/tmp/s1.jsonl",
+        mtime: baseTime - 1000,
+        provider: "claude",
+        format: "jsonl",
+      },
+      {
+        id: "s2",
+        path: "/tmp/s2.jsonl",
+        mtime: baseTime - 2000,
+        provider: "claude",
+        format: "jsonl",
+      },
+      {
+        id: "s3",
+        path: "/tmp/s3.jsonl",
+        mtime: baseTime - 3000,
+        provider: "claude",
+        format: "jsonl",
+      },
+    ]
+
+    const state = {
+      sessionActivity: new CappedMap<string, { lastSeen: number; dispatches: number }>(10),
+      sessionToolCalls: new CappedMap<string, CapturedToolCall[]>(10),
+      sessionToolUsage: new CappedMap<string, SessionToolUsageState>(30),
+    }
+
+    const count = await hydratePersistedSessionToolState("/repo", state, {
+      listSessions: async () => sessions,
+      readToolCalls: async (_cwd, sessionId) => {
+        if (sessionId === "s2") throw new Error("Disk corruption")
+        return [
+          { name: "Read", detail: `/${sessionId}.ts`, timestamp: new Date(baseTime).toISOString() },
+        ]
+      },
+      nowMs: baseTime + 10_000,
+    })
+
+    expect(count).toBe(3)
+    expect(state.sessionToolUsage.has("s2")).toBe(false)
+    // Applied in oldest-to-newest order: s3, s1, s0
+    expect(Array.from(state.sessionToolUsage.keys())).toEqual(["s3", "s1", "s0"])
   })
 })
 

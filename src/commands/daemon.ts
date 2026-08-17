@@ -52,7 +52,10 @@ import { UpstreamSyncRegistry } from "./daemon/upstream-sync.ts"
 import {
   buildSessionToolUsageStateFromCapturedCalls,
   type CapturedToolCall,
+  HYDRATION_CONCURRENCY,
+  MAX_HYDRATED_SESSIONS,
   mergeCapturedToolCalls,
+  mergeSessionToolUsageStates,
   readPersistedSessionToolCalls,
   restartDaemon,
   type SessionToolUsageState,
@@ -454,72 +457,119 @@ function recoverLastSeenMs(calls: CapturedToolCall[], fallbackMs: number): numbe
   return lastSeen
 }
 
-function mergeSessionToolUsageStates(
-  existing: SessionToolUsageState | undefined,
-  recovered: SessionToolUsageState
-): SessionToolUsageState {
-  if (!existing) return recovered
-  return {
-    toolNames: [...existing.toolNames, ...recovered.toolNames],
-    skillInvocations: [...existing.skillInvocations, ...recovered.skillInvocations],
-    readFiles: [...(existing.readFiles ?? []), ...(recovered.readFiles ?? [])],
-    writtenFiles: [...(existing.writtenFiles ?? []), ...(recovered.writtenFiles ?? [])],
-    events: [...(existing.events ?? []), ...(recovered.events ?? [])],
-    lastSeen: Math.max(existing.lastSeen, recovered.lastSeen),
+interface HydratedSessionResult {
+  session: Session
+  mergedCalls: CapturedToolCall[]
+  lastSeen: number
+}
+
+async function mapConcurrent<T, R>(
+  items: T[],
+  limit: number,
+  fn: (item: T) => Promise<R>
+): Promise<R[]> {
+  const results: R[] = new Array(items.length)
+  let nextIndex = 0
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (nextIndex < items.length) {
+      const idx = nextIndex++
+      results[idx] = await fn(items[idx]!)
+    }
+  })
+  await Promise.all(workers)
+  return results
+}
+
+async function readSessionData(
+  cwd: string,
+  session: Session,
+  readToolCalls: (cwd: string, sessionId: string) => Promise<CapturedToolCall[]>,
+  cutoffMs: number
+): Promise<HydratedSessionResult | null> {
+  try {
+    const persisted = await readToolCalls(cwd, session.id)
+    if (!persisted || persisted.length === 0) return null
+    const lastSeen = recoverLastSeenMs(persisted, session.mtime)
+    if (lastSeen < cutoffMs) return null
+    return { session, mergedCalls: persisted, lastSeen }
+  } catch {
+    return null
   }
 }
 
-async function hydrateSessionToolState(
-  cwd: string,
-  session: Session,
-  state: HydratableSessionState,
-  readToolCalls: (cwd: string, sessionId: string) => Promise<CapturedToolCall[]>
-): Promise<boolean> {
-  const persisted = await readToolCalls(cwd, session.id)
-  if (persisted.length === 0) return false
-
-  const mergedCalls = mergeCapturedToolCalls(
-    persisted,
+function applyHydratedSession(item: HydratedSessionResult, state: HydratableSessionState): boolean {
+  const { session, mergedCalls, lastSeen } = item
+  const combinedCalls = mergeCapturedToolCalls(
+    mergedCalls,
     state.sessionToolCalls.get(session.id) ?? []
   )
-  if (mergedCalls.length === 0) return false
+  if (combinedCalls.length === 0) return false
 
-  const lastSeen = recoverLastSeenMs(mergedCalls, session.mtime)
-  state.sessionToolCalls.set(session.id, mergedCalls)
+  const effectiveLastSeen = Math.max(lastSeen, recoverLastSeenMs(combinedCalls, session.mtime))
+  state.sessionToolCalls.set(session.id, combinedCalls)
   state.sessionToolUsage.set(
     session.id,
     mergeSessionToolUsageStates(
       state.sessionToolUsage.get(session.id),
-      buildSessionToolUsageStateFromCapturedCalls(mergedCalls, lastSeen)
+      buildSessionToolUsageStateFromCapturedCalls(combinedCalls, effectiveLastSeen)
     )
   )
   const previousActivity = state.sessionActivity.get(session.id)
   state.sessionActivity.set(session.id, {
-    lastSeen: Math.max(previousActivity?.lastSeen ?? 0, lastSeen),
+    lastSeen: Math.max(previousActivity?.lastSeen ?? 0, effectiveLastSeen),
     dispatches: previousActivity?.dispatches ?? 0,
   })
   return true
 }
 
-export async function hydratePersistedSessionToolState(
-  cwd: string,
-  state: HydratableSessionState,
-  opts?: {
-    listSessions?: (cwd: string) => Promise<Session[]>
-    readToolCalls?: (cwd: string, sessionId: string) => Promise<CapturedToolCall[]>
-  }
-): Promise<number> {
+export interface HydratePersistedSessionToolStateOptions {
+  listSessions?: (cwd: string, home?: string, limit?: number) => Promise<Session[]>
+  readToolCalls?: (cwd: string, sessionId: string) => Promise<CapturedToolCall[]>
+  nowMs?: number
+}
+
+function resolveHydrationOptions(opts: HydratePersistedSessionToolStateOptions | undefined): {
+  listSessions: (cwd: string, home?: string, limit?: number) => Promise<Session[]>
+  readToolCalls: (cwd: string, sessionId: string) => Promise<CapturedToolCall[]>
+  cutoffMs: number
+} {
   const listSessions = opts?.listSessions ?? findAllProviderSessions
   const readToolCalls =
     opts?.readToolCalls ??
     ((projectCwd: string, sessionId: string) =>
       readPersistedSessionToolCalls(projectCwd, sessionId))
+  const nowMs = opts?.nowMs ?? Date.now()
+  return {
+    listSessions,
+    readToolCalls,
+    cutoffMs: nowMs - TRANSCRIPT_MEMORY_RETENTION_MS,
+  }
+}
 
-  const sessions = await listSessions(cwd)
+export async function hydratePersistedSessionToolState(
+  cwd: string,
+  state: HydratableSessionState,
+  opts?: HydratePersistedSessionToolStateOptions
+): Promise<number> {
+  const { listSessions, readToolCalls, cutoffMs } = resolveHydrationOptions(opts)
+  const discovered = await listSessions(cwd, undefined, MAX_HYDRATED_SESSIONS)
+  const candidateSessions = discovered.slice(0, MAX_HYDRATED_SESSIONS)
+
+  const readResults = await mapConcurrent(candidateSessions, HYDRATION_CONCURRENCY, (session) =>
+    readSessionData(cwd, session, readToolCalls, cutoffMs)
+  )
+
+  const validResults: HydratedSessionResult[] = []
+  for (const res of readResults) {
+    if (res) validResults.push(res)
+  }
+  // Candidate sessions were discovered newest-first. Reverse to apply in
+  // oldest-to-newest order so CappedMap evicts the oldest items when full.
+  validResults.reverse()
+
   let hydratedCount = 0
-
-  for (const session of sessions) {
-    if (await hydrateSessionToolState(cwd, session, state, readToolCalls)) hydratedCount++
+  for (const item of validResults) {
+    if (applyHydratedSession(item, state)) hydratedCount++
   }
 
   return hydratedCount

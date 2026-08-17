@@ -12,8 +12,14 @@ import {
   captureSessionToolUsage,
   extractMessageText,
   extractToolCalls,
+  MAX_SESSION_TOOL_HISTORY,
+  MAX_SESSION_UNIQUE_READ_FILES,
+  MAX_SESSION_UNIQUE_SKILLS,
+  MAX_SESSION_UNIQUE_WRITTEN_FILES,
   mergeCapturedToolCalls,
+  mergeSessionToolUsageStates,
   mergeToolStats,
+  normalizeSessionToolUsageState,
   persistSessionToolCall,
   readPersistedSessionToolCalls,
   type SessionToolUsageState,
@@ -253,6 +259,112 @@ describe("mergeCapturedToolCalls", () => {
   })
 })
 
+describe("normalizeSessionToolUsageState", () => {
+  test("caps 10,000 tool names at MAX_SESSION_TOOL_HISTORY (400)", () => {
+    const raw = {
+      toolNames: Array.from({ length: 10_000 }, (_, i) => `tool-${i}`),
+      skillInvocations: [],
+      lastSeen: 1_000,
+    }
+    const result = normalizeSessionToolUsageState(raw)
+    expect(result.toolNames).toHaveLength(MAX_SESSION_TOOL_HISTORY)
+    expect(result.toolNames[0]).toBe("tool-9600")
+    expect(result.toolNames[399]).toBe("tool-9999")
+  })
+
+  test("caps 10,000 skills at MAX_SESSION_UNIQUE_SKILLS (100) preserving recency", () => {
+    const raw = {
+      toolNames: [],
+      skillInvocations: Array.from({ length: 10_000 }, (_, i) => `skill-${i}`),
+      lastSeen: 1_000,
+    }
+    const result = normalizeSessionToolUsageState(raw)
+    expect(result.skillInvocations).toHaveLength(MAX_SESSION_UNIQUE_SKILLS)
+    expect(result.skillInvocations[0]).toBe("skill-9900")
+    expect(result.skillInvocations[99]).toBe("skill-9999")
+  })
+
+  test("de-duplicates skills and promotes latest occurrence to newest position", () => {
+    const raw = {
+      toolNames: [],
+      skillInvocations: ["commit", "push", "commit", "test", "push"],
+      lastSeen: 1_000,
+    }
+    const result = normalizeSessionToolUsageState(raw)
+    expect(result.skillInvocations).toEqual(["commit", "test", "push"])
+  })
+
+  test("caps readFiles at MAX_SESSION_UNIQUE_READ_FILES (200) and writtenFiles at MAX_SESSION_UNIQUE_WRITTEN_FILES (200)", () => {
+    const raw = {
+      toolNames: [],
+      skillInvocations: [],
+      readFiles: Array.from({ length: 10_000 }, (_, i) => `/read/file-${i}.ts`),
+      writtenFiles: Array.from({ length: 10_000 }, (_, i) => `/write/file-${i}.ts`),
+      lastSeen: 1_000,
+    }
+    const result = normalizeSessionToolUsageState(raw)
+    expect(result.readFiles).toHaveLength(MAX_SESSION_UNIQUE_READ_FILES)
+    expect(result.readFiles![0]).toBe("/read/file-9800.ts")
+    expect(result.readFiles![199]).toBe("/read/file-9999.ts")
+    expect(result.writtenFiles).toHaveLength(MAX_SESSION_UNIQUE_WRITTEN_FILES)
+    expect(result.writtenFiles![0]).toBe("/write/file-9800.ts")
+    expect(result.writtenFiles![199]).toBe("/write/file-9999.ts")
+  })
+
+  test("caps events at MAX_SESSION_TOOL_HISTORY (400) and de-duplicates exact duplicates", () => {
+    const raw = {
+      toolNames: [],
+      skillInvocations: [],
+      events: Array.from({ length: 10_000 }, (_, i) => ({
+        kind: "tool" as const,
+        value: `tool-${i % 500}`,
+        turnIndex: i,
+        timestamp: "2026-04-03T10:00:00.000Z",
+      })),
+      lastSeen: 1_000,
+    }
+    const result = normalizeSessionToolUsageState(raw)
+    expect(result.events?.length).toBeLessThanOrEqual(MAX_SESSION_TOOL_HISTORY)
+    expect(result.events![result.events!.length - 1]!.turnIndex).toBe(9_999)
+  })
+
+  test("preserves monotonic nextTurnIndex across truncation", () => {
+    const raw = {
+      toolNames: Array.from({ length: 500 }, (_, i) => `tool-${i}`),
+      skillInvocations: [],
+      lastSeen: 1_000,
+      nextTurnIndex: 500,
+    }
+    const result = normalizeSessionToolUsageState(raw)
+    expect(result.toolNames).toHaveLength(MAX_SESSION_TOOL_HISTORY)
+    expect(result.nextTurnIndex).toBe(500)
+  })
+
+  test("does not mutate original input arrays", () => {
+    const toolNames = ["Read", "Bash"]
+    const skillInvocations = ["commit"]
+    const readFiles = ["/tmp/a.ts"]
+    const writtenFiles = ["/tmp/b.ts"]
+    const result = normalizeSessionToolUsageState({
+      toolNames,
+      skillInvocations,
+      readFiles,
+      writtenFiles,
+      lastSeen: 1_000,
+    })
+
+    toolNames.push("Edit")
+    skillInvocations.push("push")
+    readFiles.push("/tmp/c.ts")
+    writtenFiles.push("/tmp/d.ts")
+
+    expect(result.toolNames).toEqual(["Read", "Bash"])
+    expect(result.skillInvocations).toEqual(["commit"])
+    expect(result.readFiles).toEqual(["/tmp/a.ts"])
+    expect(result.writtenFiles).toEqual(["/tmp/b.ts"])
+  })
+})
+
 describe("seedSessionToolUsage", () => {
   test("creates new SessionToolUsageState from CurrentSessionToolUsage", () => {
     const map = new Map<string, SessionToolUsageState>()
@@ -266,6 +378,25 @@ describe("seedSessionToolUsage", () => {
     expect(result.toolNames).toEqual(["Read", "Bash"])
     expect(result.skillInvocations).toEqual(["commit"])
     expect(typeof result.lastSeen).toBe("number")
+    expect(map.get("sess1")).toBe(result)
+  })
+
+  test("seeds 10,000 entries within every cap before inserting into map", () => {
+    const map = new Map<string, SessionToolUsageState>()
+    const usage: CurrentSessionToolUsage = {
+      toolNames: Array.from({ length: 10_000 }, (_, i) => `tool-${i}`),
+      skillInvocations: Array.from({ length: 10_000 }, (_, i) => `skill-${i}`),
+      readFiles: Array.from({ length: 10_000 }, (_, i) => `/read-${i}.ts`),
+      writtenFiles: Array.from({ length: 10_000 }, (_, i) => `/write-${i}.ts`),
+    }
+
+    const result = seedSessionToolUsage(map, "sess1", usage, Date.now())
+
+    expect(result.toolNames).toHaveLength(MAX_SESSION_TOOL_HISTORY)
+    expect(result.skillInvocations).toHaveLength(MAX_SESSION_UNIQUE_SKILLS)
+    expect(result.readFiles).toHaveLength(MAX_SESSION_UNIQUE_READ_FILES)
+    expect(result.writtenFiles).toHaveLength(MAX_SESSION_UNIQUE_WRITTEN_FILES)
+    expect(result.nextTurnIndex).toBe(10_000)
     expect(map.get("sess1")).toBe(result)
   })
 
@@ -283,6 +414,36 @@ describe("seedSessionToolUsage", () => {
   })
 })
 
+describe("mergeSessionToolUsageStates", () => {
+  test("merges two states containing 10,000 entries and returns capped de-duplicated state", () => {
+    const existing: SessionToolUsageState = {
+      toolNames: Array.from({ length: 5_000 }, (_, i) => `tool-a-${i}`),
+      skillInvocations: Array.from({ length: 5_000 }, (_, i) => `skill-a-${i}`),
+      readFiles: Array.from({ length: 5_000 }, (_, i) => `/read-a-${i}.ts`),
+      writtenFiles: Array.from({ length: 5_000 }, (_, i) => `/write-a-${i}.ts`),
+      lastSeen: 1_000,
+      nextTurnIndex: 5_000,
+    }
+    const recovered: SessionToolUsageState = {
+      toolNames: Array.from({ length: 5_000 }, (_, i) => `tool-b-${i}`),
+      skillInvocations: Array.from({ length: 5_000 }, (_, i) => `skill-b-${i}`),
+      readFiles: Array.from({ length: 5_000 }, (_, i) => `/read-b-${i}.ts`),
+      writtenFiles: Array.from({ length: 5_000 }, (_, i) => `/write-b-${i}.ts`),
+      lastSeen: 2_000,
+      nextTurnIndex: 5_000,
+    }
+
+    const result = mergeSessionToolUsageStates(existing, recovered)
+
+    expect(result.toolNames).toHaveLength(MAX_SESSION_TOOL_HISTORY)
+    expect(result.skillInvocations).toHaveLength(MAX_SESSION_UNIQUE_SKILLS)
+    expect(result.readFiles).toHaveLength(MAX_SESSION_UNIQUE_READ_FILES)
+    expect(result.writtenFiles).toHaveLength(MAX_SESSION_UNIQUE_WRITTEN_FILES)
+    expect(result.lastSeen).toBe(2_000)
+    expect(result.nextTurnIndex).toBe(10_000)
+  })
+})
+
 describe("captureSessionToolUsage", () => {
   test("creates new session with tool name when none exists", () => {
     const map = new Map<string, SessionToolUsageState>()
@@ -291,16 +452,76 @@ describe("captureSessionToolUsage", () => {
 
     expect(result.toolNames).toEqual(["Read"])
     expect(result.skillInvocations).toEqual([])
+    expect(result.nextTurnIndex).toBe(1)
   })
 
-  test("appends tool name to existing session", () => {
+  test("appends tool name to existing session and increments monotonic nextTurnIndex", () => {
     const map = new Map<string, SessionToolUsageState>([
-      ["sess1", { toolNames: ["Bash"], skillInvocations: [], lastSeen: Date.now() }],
+      [
+        "sess1",
+        { toolNames: ["Bash"], skillInvocations: [], lastSeen: Date.now(), nextTurnIndex: 1 },
+      ],
     ])
 
     captureSessionToolUsage(map, "sess1", "Read", {}, Date.now())
 
     expect(map.get("sess1")!.toolNames).toEqual(["Bash", "Read"])
+    expect(map.get("sess1")!.nextTurnIndex).toBe(2)
+  })
+
+  test("bounds history past 400 calls while nextTurnIndex increments monotonically", () => {
+    const map = new Map<string, SessionToolUsageState>()
+
+    for (let i = 0; i < 500; i++) {
+      captureSessionToolUsage(map, "sess1", `Tool-${i}`, {}, 1_000 + i)
+    }
+
+    const session = map.get("sess1")!
+    expect(session.toolNames).toHaveLength(MAX_SESSION_TOOL_HISTORY)
+    expect(session.toolNames[0]).toBe("Tool-100")
+    expect(session.toolNames[399]).toBe("Tool-499")
+    expect(session.nextTurnIndex).toBe(500)
+    expect(session.lastSeen).toBe(1_499)
+  })
+
+  test("task-tool recency results remain accurate for task calls within last 400 calls", () => {
+    const map = new Map<string, SessionToolUsageState>()
+
+    // Make 480 generic calls
+    for (let i = 0; i < 480; i++) {
+      captureSessionToolUsage(map, "sess1", "Read", {}, 1_000 + i)
+    }
+    // Make 1 task call at call index 480
+    captureSessionToolUsage(map, "sess1", "TaskUpdate", { taskId: "1" }, 1_480)
+    // Make 19 more generic calls (total 500 calls, task tool was 19 calls ago)
+    for (let i = 0; i < 19; i++) {
+      captureSessionToolUsage(map, "sess1", "Edit", {}, 1_481 + i)
+    }
+
+    const session = map.get("sess1")!
+    expect(session.nextTurnIndex).toBe(500)
+    expect(session.toolNames).toHaveLength(MAX_SESSION_TOOL_HISTORY)
+    // Find last index of TaskUpdate in retained toolNames (length 400)
+    const lastTaskIndex = session.toolNames.lastIndexOf("TaskUpdate")
+    expect(lastTaskIndex).toBe(380)
+    const callsSinceTask = session.toolNames.length - 1 - lastTaskIndex
+    expect(callsSinceTask).toBe(19) // within the 20-call threshold
+  })
+
+  test("task-tool recency safely reports no task call in window when last task call was >400 calls ago", () => {
+    const map = new Map<string, SessionToolUsageState>()
+
+    // Make 1 task call at turn 0
+    captureSessionToolUsage(map, "sess1", "TaskCreate", { subject: "Initial task" }, 1_000)
+    // Make 450 generic calls (task call pushed out of 400-call window)
+    for (let i = 0; i < 450; i++) {
+      captureSessionToolUsage(map, "sess1", "Read", {}, 1_001 + i)
+    }
+
+    const session = map.get("sess1")!
+    expect(session.toolNames).toHaveLength(MAX_SESSION_TOOL_HISTORY)
+    expect(session.toolNames.includes("TaskCreate")).toBe(false)
+    expect(session.nextTurnIndex).toBe(451)
   })
 
   test("records skill invocation only when toolName is 'Skill' and skill is string", () => {

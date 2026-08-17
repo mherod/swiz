@@ -89,6 +89,7 @@ export interface CapturedToolCall {
 
 export interface SessionToolUsageState extends CurrentSessionToolUsage {
   lastSeen: number
+  nextTurnIndex?: number
 }
 
 export interface SessionTaskPreview {
@@ -105,6 +106,13 @@ export interface ProjectTaskPreview extends SessionTaskPreview {
 }
 
 export const MAX_CAPTURED_TOOL_CALLS_PER_SESSION = 400
+export const MAX_SESSION_TOOL_HISTORY = 400
+export const MAX_SESSION_UNIQUE_SKILLS = 100
+export const MAX_SESSION_UNIQUE_READ_FILES = 200
+export const MAX_SESSION_UNIQUE_WRITTEN_FILES = 200
+export const MAX_HYDRATED_SESSIONS = 30
+export const HYDRATION_CONCURRENCY = 4
+
 const capturedToolCallSchema = z.object({
   name: z.string(),
   detail: z.string(),
@@ -355,19 +363,129 @@ function accumulateCapturedCallDetails(calls: CapturedToolCall[]): {
   return { skillInvocations, readFiles, writtenFiles }
 }
 
+function dedupePreservingRecency(items: string[] | undefined, max: number): string[] {
+  if (!items || items.length === 0) return []
+  const seen = new Set<string>()
+  const result: string[] = []
+  for (let i = items.length - 1; i >= 0; i--) {
+    const item = items[i]
+    if (item && !seen.has(item)) {
+      seen.add(item)
+      result.push(item)
+      if (result.length >= max) break
+    }
+  }
+  return result.reverse()
+}
+
+function dedupeEvents(
+  events: CurrentSessionUsageEvent[] | undefined,
+  max: number
+): CurrentSessionUsageEvent[] | undefined {
+  if (!events) return undefined
+  if (events.length === 0) return []
+  const seen = new Set<string>()
+  const result: CurrentSessionUsageEvent[] = []
+  for (let i = events.length - 1; i >= 0; i--) {
+    const event = events[i]
+    if (!event) continue
+    const key = `${event.kind}|${event.value}|${event.timestamp ?? ""}|${event.source ?? ""}|${event.turnIndex}`
+    if (!seen.has(key)) {
+      seen.add(key)
+      result.push({ ...event })
+      if (result.length >= max) break
+    }
+  }
+  return result.reverse()
+}
+
+function resolveNextTurnIndex(
+  explicitNextTurn: number | undefined,
+  toolNamesCount: number,
+  events?: CurrentSessionUsageEvent[]
+): number {
+  let maxTurn = Math.max(explicitNextTurn ?? 0, toolNamesCount)
+  if (events) {
+    for (const ev of events) {
+      if (typeof ev.turnIndex === "number" && ev.turnIndex >= maxTurn) {
+        maxTurn = ev.turnIndex + 1
+      }
+    }
+  }
+  return maxTurn
+}
+
+export function normalizeSessionToolUsageState(state: {
+  toolNames: string[]
+  skillInvocations: string[]
+  readFiles?: string[]
+  writtenFiles?: string[]
+  events?: CurrentSessionUsageEvent[]
+  lastSeen: number
+  nextTurnIndex?: number
+}): SessionToolUsageState {
+  const toolNames = state.toolNames.slice(-MAX_SESSION_TOOL_HISTORY)
+  const skillInvocations = dedupePreservingRecency(
+    state.skillInvocations,
+    MAX_SESSION_UNIQUE_SKILLS
+  )
+  const readFiles = state.readFiles
+    ? dedupePreservingRecency(state.readFiles, MAX_SESSION_UNIQUE_READ_FILES)
+    : []
+  const writtenFiles = state.writtenFiles
+    ? dedupePreservingRecency(state.writtenFiles, MAX_SESSION_UNIQUE_WRITTEN_FILES)
+    : []
+  const events = dedupeEvents(state.events, MAX_SESSION_TOOL_HISTORY)
+  const nextTurnIndex = resolveNextTurnIndex(
+    state.nextTurnIndex,
+    state.toolNames.length,
+    state.events
+  )
+
+  return {
+    toolNames,
+    skillInvocations,
+    readFiles,
+    writtenFiles,
+    events,
+    lastSeen: typeof state.lastSeen === "number" ? state.lastSeen : Date.now(),
+    nextTurnIndex,
+  }
+}
+
+export function mergeSessionToolUsageStates(
+  existing: SessionToolUsageState | undefined,
+  recovered: SessionToolUsageState
+): SessionToolUsageState {
+  if (!existing) return normalizeSessionToolUsageState(recovered)
+  return normalizeSessionToolUsageState({
+    toolNames: [...existing.toolNames, ...recovered.toolNames],
+    skillInvocations: [...existing.skillInvocations, ...recovered.skillInvocations],
+    readFiles: [...(existing.readFiles ?? []), ...(recovered.readFiles ?? [])],
+    writtenFiles: [...(existing.writtenFiles ?? []), ...(recovered.writtenFiles ?? [])],
+    events: [...(existing.events ?? []), ...(recovered.events ?? [])],
+    lastSeen: Math.max(existing.lastSeen, recovered.lastSeen),
+    nextTurnIndex: Math.max(
+      existing.nextTurnIndex ?? existing.toolNames.length,
+      recovered.nextTurnIndex ?? recovered.toolNames.length
+    ),
+  })
+}
+
 export function buildSessionToolUsageStateFromCapturedCalls(
   calls: CapturedToolCall[],
   lastSeen: number
 ): SessionToolUsageState {
   const { skillInvocations, readFiles, writtenFiles } = accumulateCapturedCallDetails(calls)
-  return {
+  return normalizeSessionToolUsageState({
     toolNames: calls.map((call) => call.name),
     skillInvocations,
     readFiles,
     writtenFiles,
     events: usageEventsFromCapturedCalls(calls),
     lastSeen,
-  }
+    nextTurnIndex: calls.length,
+  })
 }
 
 export function seedSessionToolUsage(
@@ -376,16 +494,16 @@ export function seedSessionToolUsage(
   usage: CurrentSessionToolUsage,
   nowMs: number
 ): SessionToolUsageState {
-  const entry: SessionToolUsageState = {
-    toolNames: [...usage.toolNames],
-    skillInvocations: [...usage.skillInvocations],
-    readFiles: Array.isArray(usage.readFiles) ? [...usage.readFiles] : [],
-    writtenFiles: Array.isArray(usage.writtenFiles) ? [...usage.writtenFiles] : [],
-    events: usage.events ? [...usage.events] : undefined,
+  const normalized = normalizeSessionToolUsageState({
+    toolNames: usage.toolNames,
+    skillInvocations: usage.skillInvocations,
+    readFiles: usage.readFiles,
+    writtenFiles: usage.writtenFiles,
+    events: usage.events,
     lastSeen: nowMs,
-  }
-  sessionToolUsage.set(sessionId, entry)
-  return entry
+  })
+  sessionToolUsage.set(sessionId, normalized)
+  return normalized
 }
 
 function extractDirectSkillNamesFromTool(
@@ -415,7 +533,7 @@ function captureSkillInvocations(
   const skillsToRecord = explicitSkill ? [explicitSkill, ...directSkills] : directSkills
 
   for (const skill of skillsToRecord) {
-    if (!entry.skillInvocations.includes(skill)) entry.skillInvocations.push(skill)
+    entry.skillInvocations.push(skill)
     entry.events?.push({ kind: "skill", value: skill, turnIndex, timestamp, source: "agent" })
   }
 }
@@ -428,7 +546,7 @@ function captureReadFileTargets(
 ): void {
   if (!entry.readFiles) entry.readFiles = []
   for (const filePath of extractFileReadTargetPaths(toolInput ?? {})) {
-    if (!entry.readFiles.includes(filePath)) entry.readFiles.push(filePath)
+    entry.readFiles.push(filePath)
     entry.events?.push({
       kind: "read-file",
       value: filePath,
@@ -447,7 +565,7 @@ function captureWrittenFileTargets(
 ): void {
   if (!entry.writtenFiles) entry.writtenFiles = []
   for (const filePath of extractFileEditTargetPaths(toolInput ?? {})) {
-    if (!entry.writtenFiles.includes(filePath)) entry.writtenFiles.push(filePath)
+    entry.writtenFiles.push(filePath)
     entry.events?.push({
       kind: "written-file",
       value: filePath,
@@ -473,28 +591,59 @@ function captureFileTargets(
   }
 }
 
-function getOrCreateSessionToolUsageEntry(
-  existing: SessionToolUsageState | undefined,
+function createDraftFromExisting(
+  existing: SessionToolUsageState,
+  toolName: string,
   nowMs: number
-): SessionToolUsageState {
-  if (existing) {
-    return {
-      toolNames: existing.toolNames,
-      skillInvocations: existing.skillInvocations,
-      readFiles: existing.readFiles ?? [],
-      writtenFiles: existing.writtenFiles ?? [],
-      events: existing.events ?? [],
-      lastSeen: nowMs,
-    }
-  }
+): { draft: SessionToolUsageState; turnIndex: number; timestamp: string } {
+  const turnIndex = existing.nextTurnIndex ?? existing.toolNames.length
+  const timestamp = new Date(nowMs).toISOString()
+  const events = existing.events ? existing.events.map((e) => ({ ...e })) : []
+  events.push({ kind: "tool", value: toolName, turnIndex, timestamp })
+
   return {
-    toolNames: [],
-    skillInvocations: [],
-    readFiles: [],
-    writtenFiles: [],
-    events: [],
-    lastSeen: nowMs,
+    draft: {
+      toolNames: [...existing.toolNames, toolName],
+      skillInvocations: [...existing.skillInvocations],
+      readFiles: existing.readFiles ? [...existing.readFiles] : [],
+      writtenFiles: existing.writtenFiles ? [...existing.writtenFiles] : [],
+      events,
+      lastSeen: nowMs,
+      nextTurnIndex: turnIndex + 1,
+    },
+    turnIndex,
+    timestamp,
   }
+}
+
+function createFreshDraft(
+  toolName: string,
+  nowMs: number
+): { draft: SessionToolUsageState; turnIndex: number; timestamp: string } {
+  const timestamp = new Date(nowMs).toISOString()
+  return {
+    draft: {
+      toolNames: [toolName],
+      skillInvocations: [],
+      readFiles: [],
+      writtenFiles: [],
+      events: [{ kind: "tool", value: toolName, turnIndex: 0, timestamp }],
+      lastSeen: nowMs,
+      nextTurnIndex: 1,
+    },
+    turnIndex: 0,
+    timestamp,
+  }
+}
+
+function buildInitialDraftUsage(
+  existing: SessionToolUsageState | undefined,
+  toolName: string,
+  nowMs: number
+): { draft: SessionToolUsageState; turnIndex: number; timestamp: string } {
+  return existing
+    ? createDraftFromExisting(existing, toolName, nowMs)
+    : createFreshDraft(toolName, nowMs)
 }
 
 export function captureSessionToolUsage(
@@ -504,18 +653,18 @@ export function captureSessionToolUsage(
   toolInput: Record<string, any> | undefined,
   nowMs: number
 ): SessionToolUsageState {
-  const entry = getOrCreateSessionToolUsageEntry(sessionToolUsage.get(sessionId), nowMs)
-  const turnIndex = entry.toolNames.length
-  const timestamp = new Date(nowMs).toISOString()
+  const { draft, turnIndex, timestamp } = buildInitialDraftUsage(
+    sessionToolUsage.get(sessionId),
+    toolName,
+    nowMs
+  )
 
-  entry.toolNames.push(toolName)
-  entry.events?.push({ kind: "tool", value: toolName, turnIndex, timestamp })
+  captureSkillInvocations(draft, toolName, toolInput, turnIndex, timestamp)
+  captureFileTargets(draft, toolName, toolInput, turnIndex, timestamp)
 
-  captureSkillInvocations(entry, toolName, toolInput, turnIndex, timestamp)
-  captureFileTargets(entry, toolName, toolInput, turnIndex, timestamp)
-
-  sessionToolUsage.set(sessionId, entry)
-  return entry
+  const normalized = normalizeSessionToolUsageState(draft)
+  sessionToolUsage.set(sessionId, normalized)
+  return normalized
 }
 
 export function mergeToolStats(
