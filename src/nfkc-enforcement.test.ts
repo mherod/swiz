@@ -1,6 +1,6 @@
 /**
  * Static analysis test: ensures all pretooluse hooks that read
- * `new_string`, `content`, or `old_string` from tool_input use
+ * `new_string`, `content`, or `old_string` from tool_input / toolInput use
  * `fileEditHookInputSchema` (which auto-normalizes with NFKC via
  * its `.transform()`) or explicitly call `.normalize("NFKC")`.
  *
@@ -20,11 +20,51 @@ const EXEMPT_HOOKS = new Set([
   "pretooluse-claude-md-word-limit.ts",
   // Projected content via string.replace — normalizing would break replace against file content
   "pretooluse-no-direct-deps.ts",
+  // Line counting only — normalization cannot change a newline count
+  "pretooluse-task-governance.ts",
 ])
 
-const CONTENT_ACCESS_RE = /tool_input\?\.(new_string|content|old_string)/
+const CONTENT_ACCESS_RE =
+  /\b(?:tool_input|toolInput)\s*\??\.\s*(?:new_string|content|old_string)\b|(?:const|let|var)\s*\{[^}]*\b(?:new_string|content|old_string)\b[^}]*\}\s*=\s*(?:tool_input|toolInput)\b/
 
 describe("NFKC normalization enforcement", () => {
+  describe("CONTENT_ACCESS_RE pattern matching", () => {
+    test("matches snake_case receiver with optional chaining", () => {
+      expect(CONTENT_ACCESS_RE.test("const str = input.tool_input?.new_string")).toBe(true)
+      expect(CONTENT_ACCESS_RE.test("const c = tool_input?.content")).toBe(true)
+      expect(CONTENT_ACCESS_RE.test("const old = tool_input?.old_string")).toBe(true)
+    })
+
+    test("matches snake_case receiver with direct property access", () => {
+      expect(CONTENT_ACCESS_RE.test("const str = tool_input.new_string")).toBe(true)
+      expect(CONTENT_ACCESS_RE.test("const c = tool_input.content")).toBe(true)
+    })
+
+    test("matches camelCase receiver with optional chaining", () => {
+      expect(CONTENT_ACCESS_RE.test("const str = toolInput?.new_string")).toBe(true)
+      expect(CONTENT_ACCESS_RE.test("const c = toolInput?.content")).toBe(true)
+      expect(CONTENT_ACCESS_RE.test("const old = toolInput?.old_string")).toBe(true)
+    })
+
+    test("matches camelCase receiver with direct property access", () => {
+      expect(CONTENT_ACCESS_RE.test("const str = toolInput.new_string")).toBe(true)
+      expect(CONTENT_ACCESS_RE.test("const c = toolInput.content")).toBe(true)
+      expect(CONTENT_ACCESS_RE.test("const old = toolInput.old_string")).toBe(true)
+    })
+
+    test("matches destructuring from tool_input or toolInput", () => {
+      expect(CONTENT_ACCESS_RE.test("const { new_string } = tool_input")).toBe(true)
+      expect(CONTENT_ACCESS_RE.test("const { content, file_path } = toolInput")).toBe(true)
+      expect(CONTENT_ACCESS_RE.test("let { old_string } = toolInput")).toBe(true)
+    })
+
+    test("does not match unrelated property accesses", () => {
+      expect(CONTENT_ACCESS_RE.test("const c = message?.content")).toBe(false)
+      expect(CONTENT_ACCESS_RE.test("const val = block.content")).toBe(false)
+      expect(CONTENT_ACCESS_RE.test("const p = toolInput.file_path")).toBe(false)
+    })
+  })
+
   test("all content-inspecting pretooluse hooks use fileEditHookInputSchema or explicit NFKC", async () => {
     const files = await readdir(HOOKS_DIR)
     const hooks = files.filter(
