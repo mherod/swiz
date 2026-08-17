@@ -2413,27 +2413,58 @@ describe("IssueStore event-sourced sync (#521)", () => {
     }
   })
 
-  test("listKnownRepoCwds returns repos with stored cwd cursors", () => {
-    const store = createStore()
+  test("migrate cleans up legacy cwd cursors while preserving other cursors and data", () => {
+    const dir = join(
+      tmpdir(),
+      `swiz-issue-store-migrate-${Date.now()}-${Math.random().toString(36).slice(2)}`
+    )
+    mkdirSync(dir, { recursive: true })
+    const dbPath = join(dir, "test.db")
+
+    // Create an initial store with various data including legacy cwd cursors
+    const store1 = new IssueStore(dbPath)
     try {
-      expect(store.listKnownRepoCwds()).toEqual([])
-
-      store.setSyncCursor("owner/repo-a", "cwd", "/home/user/repo-a")
-      store.setSyncCursor("owner/repo-b", "cwd", "/home/user/repo-b")
-      // A different kind should not appear.
-      store.setSyncCursor("owner/repo-a", "last_synced", "2026-01-01T00:00:00Z")
-
-      const known = store.listKnownRepoCwds()
-      expect(known).toHaveLength(2)
-      expect(known).toContainEqual({ repo: "owner/repo-a", cwd: "/home/user/repo-a" })
-      expect(known).toContainEqual({ repo: "owner/repo-b", cwd: "/home/user/repo-b" })
-
-      // Updating cwd replaces the previous value.
-      store.setSyncCursor("owner/repo-a", "cwd", "/home/user/new-path")
-      const updated = store.listKnownRepoCwds()
-      expect(updated.find((r) => r.repo === "owner/repo-a")?.cwd).toBe("/home/user/new-path")
+      store1.setSyncCursor("owner/repo-a", "cwd", "/home/user/repo-a")
+      store1.setSyncCursor("owner/repo-b", "cwd", "/home/user/repo-b")
+      store1.setSyncCursor("owner/repo-a", "last_synced", "2026-01-01T00:00:00Z")
+      store1.setSyncCursor("owner/repo-a", "issue_events", "2026-04-10T10:00:00Z")
+      store1.upsertIssues("owner/repo-a", [
+        { number: 1, title: "Issue 1", state: "open", updatedAt: "2026-01-01T00:00:00Z" },
+      ])
+      store1.upsertPullRequests("owner/repo-a", [
+        { number: 2, title: "PR 2", state: "open", updatedAt: "2026-01-01T00:00:00Z" },
+      ])
+      store1.setHttpCache("owner/repo-a", "/issues", "etag-123", JSON.stringify([{ id: 1 }]))
+      store1.queueMutation("owner/repo-a", {
+        type: "comment",
+        number: 1,
+        body: "Test comment",
+      })
     } finally {
-      store.close()
+      store1.close()
+    }
+
+    // Reopen store to trigger migrate()
+    const store2 = new IssueStore(dbPath)
+    try {
+      // Legacy cwd cursors should be removed
+      expect(store2.getSyncCursor("owner/repo-a", "cwd")).toBeNull()
+      expect(store2.getSyncCursor("owner/repo-b", "cwd")).toBeNull()
+
+      // Other cursors must remain intact
+      expect(store2.getSyncCursor("owner/repo-a", "last_synced")).toBe("2026-01-01T00:00:00Z")
+      expect(store2.getSyncCursor("owner/repo-a", "issue_events")).toBe("2026-04-10T10:00:00Z")
+
+      // Entities, cache, and pending mutations must remain intact
+      expect(store2.getIssue("owner/repo-a", 1)).not.toBeNull()
+      expect(store2.getPullRequest("owner/repo-a", 2)).not.toBeNull()
+      expect(store2.getHttpCache("owner/repo-a", "/issues")).toEqual({
+        etag: "etag-123",
+        data: JSON.stringify([{ id: 1 }]),
+      })
+      expect(store2.pendingCount("owner/repo-a")).toBe(1)
+    } finally {
+      store2.close()
     }
   })
 
@@ -2517,7 +2548,7 @@ describe("IssueStore event-sourced sync (#521)", () => {
     }
   })
 
-  test("syncUpstreamState writes last_synced and cwd cursors after sync", async () => {
+  test("syncUpstreamState writes last_synced cursor and no cwd cursor after sync", async () => {
     const store = createStore()
     try {
       const repo = "owner/repo"
@@ -2546,8 +2577,7 @@ describe("IssueStore event-sourced sync (#521)", () => {
       expect(ts).toBeGreaterThanOrEqual(before)
       expect(ts).toBeLessThanOrEqual(after)
 
-      expect(store.getSyncCursor(repo, "cwd")).toBe(cwd)
-      expect(store.listKnownRepoCwds()).toContainEqual({ repo, cwd })
+      expect(store.getSyncCursor(repo, "cwd")).toBeNull()
     } finally {
       store.close()
     }

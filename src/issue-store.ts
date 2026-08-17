@@ -498,6 +498,7 @@ export class IssueStore {
 
   private migrate(): void {
     this.db.exec(ISSUE_STORE_SCHEMA_SQL)
+    this.db.exec("DELETE FROM sync_cursors WHERE kind = 'cwd'")
   }
 
   // ─── Sync snapshot (change-detection) ────────────────────────────────────
@@ -1116,13 +1117,6 @@ export class IssueStore {
   /** Delete one per-repo sync cursor without clearing the repo's other cached state. */
   deleteSyncCursor(repo: string, kind: string): void {
     this.db.query("DELETE FROM sync_cursors WHERE repo = ? AND kind = ?").run(repo, kind)
-  }
-
-  /** Return all repos that have a stored `cwd`, so the daemon can re-register them for sync on startup. */
-  listKnownRepoCwds(): { repo: string; cwd: string }[] {
-    return this.db
-      .query("SELECT repo, value AS cwd FROM sync_cursors WHERE kind = 'cwd'")
-      .all() as { repo: string; cwd: string }[]
   }
 
   /** Read cached HTTP response ETag and payload. */

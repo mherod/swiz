@@ -150,8 +150,7 @@ Created once at startup (`createDaemonState` / `createDaemonCaches` in `daemon.t
 - **`FileWatcherRegistry`** — watches `src/manifest.ts`, `hooks/`, global and per-project settings, `.git/`, transcript paths; invalidates the manifest cache and status-line snapshots on change.
 - **`GhQueryCache`** — `gh` CLI results, 10 min TTL.
 - **`GitStateCache`** — branch/staged/unstaged/untracked/upstream/ahead/behind per cwd, served from `POST /git/state`.
-- **`TaskStateCache`** (`src/tasks/task-state-cache.ts`) — LRU + `fs.watch` + write-through. Stop hooks must use `readSessionTasksFresh()`, not this cache.
-- **`UpstreamSyncRegistry`** — syncs GitHub issue/PR/CI state into the **IssueStore** (`~/.swiz/issues.db`, 5 min TTL) every 2 min per registered repo; restored across restarts. `posttooluse-upstream-sync-on-push` POSTs `/projects/sync-now` after mutating `git push`/`gh` commands so the store never serves stale state after a write.
+- **`UpstreamSyncRegistry`** — syncs GitHub issue/PR/CI state into the **IssueStore** (`~/.swiz/issues.db`, 5 min TTL) every 2 min per active registered repo, tied to active project lifecycle. `posttooluse-upstream-sync-on-push` POSTs `/projects/sync-now` after mutating `git push`/`gh` commands so the store never serves stale state after a write.
 - **`PrReviewMonitor`** — inspects sync results and schedules auto-steer messages (e.g. "review arrived") for active sessions.
 - **`CiWatchRegistry`** — active CI watches, 30s poll, 1h timeout.
 - **Snapshot resolver** — status-line snapshots, LRU 200, invalidated by fingerprint (manifest, branch, issue/PR counts, review state); coalesces concurrent requests.

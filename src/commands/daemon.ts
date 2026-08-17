@@ -68,10 +68,10 @@ import { installDaemonLaunchAgent, uninstallDaemonLaunchAgent } from "./install.
 import { ensureShimInstallation } from "./shim.ts"
 import { computeWarmStatusLineSnapshot, type WarmStatusLineSnapshot } from "./status-line.ts"
 
-const TRANSCRIPT_MEMORY_RETENTION_MS = 30 * 60 * 1000 // 30 mins
-const TRANSCRIPT_MEMORY_PRUNE_INTERVAL_MS = 60 * 1000 // 1 min
-const PROJECT_IDLE_EVICTION_MS = 3 * 60 * 1000 // 3 mins
-const MAX_WATCHED_PROJECTS = 2
+export const TRANSCRIPT_MEMORY_RETENTION_MS = 30 * 60 * 1000 // 30 mins
+export const TRANSCRIPT_MEMORY_PRUNE_INTERVAL_MS = 60 * 1000 // 1 min
+export const PROJECT_IDLE_EVICTION_MS = 3 * 60 * 1000 // 3 mins
+export const MAX_WATCHED_PROJECTS = 2
 const SNAPSHOT_KEY_SEPARATOR = "\x00"
 
 export function snapshotCacheKey(cwd: string, sessionId: string | null | undefined): string {
@@ -118,7 +118,35 @@ async function handleDaemonSubcommand(args: string[], port: number): Promise<boo
   return false
 }
 
-function createDaemonState() {
+export interface DaemonState {
+  globalMetrics: DaemonMetrics
+  projectMetrics: CappedMap<string, DaemonMetrics>
+  projectLastSeen: CappedMap<string, number>
+  sessionActivity: CappedMap<string, { lastSeen: number; dispatches: number }>
+  sessionToolCalls: CappedMap<string, CapturedToolCall[]>
+  sessionToolUsage: CappedMap<string, SessionToolUsageState>
+  activeHookDispatches: CappedMap<string, ActiveHookDispatch>
+  recentHookAllowMessages: CappedMap<string, string>
+  sessionComplianceState: CappedMap<
+    string,
+    {
+      current: {
+        state: string
+        at: number
+        taskDurations?: Array<{ id: string; status: string; durationMs: number }>
+      } | null
+      transitions: {
+        state: string
+        at: number
+        taskDurations?: Array<{ id: string; status: string; durationMs: number }>
+      }[]
+    }
+  >
+  getProjectMetrics: (cwd: string) => DaemonMetrics
+  touchProject: (cwd: string) => void
+}
+
+export function createDaemonState(): DaemonState {
   const globalMetrics = createMetrics()
   const projectMetrics = new CappedMap<string, DaemonMetrics>(100)
   const projectLastSeen = new CappedMap<string, number>(50)
@@ -170,7 +198,26 @@ function createDaemonState() {
   }
 }
 
-function createDaemonCaches() {
+export interface DaemonCaches {
+  watchers: FileWatcherRegistry
+  ghCache: GhQueryCache
+  eligibilityCache: HookEligibilityCache
+  transcriptIndex: TranscriptIndexCache
+  cooldownRegistry: CooldownRegistry
+  ciWatchRegistry: CiWatchRegistry
+  upstreamSyncRegistry: UpstreamSyncRegistry
+  workerRuntime: DaemonWorkerRuntime
+  gitStateCache: GitStateCache
+  lastUserMessageCache: LastUserMessageCache
+  projectSettingsCache: ProjectSettingsCache
+  repositoryCapabilityCache: RepositoryCapabilityCache
+  manifestCache: ManifestCache
+  snapshots: LRUCache<string, CachedSnapshot>
+  taskStateCache: TaskStateCache
+  lifecycleTaskRegistry: LifecycleTaskRegistry
+}
+
+export function createDaemonCaches(): DaemonCaches {
   const watchers = new FileWatcherRegistry()
   const ghCache = new GhQueryCache()
   const eligibilityCache = new HookEligibilityCache()
@@ -248,11 +295,36 @@ export function buildSnapshotResolver(
   }
 }
 
-function setupWatchers(
-  caches: ReturnType<typeof createDaemonCaches>,
+export interface ProjectWatcherManager {
+  registeredProjects: Set<string>
+  registerProjectWatchers: (cwd: string) => void
+  evictProject: (cwd: string) => void
+  invalidateProject: (cwd: string) => void
+}
+
+function findOldestProjectCwd(
+  registeredProjects: Set<string>,
+  projectLastSeen: CappedMap<string, number>,
+  excludeCwd: string
+): string | null {
+  let oldestCwd: string | null = null
+  let oldestTime = Infinity
+  for (const projectCwd of registeredProjects) {
+    if (projectCwd === excludeCwd) continue
+    const lastSeen = projectLastSeen.get(projectCwd) ?? 0
+    if (lastSeen < oldestTime) {
+      oldestTime = lastSeen
+      oldestCwd = projectCwd
+    }
+  }
+  return oldestCwd
+}
+
+export function setupWatchers(
+  caches: DaemonCaches,
   transcriptMonitor: TranscriptMonitor,
-  projectLastSeen: ReturnType<typeof createDaemonState>["projectLastSeen"]
-) {
+  projectLastSeen: CappedMap<string, number>
+): ProjectWatcherManager {
   const {
     watchers,
     ghCache,
@@ -264,7 +336,6 @@ function setupWatchers(
     transcriptIndex,
     snapshots,
   } = caches
-  const projectRoot = dirname(Bun.main)
 
   const flushSnapshots = () => {
     snapshots.clear()
@@ -277,6 +348,13 @@ function setupWatchers(
     // Also invalidate the in-process settings TTL cache so changes take
     // effect immediately without waiting for the 5s TTL (issue #330).
     const settingsPath = getSwizSettingsPath()
+    if (settingsPath) invalidateSettingsCache(settingsPath)
+  }
+
+  const projectRoot = dirname(Bun.main)
+  const settingsPath = getProjectSettingsPath(projectRoot)
+  if (settingsPath) {
+    watchers.register(settingsPath, "settings", flushSnapshots)
     if (settingsPath) invalidateSettingsCache(settingsPath)
   }
 
@@ -302,8 +380,7 @@ function setupWatchers(
     sessionDataCache.invalidateProject(cwd)
     invalidateTurnsCache(cwd)
     watchers.unregisterByLabelSuffix(`:${cwd}`)
-    // Do NOT unregister from upstreamSyncRegistry here — background sync continues
-    // for idle projects so the issue store stays fresh without needing external triggers.
+    caches.upstreamSyncRegistry.unregister(cwd)
     caches.cooldownRegistry.invalidateProject(cwd)
     caches.lifecycleTaskRegistry.clearProject(cwd)
     deleteProjectSnapshots(snapshots, cwd)
@@ -328,16 +405,7 @@ function setupWatchers(
 
     // Limit the number of concurrently watched projects
     if (registeredProjects.size >= MAX_WATCHED_PROJECTS) {
-      let oldestCwd: string | null = null
-      let oldestTime = Infinity
-      for (const projectCwd of registeredProjects) {
-        if (projectCwd === cwd) continue
-        const lastSeen = projectLastSeen.get(projectCwd) ?? 0
-        if (lastSeen < oldestTime) {
-          oldestTime = lastSeen
-          oldestCwd = projectCwd
-        }
-      }
+      const oldestCwd = findOldestProjectCwd(registeredProjects, projectLastSeen, cwd)
       if (oldestCwd) {
         stderrLog("project eviction", `[daemon] Evicting project ${oldestCwd} to stay within limit`)
         evictProject(oldestCwd)
@@ -382,12 +450,12 @@ function startMemoryMonitoring(metrics: DaemonMetrics) {
   }, 30000)
 }
 
-function evictIdleProjects(
+export function evictIdleProjects(
   now: number,
-  state: ReturnType<typeof createDaemonState>,
+  state: DaemonState,
   registeredProjects: Set<string>,
   evictProject: (cwd: string) => void
-) {
+): void {
   const projectCutoff = now - PROJECT_IDLE_EVICTION_MS
   for (const [cwd, lastSeen] of state.projectLastSeen) {
     if (lastSeen >= projectCutoff) continue
@@ -653,9 +721,6 @@ async function startDaemonProcess(_args: string[], port: number): Promise<void> 
   }
 
   state.touchProject(projectRoot)
-  // Re-register repos previously synced so the daemon resumes background sync
-  // on startup without waiting for an active dispatch session.
-  void caches.upstreamSyncRegistry.restoreKnownRepos()
 
   // Self-heal the shell shim installation in the background
   ensureShimInstallation().catch((err) => {

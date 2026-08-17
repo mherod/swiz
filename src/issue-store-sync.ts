@@ -723,7 +723,6 @@ function updateSyncFreshnessCursor(ctx: SyncContext, isFetchOk: boolean): void {
   ctx.result.fetchOk = isFetchOk
   if (isFetchOk) {
     ctx.store.setSyncCursor(ctx.repo, "last_synced", new Date().toISOString())
-    ctx.store.setSyncCursor(ctx.repo, "cwd", ctx.cwd)
   }
 }
 

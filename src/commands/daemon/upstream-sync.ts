@@ -95,8 +95,7 @@ export class UpstreamSyncRegistry {
   async register(cwd: string): Promise<RegistrationResult> {
     // Placeholder/relative cwds (e.g. "." from DaemonBackedIssueStore) must not
     // become sync entries — they resolve against the daemon's own cwd and spawn
-    // a duplicate loop, and a persisted "." cursor would resurrect it on every
-    // startup via restoreKnownRepos (#716).
+    // a duplicate loop (#716).
     if (!isRegisterableProjectCwd(cwd)) return { deduped: false, registered: false }
 
     // Key on the repository root, not the cwd we happened to be handed. `/path`,
@@ -105,10 +104,9 @@ export class UpstreamSyncRegistry {
     const canonicalRoot = await resolveProjectRoot(cwd)
     if (this.entries.has(canonicalRoot)) return { deduped: true, registered: true }
 
-    // restoreKnownRepos() registers every stored cursor concurrently, so two
-    // legacy cwd variants collapsing to the same root can both clear the check
-    // above before either writes its entry. Share one registration per root so
-    // the loser dedupes instead of spawning a rival loop.
+    // Concurrent register() calls with cwd variants collapsing to the same root
+    // can both clear the check above before either writes its entry. Share one
+    // registration per root so the loser dedupes instead of spawning a rival loop.
     const inflight = this.inFlightRegistrations.get(canonicalRoot)
     if (inflight) {
       await inflight
@@ -161,22 +159,6 @@ export class UpstreamSyncRegistry {
     }
 
     return { deduped: false, registered: true }
-  }
-
-  /**
-   * Re-register all repos previously synced by reading the `cwd` cursor written
-   * by `syncUpstreamState`. Called on daemon startup so background sync resumes
-   * for every repo in the issue store without waiting for a dispatch to arrive.
-   */
-  async restoreKnownRepos(): Promise<void> {
-    const store = this.store ?? getIssueStore()
-    const known = store.listKnownRepoCwds()
-    await Promise.all(
-      known.map(async ({ repo, cwd }) => {
-        const result = await this.register(cwd)
-        if (!result.registered) store.deleteSyncCursor(repo, "cwd")
-      })
-    )
   }
 
   /** Trigger an immediate sync for a project. Accepts any cwd inside it. */

@@ -3,6 +3,14 @@ import { mkdir, mkdtemp, rm, symlink } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { IssueStore, type UpstreamSyncResult } from "../../issue-store.ts"
+import {
+  createDaemonCaches,
+  createDaemonState,
+  evictIdleProjects,
+  PROJECT_IDLE_EVICTION_MS,
+  setupWatchers,
+} from "../daemon.ts"
+import type { TranscriptMonitor } from "./cache/transcript-monitor.ts"
 import { resolveUpstreamRepoSlug, UpstreamSyncRegistry } from "./upstream-sync.ts"
 
 function deferred(): { promise: Promise<void>; resolve: () => void } {
@@ -230,24 +238,247 @@ describe("UpstreamSyncRegistry lifecycle", () => {
     }
   })
 
-  test("prunes a stored cwd cursor when startup registration fails", async () => {
+  test("inactivity eviction unregisters project and fork upstream entries, advancing time causes zero further sync calls", async () => {
+    let syncCalls = 0
     const store = new IssueStore(":memory:")
-    store.setSyncCursor("owner/deleted", "cwd", "/deleted/repo")
     const registry = new UpstreamSyncRegistry({
-      intervalMs: 60_000,
-      resolveSlug: async () => null,
-      resolveFork: async () => null,
+      intervalMs: 15,
+      timeoutMs: 1_000,
+      resolveSlug: async () => "owner/fork",
+      resolveFork: async () => ({ upstreamSlug: "org/upstream" }),
+      sync: async () => {
+        syncCalls++
+        return createSyncResult()
+      },
       store,
     })
 
     try {
-      await registry.restoreKnownRepos()
+      await registry.register("/virtual/fork")
+      expect(registry.listActive()).toHaveLength(2)
 
-      expect(store.getSyncCursor("owner/deleted", "cwd")).toBeNull()
+      // Wait for initial scheduled tick
+      await Bun.sleep(25)
+      const callsBefore = syncCalls
+      expect(callsBefore).toBeGreaterThan(0)
+
+      // Unregister (simulating eviction)
+      expect(registry.unregister("/virtual/fork")).toBe(true)
       expect(registry.listActive()).toHaveLength(0)
+
+      const callsAfterUnregister = syncCalls
+      // Advance time through multiple sync intervals (>3 intervals)
+      await Bun.sleep(50)
+
+      // Zero further sync calls occurred after unregistration
+      expect(syncCalls).toBe(callsAfterUnregister)
     } finally {
       registry.close()
       store.close()
+    }
+  })
+
+  test("reactivation re-registers project and starts immediate refresh", async () => {
+    const syncedRepos: string[] = []
+    const store = new IssueStore(":memory:")
+    const registry = new UpstreamSyncRegistry({
+      intervalMs: 60_000,
+      resolveSlug: async () => "owner/repo",
+      resolveFork: async () => null,
+      sync: async (repo) => {
+        syncedRepos.push(repo)
+        return createSyncResult()
+      },
+      store,
+    })
+
+    try {
+      await registry.register("/virtual/repo")
+      expect(registry.listActive()).toHaveLength(1)
+
+      // Evict
+      registry.unregister("/virtual/repo")
+      expect(registry.listActive()).toHaveLength(0)
+      expect(syncedRepos).toHaveLength(0) // scheduled sync hasn't fired yet
+
+      // Reactivate via register + syncNow
+      await registry.register("/virtual/repo")
+      expect(registry.listActive()).toHaveLength(1)
+      const result = await registry.syncNow("/virtual/repo")
+      expect(result).not.toBeNull()
+      expect(syncedRepos).toEqual(["owner/repo"])
+    } finally {
+      registry.close()
+      store.close()
+    }
+  })
+
+  test("cached IssueStore rows remain readable while project is inactive", async () => {
+    const store = new IssueStore(":memory:")
+    const repo = "owner/repo"
+    store.upsertIssues(repo, [
+      { number: 1, title: "Issue 1", state: "open", updatedAt: "2026-01-01T00:00:00Z" },
+    ])
+    store.upsertPullRequests(repo, [
+      { number: 2, title: "PR 2", state: "open", updatedAt: "2026-01-01T00:00:00Z" },
+    ])
+
+    const registry = new UpstreamSyncRegistry({
+      intervalMs: 60_000,
+      resolveSlug: async () => repo,
+      resolveFork: async () => null,
+      sync: async () => createSyncResult(),
+      store,
+    })
+
+    try {
+      await registry.register("/virtual/repo")
+      expect(registry.listActive()).toHaveLength(1)
+
+      // Evict project
+      registry.unregister("/virtual/repo")
+      expect(registry.listActive()).toHaveLength(0)
+
+      // Cached rows remain fully readable while inactive
+      const issues = store.listIssues<{ number: number }>(repo)
+      expect(issues).toHaveLength(1)
+      expect(issues[0]?.number).toBe(1)
+      const prs = store.listPullRequests<{ number: number }>(repo)
+      expect(prs).toHaveLength(1)
+      expect(prs[0]?.number).toBe(2)
+      expect(store.getIssue(repo, 1)).not.toBeNull()
+    } finally {
+      registry.close()
+      store.close()
+    }
+  })
+
+  test("pending mutations remain queued while inactive and replay on next active sync", async () => {
+    const store = new IssueStore(":memory:")
+    const repo = "owner/repo"
+    const registry = new UpstreamSyncRegistry({
+      intervalMs: 60_000,
+      resolveSlug: async () => repo,
+      resolveFork: async () => null,
+      sync: async () => createSyncResult(),
+      store,
+    })
+
+    try {
+      await registry.register("/virtual/repo")
+      registry.unregister("/virtual/repo")
+      expect(registry.listActive()).toHaveLength(0)
+
+      // Queue mutation while inactive
+      store.queueMutation(repo, {
+        type: "comment",
+        number: 1,
+        body: "Queued while inactive",
+      })
+      expect(store.pendingCount(repo)).toBe(1)
+
+      // Re-register
+      await registry.register("/virtual/repo")
+      expect(store.pendingCount(repo)).toBe(1)
+    } finally {
+      registry.close()
+      store.close()
+    }
+  })
+
+  test("daemon eviction under MAX_WATCHED_PROJECTS unregisters evicted project sync entries", async () => {
+    const p1 = await createProjectFixture()
+    const p2 = await createProjectFixture()
+    const p3 = await createProjectFixture()
+
+    const state = createDaemonState()
+    const caches = createDaemonCaches()
+    caches.upstreamSyncRegistry = new UpstreamSyncRegistry({
+      intervalMs: 60_000,
+      resolveSlug: async () => "owner/repo",
+      resolveFork: async () => null,
+      sync: async () => createSyncResult(),
+    })
+    const mockTranscriptMonitor = {
+      checkProject: async () => {},
+      pruneOldSessions: () => {},
+    } as unknown as TranscriptMonitor
+
+    const { registerProjectWatchers } = setupWatchers(
+      caches,
+      mockTranscriptMonitor,
+      state.projectLastSeen
+    )
+
+    try {
+      // Register project 1 and 2
+      state.touchProject(p1.root)
+      registerProjectWatchers(p1.root)
+      state.touchProject(p2.root)
+      registerProjectWatchers(p2.root)
+
+      await Bun.sleep(20)
+      expect(caches.upstreamSyncRegistry.findActiveForCwd(p1.root)).not.toBeNull()
+      expect(caches.upstreamSyncRegistry.findActiveForCwd(p2.root)).not.toBeNull()
+
+      // Update lastSeen so p1 is oldest
+      state.projectLastSeen.set(p1.root, 1000)
+      state.projectLastSeen.set(p2.root, 2000)
+
+      // Register 3rd project (exceeding MAX_WATCHED_PROJECTS = 2)
+      state.touchProject(p3.root)
+      registerProjectWatchers(p3.root)
+
+      await Bun.sleep(20)
+      // p1 should be evicted from upstreamSyncRegistry
+      expect(caches.upstreamSyncRegistry.findActiveForCwd(p1.root)).toBeNull()
+      expect(caches.upstreamSyncRegistry.findActiveForCwd(p2.root)).not.toBeNull()
+      expect(caches.upstreamSyncRegistry.findActiveForCwd(p3.root)).not.toBeNull()
+    } finally {
+      caches.upstreamSyncRegistry.close()
+      caches.watchers.close()
+      await p1.cleanup()
+      await p2.cleanup()
+      await p3.cleanup()
+    }
+  })
+
+  test("daemon idle eviction unregisters inactive project from upstreamSyncRegistry", async () => {
+    const p1 = await createProjectFixture()
+    const state = createDaemonState()
+    const caches = createDaemonCaches()
+    caches.upstreamSyncRegistry = new UpstreamSyncRegistry({
+      intervalMs: 60_000,
+      resolveSlug: async () => "owner/repo",
+      resolveFork: async () => null,
+      sync: async () => createSyncResult(),
+    })
+    const mockTranscriptMonitor = {
+      checkProject: async () => {},
+      pruneOldSessions: () => {},
+    } as unknown as TranscriptMonitor
+
+    const { registeredProjects, registerProjectWatchers, evictProject } = setupWatchers(
+      caches,
+      mockTranscriptMonitor,
+      state.projectLastSeen
+    )
+
+    try {
+      state.touchProject(p1.root)
+      registerProjectWatchers(p1.root)
+      await Bun.sleep(20)
+      expect(caches.upstreamSyncRegistry.findActiveForCwd(p1.root)).not.toBeNull()
+
+      // Advance time beyond idle eviction threshold
+      const pastNow = Date.now() + PROJECT_IDLE_EVICTION_MS + 1000
+      evictIdleProjects(pastNow, state, registeredProjects, evictProject)
+
+      expect(caches.upstreamSyncRegistry.findActiveForCwd(p1.root)).toBeNull()
+    } finally {
+      caches.upstreamSyncRegistry.close()
+      caches.watchers.close()
+      await p1.cleanup()
     }
   })
 })
@@ -311,9 +542,9 @@ describe("UpstreamSyncRegistry project identity", () => {
     }
   })
 
-  test("dedupes legacy cwd variants restored concurrently on startup", async () => {
-    // restoreKnownRepos() replays every stored cursor through Promise.all, so
-    // variants of one root arrive concurrently and must not each win a loop.
+  test("dedupes cwd variants registered concurrently", async () => {
+    // Concurrent registrations for variants of one root arrive together and must
+    // share one registration so the loser dedupes instead of spawning a rival loop.
     const fixture = await createProjectFixture()
     const store = new IssueStore(":memory:")
     const registry = createRegistry(store)
