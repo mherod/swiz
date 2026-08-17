@@ -56,8 +56,8 @@ import {
   resolveSkillRecencyOptions,
   skillGateAgentIdForHookPayload,
 } from "../src/skill-utils.ts"
-import { skillRequirementCooldownPath } from "../src/temp-paths.ts"
-import { isShellTool, isTaskListTool } from "../src/tool-matchers.ts"
+import { SWIZ_INCOMING_ROOT, skillRequirementCooldownPath } from "../src/temp-paths.ts"
+import { isAnyProviderTaskListTool, isShellTool } from "../src/tool-matchers.ts"
 import {
   GH_ISSUE_ADD_TRIAGED_LABEL_RE,
   GH_ISSUE_LABEL_CHANGE_RE,
@@ -70,7 +70,11 @@ import {
   GIT_PUSH_RE,
   isPullRequestMergeCommand,
 } from "../src/utils/git-utils.ts"
-import { formatActionPlan } from "../src/utils/inline-hook-helpers.ts"
+import {
+  formatActionPlan,
+  readNativeTaskToolAvailability,
+  shouldEnforceTaskGovernance,
+} from "../src/utils/inline-hook-helpers.ts"
 import { stripQuotedShellStrings } from "../src/utils/shell-patterns.ts"
 
 const SKILL_REQUIREMENT_COOLDOWN_MS = 2 * 60 * 1000
@@ -329,8 +333,21 @@ function resolveGatedCommand(rawInput: Record<string, any>): GatedCommandCtx | n
   return { primary, anyOfSkills: anyOf, skillFiles }
 }
 
-function requiresTaskListCheck(skill: string, input: Record<string, unknown>): boolean {
-  return skill === GATE_REQUIRED_SKILLS.commit.name && agentHasTaskListToolForHookPayload(input)
+async function requiresTaskListCheck(
+  skill: string,
+  input: Record<string, unknown>
+): Promise<boolean> {
+  if (skill !== GATE_REQUIRED_SKILLS.commit.name) return false
+  if (!agentHasTaskListToolForHookPayload(input)) return false
+  // `agentHasTaskListToolForHookPayload` is a static per-agent capability claim; a given session
+  // may still lack the native TaskList. Demanding it there makes this gate unsatisfiable, since
+  // MCP task tools are filtered out of the recent-tool scan by the ignoreMcpTools setting.
+  const availability = await readNativeTaskToolAvailability(
+    typeof input.session_id === "string" ? input.session_id : null,
+    SWIZ_INCOMING_ROOT,
+    typeof input.transcript_path === "string" ? input.transcript_path : null
+  )
+  return shouldEnforceTaskGovernance(availability)
 }
 
 function getShellCommand(rawInput: Record<string, any>): string {
@@ -378,9 +395,11 @@ async function checkTaskListRequirement(
   input: Record<string, any>,
   recencyOptions: CurrentSessionUsageRecencyOptions
 ): Promise<SwizHookOutput | null> {
-  if (!requiresTaskListCheck(skill, input)) return null
+  if (!(await requiresTaskListCheck(skill, input))) return null
   const toolNames = await getRecentlyUsedToolsForCurrentSession(input, recencyOptions)
-  if (toolNames.some((n) => isTaskListTool(n))) return null
+  // Accept MCP task listings: when the native TaskList is absent from the session it is the only
+  // sync available, and rejecting it makes this gate's own remediation impossible to satisfy.
+  if (toolNames.some((n) => isAnyProviderTaskListTool(n))) return null
   return preToolUseDeny(
     "BLOCKED: git commit requires TaskList to have been called first.\n\n" +
       `Call TaskList to sync task state, then retry the commit. The TaskList call must be within the ${formatCurrentSessionUsageWindow(recencyOptions)}.`

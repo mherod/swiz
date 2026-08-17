@@ -532,6 +532,45 @@ export async function appendPayloadToJsonl(
   })
 }
 
+/**
+ * ToolSearch carries tool-registry facts — a search query over tool names and the names that
+ * matched — rather than user or file content. Capturing it keeps the JSONL stream content-free
+ * while letting consumers answer "was tool X available in this session?" without reparsing
+ * per-dispatch capture files. Task-governance hooks depend on this to detect sessions where the
+ * task tools are absent.
+ */
+function isPlainRecord(value: unknown): value is Record<string, any> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value)
+}
+
+function assignToolSearchInput(summary: Record<string, any>, toolInput: unknown): void {
+  if (!isPlainRecord(toolInput)) return
+  if (typeof toolInput.query === "string") summary.query = toolInput.query
+  if (typeof toolInput.max_results === "number") summary.maxResults = toolInput.max_results
+}
+
+function assignToolSearchResponse(summary: Record<string, any>, toolResponse: unknown): void {
+  if (!isPlainRecord(toolResponse)) return
+  if (Array.isArray(toolResponse.matches)) {
+    summary.matches = toolResponse.matches.filter(
+      (match: unknown): match is string => typeof match === "string"
+    )
+  }
+  if (typeof toolResponse.total_deferred_tools === "number") {
+    summary.totalDeferredTools = toolResponse.total_deferred_tools
+  }
+}
+
+export function summarizeToolSearchForJsonl(
+  sanitized: Record<string, any>
+): Record<string, any> | null {
+  if (sanitized.tool_name !== "ToolSearch") return null
+  const summary: Record<string, any> = {}
+  assignToolSearchInput(summary, sanitized.tool_input)
+  assignToolSearchResponse(summary, sanitized.tool_response)
+  return Object.keys(summary).length > 0 ? summary : null
+}
+
 export function summarizeDispatchPayloadForJsonl(
   payload: Record<string, any>
 ): Record<string, any> {
@@ -560,6 +599,8 @@ export function summarizeDispatchPayloadForJsonl(
     summary._toolInputKeys = Object.keys(toolInput).sort()
     summary._toolInputBytes = new TextEncoder().encode(JSON.stringify(toolInput)).byteLength
   }
+  const toolSearch = summarizeToolSearchForJsonl(sanitized)
+  if (toolSearch) summary._toolSearch = toolSearch
   return summary
 }
 

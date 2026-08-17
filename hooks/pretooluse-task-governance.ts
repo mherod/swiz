@@ -99,7 +99,9 @@ import {
 } from "../src/tasks/task-subject-duplicates.ts"
 import { detect, formatMessage } from "../src/tasks/task-subject-validation.ts"
 import { getTaskCurrentDurationMs } from "../src/tasks/task-timing.ts"
+import { SWIZ_INCOMING_ROOT } from "../src/temp-paths.ts"
 import {
+  isAnyProviderTaskListTool,
   isCodeChangeTool,
   isEditTool,
   isFileEditTool,
@@ -113,8 +115,35 @@ import { getCurrentSessionTaskToolStats } from "../src/transcript-summary.ts"
 import { scheduleAutoSteer } from "../src/utils/auto-steer-helpers.ts"
 import { hasFileInTree } from "../src/utils/file-utils.ts"
 import { messageFromUnknownError } from "../src/utils/hook-json-helpers.ts"
+import {
+  readNativeTaskToolAvailability,
+  shouldEnforceTaskGovernance,
+} from "../src/utils/inline-hook-helpers.ts"
 
 // ─── Shared governance infrastructure ──────────────────────────────────────
+
+/**
+ * True when this session provably lacks the native task tools.
+ *
+ * Governance reads the native task store, which only the native tools write to. When they are
+ * missing, every gate sees an empty queue and prescribes a remedy the agent cannot perform —
+ * blocking Edit/Write/Bash with no reachable escape. Standing down is the only safe behaviour;
+ * the MCP task tools write to a different store and do not satisfy these checks.
+ *
+ * Fails open: anything short of proven absence keeps governance active.
+ */
+async function nativeTaskToolsProvenAbsent(
+  input: Record<string, any> | undefined
+): Promise<boolean> {
+  const sessionId = typeof input?.session_id === "string" ? input.session_id : null
+  const transcriptPath = typeof input?.transcript_path === "string" ? input.transcript_path : null
+  const availability = await readNativeTaskToolAvailability(
+    sessionId,
+    SWIZ_INCOMING_ROOT,
+    transcriptPath
+  )
+  return !shouldEnforceTaskGovernance(availability)
+}
 
 interface GovernanceThresholds {
   minIncomplete: number
@@ -640,7 +669,10 @@ async function checkCanonicalTaskListSync(
 async function hasRecentTaskListEvidence(input: Record<string, any>): Promise<boolean> {
   try {
     const recentTools = await getRecentlyUsedToolsForCurrentSession(input)
-    return recentTools.some((name) => isTaskListTool(name))
+    // Accept MCP task listings too: when the native TaskList is missing from the session, an MCP
+    // listing is the only sync the agent can perform, and refusing it makes the "Run TaskList now"
+    // remediation unsatisfiable — the retry loop this function exists to prevent.
+    return recentTools.some((name) => isAnyProviderTaskListTool(name))
   } catch {
     // Transcript unavailable — the caller falls through to the deny.
     return false
@@ -953,6 +985,8 @@ function runImmediateTaskStateChecks(context: TaskStateCheckContext): SwizHookOu
 }
 
 async function runTaskStateChecks(context: TaskStateCheckContext): Promise<SwizHookOutput> {
+  if (await nativeTaskToolsProvenAbsent(context.input)) return preToolUseAllow()
+
   const reconciliation = checkReconciliationRequired(context)
   if (reconciliation) return reconciliation
 
@@ -2102,6 +2136,9 @@ async function formatTaskTraceContext(
   input: Record<string, any>,
   counts: TaskTraceCounts
 ): Promise<string> {
+  // No native task tools: the queue can never fill, so nagging about it is pure noise.
+  if (await nativeTaskToolsProvenAbsent(input)) return ""
+
   const stateLead = formatTaskStateLead({
     total: counts.total,
     incomplete: counts.pending + counts.inProgress,

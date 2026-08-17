@@ -21,8 +21,74 @@ import {
   shouldCaptureIncomingPayloads,
   shouldCaptureRawIncomingPayloads,
   summarizeDispatchPayloadForJsonl,
+  summarizeToolSearchForJsonl,
   writeIncomingDispatchCapture,
 } from "./incoming-capture.ts"
+
+describe("summarizeToolSearchForJsonl", () => {
+  it("captures the query and matched tool names", () => {
+    expect(
+      summarizeToolSearchForJsonl({
+        tool_name: "ToolSearch",
+        tool_input: { query: "select:TaskCreate,TaskUpdate,TaskList", max_results: 15 },
+        tool_response: {
+          matches: ["TaskCreate", "TaskUpdate", "TaskList"],
+          total_deferred_tools: 115,
+        },
+      })
+    ).toEqual({
+      query: "select:TaskCreate,TaskUpdate,TaskList",
+      maxResults: 15,
+      matches: ["TaskCreate", "TaskUpdate", "TaskList"],
+      totalDeferredTools: 115,
+    })
+  })
+
+  it("returns null for tools other than ToolSearch", () => {
+    expect(
+      summarizeToolSearchForJsonl({ tool_name: "Bash", tool_input: { query: "ls" } })
+    ).toBeNull()
+  })
+
+  it("returns null when no recognized fields are present", () => {
+    expect(summarizeToolSearchForJsonl({ tool_name: "ToolSearch" })).toBeNull()
+    expect(
+      summarizeToolSearchForJsonl({ tool_name: "ToolSearch", tool_response: "not-an-object" })
+    ).toBeNull()
+  })
+
+  it("drops non-string entries from matches", () => {
+    expect(
+      summarizeToolSearchForJsonl({
+        tool_name: "ToolSearch",
+        tool_response: { matches: ["TaskList", 42, null] },
+      })
+    ).toEqual({ matches: ["TaskList"] })
+  })
+
+  it("is attached to the JSONL summary for ToolSearch payloads", () => {
+    const summary = summarizeDispatchPayloadForJsonl({
+      session_id: "session-a",
+      tool_name: "ToolSearch",
+      tool_input: { query: "task tools" },
+      tool_response: { matches: ["mcp__swiz__TaskList"] },
+    })
+    expect(summary._toolSearch).toEqual({
+      query: "task tools",
+      matches: ["mcp__swiz__TaskList"],
+    })
+  })
+
+  it("leaves non-ToolSearch summaries content-free", () => {
+    const summary = summarizeDispatchPayloadForJsonl({
+      session_id: "session-a",
+      tool_name: "Bash",
+      tool_input: { command: "echo secret-business" },
+    })
+    expect(summary._toolSearch).toBeUndefined()
+    expect(JSON.stringify(summary)).not.toContain("secret-business")
+  })
+})
 
 describe("incoming-capture", () => {
   it("shouldCaptureIncomingPayloads defaults to true when unset", () => {

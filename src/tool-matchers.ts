@@ -91,6 +91,25 @@ export function isTaskUpdateTool(name: string): boolean {
 export function isTaskListTool(name: string): boolean {
   return TASK_LIST_TOOLS.has(name)
 }
+
+/** `mcp__<server>__<tool>` → `<tool>`; returns the name unchanged when not MCP-namespaced. */
+export function stripMcpToolNamespace(name: string): string {
+  const match = /^mcp__[^_]+(?:_[^_]+)*__(.+)$/.exec(name)
+  return match?.[1] ?? name
+}
+
+/**
+ * True for a task-listing call from any provider, including MCP equivalents such as
+ * `mcp__swiz__TaskList`.
+ *
+ * Use this to answer "did the agent recently review its task list?" — an MCP listing is real
+ * evidence of that. Do NOT use it to decide whether the *native* task tools exist: MCP task tools
+ * write to a different store, so treating them as native leaves governance enforcing against a
+ * queue that can never fill. See `isNativeTaskToolName` in utils/inline-hook-helpers.ts.
+ */
+export function isAnyProviderTaskListTool(name: string): boolean {
+  return isTaskListTool(stripMcpToolNamespace(name))
+}
 export function isTaskGetTool(name: string): boolean {
   return TASK_GET_TOOLS.has(name)
 }

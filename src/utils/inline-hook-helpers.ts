@@ -118,6 +118,207 @@ function renderSubItems(items: ActionPlanItem[], indent: string): string[] {
   return lines
 }
 
+// ─── Native task-tool availability ───────────────────────────────────────────
+// Task governance reads the native task store. Only the *native* task tools write to it, so
+// when they are missing from the session registry every gate sees an empty queue and the
+// remedy it prescribes ("create a task") is uncallable — an unrecoverable deadlock of the same
+// class `isSwizCommand` exists to prevent. ToolSearch responses reveal which tools the session
+// actually has; these helpers classify that evidence.
+
+/** Native task tools. Bare names only — MCP equivalents do NOT write to the native store. */
+export const NATIVE_TASK_TOOL_NAMES = ["TaskCreate", "TaskUpdate", "TaskList", "TaskGet"] as const
+
+/** Every MCP tool is namespaced `mcp__<server>__<tool>`. */
+const MCP_TOOL_NAME_PREFIX = "mcp__"
+
+/**
+ * True only for a bare native task tool name.
+ *
+ * Substring matching is wrong here: `mcp__swiz__TaskCreate` contains "TaskCreate" but writes to
+ * the swiz store, not the native one. Treating it as native keeps governance enforcing against a
+ * queue that can never fill.
+ */
+export function isNativeTaskToolName(name: string): boolean {
+  if (name.startsWith(MCP_TOOL_NAME_PREFIX)) return false
+  return (NATIVE_TASK_TOOL_NAMES as readonly string[]).includes(name)
+}
+
+/**
+ * `present` — a native task tool was seen.
+ * `absent`  — a search that would have matched one came back without it (proof, not silence).
+ * `unknown` — no qualifying evidence; callers must fail open.
+ */
+export type NativeTaskToolAvailability = "present" | "absent" | "unknown"
+
+/** ToolSearch evidence as captured in `_toolSearch` by the incoming-capture JSONL summary. */
+export interface ToolSearchEvidence {
+  query?: string
+  matches?: string[]
+  totalDeferredTools?: number
+}
+
+/**
+ * True when the query itself targeted native task tools, so an absence of matches is meaningful.
+ * A `select:` query names tools explicitly; a keyword query mentioning "task" would also surface
+ * them, since MCP task tools rank for the same terms.
+ */
+export function toolSearchQueryTargetsTaskTools(query: string): boolean {
+  const trimmed = query.trim()
+  if (!trimmed) return false
+  const selectPrefix = "select:"
+  if (trimmed.toLowerCase().startsWith(selectPrefix)) {
+    return trimmed
+      .slice(selectPrefix.length)
+      .split(",")
+      .some((name) => isNativeTaskToolName(name.trim()))
+  }
+  return /\btasks?\b/i.test(trimmed)
+}
+
+/** Classify a single ToolSearch record. */
+export function classifyToolSearchTaskEvidence(
+  evidence: ToolSearchEvidence | null | undefined
+): NativeTaskToolAvailability {
+  if (!evidence) return "unknown"
+  const matches = evidence.matches
+  if (!Array.isArray(matches)) return "unknown"
+  if (matches.some((match) => isNativeTaskToolName(match))) return "present"
+  if (!toolSearchQueryTargetsTaskTools(evidence.query ?? "")) return "unknown"
+  // A search that would have matched them returned none: the registry does not have them.
+  return "absent"
+}
+
+/**
+ * Fold ToolSearch records into one verdict. `present` wins outright — a tool seen once exists for
+ * the session — otherwise a targeted miss proves absence, and no qualifying evidence stays
+ * `unknown` so callers fail open.
+ */
+export function resolveNativeTaskToolAvailability(
+  records: Array<ToolSearchEvidence | null | undefined>
+): NativeTaskToolAvailability {
+  let verdict: NativeTaskToolAvailability = "unknown"
+  for (const record of records) {
+    const classification = classifyToolSearchTaskEvidence(record)
+    if (classification === "present") return "present"
+    if (classification === "absent") verdict = "absent"
+  }
+  return verdict
+}
+
+/** Governance may only enforce when the native tools are not known to be missing. */
+export function shouldEnforceTaskGovernance(availability: NativeTaskToolAvailability): boolean {
+  return availability !== "absent"
+}
+
+/**
+ * The harness reports a call to a missing tool with this error, which is direct proof the tool is
+ * not in the session registry.
+ */
+const NATIVE_TASK_TOOL_MISSING_RE =
+  /No such tool available:\s*(?:TaskCreate|TaskUpdate|TaskList|TaskGet)\b/
+
+/**
+ * A native task tool actually being invoked. The quoted exact name cannot match
+ * `mcp__swiz__TaskCreate`, which is the distinction the whole check rests on.
+ */
+const NATIVE_TASK_TOOL_USE_RE = /"name"\s*:\s*"(?:TaskCreate|TaskUpdate|TaskList|TaskGet)"/
+
+/**
+ * Resolve availability from the session transcript.
+ *
+ * Preferred over capture files: `transcript_path` is on every hook payload, whereas the
+ * `/tmp/swiz-incoming` JSONL stream is only written by CLI dispatch and the daemon — it goes
+ * stale whenever hooks run as standalone subprocesses.
+ *
+ * Line-level regexes avoid parsing a multi-megabyte transcript on every tool call.
+ */
+export async function readNativeTaskToolAvailabilityFromTranscript(
+  transcriptPath: string | undefined | null
+): Promise<NativeTaskToolAvailability> {
+  if (!transcriptPath) return "unknown"
+  try {
+    const file = Bun.file(transcriptPath)
+    if (!(await file.exists())) return "unknown"
+    const text = await file.text()
+    let verdict: NativeTaskToolAvailability = "unknown"
+    for (const line of text.split("\n")) {
+      if (!line.includes("Task")) continue
+      // A successful native invocation settles it outright.
+      if (NATIVE_TASK_TOOL_USE_RE.test(line)) return "present"
+      if (NATIVE_TASK_TOOL_MISSING_RE.test(line)) verdict = "absent"
+    }
+    return verdict
+  } catch {
+    return "unknown"
+  }
+}
+
+/** Extract this session's `_toolSearch` records from one capture JSONL file. */
+async function readToolSearchEvidenceFile(
+  path: string,
+  sessionId: string
+): Promise<ToolSearchEvidence[]> {
+  const file = Bun.file(path)
+  if (!(await file.exists())) return []
+  const records: ToolSearchEvidence[] = []
+  for (const line of (await file.text()).split("\n")) {
+    if (!line.includes('"_toolSearch"')) continue
+    try {
+      const record = JSON.parse(line) as Record<string, any>
+      if (record.session_id !== sessionId) continue
+      if (record._toolSearch) records.push(record._toolSearch as ToolSearchEvidence)
+    } catch {
+      // Malformed capture lines carry no evidence; absence of proof is not proof of absence.
+    }
+  }
+  return records
+}
+
+/**
+ * Resolve native task-tool availability for a session from captured ToolSearch evidence.
+ * Any failure — missing directory, unreadable file, no matching session — yields `unknown`,
+ * so governance keeps enforcing unless absence is positively proven.
+ */
+/**
+ * Resolved verdicts are cached per session: a session's tool registry is fixed for its lifetime.
+ * `unknown` is never cached — later ToolSearch calls may still settle the question.
+ */
+const nativeTaskToolAvailabilityBySession = new Map<string, NativeTaskToolAvailability>()
+
+/** Test seam: drop memoized verdicts. */
+export function resetNativeTaskToolAvailabilityCache(): void {
+  nativeTaskToolAvailabilityBySession.clear()
+}
+
+export async function readNativeTaskToolAvailability(
+  sessionId: string | undefined | null,
+  dir: string,
+  transcriptPath?: string | null
+): Promise<NativeTaskToolAvailability> {
+  if (!sessionId) return "unknown"
+  const cached = nativeTaskToolAvailabilityBySession.get(sessionId)
+  if (cached) return cached
+  const fromTranscript = await readNativeTaskToolAvailabilityFromTranscript(transcriptPath)
+  if (fromTranscript !== "unknown") {
+    nativeTaskToolAvailabilityBySession.set(sessionId, fromTranscript)
+    return fromTranscript
+  }
+  try {
+    const perFile = await Promise.all(
+      ["postToolUse", "preToolUse"].map((event) =>
+        readToolSearchEvidenceFile(`${dir}/${event}.jsonl`, sessionId)
+      )
+    )
+    const availability = resolveNativeTaskToolAvailability(perFile.flat())
+    if (availability !== "unknown") {
+      nativeTaskToolAvailabilityBySession.set(sessionId, availability)
+    }
+    return availability
+  } catch {
+    return "unknown"
+  }
+}
+
 // ─── Command/Execution Timing Hook Helpers ────────────────────────────────────
 
 /**
