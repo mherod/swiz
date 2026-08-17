@@ -26,6 +26,7 @@ const BLOCK_KIND_CLASS: Record<string, string> = {
   bashCommand: "hook-context-bash",
   taskNotification: "hook-context-task-notif",
   persistedOutput: "hook-context-persisted",
+  ambientBrowser: "hook-context-ambient-browser",
 }
 
 function blockKindClassName(kind: string | undefined): string | null {

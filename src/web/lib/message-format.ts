@@ -36,6 +36,7 @@ export interface ParsedUserMetadataBlock {
     | "bashCommand"
     | "taskNotification"
     | "persistedOutput"
+    | "ambientBrowser"
 }
 
 export interface UserMessageParts {
@@ -139,6 +140,10 @@ function extractInlineContextBlocks(text: string): {
   let cleanedText = text
   const metadataBlocks: ParsedUserMetadataBlock[] = []
 
+  const ambientBrowser = extractAmbientBrowserBlocks(cleanedText)
+  cleanedText = ambientBrowser.cleanedText
+  metadataBlocks.push(...ambientBrowser.blocks)
+
   const taskNotification = extractTaskNotificationBlocks(cleanedText)
   cleanedText = taskNotification.cleanedText
   metadataBlocks.push(...taskNotification.blocks)
@@ -186,6 +191,42 @@ function extractInlineContextBlocks(text: string): {
   metadataBlocks.push(...domContext.blocks)
 
   return { cleanedText, metadataBlocks }
+}
+
+function extractAmbientBrowserBlocks(text: string): {
+  cleanedText: string
+  blocks: ParsedUserMetadataBlock[]
+} {
+  const blockRe =
+    /<in-app-browser-context(?:\s+([^>]*))?>\s*([\s\S]*?)(?:<\/in-app-browser-context>|$)/gi
+  let cleanedText = text
+  const blocks: ParsedUserMetadataBlock[] = []
+
+  for (const match of text.matchAll(blockRe)) {
+    const full = match[0]
+    if (!full) continue
+    const attrs = match[1] ?? ""
+    const raw = match[2] ?? ""
+    const details: Array<{ label: string; value: string }> = []
+    const source = extractAttr(attrs, "source")
+    const tabCount = /open with\s+(\d+)\s+tabs?/i.exec(raw)?.[1]
+    const currentUrl = /Current URL:\s*(\S+)/i.exec(raw)?.[1]
+
+    if (source) details.push({ label: "source", value: source })
+    if (tabCount) details.push({ label: "tabs", value: tabCount })
+    if (currentUrl)
+      details.push({ label: "current URL", value: compactMetadataValue(currentUrl, 180) })
+
+    blocks.push({
+      title: "Ambient browser context",
+      details,
+      notes: ["Automatically supplied page state; separate from the user request."],
+      kind: "ambientBrowser",
+    })
+    cleanedText = cleanedText.replace(full, " ").trim()
+  }
+
+  return { cleanedText, blocks }
 }
 
 const _tagRegexCache = new Map<string, RegExp>()

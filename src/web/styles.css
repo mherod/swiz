@@ -3046,6 +3046,11 @@ tbody tr:hover {
   background: rgba(28, 24, 14, 0.45);
 }
 
+.hook-context-ambient-browser {
+  border-color: color-mix(in srgb, var(--line) 75%, var(--accent) 25%);
+  background: color-mix(in srgb, var(--panel) 94%, var(--accent) 6%);
+}
+
 .hook-context-persisted .hook-context-summary {
   color: var(--color-amber-400);
 }
