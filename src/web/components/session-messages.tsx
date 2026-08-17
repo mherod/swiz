@@ -307,7 +307,26 @@ function CommonFieldsList({ fields }: { fields: Array<{ label: string; value: st
   )
 }
 
-function VerboseToolCall({ tc }: { tc: { name: string; detail: string } }) {
+function RawToolInput({ detail }: { detail: string }) {
+  if (!detail.trim()) return null
+  const shouldCollapse = detail.length > TOOL_RAW_JSON_COLLAPSE_THRESHOLD
+  if (!shouldCollapse) return <pre className="tool-command-block">{detail}</pre>
+  return (
+    <details className="tool-raw-json">
+      <summary>{summarizeText(detail)}</summary>
+      <pre className="tool-detail-full">{detail}</pre>
+    </details>
+  )
+}
+
+// eslint-disable-next-line complexity -- tool-specific renderers intentionally branch by payload shape
+function VerboseToolCall({
+  tc,
+  count = 1,
+}: {
+  tc: { name: string; detail: string }
+  count?: number
+}) {
   const parsedDetail = parseToolCallDetail(tc.name, tc.detail)
   const isBash = tc.name.toLowerCase() === "bash"
   const category = classifyTool(tc.name)
@@ -342,10 +361,14 @@ function VerboseToolCall({ tc }: { tc: { name: string; detail: string } }) {
         {icon}
       </span>
       <span className="tool-name">{tc.name}</span>
+      {count > 1 ? <span className="message-repeat-badge">x{count}</span> : null}
       {isBash ? <BashToolBody parsedDetail={parsedDetail} /> : null}
       <CommonFieldsList fields={parsedDetail.commonFields} />
       {searchParams ? <SearchToolDisplay toolName={tc.name} searchParams={searchParams} /> : null}
       <RawJsonDisplay rawJson={parsedDetail.rawJson} isBash={isBash} />
+      {!isBash && !parsedDetail.rawJson && !searchParams ? (
+        <RawToolInput detail={tc.detail} />
+      ) : null}
     </div>
   )
 }
@@ -404,18 +427,28 @@ function ToolCallsList({
   toolCalls: Array<{ name: string; detail: string }>
   verbose: boolean
 }) {
+  const groupedCalls = useMemo(() => {
+    const groups = new Map<string, { call: { name: string; detail: string }; count: number }>()
+    for (const call of toolCalls) {
+      const key = [call.name, call.detail].join("\u0000")
+      const existing = groups.get(key)
+      if (existing) existing.count += 1
+      else groups.set(key, { call, count: 1 })
+    }
+    return [...groups.values()]
+  }, [toolCalls])
   if (verbose) {
     return (
       <div className="tool-calls tool-calls-verbose">
-        {toolCalls.map((tc) => (
-          <VerboseToolCall key={`${tc.name}-${tc.detail}`} tc={tc} />
+        {groupedCalls.map(({ call, count }) => (
+          <VerboseToolCall key={`${call.name}-${call.detail}`} tc={call} count={count} />
         ))}
       </div>
     )
   }
   return (
     <ul className="tool-calls">
-      {toolCalls.map((tc) => {
+      {groupedCalls.map(({ call: tc, count }) => {
         const category = classifyTool(tc.name)
         const icon = toolCategoryIcon(category)
         return (
@@ -424,6 +457,7 @@ function ToolCallsList({
               {icon}
             </span>
             <span className="tool-name">{tc.name}</span>
+            {count > 1 ? <span className="message-repeat-badge">x{count}</span> : null}
             {tc.detail && (
               <span className="tool-detail">
                 <InlineMarkdown text={tc.detail} />

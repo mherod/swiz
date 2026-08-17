@@ -139,7 +139,7 @@ describe("groupMessages", () => {
     ])
   })
 
-  test("dedupes identical repeated tool calls so exact repeats still show once", () => {
+  test("preserves identical repeated tool calls for renderer occurrence counts", () => {
     const sameRead = {
       name: "Read",
       detail: JSON.stringify({ file_path: "/repo/a.ts" }),
@@ -163,7 +163,7 @@ describe("groupMessages", () => {
 
     expect(grouped).toHaveLength(1)
     expect(grouped[0]!.count).toBe(2)
-    expect(grouped[0]!.message.toolCalls).toEqual([sameRead])
+    expect(grouped[0]!.message.toolCalls).toEqual([sameRead, sameRead])
   })
 
   test("does not merge messages that already differ by text", () => {

@@ -169,32 +169,18 @@ function canonicalGroupKey(message: SessionMessage): string {
   return `${message.role}|${normalized}`
 }
 
-function toolCallSignature(tc: { name: string; detail: string }): string {
-  return `${tc.name}\x00${tc.detail}`
-}
-
 /**
  * Grouping keys off text alone (empty for tool-only assistant rows), so distinct
  * tool calls with no text — e.g. Reads of different files — would otherwise
- * collapse into one row that only shows the first call. Append newly-seen tool
- * calls instead of discarding them, so the merged row lists every affected file
- * while true repeats (identical name+detail) still show once.
+ * collapse into one row that only shows the first call. Preserve every tool call
+ * here so the renderer can show both distinct details and repeat counts.
  */
 function mergeToolCallsIntoMessage(
   message: SessionMessage,
   incomingToolCalls: SessionMessage["toolCalls"]
 ): SessionMessage {
   if (!incomingToolCalls || incomingToolCalls.length === 0) return message
-  const existing = message.toolCalls ?? []
-  const seen = new Set(existing.map(toolCallSignature))
-  const additions = incomingToolCalls.filter((tc) => {
-    const signature = toolCallSignature(tc)
-    if (seen.has(signature)) return false
-    seen.add(signature)
-    return true
-  })
-  if (additions.length === 0) return message
-  return { ...message, toolCalls: [...existing, ...additions] }
+  return { ...message, toolCalls: [...(message.toolCalls ?? []), ...incomingToolCalls] }
 }
 
 export function groupMessages(messages: SessionMessage[]): GroupedSessionMessage[] {
