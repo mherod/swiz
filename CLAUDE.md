@@ -203,43 +203,43 @@ alwaysApply: false
 - Use `console.error` (not `console.log`) in CI/hook scripts. Use `debugLog` from `./debug.ts` elsewhere. `console.*` is blocked except where allowlisted in `src/debug-logging.test.ts` with a justification.
 - Reference implementations: `src/issue-store.ts`, `src/manifest.ts`, `src/commands/tasks.ts`.
 ## Conventions
-- DO NOT use top-level `await` in `src/` files (ESLint `no-restricted-syntax` rule). Use lazy async initialization with cached results. Hooks in `hooks/` are exempt.
-- DO NOT embed ESC (0x1b) in regex literals (Biome `no-control-regex` rule). Construct at runtime: `new RegExp(String.fromCharCode(27) + "\\[[0-9;]*[a-zA-Z]", "g")`. Reference: `hooks/posttooluse-task-output.ts`.
+- No top-level `await` in `src/` (ESLint `no-restricted-syntax`). Use lazy async init with cache. `hooks/` exempt.
+- No ESC (0x1b) in regex literals (Biome `no-control-regex`). Construct at runtime: `new RegExp(String.fromCharCode(27) + "\\[[0-9;]*[a-zA-Z]", "g")`. Reference: `hooks/posttooluse-task-output.ts`.
 - When parsing bun test output, check `/\bRan \d+ tests? across \d+ files?\./`; if absent, emit "unknown number of". Strip ANSI before matching.
 - **DO**: Rename declarations and all usages in one edit — splits in PreToolUse hooks cause deadlocks. **DON'T** add unrequested renames; change only what was asked for.
 - **DO**: When removing utility functions, grep usages and remove atomically. Removing only the definition leaves broken imports.
 - DO: Read every file in full before editing — snippets miss conflicts and patterns in other sections.
 - Use ANSI escape codes directly; do not add color libraries.
-- Prefer `Bun.spawn(["sh", "-c", cmd])` for shell execution in skills/hooks.
-- With piped `Bun.spawn`, drain stdout/stderr concurrently via `Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()])` before `await proc.exited`.
+- Prefer `Bun.spawn(["sh", "-c", cmd])` in skills/hooks.
+- Piped `Bun.spawn`: drain stdout/stderr concurrently via `Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()])` before `await proc.exited`.
 - Hooks are `.ts` and run as `bun hooks/<file>.ts`.
 - Settings writes must create `.bak` backup first.
 - Stop hooks inject session tasks from `~/.claude/tasks/<session_id>/`; format `IN PROGRESS` before `COMPLETED`.
 - Stop-memory prompts must include `Cause: <cause>`.
 - On `MEMORY CAPTURE ENFORCEMENT`, read `/update-memory/SKILL.md`, edit `CLAUDE.md`, resolve immediately.
 - When unblocking a gated session: complete prior task with evidence, create `in_progress` task before tool calls.
-- `pretooluse-require-tasks.ts` and `pretooluse-update-memory-enforcement.ts` must skip outside git repos or when `CLAUDE.md` is missing; guard with `isGitRepo(cwd)` + upward search, else `process.exit(0)`.
+- `pretooluse-require-tasks.ts` and `pretooluse-update-memory-enforcement.ts` skip outside git repos or when `CLAUDE.md` missing; guard with `isGitRepo(cwd)` + upward search, else `process.exit(0)`.
 - **DO**: Own every diagnostic — never label warnings "pre-existing". Investigate all test failures before completing tasks.
 - **DON'T**: Attribute feedback to "hooks", "systems", or "auto-steer" — all from the user. Act immediately.
 - **DON'T**: End with permission questions — authority is delegated. Execute; state what you're doing.
-- Test Biome rule changes with `biome check .` (not `biome check src/`); add overrides for directories with valid console usage.
-- Bun test reporter: `--reporter=dots`. Multi-file runs use bounded isolated workers (`--parallel=<1-8>`); never use `--concurrent`, which marks every test concurrent. Run once without pipe — piped re-runs trigger repeated-test hook.
-- **DO**: In `ci-routes.test.ts` and `issue-routes.test.ts`, use per-test cleanup or `afterAll` for registries/repos. **DON'T** delete shared temporary `cwd` paths in `afterEach`.
+- Test Biome changes with `biome check .` (not `biome check src/`); add overrides for dirs with valid console usage.
+- Bun test reporter: `--reporter=dots`. Multi-file runs use bounded workers (`--parallel=<1-8>`); never use `--concurrent`. Run once without pipe — piped re-runs trigger repeated-test hook.
+- **DO**: In `ci-routes.test.ts` and `issue-routes.test.ts`, use per-test cleanup or `afterAll` for registries/repos. **DON'T** delete shared temp `cwd` in `afterEach`.
 - **DO**: Edit a file between `bun run format` and `bun run lint` — hook detects no file changes on consecutive runs.
 - No `cd` in Bash; use absolute paths, `git -C`, `pnpm --prefix`, or `cwd` in `Bun.spawn()`.
-- `sed -i`/`sed > file` blocked; `sed -n` pipelines allowed. Use Read `offset`/`limit`.
-- `awk > file`/`awk | tee -i` blocked; `awk '{print}'` allowed. Prefer `bun -e`, `cut`, or git `--format`.
+- `sed -i`/`sed > file` blocked; `sed -n` allowed. Use Read `offset`/`limit`.
+- `awk > file`/`awk | tee -i` blocked; `awk '{print}'` allowed. Prefer `bun -e`, `cut`, `git --format`.
 - Do not use `python`/`python3`; use `bun -e` or `jq`.
-- Do not use `rm`/`rm -rf`; use `trash <path>`; guard with `[[ -e <path> ]] && trash <path>`.
-- DO NOT edit `~/.claude/hooks/` or `~/.claude/skills/`; they are external repos. For cross-repo bugs, file an issue with error, root cause, fix, and criteria.
-- **DO NOT mark tasks complete without shipped code.** Always: modify source, verify `git diff`, commit, then mark complete.
-- Stop-hook footers with `REMINDER_FRAGMENT` re-trigger memory enforcement. `pretooluse-update-memory-enforcement.ts` uses a 30-min `CLAUDE.md` mtime cooldown; run `swiz install` after hook changes.
-- Cache-key generation: use `getCanonicalPathHash()` in `hook-utils.ts`. DO NOT duplicate cache-key logic.
+- No `rm`/`rm -rf`; use `trash <path>`; guard with `[[ -e <path> ]] && trash <path>`.
+- DO NOT edit `~/.claude/hooks/` or `~/.claude/skills/` (external repos). For cross-repo bugs, file an issue with error, root cause, fix, and criteria.
+- **DO NOT mark tasks complete without shipped code:** modify source, verify `git diff`, commit, mark complete.
+- Stop footers with `REMINDER_FRAGMENT` re-trigger memory enforcement. `pretooluse-update-memory-enforcement.ts` uses 30-min `CLAUDE.md` mtime cooldown; run `swiz install` after hook changes.
+- Cache keys: use `getCanonicalPathHash()` in `hook-utils.ts`. DO NOT duplicate cache-key logic.
 - In CLI subprocess tests, do not set `cwd: process.cwd()`; use absolute `indexPath = join(process.cwd(), "index.ts")`, temp `cwd`, and `env: { ...process.env, HOME: tempDir }`.
-- Do not use Agent tool `isolation: "worktree"` — corrupts `.git/config`.
-- For secret-like test fixtures, build via array join (`['s','k','_','l','i','v','e','_',...].join('')`) — push protection blocks literal secrets.
-- **DO**: In subprocess tests reaching `hasAiProvider() || detectAgentCli()`, pass `AI_TEST_NO_BACKEND: "1"` — prevents real backend calls. Exempt: tests using `GEMINI_API_KEY: "test-key"` + `GEMINI_TEST_RESPONSE`.
+- No Agent tool `isolation: "worktree"` — corrupts `.git/config`.
+- For secret test fixtures, build via array join (`['s','k','_','l','i','v','e','_',...].join('')`) — push protection blocks literal secrets.
+- **DO**: In subprocess tests reaching `hasAiProvider() || detectAgentCli()`, pass `AI_TEST_NO_BACKEND: "1"` — prevents real backend calls. Exempt: tests with `GEMINI_API_KEY: "test-key"` + `GEMINI_TEST_RESPONSE`.
 - **DON'T**: Treat first-run `pretooluse-repeated-lint-test` blocks as violations. Workaround: make any Edit between runs.
 - Declare commit or push success only after confirming tool output.
 - **DO**: Create workflow tasks for multi-commit sessions: "Task Preflight", "Check Current Branch", "Determine Repository Type", "Branch Decision Rules". Mark complete as steps finish.
-- **DO**: Use `mergeActionPlanIntoTasks(planSteps, sessionId, cwd)` in hooks that build action plans — auto-creates tasks before blocking. Call before `blockStop`/`denyPreToolUse` since those call `process.exit(0)`.
+- **DO**: Use `mergeActionPlanIntoTasks(planSteps, sessionId, cwd)` in action-plan hooks — auto-creates tasks before blocking. Call before `blockStop`/`denyPreToolUse` since those call `process.exit(0)`.

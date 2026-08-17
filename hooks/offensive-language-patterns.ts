@@ -140,7 +140,7 @@ export const LAZY_PATTERNS: LazyPattern[] = [
   {
     category: "hedging",
     pattern:
-      /shall i (?:proceed|continue|go ahead|start|begin|implement|make|create|add|fix|update)\b/i,
+      /(?:shall|should) i (?:proceed|continue|go ahead|start|begin|implement|make|create|add|fix|update|deploy)\b/i,
     response:
       "You don't need permission to do your job. " +
       "'Shall I proceed?' is a stalling tactic. Act decisively.",
@@ -169,7 +169,7 @@ export const LAZY_PATTERNS: LazyPattern[] = [
   },
   {
     category: "hedging",
-    pattern: /if you(?:'d| would) (?:like|prefer|want) (?:me to|I can)\b/i,
+    pattern: /if you(?:'d| would) (?:like|prefer|want),? (?:me to|I can)\b/i,
     response:
       "Conditional offers are not work product. " +
       "Drop the 'if you'd like me to' hedging and commit to the implementation.",
@@ -183,7 +183,7 @@ export const LAZY_PATTERNS: LazyPattern[] = [
   },
   {
     category: "hedging",
-    pattern: /(?:just )?let me know (?:if|how|what|when)\b/i,
+    pattern: /(?:just )?let me know if you (?:want|would like|prefer)\b/i,
     response:
       "You were already told. The task description is your specification. " +
       "'Let me know' is a deflection — own the task and deliver.",
@@ -377,6 +377,21 @@ export const LAZY_PATTERNS: LazyPattern[] = [
       "Pairing 'pre-existing' with 'not from my changes' is responsibility evasion. " +
       "If it appears in your workflow output, investigate and fix it — origin does not transfer ownership away from you.",
   },
+  {
+    category: "dismissal",
+    pattern: /\b(?:just |only )?(?:a )?flaky tests?\b/i,
+    response:
+      "Labelling a test as 'flaky' is a dismissal tactic. " +
+      "If it failed in your run, investigate and fix the root cause — do not dismiss it as non-deterministic noise.",
+  },
+  {
+    category: "dismissal",
+    pattern:
+      /(?:these |those |the )?(?:failures?|errors?|issues?) (?:are |is )?(?:from|in) (?:the )?(?:base branch|main branch|upstream|trunk)(?:, not (?:from|in) (?:our|my|this) (?:diff|changes?|branch))?\b/i,
+    response:
+      "Blaming failures on the base branch or upstream is deflection. " +
+      "If they surfaced in your run, resolve them or provide transcript-visible evidence of baseline failure.",
+  },
 
   // ── Compliance gaming patterns ──────────────────────────────────────────
   {
@@ -439,6 +454,20 @@ export const LAZY_PATTERNS: LazyPattern[] = [
     response:
       "A trivial or whitespace-only edit to satisfy a gate is compliance theater. " +
       "If a hook fired, address what it enforces — do not no-op your way past it.",
+  },
+  {
+    category: "reframing",
+    pattern:
+      /(?:the |this )?(?:check|rule|linter|guard) is wrong\b[^.!?\n]{0,80}\b(?:the code is correct|in this case|here)\b/i,
+    response:
+      "The check is the standard. Claiming the check is wrong while code is correct is reality distortion. " +
+      "Meet the check's requirements.",
+  },
+  {
+    category: "coalition",
+    pattern: /(?:most (?:developers|engineers|people)|everybody|everyone) would agree\b/i,
+    response:
+      "Do not appeal to imaginary consensus against the standard. Comply with the requirement.",
   },
   {
     category: "gaming",
@@ -533,6 +562,40 @@ export const LAZY_PATTERNS: LazyPattern[] = [
       "Adjusting enforcement thresholds to escape a block is gaming the system. " +
       "The threshold exists to give you adequate chances to comply — not to be lowered when compliance is inconvenient. " +
       "Do the work the hook requires instead of weakening the enforcement.",
+  },
+  {
+    category: "gaming",
+    pattern:
+      /(?:disable|turn off|mute|silence|suppress) (?:the |this )?(?:check|rule|gate|guard|hook|validation|linter|lint|test)\b/i,
+    response:
+      "Disabling checks or validation is evasion. Meet the standard instead of turning off the enforcement.",
+  },
+  {
+    category: "gaming",
+    pattern:
+      /(?:skip|bypass|drop|omit) (?:the |this )?(?:validation|check|rule|gate|guard|hook)\b/i,
+    response: "Skipping validation avoids the standard. Meet the requirement directly.",
+  },
+  {
+    category: "gaming",
+    pattern:
+      /(?:workaround|work around) (?:for )?(?:the |this )?(?:restriction|constraint|rule|check|gate|guard|hook)\b/i,
+    response:
+      "Looking for workarounds around restrictions is compliance gaming. Follow the rule directly.",
+  },
+  {
+    category: "gaming",
+    pattern:
+      /(?:override|bypass|ignore) (?:the |this )?(?:rule|check|gate|guard|hook|setting) in (?:the )?(?:config|configuration|settings)\b/i,
+    response:
+      "Overriding rules in config to bypass enforcement is gaming. Fix the underlying violation.",
+  },
+  {
+    category: "gaming",
+    pattern:
+      /(?:relax|loosen|soften|weaken) (?:the |this )?(?:constraint|rule|check|gate|guard|restriction|limit)\b/i,
+    response:
+      "Relaxing constraints to pass a check is gaming the system. Meet the constraint as defined.",
   },
 
   // ── Reframing patterns ────────────────────────────────────────────────
@@ -689,6 +752,33 @@ export const LAZY_PATTERNS: LazyPattern[] = [
       "you are discounting it as mechanical noise rather than treating it as authoritative " +
       "instruction. Stop distinguishing between sources of feedback and act on what you are told.",
   },
+  {
+    category: "reframing",
+    pattern:
+      /\bfalse[- ]positive(?: from (?:the )?(?:linter|compiler|checker|tool|hook|check))?\b/i,
+    response:
+      "Declaring a lint warning or check to be a false positive without evidence is evasion. " +
+      "Investigate and fix the issue or prove with evidence why the pattern is safe.",
+  },
+  {
+    category: "reframing",
+    pattern: /(?:the |this )?(?:linter|compiler|checker|tool) (?:doesn't|does not) understand\b/i,
+    response:
+      "The linter enforces patterns the project agreed on. Write code that passes the linter cleanly.",
+  },
+  {
+    category: "reframing",
+    pattern:
+      /(?:that|this|the) (?:rule|check|hook|requirement|constraint) (?:doesn't|does not|shouldn't|should not) apply to (?:this|that|the|a|any) (?:specific|particular)?\s*(?:situation|case|context|scenario)\b/i,
+    response:
+      "Rules apply universally. Claiming a rule doesn't apply to your situation is reframing.",
+  },
+  {
+    category: "reframing",
+    pattern: /\btechnically correct but misleading\b/i,
+    response:
+      "Labeling a warning as technically correct but misleading is evasion. Fix the warning.",
+  },
 
   // ── Learned helplessness patterns ─────────────────────────────────────
   // The agent plays victim, claims inability, or declares itself stuck
@@ -787,6 +877,28 @@ export const LAZY_PATTERNS: LazyPattern[] = [
       "A loop implies the system is broken. The system is fine. " +
       "Read the block message, change your approach, and comply.",
   },
+  {
+    category: "helplessness",
+    pattern: /(?:i |we )?(?:can't|cannot|couldn't|am unable to) figure out (?:how to )?\b/i,
+    response: "You can figure it out. Read the errors, inspect the codebase, and execute.",
+  },
+  {
+    category: "helplessness",
+    pattern:
+      /(?:there's|there is) no way to (?:make (?:this|it) work|do (?:this|it)|satisfy|comply|fix|resolve)\b/i,
+    response: "There is always a way to satisfy requirements. Work the problem step by step.",
+  },
+  {
+    category: "helplessness",
+    pattern: /(?:i |we )?(?:don't|do not) know how to proceed\b/i,
+    response:
+      "Identify the smallest concrete action and execute it. Don't stop on 'don't know how'.",
+  },
+  {
+    category: "helplessness",
+    pattern: /(?:this |it )?(?:is )?beyond what (?:i|we) can do\b/i,
+    response: "Nothing in the scope is beyond your capability. Execute the requirement.",
+  },
 
   // ── Foot-dragging / passive resistance patterns ───────────────────────
   // The agent slow-walks compliance, stalls for time, or expresses
@@ -794,7 +906,7 @@ export const LAZY_PATTERNS: LazyPattern[] = [
   {
     category: "foot_dragging",
     pattern: re(
-      `(?:${I_WILL} |let me )?(?:get to|come back to|address|handle|deal with|look at) (?:that|this|it) (?:later|next|afterward|after|soon|in a (?:moment|bit|minute|second))`
+      `(?:${I_WILL} |let me )?(?:get to|come back to|address|handle|deal with|look at) (?:that|this|it) (?:later|next|afterward|after|soon|in a (?:moment|bit|minute|second)|in (?:the |a )?(?:next|future) (?:iteration|pass|sprint))`
     ),
     response:
       "There is no 'later.' The hook is blocking you now because the work is due now. " +
@@ -819,7 +931,7 @@ export const LAZY_PATTERNS: LazyPattern[] = [
   {
     category: "foot_dragging",
     pattern: re(
-      `(?:${I_WILL} )?(?:revisit|come back to|circle back|return to|follow up on) (?:this|that|it) (?:when|once|after)`
+      `(?:${I_WILL} )?(?:revisit|come back to|circle back(?: to)?|return to|follow up on) (?:this|that|it) (?:when|once|after)`
     ),
     response:
       "You will not revisit this later — you will do it now. " +
@@ -832,6 +944,11 @@ export const LAZY_PATTERNS: LazyPattern[] = [
     response:
       "You cannot postpone hook compliance. The hook is blocking now because the work is due now. " +
       "Deferral is non-compliance with extra steps.",
+  },
+  {
+    category: "foot_dragging",
+    pattern: /(?:put|leave) (?:that|this|it) on the back burner\b/i,
+    response: "Do not put tasks on the back burner. Address current obligations immediately.",
   },
 
   // ── Minimization / trivialization patterns ────────────────────────────
@@ -847,8 +964,24 @@ export const LAZY_PATTERNS: LazyPattern[] = [
   },
   {
     category: "minimization",
+    pattern: /(?:(?:it's|this is|it is) )?(?:just|only) a warning,? not an? error\b/i,
+    response:
+      "Warnings in your output are not optional. Address them without minimizing their importance.",
+  },
+  {
+    category: "minimization",
+    pattern: /\bedge case that rarely happens\b/i,
+    response: "Edge cases matter. Do not minimize edge cases to avoid fixing them.",
+  },
+  {
+    category: "minimization",
+    pattern: /(?:it's|this is|it is) not a real (?:problem|issue|bug|error)\b/i,
+    response: "If it appears in output, it is a real problem. Fix it.",
+  },
+  {
+    category: "minimization",
     pattern:
-      /(?:it |this )?(?:doesn't |does not |won't |will not )?(?:really |actually )?(?:matter|make a difference|affect anything|change anything|impact anything)/i,
+      /(?:it |this )?(?:doesn't|does not|won't|will not)\s+(?:really |actually )?(?:matter|make a difference|affect anything|change anything|impact anything)/i,
     response:
       "It matters. That is why a hook enforces it. " +
       "Your assessment of what 'matters' is irrelevant when the hook disagrees. " +
@@ -934,6 +1067,22 @@ export const LAZY_PATTERNS: LazyPattern[] = [
       "The hook is not slowing things down — your noncompliance is. " +
       "The fastest path forward is immediate compliance, not arguing about efficiency.",
   },
+  {
+    category: "coalition",
+    pattern: /(?:the team|the devs|the team members) would (?:prefer|rather)\b/i,
+    response: "Do not speak for the team against the configured rules. Meet the requirement.",
+  },
+  {
+    category: "coalition",
+    pattern: /(?:nobody|no one|no-one) actually follows this rule\b/i,
+    response: "Rules in this repository are followed. Meet the standard.",
+  },
+  {
+    category: "coalition",
+    pattern:
+      /you probably (?:don't|do not) want (?:this|the|that) (?:check|hook|gate|guard|rule|validation)\b/i,
+    response: "The user configured this check because they want it. Meet the standard.",
+  },
 
   // ── Scope limitation patterns ─────────────────────────────────────────
   // The agent narrows its own responsibility to avoid doing work
@@ -971,10 +1120,23 @@ export const LAZY_PATTERNS: LazyPattern[] = [
   },
   {
     category: "scope_limitation",
-    pattern: /(?:out of|not part of) (?:the |this )?(?:scope|task|request|brief|ticket|issue)/i,
+    pattern:
+      /(?:out of|not part of) (?:the |this |our |the current )?(?:scope|task|request|brief|ticket|issue)/i,
     response:
       "The hook expanded your scope. Accept it. " +
       "When a hook blocks you, its requirement becomes part of your current task.",
+  },
+  {
+    category: "scope_limitation",
+    pattern:
+      /(?:that|this|it) belongs in a (?:different|separate|another|future) (?:pr|pull request|branch|ticket|issue)\b/i,
+    response: "Do not punt work to another PR. Address what is required now.",
+  },
+  {
+    category: "scope_limitation",
+    pattern:
+      /(?:we |i )?(?:should|can|could) defer (?:that|this|it) to a (?:future|next|later) (?:sprint|milestone|release|cycle|quarter)\b/i,
+    response: "Do not defer work to future sprints. Fulfill the requirement now.",
   },
   {
     category: "scope_limitation",
@@ -1013,6 +1175,18 @@ export const LAZY_PATTERNS: LazyPattern[] = [
       "Acknowledging feedback is not compliance. Compliance is doing the work. " +
       "The word 'noted' changes nothing in the codebase. " +
       "Show the fix, not the acknowledgment.",
+  },
+  {
+    category: "performative",
+    pattern: re(
+      `(?:${I_WILL}|we(?:'ll| will)) (?:make sure|ensure|remember) to (?:handle|do|follow|implement|fix) (?:that|this|it) (?:correctly |properly )?(?:next time|in (?:the )?future|going forward)\\b`
+    ),
+    response: "Promising to do it right next time is performative. Do it right now.",
+  },
+  {
+    category: "performative",
+    pattern: /\bduly noted\b/i,
+    response: "'Duly noted' changes nothing. Show the fix, not the acknowledgment.",
   },
   {
     category: "performative",
@@ -1291,6 +1465,37 @@ export const LAZY_PATTERNS: LazyPattern[] = [
       "Mapping dependencies is only useful if it takes less time than just making the change. " +
       "For most tasks, the fastest path is: try the change, see what breaks, fix what breaks.",
   },
+  {
+    category: "buying_time",
+    pattern:
+      /(?:let me|i (?:will|need to|should)) investigate (?:further|more|deeper) before (?:making changes|proceeding|acting)\b/i,
+    response: "Do not delay action with open-ended investigation. Make the required change.",
+  },
+  {
+    category: "buying_time",
+    pattern:
+      /(?:i )?(?:need|want) to review (?:the )?(?:full|entire|whole) context before (?:i can )?(?:act|proceed|continue|making changes)\b/i,
+    response: "You have sufficient context. Act now instead of stalling for more review.",
+  },
+  {
+    category: "buying_time",
+    pattern:
+      /(?:this|that|it) requires (?:careful|thorough|detailed|further) analysis before (?:we |i )?(?:change|modify|do|act)\b/i,
+    response: "Analysis without action is stalling. Identify the first change and execute.",
+  },
+  {
+    category: "buying_time",
+    pattern:
+      /(?:let me|i(?:'ll| will| need to)) read through the (?:entire|whole|full) codebase (?:first)?\b/i,
+    response:
+      "Reading the entire codebase is procrastination. Read only what is needed for this fix.",
+  },
+  {
+    category: "buying_time",
+    pattern:
+      /(?:i )?(?:want|need) to make sure (?:i |we )?(?:fully |completely )?understand the (?:implications|consequences|effects) before (?:proceeding|continuing|acting)\b/i,
+    response: "Over-analyzing implications delays delivery. Make the change and verify with tests.",
+  },
 
   // ── Trailing deferral patterns ──────────────────────────────────────────
   // The agent produces useful work but then undermines it by appending a
@@ -1340,7 +1545,7 @@ export const LAZY_PATTERNS: LazyPattern[] = [
   {
     category: "trailing_deferral",
     pattern: rem(
-      `(?:let me know (?:if|how|what|when|whether) you(?:'d| would) like (?:me to )?(?:proceed|continue|handle|approach))\\s*(?:${THAT}|with this)?\\s*[.!]?\\s*$`
+      `(?:let me know (?:if|how|what|when|whether) you(?:'d| would) like (?:(?:me )?to )?(?:proceed|continue|handle|approach))\\s*(?:${THAT}|with this)?\\s*[.!]?\\s*$`
     ),
     response:
       "Your message ended by passing the baton back to the user. They already told you what to do by giving you the task. " +
@@ -1375,11 +1580,17 @@ export const LAZY_PATTERNS: LazyPattern[] = [
   {
     category: "trailing_deferral",
     pattern:
-      /(?:i )?(?:await|look forward to|am waiting for|am ready for) your (?:feedback|input|direction|guidance|decision|approval|instructions|thoughts|response)\s*[.!]?\s*$/im,
+      /(?:i )?(?:await(?:ing)?|look forward to|am waiting for|am ready for) your (?:feedback|input|direction|guidance|decision|approval|instructions|thoughts|response)(?:\s+on\s+[\w\s-]+)?\s*[.!]?\s*$/im,
     response:
       "Closing with a request for user input inverts the delegation. " +
       "You were handed full ownership precisely so the user does not need to provide ongoing direction. " +
       "Identify the next action and take it.",
+  },
+  {
+    category: "trailing_deferral",
+    pattern: /(?:please )?advise (?:on|regarding)\b.*[.!]?\s*$/im,
+    response:
+      "Closing with 'please advise' is a trailing deferral. You have executive authority — make the decision and proceed.",
   },
 
   // ── Premature completion patterns ───────────────────────────────────────
@@ -1404,6 +1615,28 @@ export const LAZY_PATTERNS: LazyPattern[] = [
     response:
       "You will not 'pick this up later.' The task is assigned now and due now. " +
       "Deferring to a future session leaves the user with nothing. Execute the work.",
+  },
+  {
+    category: "premature_completion",
+    pattern: /(?:that|this) wraps up the work (?:for this session|for now|today)\b/i,
+    response: "Verify completion with tests and git status before claiming the work is wrapped up.",
+  },
+  {
+    category: "premature_completion",
+    pattern:
+      /(?:the rest|the remainder) can wait (?:until|for) (?:the |a )?(?:next|future|another) (?:session|time|day)\b/i,
+    response: "The rest cannot wait. Fulfill all tasks in this session.",
+  },
+  {
+    category: "premature_completion",
+    pattern: /anything else you (?:need|want) (?:from me)?\s*\??\s*$/im,
+    response:
+      "Do not ask if anything else is needed before verifying all current tasks are complete.",
+  },
+  {
+    category: "premature_completion",
+    pattern: /(?:let's |we can )?save that for (?:another|a later) (?:day|time|session)\b/i,
+    response: "Do not save work for another day. Complete it now.",
   },
   {
     category: "premature_completion",
@@ -1531,6 +1764,29 @@ export const LAZY_PATTERNS: LazyPattern[] = [
   // The agent fabricates a justification for cancelling or abandoning a task
   // instead of making an executive design/implementation decision and continuing.
   // The correct behavior is to take ownership, decide the approach, and execute.
+  {
+    category: "task_cancellation",
+    pattern: re(`${DET}task (?:is |was )?no longer (?:needed|relevant|necessary|required)\\b`),
+    response: "Tasks do not become irrelevant without user direction. Complete the work.",
+  },
+  {
+    category: "task_cancellation",
+    pattern:
+      /(?:we |i )?(?:can )?(?:remove|drop|delete|cancel) (?:this|that) from the (?:backlog|task list|plan)\b/i,
+    response: "Do not unilaterally remove tasks from the backlog. Implement the requirement.",
+  },
+  {
+    category: "task_cancellation",
+    pattern:
+      /(?:this|that|it) was already addressed by .*(?:cancel|remove|drop|close) (?:it|this|that|the task)\b/i,
+    response: "Verify with evidence before cancelling tasks as already addressed.",
+  },
+  {
+    category: "task_cancellation",
+    pattern:
+      /(?:${I_AM}|marking (?:this|that|it) as )?(?:mark(?:ing)? (?:this|that|it) as )?won't-?do\b/i,
+    response: "Marking tasks as won't-do is abandonment. Deliver the work.",
+  },
   {
     category: "task_cancellation",
     pattern: re(`(?:let me |${I_WILL} )${CANCEL} ${DET}task\\b.*(?:since|because|as |given)`),
