@@ -185,10 +185,17 @@ function summarizeFileOrCommandInput(input: Record<string, any>): string | null 
   return null
 }
 
+function execCodeDetail(input: Record<string, any>, name?: string): string | null {
+  if (name?.toLowerCase() !== "exec" || typeof input.code !== "string") return null
+  return truncate(input.code, GENERIC_TOOL_DETAIL_TRUNCATE)
+}
+
 export function summarizeToolInput(input: Record<string, any> | undefined, name?: string): string {
   if (!input) return ""
   if (name && isTaskTool(name)) return taskToolDetail(input)
   if (name && isFileTool(name)) return fileToolDetail(input)
+  const execCode = execCodeDetail(input, name)
+  if (execCode) return execCode
   const summary = summarizeFileOrCommandInput(input)
   if (summary) return summary
   // Keep unknown provider-specific payloads inspectable without retaining unbounded blobs.

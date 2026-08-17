@@ -87,7 +87,7 @@ describe("summarizeToolInput", () => {
       "exec"
     )
 
-    expect(detail).toContain('"code"')
+    expect(detail).not.toContain('"code"')
     expect(detail).toContain("bun test")
   })
 })
