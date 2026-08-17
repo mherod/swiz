@@ -495,19 +495,22 @@ export class TaskStateCache {
    */
   watchSession(sessionId: string, tasksDir: string): void {
     const existingDir = this.tasksDirs.get(sessionId)
-    if (existingDir === tasksDir && this.watchers.has(sessionId)) return
     if (existingDir && existingDir !== tasksDir) {
       this.unwatchSession(sessionId)
     }
     this.tasksDirs.set(sessionId, tasksDir)
-    try {
-      const watcher = watch(tasksDir, { recursive: false }, () => {
-        this.markStale(sessionId)
-      })
-      this.watchers.set(sessionId, watcher)
-    } catch {
-      // Directory may not exist yet — that's fine, first read will populate
+    if (!this.watchers.has(sessionId)) {
+      try {
+        const watcher = watch(tasksDir, { recursive: false }, () => {
+          this.markStale(sessionId)
+        })
+        this.watchers.set(sessionId, watcher)
+      } catch {
+        // Directory may not exist yet — that's fine, first read will populate
+      }
     }
+    this.touchAccessOrder(sessionId)
+    this.evictIfNeeded()
   }
 
   /** Stop watching a session and remove its cached state + event state. */
@@ -519,7 +522,8 @@ export class TaskStateCache {
     }
     this.entries.delete(sessionId)
     this.tasksDirs.delete(sessionId)
-    this.accessOrder = this.accessOrder.filter((id) => id !== sessionId)
+    const idx = this.accessOrder.indexOf(sessionId)
+    if (idx >= 0) this.accessOrder.splice(idx, 1)
     pruneSession(sessionId)
   }
 
@@ -773,6 +777,16 @@ export class TaskStateCache {
     return [...this.watchers.keys()]
   }
 
+  /** Snapshot of all tracked session IDs in LRU order (least to most recently used). */
+  trackedSessions(): string[] {
+    return [...this.accessOrder]
+  }
+
+  /** Number of tracked session lifecycles. */
+  get trackedCount(): number {
+    return this.accessOrder.length
+  }
+
   // ─── Lifecycle ──────────────────────────────────────────────────────────
 
   /** Close all watchers and clear both the cache and in-memory event state. */
@@ -783,6 +797,9 @@ export class TaskStateCache {
     this.watchers.clear()
     // Prune event state only for sessions this cache tracked — avoids
     // clearing state owned by other cache instances in concurrent tests.
+    for (const sessionId of this.accessOrder) {
+      pruneSession(sessionId)
+    }
     for (const sessionId of this.entries.keys()) {
       pruneSession(sessionId)
     }
@@ -833,8 +850,9 @@ export class TaskStateCache {
   }
 
   private evictIfNeeded(): void {
-    while (this.entries.size > this.maxEntries && this.accessOrder.length > 0) {
-      const oldest = this.accessOrder.shift()!
+    while (this.accessOrder.length > this.maxEntries) {
+      const oldest = this.accessOrder[0]
+      if (!oldest) break
       this.unwatchSession(oldest)
     }
   }

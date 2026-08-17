@@ -435,6 +435,98 @@ describe("TaskStateCache", () => {
       expect(cache.has("s3")).toBe(true)
       cache.close()
     })
+
+    it("watching session directories without getState retains maxEntries and closes oldest watcher", async () => {
+      const cache = new TaskStateCache({ maxEntries: 2 })
+      const base = await tmp.create()
+
+      const dir1 = await createSessionDir(base, "w1")
+      const dir2 = await createSessionDir(base, "w2")
+      const dir3 = await createSessionDir(base, "w3")
+
+      cache.watchSession("w1", dir1)
+      cache.watchSession("w2", dir2)
+      expect(cache.watchedSessions()).toEqual(["w1", "w2"])
+      expect(cache.trackedSessions()).toEqual(["w1", "w2"])
+      expect(cache.trackedCount).toBe(2)
+
+      // Watching w3 should evict w1
+      cache.watchSession("w3", dir3)
+      expect(cache.watchedSessions()).toEqual(["w2", "w3"])
+      expect(cache.trackedSessions()).toEqual(["w2", "w3"])
+      expect(cache.trackedCount).toBe(2)
+
+      cache.close()
+    })
+
+    it("missing directories count toward bound and evict oldest mapping and event state", async () => {
+      const cache = new TaskStateCache({ maxEntries: 2 })
+      const pid = process.pid
+
+      applyTaskCreateEvent(`missing-a-${pid}`, "1", "Task A")
+      applyTaskCreateEvent(`missing-b-${pid}`, "2", "Task B")
+
+      cache.watchSession(`missing-a-${pid}`, `/nonexistent/dir/a-${pid}`)
+      cache.watchSession(`missing-b-${pid}`, `/nonexistent/dir/b-${pid}`)
+      expect(cache.trackedSessions()).toEqual([`missing-a-${pid}`, `missing-b-${pid}`])
+      expect(getSessionEventState(`missing-a-${pid}`)).toHaveLength(1)
+
+      // Register third missing directory — should evict missing-a
+      cache.watchSession(`missing-c-${pid}`, `/nonexistent/dir/c-${pid}`)
+      expect(cache.trackedSessions()).toEqual([`missing-b-${pid}`, `missing-c-${pid}`])
+      expect(cache.trackedCount).toBe(2)
+
+      // Oldest mapping and event state are pruned
+      expect(getSessionEventState(`missing-a-${pid}`)).toBeNull()
+      expect(getSessionEventState(`missing-b-${pid}`)).toHaveLength(1)
+
+      cache.close()
+    })
+
+    it("re-registering an existing session refreshes it to MRU", async () => {
+      const cache = new TaskStateCache({ maxEntries: 2 })
+      const base = await tmp.create()
+
+      const dir1 = await createSessionDir(base, "mru1")
+      const dir2 = await createSessionDir(base, "mru2")
+      const dir3 = await createSessionDir(base, "mru3")
+
+      cache.watchSession("mru1", dir1)
+      cache.watchSession("mru2", dir2)
+      expect(cache.trackedSessions()).toEqual(["mru1", "mru2"])
+
+      // Re-register mru1 -> refreshes mru1 to MRU
+      cache.watchSession("mru1", dir1)
+      expect(cache.trackedSessions()).toEqual(["mru2", "mru1"])
+
+      // Watch mru3 -> evicts mru2 (the least recently used), retaining mru1 and mru3
+      cache.watchSession("mru3", dir3)
+      expect(cache.trackedSessions()).toEqual(["mru1", "mru3"])
+      expect(cache.watchedSessions()).toEqual(["mru1", "mru3"])
+
+      cache.close()
+    })
+
+    it("unwatchSession and close are idempotent and leave no live handles", async () => {
+      const cache = new TaskStateCache({ maxEntries: 2 })
+      const base = await tmp.create()
+
+      const dir1 = await createSessionDir(base, "idem1")
+      cache.watchSession("idem1", dir1)
+      expect(cache.watchedSessions()).toEqual(["idem1"])
+
+      // Multiple unwatch calls
+      cache.unwatchSession("idem1")
+      cache.unwatchSession("idem1")
+      expect(cache.watchedSessions()).toEqual([])
+      expect(cache.trackedSessions()).toEqual([])
+
+      // Multiple close calls
+      cache.close()
+      cache.close()
+      expect(cache.watchedSessions()).toEqual([])
+      expect(cache.trackedSessions()).toEqual([])
+    })
   })
 
   describe("getTasksFresh", () => {

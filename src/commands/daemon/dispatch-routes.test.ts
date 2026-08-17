@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 import stopLifecycleTasks from "../../../hooks/stop-lifecycle-tasks.ts"
 import type { HookGroup } from "../../manifest.ts"
 import type { SwizHook } from "../../SwizHook.ts"
+import { TaskStateCache } from "../../tasks/task-state-cache.ts"
 import { resolveSessionLines } from "../../utils/transcript.ts"
 import { CappedMap } from "./cache/capped-map.ts"
 import { LastUserMessageCache } from "./cache/last-user-message-cache.ts"
@@ -533,5 +534,41 @@ describe("prepareLifecycleTaskDispatch", () => {
     expect(body.continue).toBe(true)
     expect(body.reason).toEqual(expect.stringContaining("task-1: Compile assets"))
     expect(body.systemMessage).toEqual(expect.stringContaining("advisory only"))
+  })
+
+  test("dispatching more than maxEntries unique sessions bounds task-cache lifecycles", async () => {
+    const taskStateCache = new TaskStateCache({ maxEntries: 2 })
+    const ctx = {
+      ...createDispatchContext([{ event: "taskCreated", hooks: [] }]),
+      taskStateCache,
+    }
+
+    const projectCwd = process.cwd()
+    const url = new URL("http://daemon/dispatch?event=taskCreated&hookEventName=TaskCreated")
+
+    for (let i = 1; i <= 4; i++) {
+      await handleDispatchRoute(
+        new Request(url, {
+          method: "POST",
+          body: JSON.stringify({
+            cwd: projectCwd,
+            session_id: `session-dispatch-bound-${i}`,
+            hook_event_name: "TaskCreated",
+            task_id: `task-${i}`,
+            task_subject: `Task subject ${i}`,
+          }),
+        }),
+        url,
+        ctx
+      )
+    }
+
+    // Even though 4 unique sessions were dispatched, at most maxEntries (2) are retained
+    expect(taskStateCache.trackedCount).toBe(2)
+    expect(taskStateCache.trackedSessions()).toEqual([
+      "session-dispatch-bound-3",
+      "session-dispatch-bound-4",
+    ])
+    taskStateCache.close()
   })
 })
