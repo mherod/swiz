@@ -64,6 +64,8 @@ export interface AuditEntry {
   verificationText?: string
   evidence?: string
   subject?: string
+  /** Stable operation key used to make a retried batch's audit append idempotent. */
+  operationId?: string
 }
 
 export const STATUS_STYLE: Record<TaskStatus, { emoji: string; color: string }> = {
@@ -325,6 +327,20 @@ async function updateSessionMeta(dir: string, cwd?: string): Promise<void> {
   }
 }
 
+async function updateSessionMetaFromTasks(
+  dir: string,
+  tasks: readonly Task[],
+  cwd?: string
+): Promise<void> {
+  const effectiveCwd = await resolveMetaCwd(dir, cwd)
+  const meta: SessionMeta = {
+    openCount: tasks.filter((task) => isIncompleteTaskStatus(task.status)).length,
+    updatedAt: new Date().toISOString(),
+    ...(effectiveCwd !== undefined ? { cwd: effectiveCwd } : {}),
+  }
+  await atomicWriteJson(join(dir, SESSION_META_FILE), meta)
+}
+
 /**
  * In-process cache for session metadata. Avoids repeated filesystem reads
  * within a single CLI invocation. Invalidated per-session by writeTask.
@@ -334,6 +350,107 @@ const sessionMetaCache = new CappedMap<string, SessionMeta | null>(500)
 /** Cache key for sessionMetaCache. */
 function metaCacheKey(sessionId: string, tasksDir: string): string {
   return `${tasksDir}\0${sessionId}`
+}
+
+export interface TaskBatchWrite {
+  task: Task
+  audit: AuditEntry
+}
+
+export interface TaskBatchWriteResult {
+  taskWrites: number
+  auditWrites: number
+  metadataWrites: number
+  maxConcurrentTaskWrites: number
+}
+
+async function writeBoundedTaskFiles(
+  dir: string,
+  tasks: readonly Task[],
+  concurrency = 8
+): Promise<Pick<TaskBatchWriteResult, "taskWrites" | "maxConcurrentTaskWrites">> {
+  let nextIndex = 0
+  let taskWrites = 0
+  let activeWrites = 0
+  let maxConcurrentTaskWrites = 0
+  const workerCount = Math.min(Math.max(1, concurrency), tasks.length)
+  await Promise.all(
+    Array.from({ length: workerCount }, async () => {
+      while (true) {
+        const index = nextIndex++
+        const task = tasks[index]
+        if (!task) return
+        activeWrites++
+        maxConcurrentTaskWrites = Math.max(maxConcurrentTaskWrites, activeWrites)
+        try {
+          await atomicWriteJson(join(dir, `${task.id}.json`), task)
+          taskWrites++
+        } finally {
+          activeWrites--
+        }
+      }
+    })
+  )
+  return { taskWrites, maxConcurrentTaskWrites }
+}
+
+async function readAuditOperationIds(auditPath: string): Promise<Set<string>> {
+  try {
+    const entries = (await readFile(auditPath, "utf-8")).split("\n")
+    const operationIds = new Set<string>()
+    for (const entry of entries) {
+      if (!entry) continue
+      try {
+        const parsed = JSON.parse(entry) as { operationId?: unknown }
+        if (typeof parsed.operationId === "string") operationIds.add(parsed.operationId)
+      } catch {
+        // A malformed historical line does not prevent a new batch from being persisted.
+      }
+    }
+    return operationIds
+  } catch {
+    return new Set()
+  }
+}
+
+/**
+ * Persist a coherent group of task writes for one session.
+ *
+ * Task files remain individually atomic, audit entries retain source order,
+ * and session metadata is derived from the caller's final in-memory task list
+ * exactly once. Callers own any cache/event projection that follows the batch.
+ */
+export async function writeTaskBatch(
+  sessionId: string,
+  writes: readonly TaskBatchWrite[],
+  finalTasks: readonly Task[],
+  cwd?: string,
+  tasksDir = createDefaultTaskStore().tasksDir
+): Promise<TaskBatchWriteResult> {
+  const dir = join(tasksDir, sessionId)
+  await mkdir(dir, { recursive: true })
+  const auditPath = join(dir, AUDIT_LOG_FILENAME)
+  const persistedOperationIds = await readAuditOperationIds(auditPath)
+  let auditWrites = 0
+  for (const write of writes) {
+    const operationId = write.audit.operationId
+    if (operationId && persistedOperationIds.has(operationId)) continue
+    await appendJsonlEntry(auditPath, write.audit)
+    auditWrites++
+    if (operationId) persistedOperationIds.add(operationId)
+  }
+
+  const taskWrites = await writeBoundedTaskFiles(
+    dir,
+    writes.map((write) => write.task)
+  )
+  await updateSessionMetaFromTasks(dir, finalTasks, cwd)
+  sessionMetaCache.delete(metaCacheKey(sessionId, tasksDir))
+  return {
+    ...taskWrites,
+    auditWrites,
+    metadataWrites: 1,
+  }
 }
 
 /**

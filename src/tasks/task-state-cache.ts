@@ -117,12 +117,14 @@ export async function readCanonicalTaskListSyncAtMs(sessionId: string): Promise<
 
 export async function writeCanonicalTaskListSyncSentinel(
   sessionId: string,
-  syncedAtMs = Date.now()
+  syncedAtMs = Date.now(),
+  options: { throwOnError?: boolean } = {}
 ): Promise<number> {
   if (!sessionId) return syncedAtMs
   try {
     await Bun.write(taskListSyncSentinelPath(sessionId), String(syncedAtMs))
-  } catch {
+  } catch (error) {
+    if (options.throwOnError) throw error
     // Best-effort: TaskList sync should still succeed even if the sentinel write fails.
   }
   return syncedAtMs

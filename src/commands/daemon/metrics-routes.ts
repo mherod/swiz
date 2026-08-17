@@ -5,6 +5,7 @@
 import { getWorkerPoolMetrics } from "../../dispatch/worker-pool.ts"
 import { getGhRateLimitStats } from "../../gh-rate-limit.ts"
 import { getHookLogMetrics, readHookLogs } from "../../hook-log.ts"
+import { getCodexPlanSyncMetrics } from "../../tasks/codex-update-plan.ts"
 import { getTurnsCacheStats } from "../../transcript-turns.ts"
 import type {
   CooldownRegistry,
@@ -41,6 +42,7 @@ export function handleMetricsRoute(url: URL, ctx: MetricsRoutesContext): Respons
       hits: ctx.transcriptIndex.hits,
       misses: ctx.transcriptIndex.misses,
     },
+    codexPlanSync: getCodexPlanSyncMetrics(),
     turnsCache: getTurnsCacheStats(),
     eligibility: { size: ctx.eligibilityCache.size },
     cooldown: { size: ctx.cooldownRegistry.size },

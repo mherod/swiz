@@ -1,8 +1,14 @@
 import { describe, expect, it } from "bun:test"
-import { readdir, stat } from "node:fs/promises"
+import { readdir, readFile, stat } from "node:fs/promises"
 import { join } from "node:path"
 import { useTempDir } from "../utils/test-utils.ts"
-import { readTasks, type Task, writeTask } from "./task-repository.ts"
+import {
+  readSessionMeta,
+  readTasks,
+  type Task,
+  writeTask,
+  writeTaskBatch,
+} from "./task-repository.ts"
 
 const tmp = useTempDir("swiz-task-repo-")
 
@@ -87,5 +93,96 @@ describe("writeTask atomicity", () => {
     const tasks = await readTasks(sessionId, base)
     expect(tasks).toHaveLength(1)
     expect(tasks[0]!.status).toBe("in_progress")
+  })
+
+  it("writes a task batch with ordered audit entries and one final metadata state", async () => {
+    const base = await tmp.create()
+    const sessionId = "sess-atomic-batch"
+    const first = makeTask("1", "pending", "First task")
+    const second = makeTask("2", "completed", "Second task")
+
+    const result = await writeTaskBatch(
+      sessionId,
+      [
+        {
+          task: first,
+          audit: {
+            timestamp: new Date().toISOString(),
+            taskId: first.id,
+            action: "create",
+            newStatus: first.status,
+            subject: first.subject,
+          },
+        },
+        {
+          task: second,
+          audit: {
+            timestamp: new Date().toISOString(),
+            taskId: second.id,
+            action: "create",
+            newStatus: second.status,
+            subject: second.subject,
+          },
+        },
+      ],
+      [first, second],
+      process.cwd(),
+      base
+    )
+
+    expect((await readTasks(sessionId, base)).map((task) => task.id)).toEqual(["1", "2"])
+    expect(await readSessionMeta(sessionId, base)).toMatchObject({
+      cwd: process.cwd(),
+      openCount: 1,
+    })
+
+    const auditLines = (await readFile(join(base, sessionId, ".audit-log.jsonl"), "utf-8"))
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line) as { taskId: string })
+    expect(auditLines.map((entry) => entry.taskId)).toEqual(["1", "2"])
+    expect(result).toMatchObject({
+      taskWrites: 2,
+      auditWrites: 2,
+      metadataWrites: 1,
+      maxConcurrentTaskWrites: 2,
+    })
+  })
+
+  it("bounds a 100-task batch while writing one metadata record", async () => {
+    const base = await tmp.create()
+    const sessionId = "sess-atomic-large-batch"
+    const tasks = Array.from({ length: 100 }, (_, index) =>
+      makeTask(String(index + 1), "pending", `Task ${index + 1}`)
+    )
+
+    const result = await writeTaskBatch(
+      sessionId,
+      tasks.map((task) => ({
+        task,
+        audit: {
+          timestamp: new Date().toISOString(),
+          taskId: task.id,
+          action: "create" as const,
+          newStatus: task.status,
+          subject: task.subject,
+          operationId: `batch-${task.id}`,
+        },
+      })),
+      tasks,
+      process.cwd(),
+      base
+    )
+
+    expect(result).toMatchObject({ taskWrites: 100, auditWrites: 100, metadataWrites: 1 })
+    expect(result.maxConcurrentTaskWrites).toBeGreaterThan(0)
+    expect(result.maxConcurrentTaskWrites).toBeLessThanOrEqual(8)
+    expect(await readTasks(sessionId, base)).toHaveLength(100)
+    expect(await readSessionMeta(sessionId, base)).toMatchObject({ openCount: 100 })
+    const auditLines = (await readFile(join(base, sessionId, ".audit-log.jsonl"), "utf-8"))
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line) as { taskId: string })
+    expect(auditLines.map((entry) => entry.taskId)).toEqual(tasks.map((task) => task.id))
   })
 })

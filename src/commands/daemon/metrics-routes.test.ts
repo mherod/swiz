@@ -96,6 +96,14 @@ describe("metrics routes", () => {
     expect(body.totalDispatches).toBe(1)
     expect(body.projects["/repo"].totalDispatches).toBe(1)
     expect(body.caches.snapshots.size).toBe(3)
+    expect(body.caches.codexPlanSync).toMatchObject({
+      exactSnapshotSkips: expect.any(Number),
+      samePlanSkips: expect.any(Number),
+      applied: expect.any(Number),
+      failed: expect.any(Number),
+      totalDurationMs: expect.any(Number),
+      maxDurationMs: expect.any(Number),
+    })
     expect(body.hookLogs).toMatchObject({
       currentBytes: 1024,
       retainedRecords: 12,
