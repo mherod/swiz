@@ -210,7 +210,23 @@ function AttachedSkillsBlock({
 }) {
   return (
     <details className="hook-context-box hook-context-collapsible">
-      <summary className="hook-context-summary">{skills.title}</summary>
+      <summary className="hook-context-summary">
+        <span className="skill-exchange-icon" aria-hidden="true">
+          ⚡
+        </span>{" "}
+        {skills.title}
+        {skills.skills.slice(0, 3).map((skill) => (
+          <span key={`${skill.name}:${skill.path ?? ""}`}>
+            {" "}
+            <code className="skill-exchange-name" title={skill.path ?? undefined}>
+              {skill.name}
+            </code>
+          </span>
+        ))}
+        {skills.skills.length > 3 ? (
+          <span className="message-repeat-badge">+{skills.skills.length - 3}</span>
+        ) : null}
+      </summary>
       {skills.skills.length > 0 ? (
         <ul className="hook-context-list">
           {skills.skills.map((skill) => (

@@ -101,13 +101,21 @@ export function splitUserMessage(text: string): UserMessageParts {
   const normalizedText = unwrapLeadingTag(cleanedText, "user_query")
   const { cleanedText: compactText, metadataBlocks: inlineMetadataBlocks } =
     extractInlineContextBlocks(normalizedText)
-  const attachedSkills = parseManuallyAttachedSkills(attachedSkillsRaw)
   const metadataBlocks = [...taggedMetadataBlocks, ...inlineMetadataBlocks]
 
   const marker = "<hook_context>"
   const markerIndex = compactText.indexOf(marker)
+  const userText = markerIndex < 0 ? compactText : compactText.slice(0, markerIndex)
+  const inlineSkillLinks = extractInlineSkillLinks(userText)
+  const attachedSkills = mergeAttachedSkills(
+    parseManuallyAttachedSkills(attachedSkillsRaw),
+    inlineSkillLinks.skills
+  )
+  const visibleText = stripRolePrefix(
+    sanitizeInternalNoise(inlineSkillLinks.cleanedText.trim()),
+    "user"
+  )
   if (markerIndex < 0) {
-    const visibleText = stripRolePrefix(sanitizeInternalNoise(compactText.trim()), "user")
     return {
       visibleText,
       hookContext: null,
@@ -117,10 +125,6 @@ export function splitUserMessage(text: string): UserMessageParts {
     }
   }
 
-  const visibleText = stripRolePrefix(
-    sanitizeInternalNoise(compactText.slice(0, markerIndex).trim()),
-    "user"
-  )
   const rawContext = compactText.slice(markerIndex + marker.length).trim()
   const hookContext = parseHookContext(rawContext)
 
@@ -131,6 +135,139 @@ export function splitUserMessage(text: string): UserMessageParts {
     attachedSkills,
     metadataBlocks,
   }
+}
+
+interface TextRange {
+  start: number
+  end: number
+}
+
+interface TextReplacementRange extends TextRange {
+  replacement: string
+}
+
+interface InlineSkillLinks {
+  cleanedText: string
+  skills: ParsedAttachedSkill[]
+}
+
+const INLINE_SKILL_LINK_SOURCE = String.raw`\[\$([a-z0-9][a-z0-9:_-]*)\]\((\/[^)\s]+\/skills\/([a-z0-9][a-z0-9:_-]*)\/SKILL\.md)\)`
+
+function overlapsRange(start: number, end: number, ranges: TextRange[]): boolean {
+  return ranges.some((range) => start < range.end && end > range.start)
+}
+
+function collectMarkdownCodeRanges(text: string): TextRange[] {
+  const ranges: TextRange[] = []
+  const fencedCodeRe = /```[\s\S]*?(?:```|$)/g
+  for (const match of text.matchAll(fencedCodeRe)) {
+    if (match.index == null) continue
+    ranges.push({ start: match.index, end: match.index + match[0].length })
+  }
+
+  const inlineCodeRe = /`[^`\n]*`/g
+  for (const match of text.matchAll(inlineCodeRe)) {
+    if (match.index == null) continue
+    const start = match.index
+    const end = start + match[0].length
+    if (!overlapsRange(start, end, ranges)) ranges.push({ start, end })
+  }
+  return ranges
+}
+
+function normalizeRemovedInlineSkillLinks(text: string): string {
+  return text
+    .replace(/[ \t]{2,}/g, " ")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n[ \t]+\n/g, "\n\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim()
+}
+
+function replacementForInlineSkillLink(
+  text: string,
+  start: number,
+  end: number,
+  name: string
+): string {
+  const lineStart = text.lastIndexOf("\n", start - 1) + 1
+  const nextLineBreak = text.indexOf("\n", end)
+  const lineEnd = nextLineBreak < 0 ? text.length : nextLineBreak
+  const surroundingLine = text.slice(lineStart, start) + text.slice(end, lineEnd)
+  return surroundingLine.trim() ? `$${name}` : ""
+}
+
+function replaceTextRanges(text: string, ranges: TextReplacementRange[]): string {
+  let replaced = ""
+  let cursor = 0
+  for (const range of ranges) {
+    replaced += text.slice(cursor, range.start)
+    replaced += range.replacement
+    cursor = range.end
+  }
+  replaced += text.slice(cursor)
+  return replaced
+}
+
+function extractInlineSkillLinks(text: string): InlineSkillLinks {
+  const codeRanges = collectMarkdownCodeRanges(text)
+  const consumedRanges: TextReplacementRange[] = []
+  const skills: ParsedAttachedSkill[] = []
+  const skillLinkRe = new RegExp(INLINE_SKILL_LINK_SOURCE, "gi")
+
+  for (const match of text.matchAll(skillLinkRe)) {
+    if (match.index == null) continue
+    const full = match[0]
+    const name = match[1]
+    const path = match[2]
+    const pathSkillName = match[3]
+    if (!full || !name || !path || !pathSkillName) continue
+
+    const start = match.index
+    const end = start + full.length
+    if (overlapsRange(start, end, codeRanges)) continue
+    if (name.toLowerCase() !== pathSkillName.toLowerCase()) continue
+
+    skills.push({ name, path })
+    consumedRanges.push({
+      start,
+      end,
+      replacement: replacementForInlineSkillLink(text, start, end, name),
+    })
+  }
+
+  if (skills.length === 0) return { cleanedText: text, skills: [] }
+  return {
+    cleanedText: normalizeRemovedInlineSkillLinks(replaceTextRanges(text, consumedRanges)),
+    skills,
+  }
+}
+
+function skillIdentity(skill: ParsedAttachedSkill): string {
+  return `${skill.name.toLowerCase()}\u0000${skill.path?.toLowerCase() ?? ""}`
+}
+
+function mergeAttachedSkills(
+  manuallyAttached: ParsedAttachedSkills | null,
+  inlineSkills: ParsedAttachedSkill[]
+): ParsedAttachedSkills | null {
+  if (inlineSkills.length === 0) return manuallyAttached
+
+  const skills: ParsedAttachedSkill[] = []
+  const seen = new Set<string>()
+  for (const skill of [...(manuallyAttached?.skills ?? []), ...inlineSkills]) {
+    const identity = skillIdentity(skill)
+    if (seen.has(identity)) continue
+    seen.add(identity)
+    skills.push(skill)
+  }
+
+  const title = manuallyAttached
+    ? `Skills (${skills.length})`
+    : skills.length === 1
+      ? "Skill use"
+      : `Skill uses (${skills.length})`
+  return { title, skills, notes: manuallyAttached?.notes ?? [] }
 }
 
 function extractInlineContextBlocks(text: string): {
