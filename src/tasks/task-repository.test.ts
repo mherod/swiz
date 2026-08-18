@@ -3,8 +3,10 @@ import { readdir, readFile, stat } from "node:fs/promises"
 import { join } from "node:path"
 import { useTempDir } from "../utils/test-utils.ts"
 import {
+  isSafeSessionId,
   readSessionMeta,
   readTasks,
+  sessionDirPath,
   type Task,
   writeTask,
   writeTaskBatch,
@@ -26,6 +28,57 @@ function makeTask(id: string, status: Task["status"], subject?: string): Task {
     completedAt: status === "completed" ? Date.now() : null,
   }
 }
+
+describe("session directory containment", () => {
+  // `session_id` comes straight from agent hook stdin. Before the guard, `join(tasksDir, id)`
+  // let `..` segments escape: `"../../etc/passwd"` created a real `~/etc/passwd/` task
+  // directory. Reproduction: `scripts/debug-session-dir-traversal.ts`.
+  const ESCAPING = ["../../etc/passwd", "a/../../../../escaped", "..", "../sibling"]
+  const CONTAINED = [
+    "7ed7644d-3b7c-4d02-8278-9aa2d4059950",
+    "-Users-matthewherod-Development-swiz",
+    // `join` keeps an absolute-looking id under the root, unlike `resolve` — so it is contained.
+    "/tmp/not-actually-absolute",
+    // Contained despite the shell metacharacters: nothing here traverses.
+    "$(whoami)",
+  ]
+
+  it("rejects session ids that resolve outside the store", () => {
+    for (const sessionId of ESCAPING) {
+      expect(isSafeSessionId(sessionId, "/tmp/store")).toBe(false)
+      expect(() => sessionDirPath(sessionId, "/tmp/store")).toThrow(/Unsafe task session id/)
+    }
+  })
+
+  it("accepts ordinary session ids", () => {
+    // Control for the rejection case above: proves the guard is not refusing everything.
+    for (const sessionId of CONTAINED) {
+      expect(isSafeSessionId(sessionId, "/tmp/store")).toBe(true)
+      expect(sessionDirPath(sessionId, "/tmp/store")).toStartWith("/tmp/store/")
+    }
+  })
+
+  it("rejects empty and whitespace-only session ids", () => {
+    for (const sessionId of ["", "   ", "."]) {
+      expect(isSafeSessionId(sessionId, "/tmp/store")).toBe(false)
+    }
+  })
+
+  it("writes nothing outside the store when given a traversing id", async () => {
+    const base = await tmp.create()
+    await expect(
+      writeTask("../escapee", makeTask("1", "pending"), undefined, base)
+    ).rejects.toThrow(/Unsafe task session id/)
+    expect(await readdir(base)).toEqual([])
+  })
+
+  it("reads a traversing id as empty rather than throwing", async () => {
+    // Read paths (status lines, governance gates) must not crash on a malformed payload.
+    const base = await tmp.create()
+    expect(await readTasks("../../etc/passwd", base)).toEqual([])
+    expect(await readSessionMeta("../../etc/passwd", base)).toBeNull()
+  })
+})
 
 describe("writeTask atomicity", () => {
   it("does not leave .tmp files behind after a successful write", async () => {

@@ -10,8 +10,10 @@
 import { join } from "node:path"
 import { stderrLog } from "../debug.ts"
 import { getHomeDirOrNull } from "../home.ts"
+import { createDefaultTaskStore } from "../task-roots.ts"
 import {
   isIncompleteTaskStatus,
+  isSafeSessionId,
   readTasks,
   type TaskStatus,
   writeAudit,
@@ -46,6 +48,12 @@ async function validateCreateTaskInputs(
   const safeSentinel = sanitizePathComponent(sentinelKey)
   const safeSession = sanitizePathComponent(sessionId)
   if (!safeSentinel || !safeSession) return null
+  // `safeSession` only ever guarded the sentinel filename — the raw `sessionId` still reached
+  // `createTaskInProcess` below and was joined straight onto the store root, so a payload id of
+  // `"../../etc/passwd"` wrote a task directory into `~/etc`. Refuse the id here rather than
+  // sanitizing it: hooks must stay quiet, and rewriting a traversing id would silently file the
+  // task under a different real session.
+  if (!isSafeSessionId(sessionId, createDefaultTaskStore().tasksDir)) return null
   const sentinel = sessionTaskSentinelPath(safeSentinel, safeSession)
   if (await Bun.file(sentinel).exists()) return null
   return { safeSentinel, safeSession, sentinel }

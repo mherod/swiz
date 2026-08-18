@@ -5,7 +5,7 @@
  */
 
 import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises"
-import { join } from "node:path"
+import { join, resolve, sep } from "node:path"
 import { z } from "zod"
 import { debugLog } from "../debug.ts"
 import { sessionPrefix } from "../session-id.ts"
@@ -18,6 +18,44 @@ import { backfillTaskTimingFields } from "./task-timing.ts"
 const AUDIT_LOG_FILENAME = ".audit-log.jsonl"
 
 export { sessionPrefix }
+
+// ─── Session directory containment ──────────────────────────────────────────
+
+/**
+ * Whether `sessionId` stays inside the task store when joined onto `tasksDir`.
+ *
+ * `session_id` arrives verbatim from agent hook stdin and reaches `join(tasksDir, sessionId)`
+ * unsanitized, so `..` segments escape the store: `"../../etc/passwd"` created a real
+ * `~/etc/passwd/` task directory two levels above `~/.claude/tasks`. Reproduction and the
+ * per-case containment table live in `scripts/debug-session-dir-traversal.ts`.
+ *
+ * Containment is checked on the resolved path rather than by stripping characters, because
+ * stripping silently reroutes writes: `"$(whoami)"` sanitizes to `"whoami"`, which is a
+ * *different, valid* session whose tasks would then be mixed with the caller's. An id that
+ * cannot be honoured exactly is refused, never rewritten. An absolute-looking id is safe —
+ * `join` keeps it under the store, unlike `resolve`.
+ */
+export function isSafeSessionId(sessionId: string, tasksDir: string): boolean {
+  if (!sessionId.trim()) return false
+  const root = resolve(tasksDir)
+  const dir = resolve(join(root, sessionId))
+  return dir === root ? false : dir.startsWith(root + sep)
+}
+
+/**
+ * Resolve a session's directory inside the task store, refusing ids that escape it.
+ *
+ * Hard backstop for every write path; read paths that prefer an empty result over a throw
+ * should test {@link isSafeSessionId} first.
+ */
+export function sessionDirPath(sessionId: string, tasksDir: string): string {
+  if (!isSafeSessionId(sessionId, tasksDir)) {
+    throw new Error(
+      `Unsafe task session id ${JSON.stringify(sessionId)}: resolves outside the task store.`
+    )
+  }
+  return join(tasksDir, sessionId)
+}
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -188,6 +226,9 @@ export async function readTasks(
   sessionId: string,
   tasksDir = createDefaultTaskStore().tasksDir
 ): Promise<Task[]> {
+  // Reads prefer an empty result over a throw: a traversing id names no legitimate session, and
+  // callers here (status lines, governance gates) must not crash on a malformed payload.
+  if (!isSafeSessionId(sessionId, tasksDir)) return []
   const dir = join(tasksDir, sessionId)
 
   // Junie fallback: if events.jsonl exists, parse tasks from AgentPlanUpdatedEvent
@@ -470,7 +511,7 @@ export async function writeTaskBatch(
   cwd?: string,
   tasksDir = createDefaultTaskStore().tasksDir
 ): Promise<TaskBatchWriteResult> {
-  const dir = join(tasksDir, sessionId)
+  const dir = sessionDirPath(sessionId, tasksDir)
   await mkdir(dir, { recursive: true })
   const auditPath = join(dir, AUDIT_LOG_FILENAME)
   const persistedOperationIds = await readAuditOperationIds(auditPath)
@@ -507,6 +548,7 @@ export async function readSessionMeta(
 ): Promise<SessionMeta | null> {
   const key = metaCacheKey(sessionId, tasksDir)
   if (sessionMetaCache.has(key)) return sessionMetaCache.get(key)!
+  if (!isSafeSessionId(sessionId, tasksDir)) return null
   try {
     const text = await readFile(join(tasksDir, sessionId, SESSION_META_FILE), "utf-8")
     const meta = JSON.parse(text) as SessionMeta
@@ -524,7 +566,7 @@ export async function writeTask(
   cwd?: string,
   tasksDir = createDefaultTaskStore().tasksDir
 ): Promise<void> {
-  const dir = join(tasksDir, sessionId)
+  const dir = sessionDirPath(sessionId, tasksDir)
   await mkdir(dir, { recursive: true })
   await atomicWriteJson(join(dir, `${task.id}.json`), task)
   // Update lightweight index so status.ts can read openCount without scanning every task file.
@@ -562,7 +604,7 @@ export async function revertTaskStatusOnDisk(
   attemptedStatus: TaskStatus,
   tasksDir = createDefaultTaskStore().tasksDir
 ): Promise<boolean> {
-  const dir = join(tasksDir, sessionId)
+  const dir = sessionDirPath(sessionId, tasksDir)
   const filePath = join(dir, `${taskId}.json`)
   let task: Task
   try {
@@ -604,7 +646,7 @@ export async function writeAudit(
   tasksDir = createDefaultTaskStore().tasksDir
 ): Promise<void> {
   try {
-    const dir = join(tasksDir, sessionId)
+    const dir = sessionDirPath(sessionId, tasksDir)
     await mkdir(dir, { recursive: true })
     await appendJsonlEntry(join(dir, ".audit-log.jsonl"), entry)
   } catch (e) {

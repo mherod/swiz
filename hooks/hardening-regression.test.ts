@@ -1,7 +1,8 @@
 /**
  * Regression tests for security hardening applied to hooks/*.ts:
  * 1. Missing HOME env var triggers early return (no crash, no "undefined" in paths)
- * 2. Path-traversal sessionId payloads are neutralized by join()
+ * 2. Path-traversal sessionId payloads are refused by the task-store containment guard
+ *    (`isSafeSessionId`) — `join()` alone does NOT neutralize `..` segments
  * 3. Whitespace-only git output lines are filtered correctly
  */
 import { describe, expect, setDefaultTimeout, test } from "bun:test"
@@ -252,21 +253,84 @@ describe("whitespace-only line filtering", () => {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 describe("createSessionTask input sanitization", () => {
-  test("path-traversal in sentinelKey produces safe /tmp/ path", async () => {
-    const { createSessionTask } = await import("../src/utils/session-task-io.ts")
-    // Should not throw — path separators are stripped from sentinel key
-    await createSessionTask("valid-session-id", "../../etc/cron.d/evil", "subject", "desc")
+  /**
+   * Run `createSessionTask` in a subprocess rooted at a throwaway HOME and report every path
+   * created outside the task store.
+   *
+   * These cases previously ran in-process against the developer's real HOME and asserted only
+   * "does not throw". Both halves were wrong: `join()` does not neutralize `..`, so
+   * `"../../etc/passwd"` created a real `~/etc/passwd/` task directory, and the assertion could
+   * not see it. Reproduction: `scripts/debug-session-dir-traversal.ts`.
+   */
+  async function createSessionTaskInTempHome(
+    sessionId: string,
+    sentinelKeyPrefix: string
+  ): Promise<{ escaped: string[]; storeEntries: string[]; exitCode: number; stderr: string }> {
+    const home = await createTempHome()
+    // The dedup sentinel lives under /tmp keyed by the sanitized session+key, NOT under HOME, so
+    // it outlives the temp home. A fixed key makes the second run a silent no-op and the
+    // assertions vacuous — uniquify it so each case actually exercises the write path.
+    const sentinelKey = `${sentinelKeyPrefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+    const script = `
+      import { readdir } from "node:fs/promises";
+      import { join } from "node:path";
+      const { createSessionTask } = await import("./src/utils/session-task-io.ts");
+      await createSessionTask(${JSON.stringify(sessionId)}, ${JSON.stringify(sentinelKey)}, "subject", "desc");
+      const listing = async (dir) => { try { return await readdir(dir) } catch { return [] } };
+      const home = ${JSON.stringify(home)};
+      // Anything outside <home>/.claude is an escape; ".claude" itself is the legitimate root.
+      const escaped = (await listing(home)).filter((entry) => entry !== ".claude");
+      const storeEntries = await listing(join(home, ".claude", "tasks"));
+      console.log(JSON.stringify({ escaped, storeEntries }));
+    `
+    const proc = Bun.spawn([process.execPath, "-e", script], {
+      stdout: "pipe",
+      stderr: "pipe",
+      env: neutralAgentEnv({ HOME: home }),
+    })
+    const [stdout, stderr] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+    ])
+    await proc.exited
+    const lastLine = stdout.trim().split("\n").at(-1)
+    const parsed = lastLine ? JSON.parse(lastLine) : {}
+    return {
+      escaped: parsed.escaped ?? [],
+      storeEntries: parsed.storeEntries ?? [],
+      exitCode: proc.exitCode ?? 1,
+      stderr,
+    }
+  }
+
+  test("path-traversal in sentinelKey writes nothing outside the task store", async () => {
+    const result = await createSessionTaskInTempHome("valid-session-id", "../../etc/cron.d/evil")
+    expect(result.exitCode).toBe(0)
+    expect(result.escaped).toEqual([])
   })
 
-  test("path-traversal in sessionId produces safe /tmp/ path", async () => {
-    const { createSessionTask } = await import("../src/utils/session-task-io.ts")
-    await createSessionTask("../../etc/passwd", "safe-key", "subject", "desc")
+  test("path-traversal in sessionId writes nothing outside the task store", async () => {
+    const result = await createSessionTaskInTempHome("../../etc/passwd", "safe-key")
+    expect(result.exitCode).toBe(0)
+    // Before the containment guard this produced ["etc"] — the escape the old assertion missed.
+    expect(result.escaped).toEqual([])
+    expect(result.storeEntries).toEqual([])
   })
 
-  test("shell injection in sessionId is sanitized", async () => {
-    const { createSessionTask } = await import("../src/utils/session-task-io.ts")
-    await createSessionTask("$(whoami)", "safe-key", "subject", "desc")
-    // If this returns without error, the injection was neutralized
+  test("control: an ordinary sessionId still creates its task directory", async () => {
+    // Without this the assertions above pass vacuously if createSessionTask silently no-ops.
+    const result = await createSessionTaskInTempHome("7ed7644d-3b7c-4d02", "safe-key")
+    expect(result.exitCode).toBe(0)
+    expect(result.escaped).toEqual([])
+    expect(result.storeEntries).toContain("7ed7644d-3b7c-4d02")
+  })
+
+  test("shell injection in sessionId stays inside the task store", async () => {
+    const result = await createSessionTaskInTempHome("$(whoami)", "safe-key")
+    expect(result.exitCode).toBe(0)
+    expect(result.escaped).toEqual([])
+    // Contained, so it is honoured verbatim rather than rewritten to a different real session.
+    expect(result.storeEntries).toEqual(["$(whoami)"])
   })
 
   test("empty HOME causes early return", async () => {
