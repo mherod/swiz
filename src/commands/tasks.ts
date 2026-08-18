@@ -14,6 +14,7 @@ import type { Task } from "../tasks/task-repository.ts"
 import {
   atomicWriteJson,
   compareTaskIds,
+  legacySessionPrefix,
   parseTaskId,
   readTasks,
   sessionPrefix,
@@ -44,6 +45,7 @@ export {
   getSessionIdsByCwdScan,
   getSessionIdsForProject,
   getSessions,
+  legacySessionPrefix,
   parseTaskId,
   resolveTaskById,
   sessionPrefix,

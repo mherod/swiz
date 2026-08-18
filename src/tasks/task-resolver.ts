@@ -16,6 +16,7 @@ import { parseJsonl, parseJsonlHead } from "../utils/jsonl.ts"
 import {
   compareTaskIds,
   isIncompleteTaskStatus,
+  legacySessionPrefix,
   parseTaskId,
   readSessionMeta,
   readTasks,
@@ -451,7 +452,9 @@ async function findInOrphanByPrefix(
 ): Promise<{ sessionId: string; task: Task } | null> {
   if (!filterCwd) return null
   const candidates = await candidateOrphanEntries(filterCwd, tasksDir, projectsDir)
-  const orphanSession = candidates.find((s) => sessionPrefix(s) === prefix)
+  const orphanSession =
+    candidates.find((s) => sessionPrefix(s) === prefix) ??
+    candidates.find((s) => legacySessionPrefix(s) === prefix)
   if (!orphanSession) return null
   const tasks = await readTasks(orphanSession, tasksDir)
   const task = tasks.find((t) => t.id === taskId)
@@ -476,6 +479,52 @@ async function sessionsHoldingTask(
   return holders
 }
 
+function findSessionsMatchingPrefix(
+  sessions: string[],
+  prefix: string
+): { prefixMatches: string[]; isLegacyFallback: boolean } {
+  const primaryMatches = sessions.filter((s) => sessionPrefix(s) === prefix)
+  if (primaryMatches.length > 0) {
+    return { prefixMatches: primaryMatches, isLegacyFallback: false }
+  }
+  const legacyMatches = sessions.filter((s) => legacySessionPrefix(s) === prefix)
+  return { prefixMatches: legacyMatches, isLegacyFallback: legacyMatches.length > 0 }
+}
+
+function assertUnambiguousHolders(taskId: string, prefix: string, holders: string[]): void {
+  if (holders.length > 1) {
+    throw new Error(
+      `Task #${taskId} is ambiguous — prefix "${prefix}" matches ${holders.length} sessions that each hold it:\n` +
+        holders.map((s) => `  ${s}`).join("\n") +
+        `\nRe-run with --session <id> to choose one.`
+    )
+  }
+}
+
+async function resolveFromMatchingSession(
+  matchingSession: string,
+  taskId: string,
+  prefix: string,
+  tasksDir: string,
+  isNonPrimaryOrLegacy: boolean
+): Promise<{ sessionId: string; task: Task }> {
+  const tasks = await readTasks(matchingSession, tasksDir)
+  const task = tasks.find((t) => t.id === taskId)
+  if (task) {
+    if (isNonPrimaryOrLegacy) {
+      debugLog(
+        `  ${DIM}Task #${taskId} resolved via prefix to session ${matchingSession.slice(0, 8)}...${RESET}`
+      )
+    }
+    return { sessionId: matchingSession, task }
+  }
+  const recentHint = await buildRecentTasksHint(matchingSession, tasksDir)
+  throw new Error(
+    `Task #${taskId} not found in session ${matchingSession.slice(0, 8)}... (prefix "${prefix}" matched but task file is missing).` +
+      `\nUse --session ${matchingSession.slice(0, 8)} with a different task ID, or recreate the task.${recentHint}`
+  )
+}
+
 /** Resolve a prefixed task ID by matching the prefix to a session. */
 async function resolvePrefixedTaskId(opts: {
   taskId: string
@@ -486,41 +535,27 @@ async function resolvePrefixedTaskId(opts: {
   projectsDir: string
 }): Promise<{ sessionId: string; task: Task }> {
   const { taskId, prefix, primarySessionId, filterCwd, tasksDir, projectsDir } = opts
-  if (sessionPrefix(primarySessionId) === prefix) {
+  const isPrimaryPrefix =
+    sessionPrefix(primarySessionId) === prefix || legacySessionPrefix(primarySessionId) === prefix
+  if (isPrimaryPrefix) {
     const tasks = await readTasks(primarySessionId, tasksDir)
     const task = tasks.find((t) => t.id === taskId)
     if (task) return { sessionId: primarySessionId, task }
   }
 
   const sessions = await getSessions(filterCwd, tasksDir, projectsDir)
-  const prefixMatches = sessions.filter((s) => sessionPrefix(s) === prefix)
+  const { prefixMatches, isLegacyFallback } = findSessionsMatchingPrefix(sessions, prefix)
   const holders = await sessionsHoldingTask(prefixMatches, taskId, tasksDir)
-  if (holders.length > 1) {
-    // `sessionPrefix` truncates to four characters, so distinct sessions can share a prefix and
-    // the same task id can exist in more than one of them. Picking the first match silently
-    // mutated whichever happened to sort first (#824); naming them is the only safe answer.
-    throw new Error(
-      `Task #${taskId} is ambiguous — prefix "${prefix}" matches ${holders.length} sessions that each hold it:\n` +
-        holders.map((s) => `  ${s}`).join("\n") +
-        `\nRe-run with --session <id> to choose one.`
-    )
-  }
+  assertUnambiguousHolders(taskId, prefix, holders)
+
   const matchingSession = holders[0] ?? prefixMatches[0]
   if (matchingSession) {
-    const tasks = await readTasks(matchingSession, tasksDir)
-    const task = tasks.find((t) => t.id === taskId)
-    if (task) {
-      if (matchingSession !== primarySessionId) {
-        debugLog(
-          `  ${DIM}Task #${taskId} resolved via prefix to session ${matchingSession.slice(0, 8)}...${RESET}`
-        )
-      }
-      return { sessionId: matchingSession, task }
-    }
-    const recentHint = await buildRecentTasksHint(matchingSession, tasksDir)
-    throw new Error(
-      `Task #${taskId} not found in session ${matchingSession.slice(0, 8)}... (prefix "${prefix}" matched but task file is missing).` +
-        `\nUse --session ${matchingSession.slice(0, 8)} with a different task ID, or recreate the task.${recentHint}`
+    return resolveFromMatchingSession(
+      matchingSession,
+      taskId,
+      prefix,
+      tasksDir,
+      matchingSession !== primarySessionId || isLegacyFallback
     )
   }
 
@@ -677,4 +712,4 @@ export async function collectIncompleteTasks(
 }
 
 // Re-export ID utilities for consumers that previously imported from tasks.ts
-export { compareTaskIds, parseTaskId, sessionPrefix }
+export { compareTaskIds, legacySessionPrefix, parseTaskId, sessionPrefix }

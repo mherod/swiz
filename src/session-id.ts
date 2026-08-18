@@ -1,15 +1,35 @@
+import { createHash } from "node:crypto"
+
 /**
  * Canonical type alias for session identifiers used across commands and hooks.
  * Keep this as `string` for interoperability with on-disk IDs and hook payloads.
  */
 export type SessionId = string
 
+const HEX_UUID_LIKE_RE = /^[0-9a-fA-F]{4,8}(-[0-9a-fA-F]+)*$/i
+
+/**
+ * Legacy prefix derivation: takes first 4 hyphen-stripped characters.
+ * Retained as a fallback so older tasks with 4-character path-head prefixes
+ * (like "user-1" or "home-1") remain resolvable when unambiguous.
+ */
+export function legacySessionPrefix(sessionId: SessionId): string {
+  return sessionId.replace(/-/g, "").slice(0, 4).toLowerCase()
+}
+
 /**
  * Derive a short stable prefix from a session ID for namespaced task IDs.
- * Uses first 4 characters after removing dashes and lowercasing.
+ * - For native UUID / hex session IDs: uses first 4 hex characters (e.g. "7ed7", "aaaa").
+ * - For project keys and arbitrary path keys: hashes the full store key with SHA-256
+ *   to produce a stable 4-hex prefix, ensuring distinct project paths never collide.
  */
 export function sessionPrefix(sessionId: SessionId): string {
-  return sessionId.replace(/-/g, "").slice(0, 4).toLowerCase()
+  if (!sessionId) return ""
+  if (sessionId.length < 4) return sessionId.toLowerCase()
+  if (!sessionId.startsWith("-") && HEX_UUID_LIKE_RE.test(sessionId)) {
+    return sessionId.replace(/-/g, "").slice(0, 4).toLowerCase()
+  }
+  return createHash("sha256").update(sessionId).digest("hex").slice(0, 4).toLowerCase()
 }
 
 /**

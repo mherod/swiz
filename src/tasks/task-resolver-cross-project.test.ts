@@ -6,17 +6,17 @@ import { projectKeyFromCwd } from "../project-key.ts"
 import { sessionPrefix } from "../session-id.ts"
 import { resolveTaskById } from "./task-resolver.ts"
 
-// #824: sessionPrefix truncates to 4 hyphen-stripped characters, so every macOS project key
-// collapses to "user" and `user-1` exists in every project at once. #826 scoped getSessions, but
-// the orphan-recovery scans still walk the whole task store, so a task id can still resolve into
-// another project's MCP task directory.
+// #824: sessionPrefix derives a 4-hex SHA-256 hash for path-derived store keys so distinct
+// macOS projects never collide on prefix "user". Legacy "user-*" task IDs remain resolvable
+// within their project via single-match fallback.
 
-// Deliberately macOS-shaped home paths: that is what makes both keys collapse to the prefix
-// "user", which is the collision under test. A /tmp path would yield "tmps" and prove nothing.
+// Deliberately macOS-shaped home paths: previously every macOS key collapsed to "user".
 const PROJECT_A = "/Users/tester/Development/xproj-a"
 const PROJECT_B = "/Users/tester/Development/xproj-b"
+const PROJECT_C = "/Users/tester/Development/xproj-c"
 const KEY_A = projectKeyFromCwd(PROJECT_A)
 const KEY_B = projectKeyFromCwd(PROJECT_B)
+const KEY_C = projectKeyFromCwd(PROJECT_C)
 
 const roots: string[] = []
 
@@ -64,31 +64,49 @@ async function seedMcpStore(
 }
 
 describe("cross-project task resolution", () => {
-  test("every macOS project key collapses to the same prefix (premise)", () => {
-    // The premise the collision rests on. Asserting the literal value too, so a fixture path that
-    // silently yields a different prefix cannot make the cases below pass for the wrong reason.
-    expect(sessionPrefix(KEY_A)).toBe("user")
-    expect(sessionPrefix(KEY_B)).toBe("user")
+  test("distinct macOS project keys produce distinct prefixes (#824)", () => {
+    const prefixA = sessionPrefix(KEY_A)
+    const prefixB = sessionPrefix(KEY_B)
+    const prefixC = sessionPrefix(KEY_C)
+
+    expect(prefixA).not.toBe(prefixB)
+    expect(prefixB).not.toBe(prefixC)
+    expect(prefixA).not.toBe(prefixC)
+    expect(prefixA).toMatch(/^[0-9a-f]{4}$/)
+    expect(prefixB).toMatch(/^[0-9a-f]{4}$/)
+    expect(prefixC).toMatch(/^[0-9a-f]{4}$/)
   })
 
   test("does not resolve a task id into another project's store", async () => {
     const fx = await makeFixture()
+    const taskBId = `${sessionPrefix(KEY_B)}-1`
     // Only project B has this id. Project A must not reach into it.
-    await seedMcpStore(fx, KEY_B, PROJECT_B, "user-1", "project B task")
+    await seedMcpStore(fx, KEY_B, PROJECT_B, taskBId, "project B task")
 
     await expect(
-      resolveTaskById("user-1", KEY_A, PROJECT_A, fx.tasksDir, fx.projectsDir)
+      resolveTaskById(taskBId, KEY_A, PROJECT_A, fx.tasksDir, fx.projectsDir)
     ).rejects.toThrow()
   })
 
   test("resolves within the current project when the id is genuinely present", async () => {
     const fx = await makeFixture()
-    await seedMcpStore(fx, KEY_A, PROJECT_A, "user-1", "project A task")
-    await seedMcpStore(fx, KEY_B, PROJECT_B, "user-1", "project B task")
+    const taskAId = `${sessionPrefix(KEY_A)}-1`
+    const taskBId = `${sessionPrefix(KEY_B)}-1`
+    await seedMcpStore(fx, KEY_A, PROJECT_A, taskAId, "project A task")
+    await seedMcpStore(fx, KEY_B, PROJECT_B, taskBId, "project B task")
+
+    const resolved = await resolveTaskById(taskAId, KEY_A, PROJECT_A, fx.tasksDir, fx.projectsDir)
+    expect(resolved.sessionId).toBe(KEY_A)
+    expect(resolved.task.subject).toBe("project A task")
+  })
+
+  test("resolves legacy user-1 prefixed tasks via fallback", async () => {
+    const fx = await makeFixture()
+    await seedMcpStore(fx, KEY_A, PROJECT_A, "user-1", "legacy project A task")
 
     const resolved = await resolveTaskById("user-1", KEY_A, PROJECT_A, fx.tasksDir, fx.projectsDir)
     expect(resolved.sessionId).toBe(KEY_A)
-    expect(resolved.task.subject).toBe("project A task")
+    expect(resolved.task.subject).toBe("legacy project A task")
   })
 
   test("fails loudly when two sessions in this project both hold the id", async () => {

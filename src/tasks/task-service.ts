@@ -20,6 +20,7 @@ import { hasMeaningfulCompletionEvidence } from "./task-evidence.ts"
 import {
   compareTaskIds,
   isIncompleteTaskStatus,
+  legacySessionPrefix,
   parseTaskId,
   readTasks,
   STATUS_STYLE,
@@ -31,7 +32,7 @@ import {
 import { collectIncompleteTasks, resolveTaskById } from "./task-resolver.ts"
 import { detect, formatMessage } from "./task-subject-validation.ts"
 
-export { compareTaskIds, parseTaskId, sessionPrefix }
+export { compareTaskIds, legacySessionPrefix, parseTaskId, sessionPrefix }
 
 // ─── Deduplication ──────────────────────────────────────────────────────────
 

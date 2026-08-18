@@ -10,6 +10,7 @@ import {
   getSessionIdsByCwdScan,
   getSessionIdsForProject,
   getSessions,
+  legacySessionPrefix,
   parseTaskId,
   resolveTaskById,
   runTasks,
@@ -539,11 +540,35 @@ describe("sessionPrefix", () => {
   it("extracts first 4 hex chars from UUID", () => {
     expect(sessionPrefix("aaaa-aaaa-aaaa")).toBe("aaaa")
     expect(sessionPrefix("AbCd-1234-5678")).toBe("abcd")
+    expect(sessionPrefix("7ed7644d-3b7c-4d02-8278-9aa2d4059950")).toBe("7ed7")
+    expect(sessionPrefix("1b1b475a-0000-4000-8000-000000000000")).toBe("1b1b")
   })
 
   it("handles short session IDs", () => {
     expect(sessionPrefix("ab")).toBe("ab")
     expect(sessionPrefix("")).toBe("")
+  })
+
+  it("derives distinct sha256 4-hex prefixes for path-derived project keys", () => {
+    const swiz = sessionPrefix("-Users-matthewherod-Development-swiz")
+    const plugg = sessionPrefix("-Users-matthewherod-Development-plugg-platform")
+    const resect = sessionPrefix("-Users-matthewherod-Development-resect")
+    const linux = sessionPrefix("-home-alice-code-api")
+
+    expect(swiz).toMatch(/^[0-9a-f]{4}$/)
+    expect(plugg).toMatch(/^[0-9a-f]{4}$/)
+    expect(resect).toMatch(/^[0-9a-f]{4}$/)
+    expect(linux).toMatch(/^[0-9a-f]{4}$/)
+
+    expect(swiz).not.toBe(plugg)
+    expect(plugg).not.toBe(resect)
+    expect(swiz).not.toBe(resect)
+  })
+
+  it("legacySessionPrefix extracts 4-char head without dashes", () => {
+    expect(legacySessionPrefix("-Users-matthewherod-Development-swiz")).toBe("user")
+    expect(legacySessionPrefix("-home-alice-code-api")).toBe("home")
+    expect(legacySessionPrefix("aaaa-aaaa-aaaa")).toBe("aaaa")
   })
 })
 

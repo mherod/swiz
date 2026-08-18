@@ -8,7 +8,7 @@ import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/p
 import { join, resolve, sep } from "node:path"
 import { z } from "zod"
 import { debugLog } from "../debug.ts"
-import { sessionPrefix } from "../session-id.ts"
+import { legacySessionPrefix, sessionPrefix } from "../session-id.ts"
 import { createDefaultTaskStore } from "../task-roots.ts"
 import { CappedMap } from "../utils/capped-map.ts"
 import { appendJsonlEntry, parseJsonl } from "../utils/jsonl.ts"
@@ -17,7 +17,7 @@ import { backfillTaskTimingFields } from "./task-timing.ts"
 
 const AUDIT_LOG_FILENAME = ".audit-log.jsonl"
 
-export { sessionPrefix }
+export { legacySessionPrefix, sessionPrefix }
 
 // ─── Session directory containment ──────────────────────────────────────────
 
