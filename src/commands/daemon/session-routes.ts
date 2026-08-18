@@ -1,4 +1,4 @@
-import { resolveRegisterableProjectCwd } from "./route-helpers.ts"
+import { registerProjectAndTouch } from "./route-helpers.ts"
 import type { SessionPreview, SessionTokenStats } from "./session-data.ts"
 import type { SessionMessage, SessionTaskSummary } from "./types.ts"
 import type { ProjectTaskPreview, SessionTaskPreview } from "./utils.ts"
@@ -38,6 +38,7 @@ export type SessionWithLiveness = SessionPreview & { processAlive: boolean }
 
 export interface SessionRoutesContext {
   touchProject: (cwd: string) => void
+  registerProjectWatchers: (cwd: string) => void
   getKnownProjects: () => string[]
   getProjectLastSeen: (cwd: string) => number
   getProjectStatusLine: (cwd: string, sessionId?: string) => Promise<string>
@@ -117,16 +118,6 @@ function parseProjectsListBody(raw: Record<string, any> | null) {
   }
 }
 
-async function resolveSelectedProjectCwd(
-  selectedProjectCwd: string | undefined,
-  touchProject: (cwd: string) => void
-): Promise<string | null> {
-  if (!selectedProjectCwd) return null
-  const resolved = await resolveRegisterableProjectCwd(selectedProjectCwd)
-  if (resolved) touchProject(resolved)
-  return resolved
-}
-
 async function handleProjectsList(req: Request, ctx: SessionRoutesContext): Promise<Response> {
   try {
     const rawBody = (await req.json().catch(() => null)) as Record<string, any> | null
@@ -134,10 +125,9 @@ async function handleProjectsList(req: Request, ctx: SessionRoutesContext): Prom
 
     const limitProjects = Math.max(1, Math.min(30, body?.limitProjects ?? 8))
     const limitSessions = Math.max(1, Math.min(30, body?.limitSessionsPerProject ?? 8))
-    const selectedProjectCwd = await resolveSelectedProjectCwd(
-      body?.selectedProjectCwd,
-      ctx.touchProject
-    )
+    const selectedProjectCwd = body?.selectedProjectCwd
+      ? await registerProjectAndTouch(ctx, body.selectedProjectCwd)
+      : null
     const projectCwds = [
       ...new Set([...ctx.getKnownProjects(), ...(selectedProjectCwd ? [selectedProjectCwd] : [])]),
     ]
@@ -203,8 +193,7 @@ async function handleSessionMessages(req: Request, ctx: SessionRoutesContext): P
       { status: 400 }
     )
   }
-  const projectCwd = await resolveRegisterableProjectCwd(cwd)
-  if (projectCwd) ctx.touchProject(projectCwd)
+  await registerProjectAndTouch(ctx, cwd)
   const limit = Math.max(1, Math.min(300, body?.limit ?? 150))
   const data = await ctx.getSessionData(cwd, sessionId, limit)
   return Response.json({
@@ -228,8 +217,7 @@ async function handleSessionTasks(req: Request, ctx: SessionRoutesContext): Prom
       { status: 400 }
     )
   }
-  const projectCwd = await resolveRegisterableProjectCwd(cwd)
-  if (projectCwd) ctx.touchProject(projectCwd)
+  await registerProjectAndTouch(ctx, cwd)
   const limit = Math.max(1, Math.min(100, body?.limit ?? 20))
   const data = await ctx.getSessionTasks(sessionId, limit)
   if (data === null) {
@@ -247,8 +235,7 @@ async function handleProjectTasks(req: Request, ctx: SessionRoutesContext): Prom
   if (typeof cwd !== "string" || cwd.length === 0) {
     return Response.json({ error: "Missing required field: cwd (string)" }, { status: 400 })
   }
-  const projectCwd = await resolveRegisterableProjectCwd(cwd)
-  if (projectCwd) ctx.touchProject(projectCwd)
+  await registerProjectAndTouch(ctx, cwd)
   const limit = Math.max(1, Math.min(300, body?.limit ?? 120))
   const data = await ctx.getProjectTasks(cwd, limit)
   return Response.json(data)

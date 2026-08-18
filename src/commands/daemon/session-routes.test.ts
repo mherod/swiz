@@ -104,6 +104,7 @@ describe("SessionRoutesContext DTO shapes", () => {
   test("minimal mock satisfies the session-routes contract", async () => {
     const ctx: SessionRoutesContext = {
       touchProject: () => {},
+      registerProjectWatchers: () => {},
       getKnownProjects: () => [],
       getProjectLastSeen: () => 0,
       getProjectStatusLine: async () => "",
@@ -144,6 +145,7 @@ describe("handleSessionTasks unknown session", () => {
   ): SessionRoutesContext {
     return {
       touchProject: () => {},
+      registerProjectWatchers: () => {},
       getKnownProjects: () => [],
       getProjectLastSeen: () => 0,
       getProjectStatusLine: async () => "",
@@ -193,10 +195,12 @@ describe("handleSessionTasks unknown session", () => {
 describe("handleProjectsList compat shim", () => {
   test("includes and touches an explicitly selected project on the first request", async () => {
     const selectedProjectCwd = process.cwd()
+    const registered: string[] = []
     const touched: string[] = []
     const listed: string[] = []
     const ctx: SessionRoutesContext = {
       touchProject: (cwd) => touched.push(cwd),
+      registerProjectWatchers: (cwd) => registered.push(cwd),
       getKnownProjects: () => [],
       getProjectLastSeen: () => 123,
       getProjectStatusLine: async () => "ready",
@@ -221,9 +225,42 @@ describe("handleProjectsList compat shim", () => {
     const res = await handleSessionRoutes(req, new URL(req.url), ctx)
     const body = await res!.json()
 
+    expect(registered).toEqual([selectedProjectCwd])
     expect(touched).toEqual([selectedProjectCwd])
     expect(listed).toEqual([selectedProjectCwd])
     expect(body.projects[0].cwd).toBe(selectedProjectCwd)
+  })
+
+  test("registers and refreshes a project from a session-only request", async () => {
+    const registered: string[] = []
+    const touched: string[] = []
+    const ctx: SessionRoutesContext = {
+      touchProject: (cwd) => touched.push(cwd),
+      registerProjectWatchers: (cwd) => registered.push(cwd),
+      getKnownProjects: () => [],
+      getProjectLastSeen: () => 0,
+      getProjectStatusLine: async () => "",
+      listProjectSessions: async () => ({ sessionCount: 0, sessions: [] }),
+      getSessionData: async () => ({ messages: [], toolStats: [] }),
+      getSessionTasks: async () => null,
+      getProjectTasks: async () => ({
+        tasks: [],
+        summary: { total: 0, open: 0, completed: 0, cancelled: 0 },
+      }),
+      getAgentProcessSnapshot: async () => ({ providers: {}, pidCwds: {} }),
+    }
+    const cwd = process.cwd()
+    const req = new Request("http://localhost/sessions/messages", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ cwd, sessionId: "session-1" }),
+    })
+
+    const res = await handleSessionRoutes(req, new URL(req.url), ctx)
+
+    expect(res!.status).toBe(200)
+    expect(registered).toEqual([cwd])
+    expect(touched).toEqual([cwd])
   })
 
   test("remaps legacy selectedProject to selectedProjectCwd", () => {

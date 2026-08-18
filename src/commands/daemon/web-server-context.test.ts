@@ -64,6 +64,7 @@ describe("web server route context builders", () => {
     expect(Object.keys(result).sort()).toEqual(
       [
         "touchProject",
+        "registerProjectWatchers",
         "getKnownProjects",
         "getProjectLastSeen",
         "getProjectStatusLine",
@@ -75,6 +76,7 @@ describe("web server route context builders", () => {
       ].sort()
     )
     expect(result.touchProject).toBe(source.touchProject)
+    expect(result.registerProjectWatchers).toBe(source.registerProjectWatchers)
     expect(result.getKnownProjects).toBeFunction()
     expect(result.getProjectLastSeen).toBeFunction()
     expect(result.getProjectStatusLine).toBeFunction()
