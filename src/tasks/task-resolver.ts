@@ -95,23 +95,33 @@ async function transcriptMatchesCwd(filePath: string, filterCwd: string): Promis
   return false
 }
 
-/** Partition candidates into matched (meta cwd matches) and remaining (no meta cwd). */
+/**
+ * Partition candidates by what their session metadata says about ownership.
+ *
+ * `matched` — meta cwd equals filterCwd, so the session belongs to this project.
+ * `remaining` — no meta cwd, so ownership is still unknown and a transcript scan may settle it.
+ * `attributedElsewhere` — meta names a different cwd, which is positive proof the session belongs
+ *   to another project. Callers must not fall back to admitting these.
+ */
 async function partitionByMeta(
   candidates: string[],
   filterCwd: string,
   tasksDir: string
-): Promise<{ matched: Set<string>; remaining: string[] }> {
+): Promise<{ matched: Set<string>; remaining: string[]; attributedElsewhere: Set<string> }> {
   const matched = new Set<string>()
   const remaining: string[] = []
+  const attributedElsewhere = new Set<string>()
   for (const sessionId of candidates) {
     const meta = await readSessionMeta(sessionId, tasksDir)
     if (meta?.cwd === filterCwd) {
       matched.add(sessionId)
     } else if (!meta?.cwd) {
       remaining.push(sessionId)
+    } else {
+      attributedElsewhere.add(sessionId)
     }
   }
-  return { matched, remaining }
+  return { matched, remaining, attributedElsewhere }
 }
 
 const junieEventSchema = z.looseObject({
@@ -233,10 +243,27 @@ export async function getSessionIdsByCwdScan(
   projectsDir = createDefaultTaskStore().projectsDir,
   tasksDir = createDefaultTaskStore().tasksDir
 ): Promise<Set<string>> {
-  const { matched: ids, remaining } = await partitionByMeta(candidates, filterCwd, tasksDir)
-  if (remaining.length === 0) return ids
+  return (await scanSessionIdsByCwd(filterCwd, candidates, projectsDir, tasksDir)).matched
+}
+
+/**
+ * As {@link getSessionIdsByCwdScan}, but also reports the candidates whose metadata positively
+ * attributes them to a different project, so callers can exclude them from any fallback.
+ */
+async function scanSessionIdsByCwd(
+  filterCwd: string,
+  candidates: string[],
+  projectsDir: string,
+  tasksDir: string
+): Promise<{ matched: Set<string>; attributedElsewhere: Set<string> }> {
+  const {
+    matched: ids,
+    remaining,
+    attributedElsewhere,
+  } = await partitionByMeta(candidates, filterCwd, tasksDir)
+  if (remaining.length === 0) return { matched: ids, attributedElsewhere }
   await scanTranscriptsForCwd(new Set(remaining), filterCwd, projectsDir, ids)
-  return ids
+  return { matched: ids, attributedElsewhere }
 }
 
 async function matchSessionsByCwd(
@@ -258,15 +285,33 @@ async function matchSessionsByCwd(
     if (projectSessionIds.has(s)) matched.add(s)
   }
   const unmatched = entries.filter((s) => !matched.has(s))
-  if (unmatched.length > 0) {
-    const fallbackIds = await getSessionIdsByCwdScan(filterCwd, unmatched, projectsDir, tasksDir)
-    for (const id of fallbackIds) matched.add(id)
-  }
+  const scan = await scanSessionIdsByCwd(filterCwd, unmatched, projectsDir, tasksDir)
+  for (const id of scan.matched) matched.add(id)
+
+  await admitUnattributableSessions(entries, scan.attributedElsewhere, projectsDir, matched)
+  return matched
+}
+
+/**
+ * Admit task directories that no project transcript accounts for, so a compaction-gap orphan is
+ * not lost when its transcript has gone.
+ *
+ * Only genuinely unattributable directories qualify. A store the MCP server keyed by another
+ * project's path produces no transcript either, so the "no transcript" test alone admitted it and
+ * leaked that project's tasks into a cwd-scoped listing (#826). Metadata that names a different
+ * cwd is positive proof of ownership and disqualifies the entry.
+ */
+async function admitUnattributableSessions(
+  entries: string[],
+  attributedElsewhere: Set<string>,
+  projectsDir: string,
+  matched: Set<string>
+): Promise<void> {
   const allProjectSessionIds = await getAllProjectSessionIds(projectsDir)
   for (const s of entries) {
+    if (attributedElsewhere.has(s)) continue
     if (!allProjectSessionIds.has(s)) matched.add(s)
   }
-  return matched
 }
 
 export async function getSessions(

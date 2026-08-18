@@ -93,7 +93,24 @@ async function resolveSession(args: string[]): Promise<string> {
     }
   }
 
+  reportSessionSelection(sessions)
   return sessions[0]!
+}
+
+/**
+ * Name the chosen store when more than one could have answered.
+ *
+ * Selection falls back to "most recently modified", so which list you see depends on which store
+ * was written last — the MCP project-keyed store or a native session. Silently picking one made
+ * that ambiguity invisible (#826); stating it lets the reader tell why a list looks unexpected and
+ * which `--session` to pass to pin it.
+ */
+function reportSessionSelection(sessions: string[]): void {
+  if (sessions.length < 2) return
+  console.log(
+    `  ${DIM}Showing most recently updated of ${sessions.length} sessions: ${sessions[0]}. ` +
+      `Use --session <id> to pick another, or --all-sessions to see them all.${RESET}`
+  )
 }
 
 function isListInvocation(subcommand: string | undefined): boolean {
