@@ -21,6 +21,8 @@ import { createDefaultTaskStore } from "../../task-roots.ts"
 import { isSessionTaskJsonFile } from "../../tasks/task-file-utils.ts"
 import { formatBytes } from "../../utils/format.ts"
 import { getDaemonStatus } from "../daemon/daemon-admin.ts"
+import { findAntigravityCleanupGroups } from "./cleanup-antigravity.ts"
+import { dirSize, type ProjectResult, type SessionInfo } from "./cleanup-fs.ts"
 import {
   type CleanupArgs,
   decodeProjectPath,
@@ -34,28 +36,6 @@ const DAEMON_LABEL = SWIZ_DAEMON_LABEL
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const ORPHAN_SESSION_ID_RE =
   /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|test-.*|unknown-.*)$/i
-
-async function dirSize(dirPath: string): Promise<number> {
-  let total = 0
-  try {
-    const entries = await readdir(dirPath, { withFileTypes: true })
-    for (const entry of entries) {
-      const p = join(dirPath, entry.name)
-      if (entry.isDirectory()) {
-        total += await dirSize(p)
-      } else {
-        try {
-          total += (await stat(p)).size
-        } catch {
-          // skip unreadable files
-        }
-      }
-    }
-  } catch {
-    // skip unreadable dirs
-  }
-  return total
-}
 
 const trashDir = defaultTrashPath
 
@@ -163,15 +143,6 @@ async function findGeminiBackups(homeDir: string): Promise<GeminiBackupInfo> {
   await collectBakFiles(geminiTmpDir, backup, true)
 
   return backup
-}
-
-interface SessionInfo {
-  sessionId: string
-  paths: string[]
-  mtimeMs: number
-  sizeBytes: number
-  taskDirPath: string | null
-  taskDirSizeBytes: number
 }
 
 interface OldTaskFileInfo {
@@ -573,13 +544,6 @@ async function findSessions(
   }
 
   return { keep, old }
-}
-
-interface ProjectResult {
-  name: string
-  keep: SessionInfo[]
-  old: SessionInfo[]
-  stale: boolean
 }
 
 async function discoverProjectNames(
@@ -1143,6 +1107,12 @@ async function gatherCleanupData(cleanupArgs: CleanupArgs) {
     const claudeResults = await scanProjects(projectNames, projectsDir, cutoffMs, tasksDir)
     await markStaleProjects(claudeResults, homeDir)
     results = results.concat(claudeResults)
+  }
+
+  // Antigravity sessions live outside the Claude projects tree and are not
+  // keyed by project path, so they are only scanned for unscoped cleanups.
+  if (!cleanupArgs.projectFilter) {
+    results = results.concat(await findAntigravityCleanupGroups(homeDir, cutoffMs))
   }
 
   const scopedSessionIds = collectSessionIds(results)

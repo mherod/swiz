@@ -697,7 +697,7 @@ Provider precedence is deterministic when timestamps tie: Claude → Gemini → 
 
 ### `swiz doctor clean`
 
-Remove old Claude Code session data from `~/.claude/projects/` and Gemini backup artifacts from `~/.gemini/`. Keeps disk usage under control for long-running projects. (Formerly `swiz cleanup`; merged into `swiz doctor` — `--clean` is an alias.)
+Remove old Claude Code and Antigravity session data, plus Gemini backup artifacts from `~/.gemini/`. Keeps disk usage under control for long-running projects. (Formerly `swiz cleanup`; merged into `swiz doctor` — `--clean` is an alias.)
 
 ```bash
 swiz doctor clean                           # remove sessions older than 30 days (+ Gemini backups)
@@ -709,14 +709,16 @@ swiz doctor clean --project myrepo          # limit Claude cleanup to a specific
 
 **Claude cleanup scope:** `~/.claude/projects/` and `~/.claude/tasks/`
 
+**Antigravity cleanup scope:** `~/.gemini/antigravity-cli/{brain,conversations}/` and the legacy `~/.gemini/antigravity/{brain,conversations}/`. A session's brain directory and every conversation artifact sharing its id are aged and removed together, using the newest nested file's mtime so active sessions are retained. Skipped when `--project` is set, since Antigravity sessions are not keyed by project path.
+
 **Gemini backup scope:** `~/.gemini/settings.json.bak` and `~/.gemini/tmp/**/*.bak` (automatically cleaned without additional flags)
 
-| Flag                       | Description                                                                                                                             |
-|----------------------------|-----------------------------------------------------------------------------------------------------------------------------------------|
-| `--older-than <time>`      | Remove Claude sessions older than this time: days (`30`, `7d`) or hours (`48h`). Default: 30 (Gemini backups removed regardless of age) |
-| `--task-older-than <time>` | Also remove task files older than this time (days/hours), regardless of status. Disabled by default.                                    |
-| `--dry-run`                | Show what would be removed without deleting                                                                                             |
-| `--project <name>`         | Limit Claude cleanup to a specific project directory name                                                                               |
+| Flag                       | Description                                                                                                                                        |
+|----------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------|
+| `--older-than <time>`      | Remove Claude and Antigravity sessions older than this time: days (`30`, `7d`) or hours (`48h`). Default: 30 (Gemini backups removed regardless of age) |
+| `--task-older-than <time>` | Also remove task files older than this time (days/hours), regardless of status. Disabled by default.                                               |
+| `--dry-run`                | Show what would be removed without deleting                                                                                                        |
+| `--project <name>`         | Limit Claude cleanup to a specific project directory name (skips Antigravity)                                                                      |
 
 ### `swiz issue`
 
