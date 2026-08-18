@@ -8,7 +8,7 @@ import { getHomeDirWithFallback } from "../home.ts"
 import { projectKeyFromCwd } from "../project-key.ts"
 import { readSwizSettings } from "../settings.ts"
 import { getTaskToolName } from "../tasks/task-governance-messages.ts"
-import { readTasks } from "../tasks/task-repository.ts"
+import { readTasks, type Task } from "../tasks/task-repository.ts"
 import {
   completeTaskWithAutoTransition,
   createTaskInProcess,
@@ -802,6 +802,34 @@ function registerTaskUpdateTool(server: McpToolServer, cwd: string): void {
   )
 }
 
+export interface TaskListSummary {
+  total: number
+  pending: number
+  inProgress: number
+  completed: number
+  cancelled: number
+}
+
+/**
+ * Bucket every task status for the `TaskList` response.
+ *
+ * Every status needs its own bucket. Omitting `cancelled` made the buckets sum to 47 against a
+ * `total` of 48, so a consumer deriving remaining work as
+ * `total - completed - pending - inProgress` counted a phantom open task. When a status is added
+ * to `TASK_STATUSES`, add it here too — the exhaustiveness test in `mcp.test.ts` fails otherwise.
+ */
+export function summarizeTasks(tasks: readonly Task[]): TaskListSummary {
+  const countByStatus = (status: Task["status"]): number =>
+    tasks.filter((task) => task.status === status).length
+  return {
+    total: tasks.length,
+    pending: countByStatus("pending"),
+    inProgress: countByStatus("in_progress"),
+    completed: countByStatus("completed"),
+    cancelled: countByStatus("cancelled"),
+  }
+}
+
 function registerTaskListTool(server: McpToolServer, cwd: string): void {
   server.registerTool(
     "TaskList",
@@ -816,12 +844,7 @@ function registerTaskListTool(server: McpToolServer, cwd: string): void {
     async () => {
       try {
         const allTasks = await readTasks(projectKeyFromCwd(cwd))
-        const summary = {
-          total: allTasks.length,
-          pending: allTasks.filter((task) => task.status === "pending").length,
-          inProgress: allTasks.filter((task) => task.status === "in_progress").length,
-          completed: allTasks.filter((task) => task.status === "completed").length,
-        }
+        const summary = summarizeTasks(allTasks)
         return {
           content: [
             { type: "text" as const, text: JSON.stringify({ ok: true, tasks: allTasks, summary }) },

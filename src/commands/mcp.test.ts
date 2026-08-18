@@ -2,13 +2,66 @@ import { describe, expect, it } from "bun:test"
 import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
+import { TASK_STATUSES, type Task } from "../tasks/task-repository.ts"
 import {
   appendReplyToSink,
   buildMcpCapabilities,
   buildMcpInstructions,
   evaluatePermissionPolicy,
   loadPermissionPolicy,
+  summarizeTasks,
 } from "./mcp.ts"
+
+describe("TaskList summary", () => {
+  const task = (id: string, status: Task["status"]): Task => ({
+    id,
+    subject: `Task ${id}`,
+    description: "",
+    status,
+    blocks: [],
+    blockedBy: [],
+  })
+
+  it("buckets every status so the parts sum to the total", () => {
+    // The observed failure: 48 tasks reported as pending 2 / inProgress 0 / completed 45, with
+    // the one cancelled task counted in `total` but in no bucket. A consumer computing
+    // `total - completed - pending - inProgress` then saw a phantom open task.
+    const tasks = [
+      task("1", "pending"),
+      task("2", "in_progress"),
+      task("3", "completed"),
+      task("4", "completed"),
+      task("5", "cancelled"),
+    ]
+    const summary = summarizeTasks(tasks)
+
+    expect(summary).toEqual({ total: 5, pending: 1, inProgress: 1, completed: 2, cancelled: 1 })
+    expect(summary.pending + summary.inProgress + summary.completed + summary.cancelled).toBe(
+      summary.total
+    )
+  })
+
+  it("keeps a bucket for every status in TASK_STATUSES", () => {
+    // Guards the next status added to the enum: one task per status must still sum to the total,
+    // so a new status cannot silently land outside the buckets the way `cancelled` did.
+    const tasks = TASK_STATUSES.map((status, i) => task(String(i), status))
+    const summary = summarizeTasks(tasks)
+    const bucketed = summary.pending + summary.inProgress + summary.completed + summary.cancelled
+
+    expect(summary.total).toBe(TASK_STATUSES.length)
+    expect(bucketed).toBe(summary.total)
+  })
+
+  it("returns zeroed buckets for an empty task list", () => {
+    expect(summarizeTasks([])).toEqual({
+      total: 0,
+      pending: 0,
+      inProgress: 0,
+      completed: 0,
+      cancelled: 0,
+    })
+  })
+})
 
 describe("MCP channel setting helpers", () => {
   it("omits channel capabilities when MCP channels are disabled", () => {
