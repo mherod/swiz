@@ -418,6 +418,29 @@ async function safeReadTaskDirEntries(tasksDir: string): Promise<string[]> {
   }
 }
 
+/**
+ * Task directories that could plausibly be an orphan of this project.
+ *
+ * "Has no transcript" alone is not enough. The MCP server keys its store by the project path and
+ * never writes a transcript, so every *other* project's store also passes that test — and with
+ * `sessionPrefix` truncating to four characters, every macOS project key collapses to `user`, so
+ * `user-1` exists in all of them at once. Scanning unfiltered therefore resolved a task id into
+ * another project's store (#824). Metadata naming a different cwd is positive proof of ownership
+ * and disqualifies the entry; entries with no cwd at all stay eligible, which is what keeps
+ * compaction-gap recovery working.
+ */
+async function candidateOrphanEntries(
+  filterCwd: string,
+  tasksDir: string,
+  projectsDir: string
+): Promise<string[]> {
+  const allIndexedIds = await getAllProjectSessionIds(projectsDir)
+  const entries = await safeReadTaskDirEntries(tasksDir)
+  const unindexed = entries.filter((s) => !allIndexedIds.has(s))
+  const { attributedElsewhere } = await partitionByMeta(unindexed, filterCwd, tasksDir)
+  return unindexed.filter((s) => !attributedElsewhere.has(s))
+}
+
 /** Search orphan sessions (no transcript in any project dir) for a task matching the given prefix+ID. */
 async function findInOrphanByPrefix(
   taskId: string,
@@ -427,11 +450,8 @@ async function findInOrphanByPrefix(
   projectsDir: string
 ): Promise<{ sessionId: string; task: Task } | null> {
   if (!filterCwd) return null
-  const allIndexedIds = await getAllProjectSessionIds(projectsDir)
-  const taskDirEntries = await safeReadTaskDirEntries(tasksDir)
-  const orphanSession = taskDirEntries.find(
-    (s) => !allIndexedIds.has(s) && sessionPrefix(s) === prefix
-  )
+  const candidates = await candidateOrphanEntries(filterCwd, tasksDir, projectsDir)
+  const orphanSession = candidates.find((s) => sessionPrefix(s) === prefix)
   if (!orphanSession) return null
   const tasks = await readTasks(orphanSession, tasksDir)
   const task = tasks.find((t) => t.id === taskId)
@@ -440,6 +460,20 @@ async function findInOrphanByPrefix(
     `  ${DIM}Task #${taskId} resolved via compaction-recovery fallback in orphan session ${orphanSession.slice(0, 8)}...${RESET}`
   )
   return { sessionId: orphanSession, task }
+}
+
+/** Of the given sessions, those that actually hold a task with this id. */
+async function sessionsHoldingTask(
+  sessionIds: string[],
+  taskId: string,
+  tasksDir: string
+): Promise<string[]> {
+  const holders: string[] = []
+  for (const sessionId of sessionIds) {
+    const tasks = await readTasks(sessionId, tasksDir)
+    if (tasks.some((t) => t.id === taskId)) holders.push(sessionId)
+  }
+  return holders
 }
 
 /** Resolve a prefixed task ID by matching the prefix to a session. */
@@ -459,7 +493,19 @@ async function resolvePrefixedTaskId(opts: {
   }
 
   const sessions = await getSessions(filterCwd, tasksDir, projectsDir)
-  const matchingSession = sessions.find((s) => sessionPrefix(s) === prefix)
+  const prefixMatches = sessions.filter((s) => sessionPrefix(s) === prefix)
+  const holders = await sessionsHoldingTask(prefixMatches, taskId, tasksDir)
+  if (holders.length > 1) {
+    // `sessionPrefix` truncates to four characters, so distinct sessions can share a prefix and
+    // the same task id can exist in more than one of them. Picking the first match silently
+    // mutated whichever happened to sort first (#824); naming them is the only safe answer.
+    throw new Error(
+      `Task #${taskId} is ambiguous — prefix "${prefix}" matches ${holders.length} sessions that each hold it:\n` +
+        holders.map((s) => `  ${s}`).join("\n") +
+        `\nRe-run with --session <id> to choose one.`
+    )
+  }
+  const matchingSession = holders[0] ?? prefixMatches[0]
   if (matchingSession) {
     const tasks = await readTasks(matchingSession, tasksDir)
     const task = tasks.find((t) => t.id === taskId)
@@ -495,10 +541,8 @@ async function findInOrphanUnprefixed(
   projectsDir: string
 ): Promise<{ sessionId: string; task: Task }[]> {
   if (!filterCwd) return []
-  const allIndexedIds = await getAllProjectSessionIds(projectsDir)
-  const taskDirEntries = await safeReadTaskDirEntries(tasksDir)
-  for (const s of taskDirEntries) {
-    if (allIndexedIds.has(s)) continue
+  const candidates = await candidateOrphanEntries(filterCwd, tasksDir, projectsDir)
+  for (const s of candidates) {
     const tasks = await readTasks(s, tasksDir)
     const task = tasks.find((t) => t.id === taskId)
     if (task) {
