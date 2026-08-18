@@ -161,9 +161,29 @@ export interface ToolSearchEvidence {
 }
 
 /**
- * True when the query itself targeted native task tools, so an absence of matches is meaningful.
+ * True for any task tool by name, native or provider-prefixed (`mcp__<server>__TaskCreate`).
+ *
+ * Deliberately weaker than {@link isNativeTaskToolName}: this answers "is this name a task tool?",
+ * not "does this name write to the native store?". Only the former decides whether a search was
+ * aimed at task tools.
+ */
+function isTaskToolNameForAnyProvider(name: string): boolean {
+  if (isNativeTaskToolName(name)) return true
+  if (!name.startsWith(MCP_TOOL_NAME_PREFIX)) return false
+  const bareName = name.slice(name.lastIndexOf("__") + 2)
+  return (NATIVE_TASK_TOOL_NAMES as readonly string[]).includes(bareName)
+}
+
+/**
+ * True when the query itself targeted task tools, so an absence of native matches is meaningful.
  * A `select:` query names tools explicitly; a keyword query mentioning "task" would also surface
  * them, since MCP task tools rank for the same terms.
+ *
+ * Provider-prefixed names count here even though they are not native. A session whose only task
+ * tools are MCP asks for them by their MCP names, and that search would still have returned the
+ * native tools had the registry held any — so a miss is proof, not silence. Reusing the strict
+ * native check for this question left exactly those sessions permanently `unknown`, keeping
+ * governance enforced against a store they never write to (#825).
  */
 export function toolSearchQueryTargetsTaskTools(query: string): boolean {
   const trimmed = query.trim()
@@ -173,7 +193,7 @@ export function toolSearchQueryTargetsTaskTools(query: string): boolean {
     return trimmed
       .slice(selectPrefix.length)
       .split(",")
-      .some((name) => isNativeTaskToolName(name.trim()))
+      .some((name) => isTaskToolNameForAnyProvider(name.trim()))
   }
   return /\btasks?\b/i.test(trimmed)
 }

@@ -40,9 +40,27 @@ describe("toolSearchQueryTargetsTaskTools", () => {
     expect(toolSearchQueryTargetsTaskTools("select:TaskCreate")).toBe(true)
   })
 
-  test("ignores select: queries naming only other tools", () => {
+  test("ignores select: queries naming only unrelated tools", () => {
     expect(toolSearchQueryTargetsTaskTools("select:Read,Edit,Grep")).toBe(false)
-    expect(toolSearchQueryTargetsTaskTools("select:mcp__swiz__TaskCreate")).toBe(false)
+  })
+
+  test("recognizes select: queries naming provider-prefixed task tools", () => {
+    // Asking for the MCP task tools by name is still a search that would have surfaced the native
+    // ones. Treating it as off-target left MCP-only sessions permanently `unknown`, so governance
+    // enforced against a store they never write to (#825). The names remain non-native — only the
+    // question "was this query about task tools?" changes.
+    expect(toolSearchQueryTargetsTaskTools("select:mcp__swiz__TaskCreate")).toBe(true)
+    expect(
+      toolSearchQueryTargetsTaskTools(
+        "select:mcp__swiz__TaskCreate,mcp__swiz__TaskUpdate,mcp__swiz__TaskList"
+      )
+    ).toBe(true)
+    expect(toolSearchQueryTargetsTaskTools("select:Read,mcp__swiz__TaskList")).toBe(true)
+  })
+
+  test("ignores select: queries naming non-task MCP tools", () => {
+    expect(toolSearchQueryTargetsTaskTools("select:mcp__swiz__reply")).toBe(false)
+    expect(toolSearchQueryTargetsTaskTools("select:mcp__resect__analyze")).toBe(false)
   })
 
   test("recognizes keyword queries mentioning tasks", () => {
@@ -79,6 +97,28 @@ describe("classifyToolSearchTaskEvidence", () => {
     expect(classifyToolSearchTaskEvidence({ query: "select:TaskCreate", matches: [] })).toBe(
       "absent"
     )
+  })
+
+  test("reports absent for an MCP-only select: query returning only MCP tools", () => {
+    // The shape an MCP-only session actually produces. It used to classify `unknown`, which left
+    // governance enforcing against an unreachable remedy for the whole session (#825).
+    expect(
+      classifyToolSearchTaskEvidence({
+        query: "select:mcp__swiz__TaskCreate,mcp__swiz__TaskUpdate,mcp__swiz__TaskList",
+        matches: ["mcp__swiz__TaskCreate", "mcp__swiz__TaskUpdate", "mcp__swiz__TaskList"],
+      })
+    ).toBe("absent")
+  })
+
+  test("still reports present when a native tool matched an MCP-shaped query", () => {
+    // Widening the query predicate must not weaken the match predicate: a native tool in the
+    // results still proves availability, whatever the query looked like.
+    expect(
+      classifyToolSearchTaskEvidence({
+        query: "select:mcp__swiz__TaskCreate,TaskCreate",
+        matches: ["mcp__swiz__TaskCreate", "TaskCreate"],
+      })
+    ).toBe("present")
   })
 
   test("reports unknown when the query could not have surfaced task tools", () => {
