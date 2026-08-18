@@ -279,7 +279,10 @@ describe("createSessionTask input sanitization", () => {
       const listing = async (dir) => { try { return await readdir(dir) } catch { return [] } };
       const home = ${JSON.stringify(home)};
       // Anything outside <home>/.claude is an escape; ".claude" itself is the legitimate root.
-      const escaped = (await listing(home)).filter((entry) => entry !== ".claude");
+      // Runtime directories like ".bun" (created by Bun subprocesses on Linux) are also ignored.
+      const escaped = (await listing(home)).filter(
+        (entry) => entry !== ".claude" && entry !== ".bun"
+      );
       const storeEntries = await listing(join(home, ".claude", "tasks"));
       console.log(JSON.stringify({ escaped, storeEntries }));
     `
