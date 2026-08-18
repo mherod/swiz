@@ -354,7 +354,9 @@ describe("handleDispatchRoute", () => {
     const body = await response.json()
 
     expect(response.status).toBe(400)
-    expect(body.error).toBe('Invalid dispatch payload for event "preToolUse"')
+    expect(body.error).toBe(
+      'Invalid dispatch payload for event "preToolUse": stdin must be valid JSON resolving to an object record'
+    )
     expect(body.issues).toBeArray()
     expect(body.issues).not.toHaveLength(0)
   })

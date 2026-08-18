@@ -11,7 +11,7 @@
 import { getHomeDirWithFallback } from "../src/home.ts"
 import type { SwizHook, SwizHookOutput } from "../src/SwizHook.ts"
 import { runSwizHookAsMain } from "../src/SwizHook.ts"
-import { sessionHookInputSchema } from "../src/schemas.ts"
+import { preCompactHookInputSchema } from "../src/schemas.ts"
 import {
   getSessionCompactSnapshotPath,
   isIncompleteTaskStatus,
@@ -100,7 +100,7 @@ function buildSnapshot(sessionId: string, tasks: SnapshotTask[]): CompactSnapsho
 }
 
 export async function evaluatePrecompactTaskSnapshot(input: unknown): Promise<SwizHookOutput> {
-  const hookInput = sessionHookInputSchema.parse(input)
+  const hookInput = preCompactHookInputSchema.parse(input)
   const sessionId = hookInput.session_id ?? ""
   if (!sessionId) return {}
 

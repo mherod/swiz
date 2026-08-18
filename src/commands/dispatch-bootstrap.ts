@@ -18,6 +18,7 @@ import { normalizeAgentHookPayload } from "../dispatch/payload-normalize.ts"
 import { DISPATCH_TIMEOUTS } from "../dispatch/timeouts.ts"
 import { swizDispatchLogPath } from "../temp-paths.ts"
 import { sanitizeHookOutputForCurrentAgent } from "../utils/hook-output-agent-compat.ts"
+import { supportsHookSpecificOutput } from "../utils/hook-specific-output.ts"
 import { detectTerminal } from "../utils/terminal-detection.ts"
 
 const DEFAULT_DAEMON_PORT = 7_943
@@ -196,10 +197,6 @@ async function executeLocalFallback(
       preParsedPayload: payload,
     })
   })
-}
-
-function supportsHookSpecificOutput(canonicalEvent: string): boolean {
-  return ["preToolUse", "postToolUse", "userPromptSubmit", "postToolBatch"].includes(canonicalEvent)
 }
 
 async function failOpen(

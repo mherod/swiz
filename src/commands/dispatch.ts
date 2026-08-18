@@ -47,6 +47,7 @@ import type { Command } from "../types.ts"
 import { getEffectiveSwizSettingsForToolHook } from "../utils/hook-effective-settings.ts"
 import { messageFromUnknownError } from "../utils/hook-json-helpers.ts"
 import { sanitizeHookOutputForCurrentAgent } from "../utils/hook-output-agent-compat.ts"
+import { supportsHookSpecificOutput } from "../utils/hook-specific-output.ts"
 import { checkIncompleteTasks } from "../utils/stop-incomplete-tasks-core.ts"
 import { detectTerminal } from "../utils/terminal-detection.ts"
 import { getDaemonPort } from "./daemon/daemon-admin.ts"
@@ -309,20 +310,6 @@ interface DispatchTiming {
 
 function isStopLikeEvent(canonicalEvent: string): boolean {
   return canonicalEvent === "stop" || canonicalEvent === "subagentStop"
-}
-
-/**
- * Claude only accepts `hookSpecificOutput` on these events. Emitting it elsewhere
- * (PreCompact, SessionStart, SessionEnd, Notification, SubagentStart, PreCommit, PrePush)
- * is rejected by the hook output schema as "Invalid input".
- */
-function supportsHookSpecificOutput(canonicalEvent: string): boolean {
-  return (
-    canonicalEvent === "preToolUse" ||
-    canonicalEvent === "postToolUse" ||
-    canonicalEvent === "userPromptSubmit" ||
-    canonicalEvent === "postToolBatch"
-  )
 }
 
 function describeDispatchFailure(err: unknown): { message: string; detail: string } {

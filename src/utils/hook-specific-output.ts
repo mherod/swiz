@@ -8,6 +8,44 @@
 import { merge } from "lodash-es"
 import { type HookSpecificOutput, hookOutputSchema, hookSpecificOutputSchema } from "../schemas.ts"
 
+/**
+ * Canonical dispatch events whose responses may carry `hookSpecificOutput`.
+ *
+ * Claude rejects the envelope on every other event — `PostCompact`, `PreCompact`,
+ * `SessionStart`, `SessionEnd`, `Notification`, `SubagentStart`, `Stop`, `PreCommit`,
+ * `PrePush` — with `Hook JSON output validation failed — (root): Invalid input`, which
+ * discards the whole response including its `additionalContext`.
+ */
+const HOOK_SPECIFIC_OUTPUT_EVENTS = new Set([
+  "preToolUse",
+  "postToolUse",
+  "userPromptSubmit",
+  "postToolBatch",
+])
+
+/**
+ * Claude hook event names observed to reject `hookSpecificOutput` outright.
+ *
+ * Kept as a denylist, not the inverse of {@link HOOK_SPECIFIC_OUTPUT_EVENTS}: `SessionStart`
+ * is absent from Claude's published schema yet delivers `additionalContext` in practice, so
+ * only events with a confirmed rejection are stripped. Add an event here when a live dispatch
+ * reports `Hook JSON output validation failed — (root): Invalid input`.
+ */
+const HOOK_SPECIFIC_OUTPUT_REJECTED_EVENT_NAMES = new Set(["PreCompact", "PostCompact"])
+
+/** Whether a canonical dispatch event may emit `hookSpecificOutput`. */
+export function supportsHookSpecificOutput(canonicalEvent: string): boolean {
+  return HOOK_SPECIFIC_OUTPUT_EVENTS.has(canonicalEvent)
+}
+
+/** Whether an agent-facing `hookSpecificOutput.hookEventName` is rejected by Claude. */
+export function hookEventNameRejectsHookSpecificOutput(hookEventName: unknown): boolean {
+  return (
+    typeof hookEventName === "string" &&
+    HOOK_SPECIFIC_OUTPUT_REJECTED_EVENT_NAMES.has(hookEventName)
+  )
+}
+
 /** Non-array plain object `hookSpecificOutput` from a hook or dispatch envelope. */
 export function getHookSpecificOutput(resp: {
   hookSpecificOutput?: unknown

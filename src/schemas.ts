@@ -663,11 +663,24 @@ export const sessionHookInputSchema = allOptional(PkgPreCompactInputSchema)
 
 export type SessionHookInput = z.infer<typeof sessionHookInputSchema>
 
-/** Alias for dispatch validation — preCompact uses the PreCompact input shape. */
-export const preCompactHookInputSchema = z.union([
-  sessionHookInputSchema,
-  geminiPreCompressInputSchema,
-])
+/**
+ * Dispatch validation envelope for `preCompact` across every agent.
+ *
+ * DON'T narrow this back to `z.union([sessionHookInputSchema, geminiPreCompressInputSchema])`.
+ * `allOptional()` produces `.optional()` (not `.nullish()`) fields and `PkgPreCompactInputSchema`
+ * pins `trigger` to the `"manual" | "auto"` enum, so Claude sending
+ * `custom_instructions: null` — or any future trigger value — failed the whole union with a
+ * root-level `"Invalid input"` that named no field, and `/compact` reported
+ * `Invalid dispatch payload for event "preCompact"`.
+ */
+export const preCompactHookInputSchema = z.looseObject({
+  session_id: z.string().nullish(),
+  transcript_path: z.string().nullish(),
+  cwd: CwdSchema.nullish(),
+  hook_event_name: z.string().nullish(),
+  trigger: z.string().nullish(),
+  custom_instructions: z.string().nullish(),
+})
 
 // ─── Other hook event input schemas ──────────────────────────────────────────
 

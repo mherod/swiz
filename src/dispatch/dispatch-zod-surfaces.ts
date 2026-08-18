@@ -61,13 +61,27 @@ export const DISPATCH_CANONICAL_INBOUND_SCHEMAS: Record<string, z.ZodType<Record
   prePush: prePushHookInputSchema as z.ZodType<Record<string, any>>,
 }
 
+/**
+ * Render the first few zod issues as `field — message`, so a rejected payload names the
+ * offending field in the dispatch failure log instead of only in `debugLog`.
+ */
+function describeZodIssues(zodError: z.ZodError, limit = 3): string {
+  const issues = zodError.issues.slice(0, limit).map((issue) => {
+    const path = issue.path.join(".")
+    return path ? `${path} — ${issue.message}` : issue.message
+  })
+  if (issues.length === 0) return ""
+  const more = zodError.issues.length - issues.length
+  return `: ${issues.join("; ")}${more > 0 ? ` (+${more} more)` : ""}`
+}
+
 export class DispatchPayloadValidationError extends Error {
   override readonly name = "DispatchPayloadValidationError"
   constructor(
     readonly canonicalEvent: string,
     readonly zodError: z.ZodError
   ) {
-    super(`Invalid dispatch payload for event "${canonicalEvent}"`)
+    super(`Invalid dispatch payload for event "${canonicalEvent}"${describeZodIssues(zodError)}`)
   }
 }
 

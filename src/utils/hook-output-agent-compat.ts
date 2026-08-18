@@ -1,6 +1,7 @@
 import { detectCurrentAgentFromEnv } from "../agent-paths.ts"
 import { type AgentDef, getAgent, translateToolNamesInText } from "../agents.ts"
 import { tildifyHome } from "../home.ts"
+import { hookEventNameRejectsHookSpecificOutput } from "./hook-specific-output.ts"
 
 type HookOutputLike = Record<string, any>
 
@@ -170,13 +171,34 @@ function redactHomePathsInOutput<T extends HookOutputLike>(output: T): T {
   return (result ?? output) as T
 }
 
+/**
+ * On the compact events Claude rejects the whole response with
+ * `Hook JSON output validation failed — (root): Invalid input` when it carries
+ * `hookSpecificOutput`, so its `additionalContext` never reaches the model. Fold that context
+ * into `systemMessage` — which every event accepts — and drop the envelope.
+ */
+function stripUnsupportedHookSpecificOutput<T extends HookOutputLike>(output: T): T {
+  const hookSpecificOutput = output.hookSpecificOutput
+  if (!isPlainObject(hookSpecificOutput)) return output
+  if (!hookEventNameRejectsHookSpecificOutput(hookSpecificOutput.hookEventName)) return output
+
+  const cloned = structuredClone(output) as HookOutputLike
+  const additionalContext = nonEmptyString(hookSpecificOutput.additionalContext)
+  if (additionalContext && !nonEmptyString(cloned.systemMessage)) {
+    cloned.systemMessage = additionalContext
+  }
+  delete cloned.hookSpecificOutput
+  return cloned as T
+}
+
 export function sanitizeHookOutputForAgent<T extends HookOutputLike>(
   output: T,
   agentId: string | null | undefined
 ): T {
   const base = agentId === "codex" ? (sanitizeCodexHookOutput(output) as T) : output
   const agent = agentId ? getAgent(agentId) : undefined
-  return redactHomePathsInOutput(translateHookOutputToolNames(base, agent))
+  const gated = agentId === "codex" ? base : stripUnsupportedHookSpecificOutput(base)
+  return redactHomePathsInOutput(translateHookOutputToolNames(gated, agent))
 }
 
 export function sanitizeHookOutputForCurrentAgent<T extends HookOutputLike>(output: T): T {

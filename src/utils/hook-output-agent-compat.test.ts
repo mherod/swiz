@@ -16,6 +16,45 @@ describe("sanitizeHookOutputForAgent", () => {
     expect(sanitizeHookOutputForAgent(output, "claude")).toBe(output)
   })
 
+  test("drops hookSpecificOutput on events Claude rejects, keeping the context", () => {
+    const output = sanitizeHookOutputForAgent<Record<string, any>>(
+      {
+        suppressOutput: true,
+        hookSpecificOutput: {
+          hookEventName: "PostCompact",
+          additionalContext: "Post-compaction recovery: run TaskList to re-sync the task queue.",
+        },
+      },
+      "claude"
+    )
+
+    expect(output.hookSpecificOutput).toBeUndefined()
+    expect(output.systemMessage).toBe(
+      "Post-compaction recovery: run TaskList to re-sync the task queue."
+    )
+  })
+
+  test("keeps an existing systemMessage when dropping a rejected hookSpecificOutput", () => {
+    const output = sanitizeHookOutputForAgent<Record<string, any>>(
+      {
+        systemMessage: "already set",
+        hookSpecificOutput: { hookEventName: "PreCompact", additionalContext: "nested" },
+      },
+      "claude"
+    )
+
+    expect(output.hookSpecificOutput).toBeUndefined()
+    expect(output.systemMessage).toBe("already set")
+  })
+
+  test("leaves SessionStart hookSpecificOutput intact — Claude delivers its context", () => {
+    const output = {
+      hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: "session context" },
+    }
+
+    expect(sanitizeHookOutputForAgent(output, "claude")).toBe(output)
+  })
+
   test("omits additionalContext for Codex and preserves it as systemMessage", () => {
     const output = sanitizeHookOutputForAgent<Record<string, unknown>>(
       {
