@@ -239,7 +239,10 @@ describe("pretooluse-skill-invocation-gate", () => {
     ).toBe("allow")
   })
 
-  it("blocks Claude git commit when commit skill was used but TaskList was not synced", async () => {
+  it("allows git commit without a TaskList sync while the commit skill is active", async () => {
+    // The gate only fires once /commit is already running, so demanding a TaskList sync here
+    // interrupts the very skill that satisfied it — an unreachable remedy. An active skill is
+    // treated as sufficient intent instead.
     const sessionLines = [
       assistantLine([{ type: "tool_use", name: "Skill", input: { skill: "commit" } }]),
     ]
@@ -253,8 +256,10 @@ describe("pretooluse-skill-invocation-gate", () => {
     expect(
       (result as { hookSpecificOutput?: { permissionDecision?: string } }).hookSpecificOutput
         ?.permissionDecision
-    ).toBe("deny")
-    expect((result as { systemMessage?: string }).systemMessage).toContain("requires TaskList")
+    ).not.toBe("deny")
+    expect((result as { systemMessage?: string }).systemMessage ?? "").not.toContain(
+      "requires TaskList"
+    )
   })
 
   it("blocks git commit when git config identity is a placeholder", async () => {

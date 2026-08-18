@@ -652,6 +652,34 @@ export async function getRecentlyUsedToolsForCurrentSession(
 }
 
 /**
+ * True when a skill is running for this payload's session.
+ *
+ * Task governance uses this as an escape hatch: a skill drives its own ordered workflow, and a
+ * governance gate firing mid-skill blocks a step the skill has already prescribed — leaving the
+ * agent with a remedy it cannot reach without abandoning the skill. An active skill is therefore
+ * treated as sufficient intent, and the state gates stand down for its duration.
+ *
+ * Resolves the recency window from settings the same way the active-skills context banner does, so
+ * a skill counts as active here for exactly as long as it is reported as active there.
+ *
+ * Fails closed: any detection error keeps governance enforcing rather than silently disabling it.
+ */
+export async function hasActiveSkillForHookPayload(
+  source: CurrentSessionUsageSource,
+  cwd?: string
+): Promise<boolean> {
+  try {
+    const sourceCwd = typeof source === "object" && typeof source.cwd === "string" ? source.cwd : ""
+    const resolvedCwd = cwd ?? sourceCwd
+    const { recencyOptions } = await resolveSkillRecencyOptions(resolvedCwd)
+    const skills = await getRecentSkillsUsedForCurrentSession(source, recencyOptions)
+    return skills.length > 0
+  } catch {
+    return false
+  }
+}
+
+/**
  * True when any skill was invoked recently in the current session, using the
  * project-configured recency window. Dispatch consults this to relax hook
  * gating while the agent is following skill instructions. Fails closed

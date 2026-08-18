@@ -10,6 +10,7 @@ import {
   type SwizHookOutput,
 } from "../src/SwizHook.ts"
 import { type UserPromptSubmitHookInput, userPromptSubmitHookInputSchema } from "../src/schemas.ts"
+import { hasActiveSkillForHookPayload } from "../src/skill-utils.ts"
 import { buildCountSummaryFromTasks } from "../src/tasks/task-count-summary.ts"
 import {
   buildUserPromptTaskContext,
@@ -26,6 +27,10 @@ export async function evaluateUserpromptsubmitTaskAdvisor(input: unknown): Promi
 
   const home = getHomeDirOrNull()
   if (!home) return {}
+
+  // A skill is driving the session and the governance gates have stood down for its duration,
+  // so prescribing task-queue remedies here is noise the agent is expected to ignore.
+  if (await hasActiveSkillForHookPayload(raw)) return {}
 
   const tasks = await readSessionTasks(sessionId, home)
   const pendingCount = tasks.filter((t) => isIncompleteTaskStatus(t.status)).length

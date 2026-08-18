@@ -42,7 +42,10 @@ import {
   readProjectState,
   readSwizSettings,
 } from "../src/settings.ts"
-import { getRecentlyUsedToolsForCurrentSession } from "../src/skill-utils.ts"
+import {
+  getRecentlyUsedToolsForCurrentSession,
+  hasActiveSkillForHookPayload,
+} from "../src/skill-utils.ts"
 import { createTaskStoreForHookPayload } from "../src/task-roots.ts"
 import {
   CODEX_UPDATE_PLAN_TOOL_NAMES,
@@ -987,6 +990,10 @@ function runImmediateTaskStateChecks(context: TaskStateCheckContext): SwizHookOu
 async function runTaskStateChecks(context: TaskStateCheckContext): Promise<SwizHookOutput> {
   if (await nativeTaskToolsProvenAbsent(context.input)) return preToolUseAllow()
 
+  // Escape hatch: a running skill owns its own ordered workflow, so a state gate firing mid-skill
+  // blocks a step the skill itself prescribed. Stand down for the skill's duration.
+  if (await hasActiveSkillForHookPayload(context.input, context.cwd)) return preToolUseAllow()
+
   const reconciliation = checkReconciliationRequired(context)
   if (reconciliation) return reconciliation
 
@@ -1908,6 +1915,8 @@ export async function evaluatePendingOverflowGuard(
   const cwd: string = (input.cwd as string) ?? process.cwd()
   if (!sessionId) return null
   if (!(await isTaskEnforcementProject(input, cwd))) return null
+  // Same escape hatch as runTaskStateChecks — an active skill stands the state gates down.
+  if (await hasActiveSkillForHookPayload(input, cwd)) return null
 
   const allTasks = overlayEventState(await readTasksForInput(input, sessionId), sessionId)
   return checkPendingOverflow(toolName, allTasks) ?? null
@@ -2138,6 +2147,10 @@ async function formatTaskTraceContext(
 ): Promise<string> {
   // No native task tools: the queue can never fill, so nagging about it is pure noise.
   if (await nativeTaskToolsProvenAbsent(input)) return ""
+
+  // A skill is driving: the state gates have stood down, so the advisory that prescribes the same
+  // remedy is noise attached to every tool result for the skill's duration.
+  if (await hasActiveSkillForHookPayload(input)) return ""
 
   const stateLead = formatTaskStateLead({
     total: counts.total,

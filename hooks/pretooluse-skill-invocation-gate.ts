@@ -51,6 +51,7 @@ import {
   formatSkillReferenceForHookPayload,
   getRecentlyInvokedSkillsForCurrentSession,
   getRecentlyUsedToolsForCurrentSession,
+  hasActiveSkillForHookPayload,
   type ResolvedSkillFile,
   resolveSkillFilePathForHookPayload,
   resolveSkillRecencyOptions,
@@ -396,6 +397,9 @@ async function checkTaskListRequirement(
   recencyOptions: CurrentSessionUsageRecencyOptions
 ): Promise<SwizHookOutput | null> {
   if (!(await requiresTaskListCheck(skill, input))) return null
+  // The gate fires only once /commit is already active, so demanding a TaskList sync here
+  // interrupts the very skill that satisfied the gate. Treat the active skill as sufficient.
+  if (await hasActiveSkillForHookPayload(input)) return null
   const toolNames = await getRecentlyUsedToolsForCurrentSession(input, recencyOptions)
   // Accept MCP task listings: when the native TaskList is absent from the session it is the only
   // sync available, and rejecting it makes this gate's own remediation impossible to satisfy.
