@@ -21,6 +21,7 @@ import {
 } from "../src/agent-paths.ts"
 import { formatDuration } from "../src/format-duration.ts"
 import { getHomeDirOrNull } from "../src/home.ts"
+import { projectKeyFromCwd } from "../src/project-key.ts"
 import { isGitRepoForHookPayload } from "../src/repository-capability.ts"
 import type { RunSwizHookAsMainOptions, SwizHookOutput, SwizToolHook } from "../src/SwizHook.ts"
 import {
@@ -84,7 +85,7 @@ import {
   isIncompleteTaskStatus,
   isTerminalTaskStatus,
 } from "../src/tasks/task-recovery.ts"
-import { readTasks } from "../src/tasks/task-repository.ts"
+import { readTasksAcrossStores } from "../src/tasks/task-repository.ts"
 // validateLastTaskStanding removed — handleTaskCompletion now checks full governance thresholds
 import {
   CANONICAL_TASKLIST_SYNC_MAX_AGE_MS,
@@ -178,8 +179,16 @@ function taskStoreForInput(input: Record<string, any>) {
   return home ? createTaskStoreForHookPayload(input, home) : createTaskStoreForHookPayload(input)
 }
 
+/**
+ * Governance-facing task read.
+ *
+ * Reads the agent's session-keyed store unioned with the project-keyed store the MCP server writes
+ * to, so a session driven through `mcp__*__Task*` is not judged against an empty queue (#823).
+ */
 async function readTasksForInput(input: Record<string, any>, sessionId: string) {
-  return await readTasks(sessionId, taskStoreForInput(input).tasksDir)
+  const cwd = typeof input.cwd === "string" ? input.cwd : ""
+  const projectKey = cwd ? projectKeyFromCwd(cwd) : undefined
+  return await readTasksAcrossStores(sessionId, projectKey, taskStoreForInput(input).tasksDir)
 }
 
 function hasTaskGovernanceSurface(input: Record<string, any>, toolName: string): boolean {

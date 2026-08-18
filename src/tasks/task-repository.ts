@@ -265,6 +265,49 @@ export async function readTasks(
   }
 }
 
+/** ISO `statusChangedAt` as epoch ms; 0 when absent or unparseable, so it always loses a compare. */
+function statusChangedAtMs(task: Task): number {
+  if (!task.statusChangedAt) return 0
+  const parsed = Date.parse(task.statusChangedAt)
+  return Number.isNaN(parsed) ? 0 : parsed
+}
+
+/**
+ * Read one session's tasks unioned with the project-keyed store for the same machine.
+ *
+ * The store is keyed by directory name, and two surfaces disagree about what that name means: the
+ * MCP server keys by `projectKeyFromCwd(cwd)` while the native task tools key by the agent session
+ * id. A reader that consults only one key sees an empty queue for sessions driven by the other —
+ * which is how task governance came to block on a queue the agent had already filled (#823).
+ *
+ * A task present in both stores is returned once, preferring the copy whose status changed most
+ * recently, so a completion recorded through either surface wins over a stale duplicate.
+ *
+ * Pass `projectKey` as undefined to get exactly the single-store behaviour of {@link readTasks}.
+ */
+export async function readTasksAcrossStores(
+  sessionId: string,
+  projectKey: string | undefined,
+  tasksDir = createDefaultTaskStore().tasksDir
+): Promise<Task[]> {
+  if (!projectKey || projectKey === sessionId) return await readTasks(sessionId, tasksDir)
+
+  const [sessionTasks, projectTasks] = await Promise.all([
+    readTasks(sessionId, tasksDir),
+    readTasks(projectKey, tasksDir),
+  ])
+
+  const byId = new Map<string, Task>()
+  for (const task of [...sessionTasks, ...projectTasks]) {
+    const existing = byId.get(task.id)
+    if (!existing || statusChangedAtMs(task) > statusChangedAtMs(existing)) {
+      byId.set(task.id, task)
+    }
+  }
+
+  return [...byId.values()].sort((a, b) => compareTaskIds(a.id, b.id))
+}
+
 /** Lightweight per-session metadata index for O(1) open-task-count lookups. */
 export interface SessionMeta {
   /** Number of tasks with status "pending" or "in_progress". */
