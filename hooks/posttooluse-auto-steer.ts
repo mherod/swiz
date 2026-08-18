@@ -29,7 +29,11 @@ import type { SwizHook, SwizHookOutput } from "../src/SwizHook.ts"
 import { runSwizHookAsMain } from "../src/SwizHook.ts"
 import { sanitizeSessionId } from "../src/session-id.ts"
 import { readSessionTasks } from "../src/tasks/task-recovery.ts"
-import { isShellTool, isTaskCreateTool, isTaskUpdateTool } from "../src/tool-matchers.ts"
+import {
+  isAnyProviderTaskCreateTool,
+  isAnyProviderTaskUpdateTool,
+  isShellTool,
+} from "../src/tool-matchers.ts"
 import { shouldDeferAutoSteerForForegroundChatApp } from "../src/utils/auto-steer-foreground.ts"
 import {
   consumeAutoSteerRequest,
@@ -71,7 +75,7 @@ function hasTaskCreatedTrigger(
   rec: Record<string, any>
 ): boolean {
   if (!store.hasPending(safeSession, "task_created")) return false
-  return isTaskCreateTool((rec.tool_name as string) ?? "")
+  return isAnyProviderTaskCreateTool((rec.tool_name as string) ?? "")
 }
 
 function hasTaskUpdatedTrigger(
@@ -80,7 +84,7 @@ function hasTaskUpdatedTrigger(
   rec: Record<string, any>
 ): boolean {
   if (!store.hasPending(safeSession, "task_updated")) return false
-  return isTaskUpdateTool((rec.tool_name as string) ?? "")
+  return isAnyProviderTaskUpdateTool((rec.tool_name as string) ?? "")
 }
 
 function hasTaskCompletedTrigger(
@@ -89,7 +93,7 @@ function hasTaskCompletedTrigger(
   rec: Record<string, any>
 ): boolean {
   if (!store.hasPending(safeSession, "task_completed")) return false
-  if (!isTaskUpdateTool((rec.tool_name as string) ?? "")) return false
+  if (!isAnyProviderTaskUpdateTool((rec.tool_name as string) ?? "")) return false
   const status = (rec.tool_input as { status?: string } | undefined)?.status
   return status === "completed"
 }

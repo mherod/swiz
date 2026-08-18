@@ -7,10 +7,10 @@ import {
 } from "../src/SwizHook.ts"
 import { toolHookInputSchema } from "../src/schemas.ts"
 import {
+  isAnyProviderTaskUpdateTool,
   isCodeChangeTool,
   isShellTool,
   isSkillTool,
-  isTaskUpdateTool,
 } from "../src/tool-matchers.ts"
 import { resolveSessionLines } from "../src/utils/transcript.ts"
 
@@ -264,7 +264,7 @@ function appendToolUseEvent(
   const name = String(block.name ?? "")
   if (isShellTool(name)) appendShellEvents(events, block, result, timestampMs)
   else if (isCodeChangeTool(name)) appendFileEvents(events, block, result, timestampMs)
-  else if (isTaskUpdateTool(name)) appendTaskEvents(events, block, result, timestampMs)
+  else if (isAnyProviderTaskUpdateTool(name)) appendTaskEvents(events, block, result, timestampMs)
   else if (isSkillTool(name)) appendSkillEvents(events, block, result, timestampMs)
 }
 
