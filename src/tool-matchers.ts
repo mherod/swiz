@@ -110,6 +110,26 @@ export function stripMcpToolNamespace(name: string): string {
 export function isAnyProviderTaskListTool(name: string): boolean {
   return isTaskListTool(stripMcpToolNamespace(name))
 }
+/**
+ * True for a task-creation call from any provider, including `mcp__swiz__TaskCreate`.
+ *
+ * Same split as {@link isAnyProviderTaskListTool}: use this for behavioural questions — "did the
+ * agent just create a task?" — where an MCP creation is real evidence. Do NOT use it to decide
+ * whether the *native* tools exist, or to route a call into native input validation.
+ */
+export function isAnyProviderTaskCreateTool(name: string): boolean {
+  return isTaskCreateTool(stripMcpToolNamespace(name))
+}
+
+/**
+ * True for a task-update call from any provider, including `mcp__swiz__TaskUpdate`.
+ *
+ * See {@link isAnyProviderTaskCreateTool} for when this is the right matcher.
+ */
+export function isAnyProviderTaskUpdateTool(name: string): boolean {
+  return isTaskUpdateTool(stripMcpToolNamespace(name))
+}
+
 export function isTaskGetTool(name: string): boolean {
   return TASK_GET_TOOLS.has(name)
 }

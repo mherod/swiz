@@ -105,14 +105,15 @@ import { detect, formatMessage } from "../src/tasks/task-subject-validation.ts"
 import { getTaskCurrentDurationMs } from "../src/tasks/task-timing.ts"
 import { SWIZ_INCOMING_ROOT } from "../src/temp-paths.ts"
 import {
+  isAnyProviderTaskCreateTool,
   isAnyProviderTaskListTool,
+  isAnyProviderTaskUpdateTool,
   isCodeChangeTool,
   isEditTool,
   isFileEditTool,
   isShellTool,
   isTaskCreateTool,
   isTaskListTool,
-  isTaskUpdateTool,
   isWriteTool,
 } from "../src/tool-matchers.ts"
 import { getCurrentSessionTaskToolStats } from "../src/transcript-summary.ts"
@@ -647,7 +648,14 @@ async function checkCanonicalTaskListSync(
   sessionId: string,
   input: Record<string, any>
 ): Promise<SwizHookOutput | undefined> {
-  if (isTaskListTool(toolName) || isTaskCreateTool(toolName) || isUpdatePlanTool(toolName)) {
+  // Provider-prefixed creations count here: an agent whose only task tools are MCP is doing task
+  // work when it calls `mcp__swiz__TaskCreate`, and excluding it made the sync gate fire on the
+  // very call that satisfies it.
+  if (
+    isAnyProviderTaskListTool(toolName) ||
+    isAnyProviderTaskCreateTool(toolName) ||
+    isUpdatePlanTool(toolName)
+  ) {
     return undefined
   }
   if (!agentHasTaskListToolForHookPayload(input)) return undefined
@@ -2222,7 +2230,7 @@ export async function shouldSuppressGovernanceTrace(input: Record<string, any>):
     const entry = await getCurrentComplianceEntry(sessionId)
     if (entry && entry.state === "healthy") {
       const toolName = (input?.tool_name as string) ?? ""
-      if (isCodeChangeTool(toolName) || isTaskUpdateTool(toolName)) {
+      if (isCodeChangeTool(toolName) || isAnyProviderTaskUpdateTool(toolName)) {
         return true
       }
     }
