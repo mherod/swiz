@@ -359,11 +359,12 @@ swiz install              # all agents with configurable hooks
 swiz install --claude     # Claude Code only
 swiz install --cursor     # Cursor only
 swiz install --gemini     # Gemini CLI only
-swiz install --codex      # shows Codex status (not yet configurable)
+swiz install --codex      # Codex CLI only (~/.codex/hooks.json)
 swiz install --antigravity # Antigravity CLI only (~/.gemini/antigravity-cli/hooks.json)
 swiz install --dry-run    # line-by-line unified diff, no writes
 ```
 
+- **Codex needs its feature flag** — `swiz install --codex` writes `~/.codex/hooks.json`, but Codex CLI only executes those hooks when its hooks feature is enabled: run `codex -c features.codex_hooks=true`, or set `features.codex_hooks = true` in `~/.codex/config.toml` to make it permanent. Without the flag the file is written and silently ignored.
 - **Merge, not replace** — user-defined hooks (sound effects, agent hooks, inline scripts, etc.) are preserved. Only swiz-managed hooks are touched.
 - **Legacy replacement** — if you previously had hooks at `~/.claude/hooks/`, swiz detects and replaces them with the portable versions from the swiz project.
 - **Idempotent** — running install twice produces the same result. Old swiz hooks are stripped before new ones are added.

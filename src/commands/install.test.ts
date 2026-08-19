@@ -70,6 +70,36 @@ describe("daemon LaunchAgent environment", () => {
   })
 })
 
+describe("install --codex writes hooks", () => {
+  it("writes swiz dispatch entries to ~/.codex/hooks.json without touching other agents", async () => {
+    // Codex hooks are configurable (agents.ts sets hooksConfigurable: true), so install must
+    // actually write the file rather than only reporting status — the behaviour README once
+    // described as "not yet configurable".
+    const home = await mkdtemp(join(tmpdir(), "swiz-install-codex-write-"))
+    const codexPath = join(home, ".codex", "hooks.json")
+    const claudeSettingsPath = join(home, ".claude", "settings.json")
+
+    await writeJson(claudeSettingsPath, { userSetting: true })
+
+    const result = await runInstall(["--codex"], home)
+
+    expect(result.exitCode).toBe(0)
+    expect(result.stdout).toContain("Agents: Codex CLI")
+
+    const codex = await readJson<{ hooks: Record<string, unknown[]> }>(codexPath)
+    const events = Object.keys(codex.hooks)
+    expect(events.length).toBeGreaterThan(0)
+    // Every written entry must dispatch through swiz, not a bare hook path.
+    const commands = JSON.stringify(codex.hooks)
+    expect(commands).toContain("swiz dispatch")
+
+    // Scoping: Claude settings are left exactly as the user had them.
+    const claude = await readJson<{ userSetting?: boolean; hooks?: unknown }>(claudeSettingsPath)
+    expect(claude.userSetting).toBe(true)
+    expect(claude.hooks).toBeUndefined()
+  })
+})
+
 describe("install --uninstall scope", () => {
   it("removes only Codex hooks when --codex scopes uninstall", async () => {
     const home = await mkdtemp(join(tmpdir(), "swiz-install-codex-scope-"))
