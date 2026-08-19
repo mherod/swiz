@@ -7,8 +7,7 @@ import { stderrLog } from "../../debug.ts"
 import { complianceBaselineWantedLevel } from "../../infractions.ts"
 import { projectKeyFromCwd } from "../../project-key.ts"
 import { findTaskStoreForSession } from "../../task-roots.ts"
-import type { SessionTask } from "../../tasks/task-recovery.ts"
-import { mergeTaskStoresByRecency } from "../../tasks/task-repository.ts"
+import { mergeTaskStoresByRecency, readTasks } from "../../tasks/task-repository.ts"
 import type { TaskCounts, WarmStatusLineSnapshot } from "../status-line.ts"
 import { buildTaskCountsFromTasks } from "../status-line.ts"
 import type { CappedMap } from "./cache/capped-map.ts"
@@ -45,8 +44,8 @@ const STALE_SYNC_THRESHOLD_MS = 10 * 60 * 1000 // 10 minutes
  *
  * The MCP task tools key the store by `projectKeyFromCwd(cwd)` while the native tools key it by
  * session id, so reading only the session directory reports an empty queue for any session driven
- * through MCP. The cache is keyed by an arbitrary id, so the project store gets its own watched
- * entry and the two lists are merged by recency — the same union the governance hook already does.
+ * through MCP. The session store is served warm from the cache; the project store is read from disk
+ * (see below) and the two lists merged by recency — the same union the governance hook already does.
  */
 async function resolveTaskCountsFromCache(
   sessionId: string | null | undefined,
@@ -60,7 +59,7 @@ async function resolveTaskCountsFromCache(
     const sessionState = await cache.getState(sessionId, join(tasksDir, sessionId))
     const projectTasks =
       projectKey && projectKey !== sessionId
-        ? await readProjectStoreTasks(projectKey, tasksDir, cache)
+        ? await readProjectStoreTasks(projectKey, tasksDir)
         : []
     const tasks = mergeTaskStoresByRecency(sessionState.tasks, projectTasks)
     stderrLog(
@@ -75,16 +74,19 @@ async function resolveTaskCountsFromCache(
   }
 }
 
-/** Read the project-keyed store through the cache, watching it so fs writes invalidate the entry. */
+/**
+ * Read the project-keyed store straight from disk, never through `TaskStateCache`.
+ *
+ * A cache load runs `pruneStaleCompleted`, which `unlink`s completed task files older than
+ * `COMPLETED_TASK_PRUNE_AGE_MS`. That is sound for the session store the daemon owns and destructive
+ * for the long-lived project store, which accumulates history across sessions — pointing the cache
+ * at it made rendering the status line delete the tasks it was counting.
+ */
 async function readProjectStoreTasks(
   projectKey: string,
-  tasksDir: string,
-  cache: ComplianceRoutesContext["taskStateCache"]
-): Promise<SessionTask[]> {
-  const projectDir = join(tasksDir, projectKey)
-  cache.watchSession(projectKey, projectDir)
-  const state = await cache.getState(projectKey, projectDir)
-  return state.tasks
+  tasksDir: string
+): Promise<Array<{ id: string; status: string; statusChangedAt?: string }>> {
+  return readTasks(projectKey, tasksDir).catch(() => [])
 }
 
 export function resolveComplianceDurationLabel(

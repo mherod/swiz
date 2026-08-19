@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { projectKeyFromCwd } from "../../project-key.ts"
@@ -79,7 +79,13 @@ function withTempHome(): { home: string; restore: () => void } {
   }
 }
 
-function writeStoreTask(home: string, storeKey: string, id: string, status: string): void {
+function writeStoreTask(
+  home: string,
+  storeKey: string,
+  id: string,
+  status: string,
+  completedAt?: number
+): void {
   const dir = join(home, ".claude", "tasks", storeKey)
   mkdirSync(dir, { recursive: true })
   writeFileSync(
@@ -89,6 +95,7 @@ function writeStoreTask(home: string, storeKey: string, id: string, status: stri
       subject: `subject ${id}`,
       description: `description ${id}`,
       status,
+      completedAt: completedAt ?? null,
       blocks: [],
       blockedBy: [],
     })
@@ -226,6 +233,27 @@ describe("compliance routes", () => {
     try {
       // Without this control the union case below could pass for the wrong reason.
       expect(await snapshotTaskCounts(cwd, sessionId)).toMatchObject({ total: 1, inProgress: 1 })
+    } finally {
+      restore()
+    }
+  })
+
+  test("never prunes completed tasks out of the project store", async () => {
+    // TaskStateCache.fullLoad runs pruneStaleCompleted, which unlinks completed task files older
+    // than COMPLETED_TASK_PRUNE_AGE_MS (15m). That is sound for the session store the daemon owns
+    // and destructive for the long-lived project store, so the snapshot must read it from disk.
+    const { home, restore } = withTempHome()
+    const cwd = "/repo/prune-guard"
+    const sessionId = "00000000-0000-0000-0000-0000000000ff"
+    const projectKey = projectKeyFromCwd(cwd)
+    writeStoreTask(home, sessionId, "ffff-1", "in_progress")
+    const staleCompletion = Date.now() - 60 * 60_000
+    writeStoreTask(home, projectKey, "349d-1", "completed", staleCompletion)
+
+    try {
+      await snapshotTaskCounts(cwd, sessionId)
+      const completedPath = join(home, ".claude", "tasks", projectKey, "349d-1.json")
+      expect(existsSync(completedPath)).toBe(true)
     } finally {
       restore()
     }
