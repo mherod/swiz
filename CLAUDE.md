@@ -121,8 +121,7 @@ alwaysApply: false
 - **Task completion**: `TaskUpdate` `taskId` + `status: completed`; evidence in `description`: `commit:`, `pr:`, `file:`, `test:`, `note:`.
 - **DON'T**: Assume CI success from partial output or from `gh run watch` alone. Confirm every job: `gh run view <run-id> --json conclusion,status,jobs`.
 - Treat `gh issue create` and task completion as atomic; recover with `TaskUpdate`.
-- Run `git diff <files>` before `git add`; `git status` after each `git commit`.
-- After each `CLAUDE.md` edit, run `wc -w CLAUDE.md`; run `/compact-memory` near threshold.
+- After each `CLAUDE.md` edit run `wc -w CLAUDE.md`: the lefthook `memory` step hard-fails commits above project `memory-word-threshold` (3500 via `swiz settings show --project`, not `/compact-memory`'s laxer analyzer). Offset additions with trims in the same pass.
 - Before adding a `CLAUDE.md` rule, scan nearby rules for conflicts.
 - Before issue labeling, run `gh label list`; use requested literal labels when present.
 - After `gh issue create`, run `/refine-issue <number>` and apply readiness label.
@@ -219,7 +218,7 @@ alwaysApply: false
 - **DO**: Edit a file between `bun run format` and `bun run lint` — hook detects no file changes on consecutive runs.
 - No `cd` in Bash; use absolute paths, `git -C`, `pnpm --prefix`, or `cwd` in `Bun.spawn()`.
 - `sed -i`/`sed > file` blocked; `sed -n` allowed. Use Read `offset`/`limit`.
-- `awk > file`/`awk | tee -i` blocked; `awk '{print}'` allowed. Prefer `bun -e`, `cut`, `git --format`.
+- `awk` is blocked entirely; prefer `bun -e`, `cut`, `git --format`.
 - Do not use `python`/`python3`; use `bun -e` or `jq`.
 - No `rm`/`rm -rf`; use `trash <path>`; guard with `[[ -e <path> ]] && trash <path>`.
 - DO NOT edit `~/.claude/hooks/` or `~/.claude/skills/` (external repos). For cross-repo bugs, file an issue with error, root cause, fix, and criteria.
