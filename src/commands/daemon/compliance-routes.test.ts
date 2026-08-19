@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { existsSync, mkdtempSync } from "node:fs"
+import { mkdir, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { projectKeyFromCwd } from "../../project-key.ts"
@@ -61,8 +62,8 @@ function createContext(): ComplianceRoutesContext {
 // any session driven through MCP — no task segment, and a clean wanted level over open work.
 const tempHomes: string[] = []
 
-afterEach(() => {
-  for (const home of tempHomes.splice(0)) rmSync(home, { recursive: true, force: true })
+afterEach(async () => {
+  for (const home of tempHomes.splice(0)) await rm(home, { recursive: true, force: true })
 })
 
 function withTempHome(): { home: string; restore: () => void } {
@@ -79,16 +80,16 @@ function withTempHome(): { home: string; restore: () => void } {
   }
 }
 
-function writeStoreTask(
+async function writeStoreTask(
   home: string,
   storeKey: string,
   id: string,
   status: string,
   completedAt?: number
-): void {
+): Promise<void> {
   const dir = join(home, ".claude", "tasks", storeKey)
-  mkdirSync(dir, { recursive: true })
-  writeFileSync(
+  await mkdir(dir, { recursive: true })
+  await Bun.write(
     join(dir, `${id}.json`),
     JSON.stringify({
       id,
@@ -228,7 +229,7 @@ describe("compliance routes", () => {
     const { home, restore } = withTempHome()
     const cwd = "/repo/only-session"
     const sessionId = "00000000-0000-0000-0000-0000000000aa"
-    writeStoreTask(home, sessionId, "aaaa-1", "in_progress")
+    await writeStoreTask(home, sessionId, "aaaa-1", "in_progress")
 
     try {
       // Without this control the union case below could pass for the wrong reason.
@@ -246,9 +247,9 @@ describe("compliance routes", () => {
     const cwd = "/repo/prune-guard"
     const sessionId = "00000000-0000-0000-0000-0000000000ff"
     const projectKey = projectKeyFromCwd(cwd)
-    writeStoreTask(home, sessionId, "ffff-1", "in_progress")
+    await writeStoreTask(home, sessionId, "ffff-1", "in_progress")
     const staleCompletion = Date.now() - 60 * 60_000
-    writeStoreTask(home, projectKey, "349d-1", "completed", staleCompletion)
+    await writeStoreTask(home, projectKey, "349d-1", "completed", staleCompletion)
 
     try {
       await snapshotTaskCounts(cwd, sessionId)
@@ -263,8 +264,8 @@ describe("compliance routes", () => {
     const { home, restore } = withTempHome()
     const cwd = "/repo/mcp-driven"
     const sessionId = "00000000-0000-0000-0000-0000000000bb"
-    writeStoreTask(home, sessionId, "bbbb-1", "in_progress")
-    writeStoreTask(home, projectKeyFromCwd(cwd), "349d-1", "pending")
+    await writeStoreTask(home, sessionId, "bbbb-1", "in_progress")
+    await writeStoreTask(home, projectKeyFromCwd(cwd), "349d-1", "pending")
 
     try {
       expect(await snapshotTaskCounts(cwd, sessionId)).toMatchObject({
