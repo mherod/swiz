@@ -13,6 +13,7 @@ import { pluginCacheCheck } from "./plugin-cache.ts"
 import { scriptPermissionsCheck } from "./script-permissions.ts"
 import { shellShimCheck } from "./shell-shim.ts"
 import { skillConflictsCheck } from "./skill-conflicts.ts"
+import { splitTaskStoresCheck } from "./split-task-stores.ts"
 import { swizSettingsCheck } from "./swiz-settings.ts"
 import { ttsBackendCheck } from "./tts-backend.ts"
 
@@ -34,4 +35,5 @@ export const DIAGNOSTIC_CHECKS: DiagnosticCheck[] = [
   invalidSkillEntriesCheck,
   pluginCacheCheck,
   swizSettingsCheck,
+  splitTaskStoresCheck,
 ]
