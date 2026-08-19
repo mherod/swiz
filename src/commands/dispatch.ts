@@ -406,6 +406,7 @@ async function tryStopFastPath(
 
   const tFast = performance.now()
   const blockResult = await checkIncompleteTasks(sessionId, home, {
+    cwd: timing.cwd,
     taskListAvailable: agentHasTaskListToolForHookPayload(payload),
     taskListToolName: taskToolNameForHookPayload(payload, "TaskList"),
     taskUpdateToolName: taskToolNameForHookPayload(payload, "TaskUpdate"),

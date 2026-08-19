@@ -134,6 +134,35 @@ export async function readSessionTasks(
   return orderBy(tasks, [(t) => t.id], ["asc"])
 }
 
+/**
+ * Session tasks unioned with the project-keyed store for `cwd`.
+ *
+ * The MCP task tools key the store by `projectKeyFromCwd(cwd)` while the native tools key it by
+ * session id, so a gate reading only the session directory sees an empty queue for any session
+ * driven through MCP. Duplicate ids collapse to whichever copy changed status most recently.
+ *
+ * Pass this `cwd` from the hook payload, never `process.cwd()` — in the daemon's in-process path
+ * the process cwd is the daemon's, not the session's, which would key the union to the wrong project.
+ */
+export async function readSessionTasksUnioned(
+  sessionId: string,
+  cwd: string | null | undefined,
+  home: string = getHomeDirWithFallback("")
+): Promise<SessionTask[]> {
+  const sessionTasks = await readSessionTasks(sessionId, home)
+  if (!cwd) return sessionTasks
+
+  const { projectKeyFromCwd } = await import("../project-key.ts")
+  const projectKey = projectKeyFromCwd(cwd)
+  if (!projectKey || projectKey === sessionId) return sessionTasks
+
+  const projectTasks = await readSessionTasks(projectKey, home)
+  if (projectTasks.length === 0) return sessionTasks
+
+  const { mergeTaskStoresByRecency } = await import("./task-repository.ts")
+  return mergeTaskStoresByRecency(sessionTasks, projectTasks)
+}
+
 // ─── Cache-backed reads ─────────────────────────────────────────────────────
 
 let globalTaskStateCache: TaskStateCache | null = null

@@ -1,7 +1,10 @@
-import { describe, expect, it } from "bun:test"
+import { afterAll, beforeAll, describe, expect, it } from "bun:test"
+import { mkdir, rm } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { formatIncompleteReason } from "../tasks/task-governance-messages.ts"
 import type { SessionTask } from "../tasks/task-recovery.ts"
-import { getIncompleteDetails } from "./stop-incomplete-tasks-core.ts"
+import { checkIncompleteTasks, getIncompleteDetails } from "./stop-incomplete-tasks-core.ts"
 
 function task(id: string, status: SessionTask["status"], subject: string): SessionTask {
   return {
@@ -145,5 +148,43 @@ describe("formatIncompleteReason — source context (#613)", () => {
       "Use TaskList to review tasks, then TaskUpdate to update their status."
     )
     expect(reason).not.toContain("Run TaskList now")
+  })
+})
+
+// A session driven through the MCP task tools keeps its queue under
+// projectKeyFromCwd(cwd), not the session id. Reading only the session directory reported an empty
+// queue and waved stop straight through, defeating the gate entirely for those sessions.
+describe("checkIncompleteTasks — project-keyed queue", () => {
+  const HOME = join(tmpdir(), `swiz-stop-union-${process.pid}`)
+  const SESSION_ID = "00000000-0000-0000-0000-0000000000ab"
+  const CWD = "/Users/someone/Development/demo"
+  const PROJECT_KEY = "-Users-someone-Development-demo"
+
+  async function writeTask(storeKey: string, id: string, status: string): Promise<void> {
+    const dir = join(HOME, ".claude", "tasks", storeKey)
+    await mkdir(dir, { recursive: true })
+    await Bun.write(
+      join(dir, `${id}.json`),
+      JSON.stringify({ id, subject: `subject ${id}`, description: "", status })
+    )
+  }
+
+  beforeAll(async () => {
+    await writeTask(PROJECT_KEY, "349d-1", "in_progress")
+  })
+
+  afterAll(async () => {
+    await rm(HOME, { recursive: true, force: true })
+  })
+
+  it("allows stop when no cwd is supplied and the session store is empty (control)", async () => {
+    // Proves the block below comes from the union, not from some other tasks on disk.
+    expect(await checkIncompleteTasks(SESSION_ID, HOME)).toBeNull()
+  })
+
+  it("blocks stop on an incomplete task held in the project-keyed store", async () => {
+    const result = await checkIncompleteTasks(SESSION_ID, HOME, { cwd: CWD })
+    expect(result?.decision).toBe("block")
+    expect(result?.reason).toContain("349d-1")
   })
 })

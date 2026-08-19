@@ -22,7 +22,7 @@ import {
   getSessionTasksDir,
   hasSessionTasksDir,
   isIncompleteTaskStatus,
-  readSessionTasks,
+  readSessionTasksUnioned,
   type SessionTask,
 } from "../tasks/task-recovery.ts"
 import { isTaskSubjectCarryoverDeferral } from "../tasks/task-subject-deferral.ts"
@@ -61,10 +61,15 @@ async function logStopDiagnostic(message: string): Promise<void> {
   }
 }
 
+export interface CheckIncompleteTasksOptions extends TaskReviewInstructionContext {
+  /** Session cwd from the hook payload; unions the project-keyed task store. Never `process.cwd()`. */
+  cwd?: string | null
+}
+
 export async function checkIncompleteTasks(
   sessionId: string,
   home: string,
-  options: TaskReviewInstructionContext = {}
+  options: CheckIncompleteTasksOptions = {}
 ): Promise<HookOutput | null> {
   if (isCurrentAgent("gemini")) {
     await logStopDiagnostic(`skip: gemini agent (session=${sessionId.slice(0, 8)})`)
@@ -80,7 +85,9 @@ export async function checkIncompleteTasks(
   // Use direct disk read — not cache-backed readSessionTasksFresh — because the
   // daemon's TaskStateCache can contain phantom tasks from inline PostToolUse
   // hooks that processed subagent skill transcripts (e.g. /commit, /push).
-  const allTasks = await readSessionTasks(sessionId, home)
+  // Union in the project-keyed store so an MCP-driven session isn't read as an
+  // empty queue and waved through the gate.
+  const allTasks = await readSessionTasksUnioned(sessionId, options.cwd, home)
   const tasksDirExists = allTasks.length > 0 || (await hasSessionTasksDir(sessionId, home))
 
   await logStopDiagnostic(
