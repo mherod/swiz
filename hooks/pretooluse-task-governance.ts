@@ -311,6 +311,24 @@ export const taskSubjectValidationHook: SwizToolHook = {
  * Returns true when the session already has enough pending task buffer to
  * absorb a compound subject without losing planning fidelity.
  */
+/**
+ * Escape hatch shared by every task-state gate: a running skill owns its own ordered workflow, so a
+ * state gate firing mid-skill blocks a step the skill itself prescribed. Stand down for the skill's
+ * duration.
+ *
+ * This covers *state* gates only — counts, caps, rate limits, staleness. Integrity and validation
+ * denials (task-file access, payload validation, duplicate/compound subjects, deferral framing,
+ * deletion governance, pending-completion shortcuts) must keep blocking during a skill, which is why
+ * each call site guards the individual gate rather than a shared entry point: `evaluateUpdatePlanGovernance`
+ * and the native `TaskUpdate` path both run integrity checks around the state gates.
+ */
+async function skillOwnsWorkflow(
+  input: Record<string, any>,
+  cwd?: string | undefined
+): Promise<boolean> {
+  return await hasActiveSkillForHookPayload(input, cwd)
+}
+
 async function sessionHasHealthyPendingTaskBuffer(input: Record<string, any>): Promise<boolean> {
   try {
     const sessionId = resolveSafeSessionId(input?.session_id as string | undefined)
@@ -1007,9 +1025,8 @@ function runImmediateTaskStateChecks(context: TaskStateCheckContext): SwizHookOu
 async function runTaskStateChecks(context: TaskStateCheckContext): Promise<SwizHookOutput> {
   if (await nativeTaskToolsProvenAbsent(context.input)) return preToolUseAllow()
 
-  // Escape hatch: a running skill owns its own ordered workflow, so a state gate firing mid-skill
-  // blocks a step the skill itself prescribed. Stand down for the skill's duration.
-  if (await hasActiveSkillForHookPayload(context.input, context.cwd)) return preToolUseAllow()
+  // Escape hatch — see skillOwnsWorkflow.
+  if (await skillOwnsWorkflow(context.input, context.cwd)) return preToolUseAllow()
 
   const reconciliation = checkReconciliationRequired(context)
   if (reconciliation) return reconciliation
@@ -1354,6 +1371,10 @@ async function handleTaskCompletion(
   sessionId: string,
   cwd: string | undefined
 ): Promise<SwizHookOutput | null> {
+  // Escape hatch — see skillOwnsWorkflow. Both the rate limit and the completion threshold are
+  // state gates; the pending-completion shortcut above them stays enforced.
+  if (await skillOwnsWorkflow(input, cwd)) return null
+
   // Read tasks first so counts are available for the rate-limit bypass check.
   const diskTasks = await readTasksForInput(input, sessionId)
   const allTasks = overlayEventState(diskTasks, sessionId)
@@ -1609,14 +1630,32 @@ function checkUpdatePlanInProgressCap(projection: UpdatePlanProjection): SwizHoo
   )
 }
 
+/**
+ * Integrity denials over a projected plan, checked ahead of the skill escape hatch: a skill must not
+ * be able to shortcut a pending task straight to completed, nor plan the same work twice and satisfy
+ * the queue with it. These are not state gates and never stand down.
+ */
+function checkUpdatePlanIntegrity(
+  input: Record<string, any>,
+  projection: UpdatePlanProjection
+): SwizHookOutput | null {
+  const shortcut = findPendingCompletionShortcut(projection)
+  if (shortcut) {
+    return denyTaskGovernance(
+      { kind: "pending-completion-shortcut", taskId: shortcut.id, subject: shortcut.subject },
+      input
+    )
+  }
+
+  const duplicateGroups = findDuplicateSubjectGroups(projection.finalTasks)
+  if (duplicateGroups.length === 0) return null
+  return buildDuplicateSubjectStateBlock("update_plan", duplicateGroups)
+}
+
 function checkUpdatePlanFinalTaskState(
   projection: UpdatePlanProjection,
   thresholds: GovernanceThresholds
 ): SwizHookOutput | null {
-  const duplicateGroups = findDuplicateSubjectGroups(projection.finalTasks)
-  if (duplicateGroups.length > 0)
-    return buildDuplicateSubjectStateBlock("update_plan", duplicateGroups)
-
   const capOutcome = checkUpdatePlanInProgressCap(projection)
   if (capOutcome) return capOutcome
 
@@ -1679,17 +1718,12 @@ async function evaluateUpdatePlanGovernance(
   }
 
   const projection = await readUpdatePlanProjection(input, sessionId, plan)
-  const pendingCompletionShortcut = findPendingCompletionShortcut(projection)
-  if (pendingCompletionShortcut) {
-    return denyTaskGovernance(
-      {
-        kind: "pending-completion-shortcut",
-        taskId: pendingCompletionShortcut.id,
-        subject: pendingCompletionShortcut.subject,
-      },
-      input
-    )
-  }
+  const integrityDenied = checkUpdatePlanIntegrity(input, projection)
+  if (integrityDenied) return integrityDenied
+
+  // Escape hatch — see skillOwnsWorkflow. Placed after deferral framing, the pending-completion
+  // shortcut and duplicate subjects, which stay enforced, and before the state gates below.
+  if (await skillOwnsWorkflow(input, cwd)) return "continue"
 
   const thresholds = await resolveGovernanceThresholdsForSession(input, sessionId, cwd)
 
@@ -1710,8 +1744,12 @@ async function handleNativeInProgressUpdate(
   sessionId: string,
   input: Record<string, any>
 ): Promise<NativeTaskUpdateResult> {
-  const transitionDenied = await checkInProgressTransitionCap(taskId, sessionId, input)
-  if (transitionDenied) return transitionDenied
+  // Escape hatch — see skillOwnsWorkflow. The cap is a state gate, so a skill that prescribes a
+  // second concurrent in-progress task must not be blocked by it.
+  if (!(await skillOwnsWorkflow(input, input.cwd as string | undefined))) {
+    const transitionDenied = await checkInProgressTransitionCap(taskId, sessionId, input)
+    if (transitionDenied) return transitionDenied
+  }
   // Optimistically record in event state + cache for parallel TOCTOU safety.
   const allTasks = await readTasksForInput(input, sessionId)
   const currentTask = allTasks.find((t) => t.id === taskId)
@@ -1932,8 +1970,8 @@ export async function evaluatePendingOverflowGuard(
   const cwd: string = (input.cwd as string) ?? process.cwd()
   if (!sessionId) return null
   if (!(await isTaskEnforcementProject(input, cwd))) return null
-  // Same escape hatch as runTaskStateChecks — an active skill stands the state gates down.
-  if (await hasActiveSkillForHookPayload(input, cwd)) return null
+  // Escape hatch — see skillOwnsWorkflow.
+  if (await skillOwnsWorkflow(input, cwd)) return null
 
   const allTasks = overlayEventState(await readTasksForInput(input, sessionId), sessionId)
   return checkPendingOverflow(toolName, allTasks) ?? null
