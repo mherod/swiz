@@ -5,7 +5,10 @@
 import { join } from "node:path"
 import { stderrLog } from "../../debug.ts"
 import { complianceBaselineWantedLevel } from "../../infractions.ts"
+import { projectKeyFromCwd } from "../../project-key.ts"
 import { findTaskStoreForSession } from "../../task-roots.ts"
+import type { SessionTask } from "../../tasks/task-recovery.ts"
+import { mergeTaskStoresByRecency } from "../../tasks/task-repository.ts"
 import type { TaskCounts, WarmStatusLineSnapshot } from "../status-line.ts"
 import { buildTaskCountsFromTasks } from "../status-line.ts"
 import type { CappedMap } from "./cache/capped-map.ts"
@@ -37,24 +40,51 @@ export interface ComplianceRoutesContext {
 
 const STALE_SYNC_THRESHOLD_MS = 10 * 60 * 1000 // 10 minutes
 
+/**
+ * Warm task counts for the status line, unioned across both store keys.
+ *
+ * The MCP task tools key the store by `projectKeyFromCwd(cwd)` while the native tools key it by
+ * session id, so reading only the session directory reports an empty queue for any session driven
+ * through MCP. The cache is keyed by an arbitrary id, so the project store gets its own watched
+ * entry and the two lists are merged by recency — the same union the governance hook already does.
+ */
 async function resolveTaskCountsFromCache(
   sessionId: string | null | undefined,
+  cwd: string,
   cache: ComplianceRoutesContext["taskStateCache"]
 ): Promise<TaskCounts | null> {
   if (!sessionId) return null
   try {
     const { tasksDir } = findTaskStoreForSession(sessionId)
-    const state = await cache.getState(sessionId, join(tasksDir, sessionId))
+    const projectKey = projectKeyFromCwd(cwd)
+    const sessionState = await cache.getState(sessionId, join(tasksDir, sessionId))
+    const projectTasks =
+      projectKey && projectKey !== sessionId
+        ? await readProjectStoreTasks(projectKey, tasksDir, cache)
+        : []
+    const tasks = mergeTaskStoresByRecency(sessionState.tasks, projectTasks)
     stderrLog(
       "daemon task cache diagnostics",
-      `[resolveTaskCountsFromCache] session=${sessionId.slice(0, 8)} tasks=${state.tasks.length} pending=${state.pendingCount} inProgress=${state.inProgressCount} ids=${state.tasks.map((t) => t.id).join(",")}`
+      `[resolveTaskCountsFromCache] session=${sessionId.slice(0, 8)} tasks=${tasks.length} session=${sessionState.tasks.length} project=${projectTasks.length} ids=${tasks.map((t) => t.id).join(",")}`
     )
-    if (state.tasks.length === 0) return null
-    return buildTaskCountsFromTasks(state.tasks)
+    if (tasks.length === 0) return null
+    return buildTaskCountsFromTasks(tasks)
   } catch (err) {
     stderrLog("daemon task cache error", `[resolveTaskCountsFromCache] error: ${err}`)
     return null
   }
+}
+
+/** Read the project-keyed store through the cache, watching it so fs writes invalidate the entry. */
+async function readProjectStoreTasks(
+  projectKey: string,
+  tasksDir: string,
+  cache: ComplianceRoutesContext["taskStateCache"]
+): Promise<SessionTask[]> {
+  const projectDir = join(tasksDir, projectKey)
+  cache.watchSession(projectKey, projectDir)
+  const state = await cache.getState(projectKey, projectDir)
+  return state.tasks
 }
 
 export function resolveComplianceDurationLabel(
@@ -94,7 +124,7 @@ export async function handleStatusLineSnapshot(
   const sessionId = body?.sessionId ?? null
   const [snapshot, taskCounts] = await Promise.all([
     ctx.resolveSnapshot(body.cwd, sessionId),
-    resolveTaskCountsFromCache(sessionId, ctx.taskStateCache),
+    resolveTaskCountsFromCache(sessionId, body.cwd, ctx.taskStateCache),
   ])
   const complianceDurationLabel = sessionId
     ? resolveComplianceDurationLabel(sessionId, ctx.sessionComplianceState)

@@ -1,7 +1,9 @@
-import { describe, expect, it } from "bun:test"
+import { afterEach, describe, expect, it } from "bun:test"
 import { mkdirSync, mkdtempSync, statSync } from "node:fs"
+import { mkdir, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { projectKeyFromCwd } from "../project-key.ts"
 import { DEFAULT_SETTINGS } from "../settings.ts"
 import {
   buildSettingsFlags,
@@ -894,5 +896,99 @@ describe("renderStatusLineFromSnapshot checks segment", () => {
       timeOffset: 0,
     })
     expect(out).not.toContain("⏱")
+  })
+})
+
+// The MCP task tools key the store by projectKeyFromCwd(cwd) while the native tools key it by
+// session id. A status line that reads only the session directory renders no task segment for an
+// MCP-driven session, and derives a clean wanted level from those absent counts.
+describe("computeWarmStatusLineSnapshot task stores", () => {
+  const tempDirs: string[] = []
+
+  afterEach(async () => {
+    for (const dir of tempDirs.splice(0)) await rm(dir, { recursive: true, force: true })
+  })
+
+  function setup(): { home: string; cwd: string; restore: () => void } {
+    const home = mkdtempSync(join(tmpdir(), "swiz-status-tasks-home-"))
+    const cwd = mkdtempSync(join(tmpdir(), "swiz-status-tasks-cwd-"))
+    tempDirs.push(home, cwd)
+    const previous = process.env.HOME
+    process.env.HOME = home
+    return {
+      home,
+      cwd,
+      restore: () => {
+        if (previous === undefined) delete process.env.HOME
+        else process.env.HOME = previous
+      },
+    }
+  }
+
+  async function writeStoreTask(
+    home: string,
+    storeKey: string,
+    id: string,
+    status: string
+  ): Promise<void> {
+    const dir = join(home, ".claude", "tasks", storeKey)
+    await mkdir(dir, { recursive: true })
+    await Bun.write(
+      join(dir, `${id}.json`),
+      JSON.stringify({
+        id,
+        subject: `subject ${id}`,
+        description: `description ${id}`,
+        status,
+        blocks: [],
+        blockedBy: [],
+      })
+    )
+  }
+
+  it("counts session-store tasks (control)", async () => {
+    const { home, cwd, restore } = setup()
+    const sessionId = "00000000-0000-0000-0000-0000000000cc"
+    await writeStoreTask(home, sessionId, "cccc-1", "in_progress")
+
+    try {
+      // Without this control the union cases below could pass for the wrong reason.
+      const snapshot = await computeWarmStatusLineSnapshot(cwd, sessionId)
+      expect(snapshot.taskCounts).toMatchObject({ total: 1, inProgress: 1 })
+    } finally {
+      restore()
+    }
+  })
+
+  it("counts project-keyed MCP tasks alongside session tasks", async () => {
+    const { home, cwd, restore } = setup()
+    const sessionId = "00000000-0000-0000-0000-0000000000dd"
+    await writeStoreTask(home, sessionId, "dddd-1", "in_progress")
+    await writeStoreTask(home, projectKeyFromCwd(cwd), "349d-1", "pending")
+
+    try {
+      const snapshot = await computeWarmStatusLineSnapshot(cwd, sessionId)
+      expect(snapshot.taskCounts).toMatchObject({
+        total: 2,
+        incomplete: 2,
+        pending: 1,
+        inProgress: 1,
+      })
+    } finally {
+      restore()
+    }
+  })
+
+  it("counts project-keyed tasks when the session store is empty", async () => {
+    const { home, cwd, restore } = setup()
+    const sessionId = "00000000-0000-0000-0000-0000000000ee"
+    await writeStoreTask(home, projectKeyFromCwd(cwd), "349d-2", "pending")
+
+    try {
+      const snapshot = await computeWarmStatusLineSnapshot(cwd, sessionId)
+      expect(snapshot.taskCounts).toMatchObject({ total: 1, pending: 1 })
+    } finally {
+      restore()
+    }
   })
 })

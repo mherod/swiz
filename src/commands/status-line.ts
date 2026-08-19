@@ -15,6 +15,7 @@ import {
 import { complianceBaselineWantedLevel, standingWantedLevel } from "../infractions.ts"
 import { getIssueStoreReader } from "../issue-store.ts"
 import type { PrBranchDetail } from "../pr-branch-detail.ts"
+import { projectKeyFromCwd } from "../project-key.ts"
 import {
   DEFAULT_SETTINGS,
   type EffectiveSwizSettings,
@@ -27,7 +28,7 @@ import {
 import { getRecentlyInvokedSkillsForCurrentSession } from "../skill-utils.ts"
 import { findTaskStoreForSession } from "../task-roots.ts"
 import { isIncompleteTaskStatus } from "../tasks/task-recovery.ts"
-import { readTasks } from "../tasks/task-repository.ts"
+import { readTasksAcrossStores } from "../tasks/task-repository.ts"
 import { findAllProviderSessions } from "../transcript-sessions.ts"
 import type { Command } from "../types.ts"
 import {
@@ -824,7 +825,7 @@ export async function computeWarmStatusLineSnapshot(
     readSwizSettings().catch(() => null),
     readProjectSettings(cwd).catch(() => null),
     detectCiProviders(cwd).catch(() => new Set()),
-    sessionId ? readStatusLineSessionTasks(sessionId) : Promise.resolve([]),
+    sessionId ? readStatusLineSessionTasks(sessionId, cwd) : Promise.resolve([]),
     (async () => {
       try {
         const sessions = await findAllProviderSessions(cwd)
@@ -877,9 +878,16 @@ async function readWarmSnapshotFromDaemon(
   return payload?.snapshot ?? null
 }
 
-async function readStatusLineSessionTasks(sessionId: string) {
+/**
+ * Session tasks unioned with the project-keyed store for this cwd.
+ *
+ * The MCP task tools key the store by `projectKeyFromCwd(cwd)` while the native tools key it by
+ * session id, so a session driven through MCP writes tasks the status line would otherwise never
+ * see — rendering no task segment and a clean wanted level against a queue full of open work.
+ */
+async function readStatusLineSessionTasks(sessionId: string, cwd: string) {
   const { tasksDir } = findTaskStoreForSession(sessionId)
-  return readTasks(sessionId, tasksDir).catch(() => [])
+  return readTasksAcrossStores(sessionId, projectKeyFromCwd(cwd), tasksDir).catch(() => [])
 }
 
 async function readDaemonJson<T>(
@@ -1331,7 +1339,7 @@ async function runStatusLine(input: StatusLineInput): Promise<void> {
     readWarmSnapshotFromDaemon(cwd, sessionId),
     readProjectMetricsFromDaemon(cwd),
     resolveStatusLineRenderSettings(cwd, sessionId),
-    sessionId ? readStatusLineSessionTasks(sessionId) : Promise.resolve([]),
+    sessionId ? readStatusLineSessionTasks(sessionId, cwd) : Promise.resolve([]),
   ])
   const snapshot = applyRenderSettingsToSnapshot(
     warmSnapshot ?? (await computeWarmStatusLineSnapshot(cwd, sessionId)),

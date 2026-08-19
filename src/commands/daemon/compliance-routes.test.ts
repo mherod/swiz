@@ -1,4 +1,8 @@
 import { afterEach, describe, expect, test } from "bun:test"
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+import { projectKeyFromCwd } from "../../project-key.ts"
 import { TaskStateCache } from "../../tasks/task-state-cache.ts"
 import type { WarmStatusLineSnapshot } from "../status-line.ts"
 import { CappedMap } from "./cache/capped-map.ts"
@@ -50,6 +54,54 @@ function createContext(): ComplianceRoutesContext {
     sessionComplianceState: new CappedMap(20),
     upstreamSyncRegistry,
   }
+}
+
+// The MCP task tools key the store by projectKeyFromCwd(cwd) while the native tools key it by
+// session id, so a warm snapshot that reads only the session directory reports an empty queue for
+// any session driven through MCP — no task segment, and a clean wanted level over open work.
+const tempHomes: string[] = []
+
+afterEach(() => {
+  for (const home of tempHomes.splice(0)) rmSync(home, { recursive: true, force: true })
+})
+
+function withTempHome(): { home: string; restore: () => void } {
+  const home = mkdtempSync(join(tmpdir(), "swiz-compliance-tasks-"))
+  tempHomes.push(home)
+  const previous = process.env.HOME
+  process.env.HOME = home
+  return {
+    home,
+    restore: () => {
+      if (previous === undefined) delete process.env.HOME
+      else process.env.HOME = previous
+    },
+  }
+}
+
+function writeStoreTask(home: string, storeKey: string, id: string, status: string): void {
+  const dir = join(home, ".claude", "tasks", storeKey)
+  mkdirSync(dir, { recursive: true })
+  writeFileSync(
+    join(dir, `${id}.json`),
+    JSON.stringify({
+      id,
+      subject: `subject ${id}`,
+      description: `description ${id}`,
+      status,
+      blocks: [],
+      blockedBy: [],
+    })
+  )
+}
+
+async function snapshotTaskCounts(cwd: string, sessionId: string) {
+  const request = new Request("http://daemon/status-line/snapshot", {
+    method: "POST",
+    body: JSON.stringify({ cwd, sessionId }),
+  })
+  const body = await handleStatusLineSnapshot(request, createContext()).then((res) => res.json())
+  return body.snapshot.taskCounts
 }
 
 function recordRequest(body: Record<string, unknown>): Request {
@@ -163,5 +215,38 @@ describe("compliance routes", () => {
       complianceDurationSeconds: null,
       issueSyncStale: null,
     })
+  })
+
+  test("counts session-store tasks in the warm snapshot (control)", async () => {
+    const { home, restore } = withTempHome()
+    const cwd = "/repo/only-session"
+    const sessionId = "00000000-0000-0000-0000-0000000000aa"
+    writeStoreTask(home, sessionId, "aaaa-1", "in_progress")
+
+    try {
+      // Without this control the union case below could pass for the wrong reason.
+      expect(await snapshotTaskCounts(cwd, sessionId)).toMatchObject({ total: 1, inProgress: 1 })
+    } finally {
+      restore()
+    }
+  })
+
+  test("counts project-keyed MCP tasks in the warm snapshot", async () => {
+    const { home, restore } = withTempHome()
+    const cwd = "/repo/mcp-driven"
+    const sessionId = "00000000-0000-0000-0000-0000000000bb"
+    writeStoreTask(home, sessionId, "bbbb-1", "in_progress")
+    writeStoreTask(home, projectKeyFromCwd(cwd), "349d-1", "pending")
+
+    try {
+      expect(await snapshotTaskCounts(cwd, sessionId)).toMatchObject({
+        total: 2,
+        incomplete: 2,
+        pending: 1,
+        inProgress: 1,
+      })
+    } finally {
+      restore()
+    }
   })
 })

@@ -307,10 +307,32 @@ export async function readTasks(
 }
 
 /** ISO `statusChangedAt` as epoch ms; 0 when absent or unparseable, so it always loses a compare. */
-function statusChangedAtMs(task: Task): number {
+function statusChangedAtMs(task: { statusChangedAt?: string }): number {
   if (!task.statusChangedAt) return 0
   const parsed = Date.parse(task.statusChangedAt)
   return Number.isNaN(parsed) ? 0 : parsed
+}
+
+/**
+ * Union task lists from several stores, keeping one copy per id — the one whose status changed most
+ * recently, so a completion recorded through either surface wins over a stale duplicate.
+ *
+ * Generic over the task shape because the daemon's cache serves `SessionTask` while the repository
+ * serves `Task`; both carry `id` and an optional ISO `statusChangedAt`, which is all the merge needs.
+ */
+export function mergeTaskStoresByRecency<T extends { id: string; statusChangedAt?: string }>(
+  ...groups: ReadonlyArray<readonly T[]>
+): T[] {
+  const byId = new Map<string, T>()
+  for (const group of groups) {
+    for (const task of group) {
+      const existing = byId.get(task.id)
+      if (!existing || statusChangedAtMs(task) > statusChangedAtMs(existing)) {
+        byId.set(task.id, task)
+      }
+    }
+  }
+  return [...byId.values()].sort((a, b) => compareTaskIds(a.id, b.id))
 }
 
 /**
@@ -338,15 +360,7 @@ export async function readTasksAcrossStores(
     readTasks(projectKey, tasksDir),
   ])
 
-  const byId = new Map<string, Task>()
-  for (const task of [...sessionTasks, ...projectTasks]) {
-    const existing = byId.get(task.id)
-    if (!existing || statusChangedAtMs(task) > statusChangedAtMs(existing)) {
-      byId.set(task.id, task)
-    }
-  }
-
-  return [...byId.values()].sort((a, b) => compareTaskIds(a.id, b.id))
+  return mergeTaskStoresByRecency(sessionTasks, projectTasks)
 }
 
 /** Lightweight per-session metadata index for O(1) open-task-count lookups. */
