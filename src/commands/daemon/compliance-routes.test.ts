@@ -103,13 +103,17 @@ async function writeStoreTask(
   )
 }
 
-async function snapshotTaskCounts(cwd: string, sessionId: string) {
+async function snapshotOf(cwd: string, sessionId: string) {
   const request = new Request("http://daemon/status-line/snapshot", {
     method: "POST",
     body: JSON.stringify({ cwd, sessionId }),
   })
   const body = await handleStatusLineSnapshot(request, createContext()).then((res) => res.json())
-  return body.snapshot.taskCounts
+  return body.snapshot
+}
+
+async function snapshotTaskCounts(cwd: string, sessionId: string) {
+  return (await snapshotOf(cwd, sessionId)).taskCounts
 }
 
 function recordRequest(body: Record<string, unknown>): Request {
@@ -268,12 +272,33 @@ describe("compliance routes", () => {
     await writeStoreTask(home, projectKeyFromCwd(cwd), "349d-1", "pending")
 
     try {
-      expect(await snapshotTaskCounts(cwd, sessionId)).toMatchObject({
+      const snapshot = await snapshotOf(cwd, sessionId)
+      expect(snapshot.taskCounts).toMatchObject({
         total: 2,
         incomplete: 2,
         pending: 1,
         inProgress: 1,
       })
+      // Healthy merged queue: >=1 in_progress, >=1 pending, >=2 incomplete.
+      expect(snapshot.wantedLevel).toBe(0)
+    } finally {
+      restore()
+    }
+  })
+
+  test("raises the wanted level from a project-keyed queue alone", async () => {
+    // complianceBaselineWantedLevel is derived from the merged counts, so a queue held entirely in
+    // the project store used to read as counts=null — a clean wanted level over unhealthy work.
+    const { home, restore } = withTempHome()
+    const cwd = "/repo/wanted-level"
+    const sessionId = "00000000-0000-0000-0000-0000000000aa"
+    await writeStoreTask(home, projectKeyFromCwd(cwd), "349d-1", "pending")
+
+    try {
+      const snapshot = await snapshotOf(cwd, sessionId)
+      expect(snapshot.taskCounts).toMatchObject({ total: 1, incomplete: 1, inProgress: 0 })
+      // One pending task with nothing in progress is an unhealthy queue.
+      expect(snapshot.wantedLevel).toBe(1)
     } finally {
       restore()
     }
