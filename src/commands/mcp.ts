@@ -8,7 +8,17 @@ import { getHomeDirWithFallback } from "../home.ts"
 import { projectKeyFromCwd } from "../project-key.ts"
 import { readSwizSettings } from "../settings.ts"
 import { getTaskToolName } from "../tasks/task-governance-messages.ts"
-import { readTasks, type Task } from "../tasks/task-repository.ts"
+import {
+  describeTaskChanges,
+  findNewlyUnblockedTasks,
+  MAX_LISTED_PER_GROUP,
+  renderTaskToolResult,
+  renderUnblockedLine,
+  summarizeTasks,
+  type TaskListSummary,
+  truncateForLine,
+} from "../tasks/task-mcp-view.ts"
+import { readTasks } from "../tasks/task-repository.ts"
 import {
   completeTaskWithAutoTransition,
   createTaskInProcess,
@@ -640,7 +650,8 @@ function registerTaskCreateTool(server: McpToolServer, cwd: string): void {
     {
       title: "Create a task",
       description:
-        "Create a new task in the current session. Returns the created task with its ID. " +
+        "Create a new task in the current session. Confirms the new task ID and returns the " +
+        "in-progress and pending queue that follows it. " +
         "Tasks must have a non-compound subject (one verb/action per task). " +
         "Description should briefly explain what the task entails.",
       inputSchema: {
@@ -656,7 +667,13 @@ function registerTaskCreateTool(server: McpToolServer, cwd: string): void {
       try {
         const projectKey = projectKeyFromCwd(cwd)
         const task = await createTaskInProcess({ sessionId: projectKey, ...input, cwd })
-        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: true, task }) }] }
+        const tasks = await readTasks(projectKey)
+        const headline = `Created #${task.id} — ${truncateForLine(task.subject)}`
+        return {
+          content: [
+            { type: "text" as const, text: renderTaskToolResult(headline, tasks, task.id) },
+          ],
+        }
       } catch (error) {
         const name = getTaskToolName("TaskCreate")
         return {
@@ -681,27 +698,37 @@ interface TaskUpdateToolInput {
   removeBlockedBy?: string[]
 }
 
+/** Apply the non-status fields of an update, returning a label per field actually changed. */
 function applyTaskFieldUpdates(
   task: Awaited<ReturnType<typeof readTasks>>[number],
   input: TaskUpdateToolInput
-): boolean {
-  if (input.subject !== undefined) task.subject = input.subject
-  if (input.description !== undefined) task.description = input.description
-  if (input.addBlocks) task.blocks = [...new Set([...task.blocks, ...input.addBlocks])]
-  if (input.removeBlocks)
+): string[] {
+  const changes: string[] = []
+  if (input.subject !== undefined) {
+    task.subject = input.subject
+    changes.push("subject")
+  }
+  if (input.description !== undefined) {
+    task.description = input.description
+    changes.push("description")
+  }
+  if (input.addBlocks) {
+    task.blocks = [...new Set([...task.blocks, ...input.addBlocks])]
+    changes.push(`blocks +#${input.addBlocks.join(", #")}`)
+  }
+  if (input.removeBlocks) {
     task.blocks = task.blocks.filter((id) => !input.removeBlocks!.includes(id))
-  if (input.addBlockedBy) task.blockedBy = [...new Set([...task.blockedBy, ...input.addBlockedBy])]
+    changes.push(`blocks -#${input.removeBlocks.join(", #")}`)
+  }
+  if (input.addBlockedBy) {
+    task.blockedBy = [...new Set([...task.blockedBy, ...input.addBlockedBy])]
+    changes.push(`blockedBy +#${input.addBlockedBy.join(", #")}`)
+  }
   if (input.removeBlockedBy) {
     task.blockedBy = task.blockedBy.filter((id) => !input.removeBlockedBy!.includes(id))
+    changes.push(`blockedBy -#${input.removeBlockedBy.join(", #")}`)
   }
-  return [
-    input.subject,
-    input.description,
-    input.addBlocks,
-    input.removeBlocks,
-    input.addBlockedBy,
-    input.removeBlockedBy,
-  ].some((value) => value !== undefined)
+  return changes
 }
 
 async function persistTaskUpdate(
@@ -726,29 +753,86 @@ async function persistTaskUpdate(
   }
 }
 
+/** A not-found error names the open tasks, so the caller can retry without a TaskList round trip. */
+function renderUnknownTaskId(
+  taskUpdateName: string,
+  taskId: string,
+  tasks: readonly Awaited<ReturnType<typeof readTasks>>[number][]
+): string {
+  const open = tasks.filter((task) => task.status === "pending" || task.status === "in_progress")
+  if (open.length === 0) {
+    return `${taskUpdateName} failed: task ${taskId} not found — this project has no open tasks.`
+  }
+  const listed = open
+    .slice(0, MAX_LISTED_PER_GROUP)
+    .map((task) => `#${task.id} ${truncateForLine(task.subject, 40)}`)
+    .join(", ")
+  const hidden = open.length - Math.min(open.length, MAX_LISTED_PER_GROUP)
+  const suffix = hidden > 0 ? ` (+${hidden} more)` : ""
+  return `${taskUpdateName} failed: task ${taskId} not found — open tasks: ${listed}${suffix}`
+}
+
+function buildUpdateHeadline(
+  taskId: string,
+  subject: string,
+  previousStatus: string,
+  input: TaskUpdateToolInput,
+  fieldChanges: readonly string[]
+): string {
+  const parts: string[] = []
+  if (input.status !== undefined && input.status !== previousStatus) {
+    parts.push(`${previousStatus} → ${input.status}`)
+  }
+  const fields = describeTaskChanges(fieldChanges)
+  if (fields) parts.push(fields)
+  const detail = parts.length > 0 ? ` (${parts.join("; ")})` : " (no change)"
+  return `Updated #${taskId} — ${truncateForLine(subject)}${detail}`
+}
+
 async function handleTaskUpdate(input: TaskUpdateToolInput, cwd: string) {
   const taskUpdateName = getTaskToolName("TaskUpdate")
   try {
     const projectKey = projectKeyFromCwd(cwd)
-    const task = (await readTasks(projectKey)).find((candidate) => candidate.id === input.taskId)
+    const tasksBefore = await readTasks(projectKey)
+    const task = tasksBefore.find((candidate) => candidate.id === input.taskId)
     if (!task) {
       return {
         content: [
           {
             type: "text" as const,
-            text: `${taskUpdateName} failed: task ${input.taskId} not found`,
+            text: renderUnknownTaskId(taskUpdateName, input.taskId, tasksBefore),
           },
         ],
         isError: true,
       }
     }
-    const fieldsUpdated = applyTaskFieldUpdates(task, input)
-    await persistTaskUpdate(projectKey, cwd, task, input, fieldsUpdated)
-    const finalTask = (await readTasks(projectKey)).find(
-      (candidate) => candidate.id === input.taskId
+    const previousStatus = task.status
+    // Snapshot before applyTaskFieldUpdates mutates `task` in place, so the unblock comparison
+    // sees the pre-update blockedBy edges rather than the ones this call just wrote.
+    const snapshotBefore = tasksBefore.map((candidate) => ({
+      ...candidate,
+      blockedBy: [...candidate.blockedBy],
+    }))
+    const fieldChanges = applyTaskFieldUpdates(task, input)
+    await persistTaskUpdate(projectKey, cwd, task, input, fieldChanges.length > 0)
+    const tasksAfter = await readTasks(projectKey)
+    const finalTask = tasksAfter.find((candidate) => candidate.id === input.taskId)
+    const headline = buildUpdateHeadline(
+      input.taskId,
+      finalTask?.subject ?? task.subject,
+      previousStatus,
+      input,
+      fieldChanges
     )
+    const unblocked = renderUnblockedLine(findNewlyUnblockedTasks(snapshotBefore, tasksAfter))
+    const fullHeadline = unblocked ? `${headline}\n${unblocked}` : headline
     return {
-      content: [{ type: "text" as const, text: JSON.stringify({ ok: true, task: finalTask }) }],
+      content: [
+        {
+          type: "text" as const,
+          text: renderTaskToolResult(fullHeadline, tasksAfter, input.taskId),
+        },
+      ],
     }
   } catch (error) {
     return {
@@ -771,7 +855,8 @@ function registerTaskUpdateTool(server: McpToolServer, cwd: string): void {
       description:
         "Update an existing task's status, subject, description, or dependencies. " +
         "Status transitions: pending → in_progress → completed. " +
-        "Can also add/remove task blocking relationships.",
+        "Can also add/remove task blocking relationships. Confirms what changed and returns " +
+        "the resulting in-progress and pending queue.",
       inputSchema: {
         taskId: z.string().describe("Task ID to update (e.g., 'S1234-1')"),
         status: z
@@ -802,33 +887,10 @@ function registerTaskUpdateTool(server: McpToolServer, cwd: string): void {
   )
 }
 
-export interface TaskListSummary {
-  total: number
-  pending: number
-  inProgress: number
-  completed: number
-  cancelled: number
-}
-
-/**
- * Bucket every task status for the `TaskList` response.
- *
- * Every status needs its own bucket. Omitting `cancelled` made the buckets sum to 47 against a
- * `total` of 48, so a consumer deriving remaining work as
- * `total - completed - pending - inProgress` counted a phantom open task. When a status is added
- * to `TASK_STATUSES`, add it here too — the exhaustiveness test in `mcp.test.ts` fails otherwise.
- */
-export function summarizeTasks(tasks: readonly Task[]): TaskListSummary {
-  const countByStatus = (status: Task["status"]): number =>
-    tasks.filter((task) => task.status === status).length
-  return {
-    total: tasks.length,
-    pending: countByStatus("pending"),
-    inProgress: countByStatus("in_progress"),
-    completed: countByStatus("completed"),
-    cancelled: countByStatus("cancelled"),
-  }
-}
+// Re-exported for consumers that summarised task counts from this module before the
+// rendering moved into task-mcp-view.ts.
+export { summarizeTasks }
+export type { TaskListSummary }
 
 function registerTaskListTool(server: McpToolServer, cwd: string): void {
   server.registerTool(
@@ -836,19 +898,18 @@ function registerTaskListTool(server: McpToolServer, cwd: string): void {
     {
       title: "List all tasks",
       description:
-        "Retrieve all tasks in the current session. Returns task metadata including " +
-        "IDs, subjects, statuses, and blocking relationships. Useful for understanding " +
-        "the current task state without native tool support.",
+        "Show the current session's open work: in-progress and pending tasks with their IDs, " +
+        "elapsed time and blockers, plus counts for completed and cancelled tasks. " +
+        "Long lists are truncated with an explicit remainder count.",
       inputSchema: {},
     },
     async () => {
       try {
         const allTasks = await readTasks(projectKeyFromCwd(cwd))
-        const summary = summarizeTasks(allTasks)
+        const headline =
+          allTasks.length === 0 ? "No tasks in this project yet." : "Task queue for this project."
         return {
-          content: [
-            { type: "text" as const, text: JSON.stringify({ ok: true, tasks: allTasks, summary }) },
-          ],
+          content: [{ type: "text" as const, text: renderTaskToolResult(headline, allTasks) }],
         }
       } catch (error) {
         return {
