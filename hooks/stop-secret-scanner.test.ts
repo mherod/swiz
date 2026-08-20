@@ -150,6 +150,24 @@ describe("stop-secret-scanner: GENERIC_SECRET_RE exclusions allow stop", () => {
     expect(scanDiffForSecrets(mockDiffs.get(dir)!).length).toBe(0)
   })
 
+  test("allows password with 'mock-password' placeholder", () => {
+    const dir = makeRepo()
+    commitFile(dir, "config.ts", `const password = "mock-password";\n`)
+    expect(scanDiffForSecrets(mockDiffs.get(dir)!).length).toBe(0)
+  })
+
+  test("allows password with 'demo-password' placeholder", () => {
+    const dir = makeRepo()
+    commitFile(dir, "config.ts", `const password = "demo-password";\n`)
+    expect(scanDiffForSecrets(mockDiffs.get(dir)!).length).toBe(0)
+  })
+
+  test("still blocks unrelated values containing demo", () => {
+    const dir = makeRepo()
+    commitFile(dir, "config.ts", `const password = "demographic-secret-123";\n`)
+    expect(scanDiffForSecrets(mockDiffs.get(dir)!).length).toBeGreaterThan(0)
+  })
+
   test("allows short value (< 8 chars, below minimum length)", () => {
     const dir = makeRepo()
     commitFile(dir, "config.ts", `const API_KEY = "short";\n`)

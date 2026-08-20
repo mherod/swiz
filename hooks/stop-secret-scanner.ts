@@ -18,7 +18,7 @@ const TOKEN_RE =
 const GENERIC_SECRET_RE =
   /(api_?key|api_?secret|auth_?token|access_?token|secret_?key|private_?key|password|passwd|client_?secret)\s*[:=]\s*["'][^"']{8,}["']/i
 const GENERIC_EXCLUDE_RE =
-  /example|placeholder|your[_-]|<.*>|xxxx|test|fake|dummy|not-needed|replace|env\./i
+  /example|placeholder|your[_-]|<.*>|xxxx|test|fake|dummy|["'](?:mock|demo)-password["']|replace|env\.|not-needed/i
 
 function isSecretLine(line: string): boolean {
   if (PRIVATE_KEY_RE.test(line)) return true

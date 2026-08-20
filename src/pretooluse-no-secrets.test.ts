@@ -84,6 +84,23 @@ describe("scanContentForSecrets", () => {
     expect(scanContentForSecrets(content, "src/config.ts")).toEqual([])
   })
 
+  test("ignores mock-password placeholder", () => {
+    const content = `password = "mock-password"`
+    expect(scanContentForSecrets(content, "src/config.ts")).toEqual([])
+  })
+
+  test("ignores demo-password placeholder", () => {
+    const content = `password = "demo-password"`
+    expect(scanContentForSecrets(content, "src/config.ts")).toEqual([])
+  })
+
+  test("still detects unrelated values containing demo", () => {
+    const content = `password = "demographic-secret-123"`
+    const findings = scanContentForSecrets(content, "src/config.ts")
+    expect(findings).toHaveLength(1)
+    expect(findings[0]!.kind).toBe("generic-secret")
+  })
+
   test("ignores generic secret with xxxx placeholder", () => {
     const content = `api_key = "xxxx-not-real-xxxx"`
     expect(scanContentForSecrets(content, "src/config.ts")).toEqual([])

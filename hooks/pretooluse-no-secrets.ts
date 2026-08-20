@@ -42,7 +42,7 @@ const GENERIC_SECRET_RE =
 
 // Exclude common placeholder patterns that should not block legitimate edits.
 const GENERIC_EXCLUDE_RE =
-  /example|placeholder|your[_-]|<.*>|xxxx|test|fake|dummy|replace|env\.|not-needed/i
+  /example|placeholder|your[_-]|<.*>|xxxx|test|fake|dummy|["'](?:mock|demo)-password["']|replace|env\.|not-needed/i
 
 // ── Content scanning (exported for testing) ───────────────────────────────────
 
