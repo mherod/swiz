@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
-import { scanContentForSecrets } from "../hooks/pretooluse-no-secrets.ts"
+import pretoolusNoSecrets, { scanContentForSecrets } from "../hooks/pretooluse-no-secrets.ts"
+import { fileEditHookInputSchema, hookOutputSchema } from "./schemas.ts"
 
 // Build secret strings via array joins to avoid triggering the hook or
 // GitHub push protection when editing this file.
@@ -191,5 +192,26 @@ describe("scanContentForSecrets", () => {
     const findings = scanContentForSecrets(content, "src/payments.ts")
     expect(findings).toHaveLength(1)
     expect(findings[0]!.kind).toBe("token")
+  })
+})
+
+describe("pretooluse-no-secrets denial guidance", () => {
+  test("suggests safe patterns in the reason and system message", async () => {
+    const input = fileEditHookInputSchema.parse({
+      tool_input: {
+        file_path: "src/config.ts",
+        content: `password = "real-secret-value-123"`,
+      },
+    })
+
+    const output = hookOutputSchema.parse(await pretoolusNoSecrets.run(input))
+    const reason = String(output.hookSpecificOutput?.permissionDecisionReason ?? "")
+
+    expect(output.hookSpecificOutput?.permissionDecision).toBe("deny")
+    expect(output.systemMessage).toContain("mock-password")
+    expect(output.systemMessage).toContain("demo-password")
+    expect(reason).toContain('password = "mock-password"')
+    expect(reason).toContain('password = "demo-password"')
+    expect(reason).toContain("process.env.MY_SECRET")
   })
 })

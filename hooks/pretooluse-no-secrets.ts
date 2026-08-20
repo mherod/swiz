@@ -17,7 +17,7 @@
 
 import {
   preToolUseAllow,
-  preToolUseDeny,
+  preToolUseDenyWithSystemMessage,
   runSwizHookAsMain,
   type SwizFileEditHook,
 } from "../src/SwizHook.ts"
@@ -43,6 +43,9 @@ const GENERIC_SECRET_RE =
 // Exclude common placeholder patterns that should not block legitimate edits.
 const GENERIC_EXCLUDE_RE =
   /example|placeholder|your[_-]|<.*>|xxxx|test|fake|dummy|["'](?:mock|demo)-password["']|replace|env\.|not-needed/i
+
+const SECRET_DENY_SYSTEM_MESSAGE =
+  'Potential secret blocked. Use process.env.MY_SECRET or exact demo placeholders like "mock-password" / "demo-password".'
 
 // ── Content scanning (exported for testing) ───────────────────────────────────
 
@@ -99,7 +102,7 @@ function evaluate(input: FileEditHookInput) {
 
   const lines = findings.map((f) => `  [${f.kind}] ${f.line}`).join("\n")
 
-  return preToolUseDeny(
+  return preToolUseDenyWithSystemMessage(
     [
       "Potential secret material detected in the proposed file content.",
       "",
@@ -107,14 +110,20 @@ function evaluate(input: FileEditHookInput) {
       lines,
       "",
       "Do not write credentials, API keys, or tokens into source files.",
-      "Use environment variables or a secrets manager instead:",
+      "Use environment variables or a secrets manager for actual values:",
       "  - Reference values via process.env.MY_SECRET",
       "  - Load from .env files that are in .gitignore",
       "  - Use a vault, keychain, or CI secret store for actual values",
       "",
+      "Safe placeholder patterns for demo-only values:",
+      '  - password = "mock-password"',
+      '  - password = "demo-password"',
+      '  - api_key = "your_api_key_here"',
+      "",
       "If these are legitimate test fixtures, move them to a test file (*.test.ts)",
-      "or use recognisable placeholder values (e.g. 'dummy-key', 'example-token').",
-    ].join("\n")
+      "or use one of the safe placeholder patterns above.",
+    ].join("\n"),
+    SECRET_DENY_SYSTEM_MESSAGE
   )
 }
 

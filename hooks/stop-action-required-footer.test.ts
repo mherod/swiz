@@ -29,6 +29,7 @@ const tmp = useTempDir("swiz-stop-footer-")
 interface HookResult {
   blocked: boolean
   reason?: string
+  systemMessage?: string
 }
 
 async function runStopHook(
@@ -45,7 +46,12 @@ async function runStopHook(
     cwd: opts.cwd ?? process.cwd(),
     env,
   })
-  return { blocked: result.decision === "block", reason: result.reason }
+  return {
+    blocked: result.decision === "block",
+    reason: result.reason,
+    systemMessage:
+      typeof result.json?.systemMessage === "string" ? result.json.systemMessage : undefined,
+  }
 }
 
 describe("stop hook ACTION REQUIRED footer regression", () => {
@@ -89,6 +95,10 @@ describe("stop hook ACTION REQUIRED footer regression", () => {
     const result = await runStopHook("stop-secret-scanner.ts", { cwd: dir }, { cwd: dir })
     expect(result.blocked).toBe(true)
     expect(result.reason).toContain(FOOTER_MARKER)
+    expect(result.reason).toContain('password = "mock-password"')
+    expect(result.reason).toContain('password = "demo-password"')
+    expect(result.systemMessage).toContain("mock-password")
+    expect(result.systemMessage).toContain("demo-password")
   })
 
   test("stop-large-files: >500KB committed file block includes footer", async () => {

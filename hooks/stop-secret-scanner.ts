@@ -51,11 +51,13 @@ async function findSecretFindings(cwd: string): Promise<string[]> {
 }
 
 function formatSecretReason(findings: string[]): string {
-  let reason = "Potential secrets detected in recent commits.\n\n"
+  let reason =
+    'Potential secrets detected in recent commits. Use process.env.MY_SECRET or exact demo placeholders like "mock-password" / "demo-password".\n\n'
   reason += "Suspicious lines:\n"
   for (const f of findings) reason += `  ${f}\n`
   reason +=
     "\nReview and remove secrets before stopping. If these are false positives, use a recognised placeholder value instead of a hardcoded string:\n"
+  reason += '  • Demo password:   password = "mock-password" or password = "demo-password"\n'
   reason += '  • Not applicable:  api_key = "not-needed"\n'
   reason += '  • Placeholder:     api_key = "your_api_key_here"\n'
   reason += '  • Template token:  api_key = "<YOUR_API_KEY>"\n'
