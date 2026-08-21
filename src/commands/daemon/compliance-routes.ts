@@ -11,7 +11,14 @@ import { sessionDirPath } from "../../tasks/task-store-path.ts"
 import type { TaskCounts, WarmStatusLineSnapshot } from "../status-line.ts"
 import { buildTaskCountsFromTasks } from "../status-line.ts"
 import type { CappedMap } from "./cache/capped-map.ts"
+import {
+  type DivergenceSnapshot,
+  recoverSessionDivergence,
+  type SessionDivergenceState,
+  snapshotSessionDivergence,
+} from "./divergence.ts"
 import type { UpstreamSyncRegistry } from "./upstream-sync.ts"
+import { readPersistedSessionToolCalls } from "./utils.ts"
 
 type ComplianceEntry = {
   state: string
@@ -34,6 +41,7 @@ export interface ComplianceRoutesContext {
     sessionId: string | null | undefined
   ) => Promise<WarmStatusLineSnapshot>
   sessionComplianceState: SessionComplianceState
+  sessionDivergence: Map<string, SessionDivergenceState>
   upstreamSyncRegistry: UpstreamSyncRegistry
 }
 
@@ -126,9 +134,10 @@ export async function handleStatusLineSnapshot(
     return Response.json({ error: "Missing required field: cwd" }, { status: 400 })
   }
   const sessionId = body?.sessionId ?? null
-  const [snapshot, taskCounts] = await Promise.all([
+  const [snapshot, taskCounts, divergence] = await Promise.all([
     ctx.resolveSnapshot(body.cwd, sessionId),
     resolveTaskCountsFromCache(sessionId, body.cwd, ctx.taskStateCache),
+    resolveDivergenceSnapshot(sessionId, body.cwd, ctx),
   ])
   const complianceDurationLabel = sessionId
     ? resolveComplianceDurationLabel(sessionId, ctx.sessionComplianceState)
@@ -155,8 +164,31 @@ export async function handleStatusLineSnapshot(
       complianceDurationSeconds,
       wantedLevel,
       issueSyncStale,
+      divergence,
     },
   })
+}
+
+/**
+ * Live divergence for the snapshot (issue #844 phase 1 telemetry), rebuilt
+ * lazily from the persisted tool-call ledger after a daemon restart.
+ */
+async function resolveDivergenceSnapshot(
+  sessionId: string | null,
+  cwd: string,
+  ctx: ComplianceRoutesContext
+): Promise<DivergenceSnapshot | null> {
+  if (!sessionId) return null
+  const live = snapshotSessionDivergence(ctx.sessionDivergence, sessionId)
+  if (live) return live
+  try {
+    const calls = await readPersistedSessionToolCalls(cwd, sessionId)
+    if (calls.length === 0) return null
+    ctx.sessionDivergence.set(sessionId, recoverSessionDivergence(calls, Date.now()))
+    return snapshotSessionDivergence(ctx.sessionDivergence, sessionId)
+  } catch {
+    return null
+  }
 }
 
 export async function handleComplianceRecord(

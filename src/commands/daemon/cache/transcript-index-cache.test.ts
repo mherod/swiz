@@ -126,6 +126,7 @@ describe("TranscriptIndexCache", () => {
       },
       blockedToolUseIds: [],
       mtimeMs: 123,
+      size: 100,
       computedAt: Date.now(),
     }
     const cache = new TranscriptIndexCache({
@@ -183,6 +184,7 @@ describe("TranscriptIndexCache", () => {
           },
           blockedToolUseIds: [],
           mtimeMs,
+          size: _size,
           computedAt: Date.now(),
         }
       },
@@ -223,6 +225,7 @@ describe("TranscriptIndexCache", () => {
           },
           blockedToolUseIds: [],
           mtimeMs: observedMtimeMs,
+          size: _size,
           computedAt: Date.now(),
         }
       },
@@ -295,6 +298,7 @@ describe("TranscriptIndexCache", () => {
           },
           blockedToolUseIds: [],
           mtimeMs,
+          size: _size,
           computedAt: Date.now(),
         }
       },

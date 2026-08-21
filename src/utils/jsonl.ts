@@ -89,6 +89,14 @@ export class JsonlAppendCursor {
     }
   }
 
+  /**
+   * Decoded pending remainder — the bytes after the last newline seen. May be
+   * a partial record mid-write; callers must parse-guard before using it.
+   */
+  get tailText(): string {
+    return new TextDecoder().decode(this.remainder)
+  }
+
   private requiresColdRebuild(next: JsonlAppendMetadata): boolean {
     const previous = this.metadata
     if (!previous) return true

@@ -127,6 +127,7 @@ describe("web server route context builders", () => {
       "taskStateCache",
       "resolveSnapshot",
       "sessionComplianceState",
+      "sessionDivergence",
       "upstreamSyncRegistry",
     ] as const satisfies readonly (keyof DaemonWebServerContext)[]
 

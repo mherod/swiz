@@ -16,6 +16,7 @@ import type { CacheRoutesContext } from "./cache-routes.ts"
 import type { CiRoutesContext } from "./ci-routes.ts"
 import type { CiWatchRegistry } from "./ci-watch-registry.ts"
 import type { ComplianceRoutesContext } from "./compliance-routes.ts"
+import type { SessionDivergenceState } from "./divergence.ts"
 import type { IssueRoutesContext } from "./issue-routes.ts"
 import type { LifecycleTaskRegistry } from "./lifecycle-task-registry.ts"
 import type { MetricsRoutesContext } from "./metrics-routes.ts"
@@ -62,6 +63,7 @@ export interface DaemonWebServerContext {
   sessionActivity: Map<string, { lastSeen: number; dispatches: number }>
   sessionToolCalls: Map<string, CapturedToolCall[]>
   sessionToolUsage: Map<string, SessionToolUsageState>
+  sessionDivergence: Map<string, SessionDivergenceState>
   activeHookDispatches: Map<string, ActiveHookDispatch>
   projectMetrics: Map<string, DaemonMetrics>
   ghCache: GhQueryCache
@@ -206,6 +208,7 @@ export function buildComplianceRoutesContext(ctx: DaemonWebServerContext): Compl
     taskStateCache: ctx.taskStateCache,
     resolveSnapshot: ctx.resolveSnapshot,
     sessionComplianceState: ctx.sessionComplianceState,
+    sessionDivergence: ctx.sessionDivergence,
     upstreamSyncRegistry: ctx.upstreamSyncRegistry,
   }
 }

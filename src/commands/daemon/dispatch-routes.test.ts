@@ -31,6 +31,7 @@ const DISPATCH_CONTEXT_KEYS = [
   "sessionActivity",
   "sessionToolCalls",
   "sessionToolUsage",
+  "sessionDivergence",
   "activeHookDispatches",
   "workerRuntime",
   "touchProject",
@@ -66,6 +67,7 @@ function activeDispatch(
 function createDispatchContext(manifest: HookGroup[] = []): DispatchRoutesContext {
   const projectMetrics = new Map<string, ReturnType<typeof createMetrics>>()
   return {
+    sessionDivergence: new Map(),
     projectMetrics,
     getProjectMetrics: (cwd) => {
       const existing = projectMetrics.get(cwd)
@@ -201,6 +203,7 @@ describe("handleDispatchRoute", () => {
           },
           blockedToolUseIds: [],
           mtimeMs,
+          size: _size,
           computedAt: Date.now(),
         }
       },

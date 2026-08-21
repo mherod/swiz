@@ -28,12 +28,23 @@ import {
 } from "../../dispatch/stop-response.ts"
 import type { DispatchStageDurations } from "../../dispatch/timing.ts"
 import { DISPATCH_TIMEOUTS } from "../../manifest.ts"
+import { projectKeyFromCwd } from "../../project-key.ts"
 import { taskCompletedHookInputSchema, taskCreatedHookInputSchema } from "../../schemas.ts"
-import { createTaskStoreForHookPayload } from "../../task-roots.ts"
+import { createTaskStoreForHookPayload, findTaskStoreForSession } from "../../task-roots.ts"
+import { readTasksAcrossStores } from "../../tasks/task-repository.ts"
 import { sessionDirPath } from "../../tasks/task-store-path.ts"
+import { isAnyProviderTaskCreateTool, isAnyProviderTaskUpdateTool } from "../../tool-matchers.ts"
 import type { CurrentSessionToolUsage } from "../../transcript-summary.ts"
 import type { WarmStatusLineSnapshot } from "../status-line.ts"
 import type { CappedMap } from "./cache/capped-map.ts"
+import {
+  type DivergenceMovementKind,
+  hasMutatingUpdateFields,
+  type PriorTaskState,
+  recordDivergenceToolCall,
+  resolveTaskMovement,
+  type SessionDivergenceState,
+} from "./divergence.ts"
 import {
   ACTIVE_LIFECYCLE_TASKS_PAYLOAD_KEY,
   formatLifecycleTaskAdvisory,
@@ -77,6 +88,7 @@ export interface DispatchRoutesContext {
   sessionActivity: Map<string, { lastSeen: number; dispatches: number }>
   sessionToolCalls: Map<string, CapturedToolCall[]>
   sessionToolUsage: Map<string, SessionToolUsageState>
+  sessionDivergence: Map<string, SessionDivergenceState>
   activeHookDispatches: Map<string, ActiveHookDispatch>
   workerRuntime: DaemonWorkerRuntime
   touchProject: (cwd: string) => void
@@ -103,6 +115,7 @@ export function buildDispatchRoutesContext(ctx: DaemonWebServerContext): Dispatc
     sessionActivity: ctx.sessionActivity,
     sessionToolCalls: ctx.sessionToolCalls,
     sessionToolUsage: ctx.sessionToolUsage,
+    sessionDivergence: ctx.sessionDivergence,
     activeHookDispatches: ctx.activeHookDispatches,
     workerRuntime: ctx.workerRuntime,
     touchProject: ctx.touchProject,
@@ -258,7 +271,7 @@ async function updateParsedPayloadMetrics(
   const projectMetrics = await metricsForParsedProject(ctx, parsed.cwd)
   if (!parsed.sessionId) return projectMetrics
   recordParsedSessionActivity(ctx, parsed.sessionId, canonicalEvent, nowMs)
-  captureParsedToolUse(ctx, parsed, canonicalEvent, nowMs)
+  await captureParsedToolUse(ctx, parsed, canonicalEvent, nowMs)
   return projectMetrics
 }
 
@@ -291,36 +304,84 @@ type ParsedDispatchPayload = NonNullable<
   Awaited<ReturnType<DaemonWorkerRuntime["parseDispatchPayload"]>>
 >
 
-function captureParsedToolUse(
+async function captureParsedToolUse(
   ctx: DispatchRoutesContext,
   parsed: ParsedDispatchPayload,
   canonicalEvent: string,
   nowMs: number
-): void {
-  if (canonicalEvent !== "preToolUse" || !parsed.sessionId || !parsed.toolName) return
-  captureSessionToolCall(
-    ctx.sessionToolCalls,
-    parsed.sessionId,
-    parsed.toolName,
-    parsed.toolInput,
-    nowMs
-  )
+): Promise<void> {
+  const { sessionId, toolName } = parsed
+  if (canonicalEvent !== "preToolUse" || !sessionId || !toolName) return
+  captureSessionToolCall(ctx.sessionToolCalls, sessionId, toolName, parsed.toolInput, nowMs)
   if (parsed.cwd) {
     sessionToolCallPersistenceQueue.enqueue({
       cwd: parsed.cwd,
-      sessionId: parsed.sessionId,
-      toolName: parsed.toolName,
+      sessionId,
+      toolName,
       toolInput: parsed.toolInput,
       nowMs,
     })
   }
-  captureSessionToolUsage(
-    ctx.sessionToolUsage,
-    parsed.sessionId,
-    parsed.toolName,
-    parsed.toolInput,
-    nowMs
-  )
+  captureSessionToolUsage(ctx.sessionToolUsage, sessionId, toolName, parsed.toolInput, nowMs)
+  const movement = await resolveDispatchDivergenceMovement(parsed)
+  recordDivergenceToolCall(ctx.sessionDivergence, {
+    sessionId,
+    toolName,
+    toolInput: parsed.toolInput,
+    nowMs,
+    movement,
+  })
+}
+
+/**
+ * Divergence movement for a captured preToolUse call (issue #844 phase 1).
+ * Prior task state comes from the same dual-keyed store union the compliance
+ * route reads; lookup failures return null, which the resolver treats
+ * optimistically rather than suppressing honest movement.
+ */
+async function resolveDispatchDivergenceMovement(
+  parsed: ParsedDispatchPayload
+): Promise<DivergenceMovementKind | null> {
+  const { sessionId, toolName } = parsed
+  if (!sessionId || !toolName) return null
+  if (isAnyProviderTaskCreateTool(toolName)) return "task-create"
+  if (!isAnyProviderTaskUpdateTool(toolName)) return null
+  if (!hasMutatingUpdateFields(parsed.toolInput)) return null
+  const priorTasks = await loadPriorTasksForMovement(sessionId, parsed.cwd)
+  return resolveTaskMovement(toolName, parsed.toolInput, priorTasks)
+}
+
+function priorTaskFromRecord(task: { id: string; status: string }): PriorTaskState {
+  const record = task as Record<string, unknown>
+  return {
+    id: task.id,
+    status: task.status,
+    subject: typeof record.subject === "string" ? record.subject : undefined,
+    description: typeof record.description === "string" ? record.description : null,
+    blockedBy: Array.isArray(record.blockedBy) ? (record.blockedBy as string[]) : [],
+    blocks: Array.isArray(record.blocks) ? (record.blocks as string[]) : [],
+  }
+}
+
+/**
+ * Disk records are full, so absent fields map to "known absent" rather than
+ * "unknown". An empty read means the update will be rejected by the store;
+ * read failures return null so movement stays optimistic.
+ */
+async function loadPriorTasksForMovement(
+  sessionId: string,
+  cwd: string | null | undefined
+): Promise<PriorTaskState[] | null> {
+  try {
+    const { tasksDir } = findTaskStoreForSession(sessionId)
+    const projectKey = cwd ? projectKeyFromCwd(cwd) : undefined
+    const tasks = await readTasksAcrossStores(sessionId, projectKey, tasksDir)
+    const prior = tasks.map(priorTaskFromRecord)
+    const { overlayEventState } = await import("../../tasks/task-event-state.ts")
+    return overlayEventState(prior, sessionId)
+  } catch {
+    return null
+  }
 }
 
 async function getCurrentSessionToolUsageFromDaemon(

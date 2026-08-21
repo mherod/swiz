@@ -53,6 +53,7 @@ function createContext(): ComplianceRoutesContext {
     taskStateCache,
     resolveSnapshot: async () => snapshot(),
     sessionComplianceState: new CappedMap(20),
+    sessionDivergence: new Map(),
     upstreamSyncRegistry,
   }
 }

@@ -24,6 +24,7 @@ import { WorkerTranscriptMonitor } from "./daemon/cache/worker-transcript-monito
 import { CiWatchRegistry, notifyCiCompletion } from "./daemon/ci-watch-registry.ts"
 import { DAEMON_PORT, fetchDaemonStatus } from "./daemon/daemon-admin.ts"
 import { logPseudoHook } from "./daemon/daemon-logging.ts"
+import type { SessionDivergenceState } from "./daemon/divergence.ts"
 import { LifecycleTaskRegistry } from "./daemon/lifecycle-task-registry.ts"
 import {
   CappedMap,
@@ -125,6 +126,7 @@ export interface DaemonState {
   sessionActivity: CappedMap<string, { lastSeen: number; dispatches: number }>
   sessionToolCalls: CappedMap<string, CapturedToolCall[]>
   sessionToolUsage: CappedMap<string, SessionToolUsageState>
+  sessionDivergence: CappedMap<string, SessionDivergenceState>
   activeHookDispatches: CappedMap<string, ActiveHookDispatch>
   recentHookAllowMessages: CappedMap<string, string>
   sessionComplianceState: CappedMap<
@@ -153,6 +155,7 @@ export function createDaemonState(): DaemonState {
   const sessionActivity = new CappedMap<string, { lastSeen: number; dispatches: number }>(10)
   const sessionToolCalls = new CappedMap<string, CapturedToolCall[]>(10)
   const sessionToolUsage = new CappedMap<string, SessionToolUsageState>(30)
+  const sessionDivergence = new CappedMap<string, SessionDivergenceState>(30)
   const activeHookDispatches = new CappedMap<string, ActiveHookDispatch>(10)
   const recentHookAllowMessages = new CappedMap<string, string>(128)
   const sessionComplianceState = new CappedMap<
@@ -190,6 +193,7 @@ export function createDaemonState(): DaemonState {
     sessionActivity,
     sessionToolCalls,
     sessionToolUsage,
+    sessionDivergence,
     activeHookDispatches,
     recentHookAllowMessages,
     sessionComplianceState,
@@ -752,6 +756,7 @@ async function startDaemonProcess(_args: string[], port: number): Promise<void> 
     sessionActivity: state.sessionActivity,
     sessionToolCalls: state.sessionToolCalls,
     sessionToolUsage: state.sessionToolUsage,
+    sessionDivergence: state.sessionDivergence,
     activeHookDispatches: state.activeHookDispatches,
     recentHookAllowMessages: state.recentHookAllowMessages,
     sessionComplianceState: state.sessionComplianceState,

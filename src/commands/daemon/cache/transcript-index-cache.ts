@@ -19,6 +19,7 @@ export interface TranscriptIndex {
   summary: TranscriptSummary
   blockedToolUseIds: string[]
   mtimeMs: number
+  size: number
   computedAt: number
 }
 
@@ -101,6 +102,36 @@ function extractBlockedToolUseIds(sessionLines: string[]): string[] {
   return blockedIds
 }
 
+/**
+ * Return the index augmented with the cursor's pending unterminated line.
+ *
+ * The cold builder counts a final line without a trailing newline, but the
+ * append cursor only surfaces newline-terminated records — so the two paths
+ * disagreed at exactly the append boundary (#819). The tail is folded into a
+ * fresh returned index only, never into the durable accumulator or stored
+ * session lines: when the terminating newline lands, the same bytes arrive as
+ * a complete line and are counted exactly once. A mid-write fragment fails the
+ * JSON parse guard and leaves the index unchanged. Recomputing from lines
+ * (bounded by the cache's session-line cap) happens only on unterminated
+ * tails, which newline-terminated production appends do not produce.
+ */
+function withProvisionalTail(index: TranscriptIndex, tailText: string): TranscriptIndex {
+  const tail = tailText.trim()
+  if (!tail || !tryParseJsonLine(tail)) return index
+  const sessionLines = [...index.summary.sessionLines, tail]
+  const blockedToolUseIds = [...index.blockedToolUseIds]
+  try {
+    collectBlockedIdsFromEntry(tail, blockedToolUseIds)
+  } catch {}
+  return {
+    summary: computeSummaryFromSessionLines(sessionLines),
+    blockedToolUseIds,
+    mtimeMs: index.mtimeMs,
+    size: index.size,
+    computedAt: Date.now(),
+  }
+}
+
 function splitSessionLinesAfterLatestSystem(text: string): {
   sessionLines: string[]
   sawSystem: boolean
@@ -150,13 +181,13 @@ export class TranscriptIndexCache {
     try {
       const metadata = await this.readMetadata(transcriptPath)
       if (!metadata) return null
-      if (this.dependencies.buildIndex) {
-        const cached = this.entries.get(transcriptPath)
-        if (cached && cached.mtimeMs === metadata.mtimeMs) {
-          cached.computedAt = Date.now()
-          this._hits++
-          return cached
-        }
+      const cached = this.entries.get(transcriptPath)
+      // Mtime alone misses appends that land within the filesystem's mtime
+      // granularity, so an unchanged file is (mtimeMs, size)-identical (#819).
+      if (cached && cached.mtimeMs === metadata.mtimeMs && cached.size === metadata.size) {
+        cached.computedAt = Date.now()
+        this._hits++
+        return cached
       }
 
       const built = await this.getOrBuild(transcriptPath, metadata)
@@ -170,13 +201,11 @@ export class TranscriptIndexCache {
     try {
       const metadata = await this.readMetadata(transcriptPath)
       if (!metadata) return null
-      if (this.dependencies.buildIndex) {
-        const cached = this.summaryEntries.get(transcriptPath)
-        if (cached && cached.mtimeMs === metadata.mtimeMs) {
-          cached.computedAt = Date.now()
-          this._hits++
-          return cached.summary
-        }
+      const cached = this.summaryEntries.get(transcriptPath)
+      if (cached && cached.mtimeMs === metadata.mtimeMs && cached.size === metadata.size) {
+        cached.computedAt = Date.now()
+        this._hits++
+        return cached.summary
       }
 
       const built = await this.getOrBuild(transcriptPath, metadata)
@@ -232,8 +261,9 @@ export class TranscriptIndexCache {
       if (update.kind === "hit") {
         existing.index.computedAt = Date.now()
         existing.index.mtimeMs = metadata.mtimeMs
+        existing.index.size = metadata.size
         this._hits++
-        return existing.index
+        return withProvisionalTail(existing.index, existing.cursor.tailText)
       }
       if (update.kind === "append") {
         this._appendedBytes += update.bytesRead
@@ -252,13 +282,13 @@ export class TranscriptIndexCache {
           collectSessionToolUsage([line], accumulator)
           collectBlockedIdsFromEntry(line, blockedIds)
         }
-        const index = this.createIndex(sessionLines, accumulator, blockedIds, metadata.mtimeMs)
+        const index = this.createIndex(sessionLines, accumulator, blockedIds, metadata)
         this.incrementalEntries.set(transcriptPath, {
           index,
           accumulator,
           cursor: existing.cursor,
         })
-        return index
+        return withProvisionalTail(index, existing.cursor.tailText)
       }
     }
 
@@ -293,6 +323,7 @@ export class TranscriptIndexCache {
         summary,
         blockedToolUseIds: blockedIds,
         mtimeMs,
+        size: fileSize,
         computedAt: Date.now(),
       }
       return index
@@ -305,12 +336,13 @@ export class TranscriptIndexCache {
     sessionLines: string[],
     accumulator: SummaryAccumulator,
     blockedToolUseIds: string[],
-    mtimeMs: number
+    metadata: JsonlAppendMetadata
   ): TranscriptIndex {
     return {
       summary: computeSummaryFromSessionLines(sessionLines, accumulator),
       blockedToolUseIds,
-      mtimeMs,
+      mtimeMs: metadata.mtimeMs,
+      size: metadata.size,
       computedAt: Date.now(),
     }
   }
