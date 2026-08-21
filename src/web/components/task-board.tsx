@@ -226,14 +226,52 @@ export function detailBeyondSubject(task: SessionTask): string | null {
   return detail
 }
 
+/**
+ * Cancel control for one open task.
+ *
+ * Only cancel, and only while the task is open: completion carries evidence and queue-depth
+ * governance that a dashboard button has no way to satisfy honestly.
+ *
+ * The in-flight flag is owned by the caller, not this button. A button that tracks its own
+ * spinner keeps spinning forever when the request fails, which is exactly what a stuck cancel
+ * looked like: the click succeeded, nothing on screen changed, and there was no way to retry.
+ */
+function TaskCancelButton({
+  task,
+  pending,
+  onCancel,
+}: {
+  task: SessionTask
+  pending: boolean
+  onCancel: (taskId: string) => void
+}): ReactElement | null {
+  if (task.status !== "pending" && task.status !== "in_progress") return null
+  return (
+    <button
+      type="button"
+      className="task-cancel-btn"
+      disabled={pending}
+      aria-label={`Cancel task ${task.id}: ${task.subject}`}
+      onClick={() => onCancel(task.id)}
+    >
+      {pending ? "…" : "Cancel"}
+    </button>
+  )
+}
+
 export function TaskBoardRow({
   task,
   tasks,
   sessionLabel,
+  onCancel,
+  cancelPending,
 }: {
   task: SessionTask
   tasks: readonly SessionTask[]
   sessionLabel?: string
+  /** Omitted when the queue has no known store key to cancel against. */
+  onCancel?: (taskId: string) => void
+  cancelPending?: (taskId: string) => boolean
 }): ReactElement {
   const taskTime = task.statusChangedAt ?? task.completionTimestamp
   const detail = detailBeyondSubject(task)
@@ -243,7 +281,16 @@ export function TaskBoardRow({
         <span className="session-task-id truncate max-w-[75%] sm:max-w-none text-[0.65rem] sm:text-[0.7rem]">
           {sessionLabel ? `${sessionLabel} · ` : ""}#{task.id}
         </span>
-        <TaskStatusBadge status={task.status} />
+        <span className="session-task-actions">
+          {onCancel ? (
+            <TaskCancelButton
+              task={task}
+              pending={cancelPending?.(task.id) ?? false}
+              onCancel={onCancel}
+            />
+          ) : null}
+          <TaskStatusBadge status={task.status} />
+        </span>
       </div>
       <p className={cn("session-task-subject min-w-0", `session-task-subject-${task.status}`)}>
         <TaskChecklistMark status={task.status} />
@@ -271,6 +318,8 @@ function TaskBoardGroup({
   sessionLabelFor,
   showEmpty,
   collapsible,
+  onCancel,
+  cancelPending,
 }: {
   groupKey: BoardGroupKey
   group: readonly SessionTask[]
@@ -278,6 +327,8 @@ function TaskBoardGroup({
   sessionLabelFor?: (task: SessionTask) => string | undefined
   showEmpty: boolean
   collapsible?: boolean
+  onCancel?: (taskId: string) => void
+  cancelPending?: (taskId: string) => boolean
 }): ReactElement | null {
   if (group.length === 0 && !showEmpty) return null
 
@@ -300,6 +351,8 @@ function TaskBoardGroup({
             task={task}
             tasks={tasks}
             sessionLabel={sessionLabelFor?.(task)}
+            onCancel={onCancel}
+            cancelPending={cancelPending}
           />
         ))}
       </ul>
@@ -333,11 +386,16 @@ export function TaskBoard({
   tasks,
   sessionLabelFor,
   showHint = true,
+  onCancel,
+  cancelPending,
 }: {
   tasks: readonly SessionTask[]
   sessionLabelFor?: (task: SessionTask) => string | undefined
   /** Off for a board nested inside a store group: the page already states the queue's next move. */
   showHint?: boolean
+  /** Omitted when the queue has no known store key to cancel against. */
+  onCancel?: (taskId: string) => void
+  cancelPending?: (taskId: string) => boolean
 }): ReactElement {
   const partition = partitionTasks(tasks)
   const hint = showHint ? queueHintFor(tasks) : null
@@ -353,6 +411,8 @@ export function TaskBoard({
           group={partition[key]}
           tasks={tasks}
           sessionLabelFor={sessionLabelFor}
+          onCancel={onCancel}
+          cancelPending={cancelPending}
           showEmpty
         />
       ))}
@@ -363,6 +423,8 @@ export function TaskBoard({
           group={partition[key]}
           tasks={tasks}
           sessionLabelFor={sessionLabelFor}
+          onCancel={onCancel}
+          cancelPending={cancelPending}
           showEmpty={false}
           collapsible
         />

@@ -28,6 +28,8 @@ export function TasksView({
         tasks={sessionTasks}
         summary={sessionTaskSummary}
         loading={sessionTasksLoading}
+        sessionId={sessionId}
+        cwd={cwd}
       />
       <ProjectTasksSection
         tasks={projectTasks}

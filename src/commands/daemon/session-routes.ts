@@ -285,6 +285,44 @@ async function handleCreateTask(req: Request): Promise<Response> {
   }
 }
 
+interface CancelTaskBody {
+  sessionId?: string
+  taskId?: string
+  cwd?: string
+}
+
+/**
+ * Cancel one task from the dashboard.
+ *
+ * Cancel, not complete: completion carries governance weight — it wants evidence and it must not
+ * empty the queue — and a button that quietly bypasses that would make the board lie about what
+ * was finished. Cancelling is the honest affordance for work that should not have been queued,
+ * which until now had no path out of the dashboard at all.
+ */
+async function handleCancelTask(req: Request): Promise<Response> {
+  const body = (await req.json().catch(() => null)) as CancelTaskBody | null
+  const sessionId = body?.sessionId
+  const taskId = body?.taskId
+  if (!isNonEmptyString(sessionId) || !isNonEmptyString(taskId)) {
+    return Response.json(
+      { error: "Missing required fields: sessionId (string), taskId (string)" },
+      { status: 400 }
+    )
+  }
+  try {
+    const { updateStatus } = await import("../../tasks/task-service.ts")
+    await updateStatus(sessionId, taskId, "cancelled", {
+      filterCwd: isNonEmptyString(body?.cwd) ? body.cwd : undefined,
+    })
+    return Response.json({ taskId, status: "cancelled" })
+  } catch (error) {
+    return Response.json(
+      { error: error instanceof Error ? error.message : "Failed to cancel task" },
+      { status: 500 }
+    )
+  }
+}
+
 type RouteHandler = (req: Request, ctx: SessionRoutesContext) => Promise<Response>
 
 const SESSION_ROUTES: Array<{ path: string; method: string; handler: RouteHandler }> = [
@@ -293,6 +331,7 @@ const SESSION_ROUTES: Array<{ path: string; method: string; handler: RouteHandle
   { path: "/sessions/tasks", method: "POST", handler: handleSessionTasks },
   { path: "/projects/tasks", method: "POST", handler: handleProjectTasks },
   { path: "/tasks/create", method: "POST", handler: (req) => handleCreateTask(req) },
+  { path: "/tasks/cancel", method: "POST", handler: (req) => handleCancelTask(req) },
 ]
 
 export async function handleSessionRoutes(

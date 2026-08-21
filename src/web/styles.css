@@ -3036,6 +3036,36 @@ tbody tr:hover {
   margin-top: var(--space-2);
 }
 
+.session-task-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  flex: 0 0 auto;
+}
+
+.task-cancel-btn {
+  border: 1px solid rgba(236, 119, 119, 0.34);
+  border-radius: var(--radius-pill);
+  background: rgba(236, 119, 119, 0.1);
+  color: #ef9d9d;
+  font-size: 0.64rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  padding: 0.15em 0.7em;
+  min-height: 24px;
+  cursor: pointer;
+}
+
+.task-cancel-btn:hover:not(:disabled) {
+  border-color: rgba(236, 119, 119, 0.6);
+  background: rgba(236, 119, 119, 0.2);
+}
+
+.task-cancel-btn:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
 .new-task-form {
   margin-bottom: var(--space-3);
 }

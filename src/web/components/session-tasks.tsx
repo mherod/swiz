@@ -18,15 +18,124 @@ import { TaskBoard } from "./task-board.tsx"
 /** Store groups rendered before the remainder collapses behind a button. */
 const PREVIEW_GROUP_LIMIT = 4
 
+async function postCancel(sessionId: string, taskId: string, cwd: string | null): Promise<void> {
+  await postJson<{ taskId: string; status: string }>("/tasks/cancel", {
+    sessionId,
+    taskId,
+    cwd: cwd ?? undefined,
+  })
+}
+
+interface TaskCancellation {
+  cancel: (storeKey: string, taskId: string) => void
+  isPending: (storeKey: string, taskId: string) => boolean
+  /** Applies confirmed cancellations the board has not been re-fetched for yet. */
+  applyTo: <T extends SessionTask>(storeKey: string, tasks: T[]) => T[]
+  error: string | null
+}
+
+/**
+ * Re-status the tasks whose cancellation the server already confirmed.
+ *
+ * Keyed by store as well as id because task ids are unique only within a store: a bare id would
+ * also strike the same-numbered row in every other session's board.
+ */
+export function applyConfirmedCancellations<T extends SessionTask>(
+  storeKey: string,
+  tasks: T[],
+  cancelled: ReadonlySet<string>
+): T[] {
+  if (cancelled.size === 0) return tasks
+  return tasks.map((task) =>
+    cancelled.has(cancelKey(storeKey, task.id)) && task.status !== "cancelled"
+      ? { ...task, status: "cancelled" as const }
+      : task
+  )
+}
+
+export function cancelKey(storeKey: string, taskId: string): string {
+  return `${storeKey}\x00${taskId}`
+}
+
+/**
+ * Owns the result of a cancel rather than waiting for the dashboard poll to show it.
+ *
+ * The poll cannot be relied on here: `useSessionPolling` returns early unless BOTH a project and
+ * a session are selected, so on a project-only URL the board is fetched once and never again — a
+ * confirmed cancel would sit invisible behind a spinner that never resolves. Applying the
+ * confirmed status locally makes the mutation's result visible immediately, and surfacing the
+ * error makes a failed one visible at all.
+ */
+function useTaskCancellation(cwd: string | null): TaskCancellation {
+  const [pending, setPending] = useState<ReadonlySet<string>>(new Set())
+  const [cancelled, setCancelled] = useState<ReadonlySet<string>>(new Set())
+  const [error, setError] = useState<string | null>(null)
+
+  const cancel = useCallback(
+    (storeKey: string, taskId: string) => {
+      const key = cancelKey(storeKey, taskId)
+      setError(null)
+      setPending((prev) => new Set(prev).add(key))
+      postCancel(storeKey, taskId, cwd)
+        .then(() => setCancelled((prev) => new Set(prev).add(key)))
+        .catch((err: unknown) => {
+          setError(
+            `Could not cancel #${taskId}: ${err instanceof Error ? err.message : "request failed"}`
+          )
+        })
+        .finally(() =>
+          setPending((prev) => {
+            const next = new Set(prev)
+            next.delete(key)
+            return next
+          })
+        )
+    },
+    [cwd]
+  )
+
+  const isPending = useCallback(
+    (storeKey: string, taskId: string) => pending.has(cancelKey(storeKey, taskId)),
+    [pending]
+  )
+
+  const applyTo = useCallback(
+    <T extends SessionTask>(storeKey: string, tasks: T[]): T[] =>
+      applyConfirmedCancellations(storeKey, tasks, cancelled),
+    [cancelled]
+  )
+
+  return { cancel, isPending, applyTo, error }
+}
+
+function TaskCancelError({ error }: { error: string | null }): ReactElement | null {
+  return error ? <p className="new-task-error">{error}</p> : null
+}
+
 export function SessionTasksSection({
   tasks,
   summary,
   loading,
+  sessionId,
+  cwd,
 }: {
   tasks: SessionTask[]
   summary: SessionTaskSummary | null
   loading: boolean
+  /** The store these tasks came from; without it a row has nothing to cancel against. */
+  sessionId?: string | null
+  cwd?: string | null
 }): ReactElement {
+  const cancellation = useTaskCancellation(cwd ?? null)
+  const storeKey = sessionId ?? ""
+  const handleCancel = useCallback(
+    (taskId: string) => {
+      if (storeKey) cancellation.cancel(storeKey, taskId)
+    },
+    [storeKey, cancellation]
+  )
+  const shownTasks = cancellation.applyTo(storeKey, tasks)
+
   return (
     <section className="session-tasks-section" aria-label="Current tasks for selected session">
       <h3 className="session-tasks-title mb-2">Session tasks</h3>
@@ -42,7 +151,14 @@ export function SessionTasksSection({
           No tasks recorded for this session. Tasks appear once an agent starts work.
         </p>
       ) : (
-        <TaskBoard tasks={tasks} />
+        <>
+          <TaskCancelError error={cancellation.error} />
+          <TaskBoard
+            tasks={shownTasks}
+            onCancel={storeKey ? handleCancel : undefined}
+            cancelPending={(taskId) => cancellation.isPending(storeKey, taskId)}
+          />
+        </>
       )}
     </section>
   )
@@ -106,7 +222,20 @@ export function groupTasksByStore(tasks: ProjectTask[], cwd: string | null): Tas
   })
 }
 
-function TaskStoreGroupCard({ group }: { group: TaskStoreGroup }): ReactElement {
+function TaskStoreGroupCard({
+  group,
+  cancellation,
+}: {
+  group: TaskStoreGroup
+  cancellation: TaskCancellation
+}): ReactElement {
+  const { storeKey } = group
+  const handleCancel = useCallback(
+    (taskId: string) => cancellation.cancel(storeKey, taskId),
+    [storeKey, cancellation]
+  )
+  const shownTasks = cancellation.applyTo(storeKey, group.tasks)
+
   return (
     <details className="task-store-group" open={group.openCount > 0}>
       <summary className="task-store-summary">
@@ -119,7 +248,12 @@ function TaskStoreGroupCard({ group }: { group: TaskStoreGroup }): ReactElement 
         </span>
       </summary>
       <div className="task-store-body">
-        <TaskBoard tasks={group.tasks} showHint={false} />
+        <TaskBoard
+          tasks={shownTasks}
+          showHint={false}
+          onCancel={handleCancel}
+          cancelPending={(taskId) => cancellation.isPending(storeKey, taskId)}
+        />
       </div>
     </details>
   )
@@ -135,6 +269,7 @@ function ProjectTaskGroups({
   loading: boolean
 }): ReactElement {
   const [showAllGroups, setShowAllGroups] = useState(false)
+  const cancellation = useTaskCancellation(cwd)
   const groups = useMemo(() => groupTasksByStore(tasks, cwd), [tasks, cwd])
   const visibleGroups = showAllGroups ? groups : groups.slice(0, PREVIEW_GROUP_LIMIT)
   const hiddenCount = groups.length - visibleGroups.length
@@ -153,8 +288,9 @@ function ProjectTaskGroups({
       <p className="session-tasks-summary">
         {groups.length} task store{groups.length === 1 ? "" : "s"} in this project
       </p>
+      <TaskCancelError error={cancellation.error} />
       {visibleGroups.map((group) => (
-        <TaskStoreGroupCard key={group.storeKey} group={group} />
+        <TaskStoreGroupCard key={group.storeKey} group={group} cancellation={cancellation} />
       ))}
       {hiddenCount > 0 || showAllGroups ? (
         <button

@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { toSessionTaskPreview } from "../../commands/daemon/utils.ts"
 import type { ProjectTask, SessionTask } from "./session-browser-types.ts"
-import { groupTasksByStore } from "./session-tasks.tsx"
+import { applyConfirmedCancellations, cancelKey, groupTasksByStore } from "./session-tasks.tsx"
 import { detailBeyondSubject, queueHintFor } from "./task-board.tsx"
 
 function webTask(
@@ -139,6 +139,36 @@ describe("detailBeyondSubject", () => {
 
   test("nothing to show when both are absent", () => {
     expect(detailBeyondSubject(webTask({ id: "a", status: "pending" }))).toBeNull()
+  })
+})
+
+describe("applyConfirmedCancellations", () => {
+  const store = "-Users-me-Development-swiz"
+
+  test("re-statuses only the confirmed task", () => {
+    const tasks = [
+      webTask({ id: "a", status: "pending" }),
+      webTask({ id: "b", status: "in_progress" }),
+    ]
+    const result = applyConfirmedCancellations(store, tasks, new Set([cancelKey(store, "a")]))
+    expect(result.map((t) => t.status)).toEqual(["cancelled", "in_progress"])
+  })
+
+  test("a confirmation in another store leaves this store's same-numbered task alone", () => {
+    const tasks = [webTask({ id: "1", status: "pending" })]
+    const otherStore = new Set([cancelKey("some-other-session", "1")])
+    expect(applyConfirmedCancellations(store, tasks, otherStore)[0]?.status).toBe("pending")
+  })
+
+  test("returns the original array when nothing is confirmed", () => {
+    const tasks = [webTask({ id: "a", status: "pending" })]
+    expect(applyConfirmedCancellations(store, tasks, new Set())).toBe(tasks)
+  })
+
+  test("does not clone a task that is already cancelled", () => {
+    const tasks = [webTask({ id: "a", status: "cancelled" })]
+    const result = applyConfirmedCancellations(store, tasks, new Set([cancelKey(store, "a")]))
+    expect(result[0]).toBe(tasks[0])
   })
 })
 

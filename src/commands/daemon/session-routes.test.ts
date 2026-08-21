@@ -298,3 +298,54 @@ describe("handleProjectsList compat shim", () => {
     expect(selectedProjectCwd).toBe("/home/user/new-project")
   })
 })
+
+describe("/tasks/cancel routing and validation", () => {
+  const ctx = null as unknown as SessionRoutesContext
+
+  function cancelRequest(body: unknown, method = "POST"): Request {
+    return new Request("http://localhost/tasks/cancel", {
+      method,
+      headers: { "Content-Type": "application/json" },
+      body: method === "POST" ? JSON.stringify(body) : undefined,
+    })
+  }
+
+  test("is routed rather than falling through to the static file server", async () => {
+    const req = cancelRequest({})
+    const res = await handleSessionRoutes(req, new URL(req.url), ctx)
+    expect(res).not.toBeNull()
+  })
+
+  test("rejects a missing sessionId with 400, not a silent success", async () => {
+    const req = cancelRequest({ taskId: "1" })
+    const res = await handleSessionRoutes(req, new URL(req.url), ctx)
+    expect(res!.status).toBe(400)
+    expect((await res!.json()).error).toContain("sessionId")
+  })
+
+  test("rejects a missing taskId with 400", async () => {
+    const req = cancelRequest({ sessionId: "s1" })
+    const res = await handleSessionRoutes(req, new URL(req.url), ctx)
+    expect(res!.status).toBe(400)
+    expect((await res!.json()).error).toContain("taskId")
+  })
+
+  test("rejects an empty-string sessionId — presence alone is not validity", async () => {
+    const req = cancelRequest({ sessionId: "", taskId: "1" })
+    const res = await handleSessionRoutes(req, new URL(req.url), ctx)
+    expect(res!.status).toBe(400)
+  })
+
+  test("does not answer GET — the route is a mutation", async () => {
+    const req = cancelRequest(undefined, "GET")
+    const res = await handleSessionRoutes(req, new URL(req.url), ctx)
+    expect(res).toBeNull()
+  })
+
+  test("reports an unresolvable task as a 500 with its reason, not a fake success", async () => {
+    const req = cancelRequest({ sessionId: "no-such-session-xyz", taskId: "no-such-task" })
+    const res = await handleSessionRoutes(req, new URL(req.url), ctx)
+    expect(res!.status).toBe(500)
+    expect((await res!.json()).error).toBeTruthy()
+  })
+})
