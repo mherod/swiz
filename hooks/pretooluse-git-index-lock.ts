@@ -289,6 +289,26 @@ function isGitExecutable(command: string): boolean {
   return base === "git" || base.startsWith("git-")
 }
 
+/**
+ * Whether a command's argv names this repo as a path token. A bare
+ * `includes(repoRoot)` false-positives on sibling paths that merely extend
+ * ours (…/swiz matching inside …/swiz-other), so the character after the
+ * match must terminate the path: end-of-string, a path separator, whitespace,
+ * or a closing quote (verifier follow-up on d74ede0a).
+ */
+export function argvNamesRepo(command: string, repoRoot: string): boolean {
+  let from = 0
+  while (true) {
+    const at = command.indexOf(repoRoot, from)
+    if (at === -1) return false
+    const next = command[at + repoRoot.length]
+    if (next === undefined || next === "/" || next === "'" || next === '"' || /\s/.test(next)) {
+      return true
+    }
+    from = at + 1
+  }
+}
+
 function parseGitProcessTable(out: string): {
   rows: GitProcessRow[]
   parentMap: Map<number, number>
@@ -403,7 +423,7 @@ export async function inspectGitProcessesForRepo(
   if (candidates.length === 0) return false
 
   // argv-aware repo association: `git -C <repo> …` runs with its cwd anywhere.
-  if (candidates.some((row) => row.command.includes(repoRoot))) return true
+  if (candidates.some((row) => argvNamesRepo(row.command, repoRoot))) return true
 
   return await processesUseRepo(
     candidates.map((row) => row.pid),

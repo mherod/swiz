@@ -4,6 +4,7 @@ import { join } from "node:path"
 import { GIT_INDEX_LOCK } from "../src/git-helpers.ts"
 import { runGit, useTempDir } from "../src/utils/test-utils.ts"
 import {
+  argvNamesRepo,
   evaluatePretooluseGitIndexLock,
   type GitIndexLockRuntime,
   inspectGitProcessesForRepo,
@@ -208,6 +209,18 @@ describe("pretooluse-git-index-lock", () => {
 
       expect(active).toBe(true)
       expect(harness.processCalls.map((cmd) => cmd[0])).toEqual(["ps"])
+    })
+
+    test("argv repo match requires a path boundary after the root", () => {
+      expect(argvNamesRepo("git -C /repo commit", "/repo")).toBe(true)
+      expect(argvNamesRepo("git --git-dir=/repo/.git status", "/repo")).toBe(true)
+      expect(argvNamesRepo("git -C '/repo' commit", "/repo")).toBe(true)
+      expect(argvNamesRepo("git -C /repo", "/repo")).toBe(true)
+      // Sibling path that merely extends ours must NOT match (verifier follow-up).
+      expect(argvNamesRepo("git -C /repo-other commit", "/repo")).toBe(false)
+      expect(argvNamesRepo("git -C /repository status", "/repo")).toBe(false)
+      // A sibling mention followed by a real mention still matches.
+      expect(argvNamesRepo("git -C /repo-other diff /repo/file.ts", "/repo")).toBe(true)
     })
 
     test("ignores processes that merely mention git or the repo path", async () => {
