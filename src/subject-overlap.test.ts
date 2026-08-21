@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 import {
   canonicalWords,
   computeSubjectFingerprint,
+  explainSubjectOverlap,
   normalizeSubject,
   significantWords,
   stemWord,
@@ -128,6 +129,52 @@ describe("subjectsOverlap", () => {
   test("rejects cross-domain tasks", () => {
     expect(subjectsOverlap("Update README documentation", "Fix authentication bug")).toBe(false)
     expect(subjectsOverlap("Run database migration", "Verify CI status")).toBe(false)
+  })
+
+  // ── Incidental domain words (issue #837) ─────────────────────────────
+  // "…and ship" canonicalises to push, dropping an issue-filing subject into
+  // the git-commit domain; the pipeline rule then collided it with every
+  // verify/push workflow task. Verb rules now require the shared domain to be
+  // a meaningful share of BOTH subjects.
+
+  test("rejects unrelated subjects sharing one incidental domain word", () => {
+    expect(
+      subjectsOverlap(
+        "Verify Codex acceptance criteria and ship",
+        "File skills-repo issue for push guard jq bug"
+      )
+    ).toBe(false)
+    expect(
+      subjectsOverlap(
+        "Verify Codex acceptance criteria and ship",
+        "Report the push-skill jq false-swallowing defect"
+      )
+    ).toBe(false)
+  })
+})
+
+describe("explainSubjectOverlap", () => {
+  test("names the rule that produced an overlap", () => {
+    // Control for the density gate: the pipeline rule must still fire for a
+    // genuine workflow-step pair sitting exactly at the 0.25 boundary.
+    const kept = explainSubjectOverlap(
+      "Verify Push Success with Hard Gate",
+      "Perform Git Commit and Push"
+    )
+    expect(kept.overlap).toBe(true)
+    expect(kept.rule).toBe("workflow-pipeline")
+    expect(kept.domainDensityA).toBeCloseTo(0.25)
+  })
+
+  test("reports no rule for the issue #837 false positives", () => {
+    const rejected = explainSubjectOverlap(
+      "Verify Codex acceptance criteria and ship",
+      "File skills-repo issue for push guard jq bug"
+    )
+    expect(rejected.overlap).toBe(false)
+    expect(rejected.rule).toBeNull()
+    expect(rejected.wordsA.length).toBeGreaterThan(0)
+    expect(rejected.wordsB.length).toBeGreaterThan(0)
   })
 })
 

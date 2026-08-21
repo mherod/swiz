@@ -495,18 +495,107 @@ function hasSharedActionVerb(wordsA: Set<string>, wordsB: Set<string>): boolean 
   return false
 }
 
-function domainOverlap(wordsA: Set<string>, wordsB: Set<string>): boolean {
+interface DomainOverlapVerdict {
+  rule: "domain-density" | "workflow-pipeline" | "shared-verb"
+  domain: string
+  densityA: number
+  densityB: number
+}
+
+/**
+ * Minimum share of a subject's canonical words that must belong to the shared
+ * domain before verb-based evidence (same workflow pipeline or a shared action
+ * verb) may mark two subjects as duplicates. One incidental domain word in an
+ * otherwise unrelated subject is not duplicate evidence: "…and ship" placed an
+ * issue-filing subject in the git-commit domain and the pipeline rule collided
+ * it with every verify/push workflow task (issue #837, densities 0.20/0.14).
+ * 0.25 is the observed boundary — it keeps genuine workflow-step subjects like
+ * "Verify Push Success with Hard Gate" (1 domain word in 4) overlapping.
+ */
+const MIN_DOMAIN_DENSITY_FOR_VERB_RULES = 0.25
+
+function verbRuleFor(
+  wordsA: Set<string>,
+  wordsB: Set<string>
+): "workflow-pipeline" | "shared-verb" | null {
+  const verbA = extractVerb(wordsA)
+  const verbB = extractVerb(wordsB)
+  if (verbA && verbB && sameWorkflowPipeline(verbA, verbB)) return "workflow-pipeline"
+  if (hasSharedActionVerb(wordsA, wordsB)) return "shared-verb"
+  return null
+}
+
+function explainDomainOverlap(
+  wordsA: Set<string>,
+  wordsB: Set<string>
+): DomainOverlapVerdict | null {
   const domainsA = classifyDomains(wordsA)
   const domainsB = classifyDomains(wordsB)
   for (const domain of domainsA) {
     if (!domainsB.has(domain)) continue
-    if (domainDensity(wordsA, domain) >= 0.5 && domainDensity(wordsB, domain) >= 0.5) return true
-    const verbA = extractVerb(wordsA)
-    const verbB = extractVerb(wordsB)
-    if (verbA && verbB && sameWorkflowPipeline(verbA, verbB)) return true
-    if (hasSharedActionVerb(wordsA, wordsB)) return true
+    const densityA = domainDensity(wordsA, domain)
+    const densityB = domainDensity(wordsB, domain)
+    if (densityA >= 0.5 && densityB >= 0.5)
+      return { rule: "domain-density", domain, densityA, densityB }
+    if (
+      densityA < MIN_DOMAIN_DENSITY_FOR_VERB_RULES ||
+      densityB < MIN_DOMAIN_DENSITY_FOR_VERB_RULES
+    ) {
+      continue
+    }
+    const rule = verbRuleFor(wordsA, wordsB)
+    if (rule) return { rule, domain, densityA, densityB }
   }
-  return false
+  return null
+}
+
+export interface SubjectOverlapExplanation {
+  wordsA: string[]
+  wordsB: string[]
+  overlapRatio: number
+  sharedDomain: string | null
+  domainDensityA: number
+  domainDensityB: number
+  verbA: string | null
+  verbB: string | null
+  rule: "word-overlap" | "domain-density" | "workflow-pipeline" | "shared-verb" | null
+  overlap: boolean
+}
+
+/**
+ * Diagnostic form of {@link subjectsOverlap}: same decision, plus which rule
+ * produced it and the intermediate signals. Used by scripts/debug-subject-overlap.ts
+ * and available to error messages that need to justify a duplicate rejection.
+ */
+export function explainSubjectOverlap(a: string, b: string): SubjectOverlapExplanation {
+  const wordsA = canonicalWords(normalizeSubject(a))
+  const wordsB = canonicalWords(normalizeSubject(b))
+  const base: SubjectOverlapExplanation = {
+    wordsA: [...wordsA],
+    wordsB: [...wordsB],
+    overlapRatio: wordsA.size > 0 && wordsB.size > 0 ? wordOverlapRatio(wordsA, wordsB) : 0,
+    sharedDomain: null,
+    domainDensityA: 0,
+    domainDensityB: 0,
+    verbA: extractVerb(wordsA),
+    verbB: extractVerb(wordsB),
+    rule: null,
+    overlap: false,
+  }
+  if (wordsA.size === 0 || wordsB.size === 0) return base
+  if (base.overlapRatio >= 0.5) return { ...base, rule: "word-overlap", overlap: true }
+  const domainVerdict = explainDomainOverlap(wordsA, wordsB)
+  if (domainVerdict) {
+    return {
+      ...base,
+      sharedDomain: domainVerdict.domain,
+      domainDensityA: domainVerdict.densityA,
+      domainDensityB: domainVerdict.densityB,
+      rule: domainVerdict.rule,
+      overlap: true,
+    }
+  }
+  return base
 }
 
 /**
@@ -516,11 +605,7 @@ function domainOverlap(wordsA: Set<string>, wordsB: Set<string>): boolean {
  *    verbs in the same workflow pipeline, or a shared action verb.
  */
 export function subjectsOverlap(a: string, b: string): boolean {
-  const wordsA = canonicalWords(normalizeSubject(a))
-  const wordsB = canonicalWords(normalizeSubject(b))
-  if (wordsA.size === 0 || wordsB.size === 0) return false
-  if (wordOverlapRatio(wordsA, wordsB) >= 0.5) return true
-  return domainOverlap(wordsA, wordsB)
+  return explainSubjectOverlap(a, b).overlap
 }
 
 // ─── Fingerprint ────────────────────────────────────────────────────────────
