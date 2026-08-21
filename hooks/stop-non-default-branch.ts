@@ -23,8 +23,9 @@ import { runSwizHookAsMain } from "../src/SwizHook.ts"
 import { type StopHookInput, stopHookInputSchema } from "../src/schemas.ts"
 import { readProjectSettings } from "../src/settings.ts"
 import { skillAdvice } from "../src/skill-utils.ts"
-import { getDefaultBranch, isDefaultBranch } from "../src/utils/git-utils.ts"
+import { getDefaultBranch, getGitStatusV2, isDefaultBranch } from "../src/utils/git-utils.ts"
 import { blockStopObj } from "../src/utils/hook-response.ts"
+import { resolveSessionFileOwnership } from "../src/utils/session-file-ownership.ts"
 import type { WorktreePreservationDecision } from "../src/worktree-preservation.ts"
 import { evaluateWorktreePreservation } from "../src/worktree-preservation.ts"
 
@@ -40,12 +41,42 @@ async function getOpenBranchPr(branch: string, cwd: string): Promise<OpenBranchP
   return await getOpenPrForBranch<OpenBranchPr>(branch, cwd, "mergeable,number")
 }
 
-function buildTrunkModeOutput(
+/**
+ * A branch switch carries uncommitted files with it (or fails midway), so a
+ * checkout remedy is unsafe while another live session holds dirty files in
+ * this checkout (issue #842). Empty when no peer edits are confirmed.
+ */
+function buildPeerHoldCaution(defaultBranch: string, peerHeldFiles: readonly string[]): string {
+  if (peerHeldFiles.length === 0) return ""
+  const shown = peerHeldFiles.slice(0, 20).join(", ")
+  const suffix = peerHeldFiles.length > 20 ? ` (and ${peerHeldFiles.length - 20} more)` : ""
+  return (
+    `A peer session holds uncommitted edits in this checkout: ${shown}${suffix}.\n` +
+    `Do not switch branches (\`git checkout ${defaultBranch}\`) until their owner commits them — ` +
+    `a switch carries those files onto '${defaultBranch}' or fails midway, stranding the peer's work. ` +
+    `Wait for the peer's commit, then continue with the steps below.\n\n`
+  )
+}
+
+async function resolvePeerHeldFiles(cwd: string, sessionId: string | undefined): Promise<string[]> {
+  try {
+    const status = await getGitStatusV2(cwd)
+    if (!status || status.lines.length === 0) return []
+    const ownership = await resolveSessionFileOwnership(cwd, sessionId, status.lines)
+    return ownership.editedByOthers
+  } catch {
+    return []
+  }
+}
+
+export function buildTrunkModeOutput(
   branch: string,
-  defaultBranch: string
+  defaultBranch: string,
+  peerHeldFiles: readonly string[] = []
 ): ReturnType<typeof blockStopObj> {
   return blockStopObj(
-    `Stopping on branch '${branch}' — trunk mode requires the default branch ('${defaultBranch}') before the session ends.\n\n` +
+    buildPeerHoldCaution(defaultBranch, peerHeldFiles) +
+      `Stopping on branch '${branch}' — trunk mode requires the default branch ('${defaultBranch}') before the session ends.\n\n` +
       `Switch back: \`git checkout ${defaultBranch}\`\n\n` +
       `Do not open a pull request for trunk-mode work; integrate on '${defaultBranch}'.`
   )
@@ -71,13 +102,16 @@ function buildPreservationOutput(
   )
 }
 
-function buildStandardFeatureBranchReason(
+export function buildStandardFeatureBranchReason(
   branch: string,
   defaultBranch: string,
   pr: OpenBranchPr | null,
-  fork: ForkTopology
+  fork: ForkTopology,
+  peerHeldFiles: readonly string[] = []
 ): string {
-  let reason = `Stopping on feature branch '${branch}' — the repository must be on '${defaultBranch}' before the session ends.\n\n`
+  let reason =
+    buildPeerHoldCaution(defaultBranch, peerHeldFiles) +
+    `Stopping on feature branch '${branch}' — the repository must be on '${defaultBranch}' before the session ends.\n\n`
 
   if (pr) {
     reason += `PR #${pr.number} is open for this branch. Complete the full PR workflow:\n\n`
@@ -148,8 +182,10 @@ export async function evaluateStopNonDefaultBranch(input: StopHookInput): Promis
   const defaultBranch = await getDefaultBranch(cwd)
   if (isDefaultBranch(branch, defaultBranch)) return {}
 
+  const peerHeldFiles = await resolvePeerHeldFiles(cwd, parsed.session_id)
+
   const trunkMode = (await readProjectSettings(cwd))?.trunkMode === true
-  if (trunkMode) return buildTrunkModeOutput(branch, defaultBranch)
+  if (trunkMode) return buildTrunkModeOutput(branch, defaultBranch, peerHeldFiles)
 
   const pr = await getOpenBranchPr(branch, cwd)
 
@@ -160,7 +196,9 @@ export async function evaluateStopNonDefaultBranch(input: StopHookInput): Promis
   }
 
   const fork = await detectForkTopology(cwd)
-  return blockStopObj(buildStandardFeatureBranchReason(branch, defaultBranch, pr, fork))
+  return blockStopObj(
+    buildStandardFeatureBranchReason(branch, defaultBranch, pr, fork, peerHeldFiles)
+  )
 }
 
 const stopNonDefaultBranch: SwizStopHook = {

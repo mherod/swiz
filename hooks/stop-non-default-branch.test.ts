@@ -2,6 +2,10 @@ import { describe, expect, test } from "bun:test"
 import { mkdir, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { type HookResult, runHookInProcess, useTempDir } from "../src/utils/test-utils.ts"
+import {
+  buildStandardFeatureBranchReason,
+  buildTrunkModeOutput,
+} from "./stop-non-default-branch.ts"
 
 async function enableTrunkMode(dir: string): Promise<void> {
   await mkdir(join(dir, ".swiz"), { recursive: true })
@@ -143,5 +147,49 @@ describe("stop-non-default-branch", () => {
     const result = await runHook(dir)
     expect(result.exitCode).toBe(0)
     expect(result.stdout).toBe("")
+  })
+})
+
+describe("peer-held file caution (issue #842)", () => {
+  const PEER_FILES = ["src/theirs.ts", "hooks/also-theirs.ts"]
+
+  test("control: trunk-mode output without peer files has no caution", () => {
+    const reason = buildTrunkModeOutput("feat/x", "main", []).reason ?? ""
+    expect(reason).not.toContain("peer session")
+    expect(reason).toContain("git checkout main")
+  })
+
+  test("trunk-mode output leads with the defer caution when a peer holds files", () => {
+    const reason = buildTrunkModeOutput("feat/x", "main", PEER_FILES).reason ?? ""
+    expect(reason.startsWith("A peer session holds uncommitted edits")).toBe(true)
+    expect(reason).toContain("src/theirs.ts, hooks/also-theirs.ts")
+    expect(reason).toContain("Do not switch branches")
+    expect(reason).toContain("stranding the peer's work")
+  })
+
+  test("control: standard reason without peer files has no caution", () => {
+    const reason = buildStandardFeatureBranchReason("feat/x", "main", null, null, [])
+    expect(reason).not.toContain("peer session")
+    expect(reason).toContain("git checkout main")
+  })
+
+  test("standard reason leads with the defer caution when a peer holds files", () => {
+    const reason = buildStandardFeatureBranchReason("feat/x", "main", null, null, PEER_FILES)
+    expect(reason.startsWith("A peer session holds uncommitted edits")).toBe(true)
+    expect(reason).toContain("Do not switch branches")
+  })
+
+  test("PR-path reason also carries the caution", () => {
+    const pr = { mergeable: "MERGEABLE", number: 7 }
+    const reason = buildStandardFeatureBranchReason("feat/x", "main", pr, null, PEER_FILES)
+    expect(reason.startsWith("A peer session holds uncommitted edits")).toBe(true)
+    expect(reason).toContain("PR #7 is open")
+  })
+
+  test("long peer file lists are bounded", () => {
+    const many = Array.from({ length: 25 }, (_, i) => `src/f${i}.ts`)
+    const reason = buildTrunkModeOutput("feat/x", "main", many).reason ?? ""
+    expect(reason).toContain("(and 5 more)")
+    expect(reason).not.toContain("src/f24.ts")
   })
 })
