@@ -6,7 +6,7 @@ One manifest of TypeScript hook scripts gets installed across Claude Code, Curso
 
 When `swiz idea` and `swiz continue` are used together, the system can enter a **self-directed loop** — a closed-loop state where the agent's own outputs become the next inputs, expanding the project without external prompts. See [docs/ai-providers.md](docs/ai-providers.md#self-directed-loop) for the canonical terminology.
 
-**158 hooks. 17 event types. Every agent. Zero compromises.**
+**159 hooks. 17 event types. Every agent. Zero compromises.**
 
 ## Install
 
@@ -227,7 +227,7 @@ PreToolUse hooks intercept tool calls *before* they execute. A blocking hook her
 | `pretooluse-measure-test-time.ts`              | Identifies full test suite runs and writes start times to temporary sentinel files. Excludes single file or limited directory test runs to focus on complete suite evaluations. |
 | `pretooluse-measure-lint-time.ts`              | Identifies full lint suite runs and writes start times to temporary sentinel files. Excludes single file or limited directory lint runs to focus on complete suite evaluations. |
 
-### PostToolUse (32)
+### PostToolUse (33)
 
 PostToolUse hooks run after a tool completes. They can feed error context back to the agent or inject advisory information.
 
@@ -265,6 +265,7 @@ PostToolUse hooks run after a tool completes. They can feed error context back t
 | `posttooluse-session-edits.ts` | Records files edited during the session into the `session_edits` table in IssueStore. |
 | `posttooluse-measure-test-time.ts`            | Reads start time sentinels written by the preToolUse hook, computes the test run duration, updates average stats in `.swiz/test-execution-stats.json`, and reports the updated average via systemMessage. |
 | `posttooluse-measure-lint-time.ts`            | Reads start time sentinels written by the preToolUse hook, computes the lint run duration, updates average stats in `.swiz/lint-execution-stats.json`, and reports the updated average via systemMessage. |
+| `posttooluse-agent-message-graph.ts` | Records inter-agent `SendMessage` sends to `~/.swiz/agent-messages.jsonl` so sessions and projects that collaborate can be associated. Stores sender session and cwd, the recipient address as written, and the body size — never the body. Recipient addresses are resolved to projects lazily by the reader, keeping the hook a cheap append. |
 
 ### SessionStart (9)
 

@@ -9,6 +9,7 @@ import notificationSpeak from "../hooks/notification-speak.ts"
 import permissionrequestInfractionRecord from "../hooks/permissionrequest-infraction-record.ts"
 import postcompactTaskRestore from "../hooks/postcompact-task-restore.ts"
 import posttooluseActiveSkills from "../hooks/posttooluse-active-skills.ts"
+import posttooluseAgentMessageGraph from "../hooks/posttooluse-agent-message-graph.ts"
 import posttooluseAutoSteer from "../hooks/posttooluse-auto-steer.ts"
 import posttooluseCommitAuthorVerification from "../hooks/posttooluse-commit-author-verification.ts"
 import posttooluseFileTruncationGuard from "../hooks/posttooluse-file-truncation-guard.ts"
@@ -470,6 +471,11 @@ export const bundledHookManifest: HookGroup[] = [
     event: "postToolUse",
     matcher: "Skill",
     hooks: [{ hook: posttoolusSkillSteps }],
+  },
+  {
+    event: "postToolUse",
+    matcher: "SendMessage",
+    hooks: [{ hook: posttooluseAgentMessageGraph }],
   },
   {
     event: "postToolUse",
