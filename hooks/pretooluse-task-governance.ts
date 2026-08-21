@@ -1187,7 +1187,7 @@ function shouldInspectShellInput(input: {
 // ─── Sliding-window completion rate limiter ─────────────────────────────────
 
 const WINDOW_MS = 5_000
-const MAX_COMPLETIONS_IN_WINDOW = 2
+export const MAX_COMPLETIONS_IN_WINDOW = 2
 
 const completionTimestamps = new Map<string, number[]>()
 

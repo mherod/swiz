@@ -13,6 +13,7 @@ import pretooluseTaskGovernance, {
   evaluatePendingOverflowGuard,
   evaluateTaskCreatePath,
   getInProgressCap,
+  MAX_COMPLETIONS_IN_WINDOW,
 } from "./pretooluse-task-governance.ts"
 import { evaluateStopIncompleteTasks } from "./stop-incomplete-tasks/evaluate.ts"
 
@@ -723,6 +724,137 @@ describe("checkInProgressTransitionCap boundary (via evaluateNativeTaskUpdatePat
       const result = await evaluateNativeTaskUpdatePath(input, toolInput, parsed)
       expect(permissionDecision(result)).toBe("deny")
       expect(decisionReason(result)).toContain(String(CAP))
+    } finally {
+      await cleanupSession(sessionId)
+    }
+  })
+
+  // Stand-downs: the cap counts in-progress tasks, but two transitions at the cap must still pass
+  // because they do not add one. The "at cap" denial above is the control for both.
+  test(`stands down at cap when the task is already in_progress (no-op)`, async () => {
+    const sessionId = uniqueSessionId(`cap-standdown-noop`)
+    try {
+      await cleanupSession(sessionId)
+      await seedInProgressTasks(sessionId, CAP)
+      const toolInput = { taskId: "1", status: "in_progress" }
+      const input = {
+        session_id: sessionId,
+        tool_name: "TaskUpdate",
+        tool_input: toolInput,
+        _taskHome: TASK_HOME,
+      }
+      const parsed = input as unknown as Parameters<typeof evaluateNativeTaskUpdatePath>[2]
+      const result = await evaluateNativeTaskUpdatePath(input, toolInput, parsed)
+      expect(permissionDecision(result)).not.toBe("deny")
+    } finally {
+      await cleanupSession(sessionId)
+    }
+  })
+
+  test(`stands down at cap when the task id is not on disk`, async () => {
+    const sessionId = uniqueSessionId(`cap-standdown-unknown`)
+    try {
+      await cleanupSession(sessionId)
+      await seedInProgressTasks(sessionId, CAP)
+      const toolInput = { taskId: "no-such-task", status: "in_progress" }
+      const input = {
+        session_id: sessionId,
+        tool_name: "TaskUpdate",
+        tool_input: toolInput,
+        _taskHome: TASK_HOME,
+      }
+      const parsed = input as unknown as Parameters<typeof evaluateNativeTaskUpdatePath>[2]
+      const result = await evaluateNativeTaskUpdatePath(input, toolInput, parsed)
+      expect(permissionDecision(result)).not.toBe("deny")
+    } finally {
+      await cleanupSession(sessionId)
+    }
+  })
+})
+
+/**
+ * The completion rate limit reads its task counts from disk, so a payload-only harness cannot
+ * reach it: the planning-buffer bypass depends on how many pending and in-progress tasks the
+ * session actually has. These drive the native TaskUpdate path against seeded task files.
+ *
+ * `completionTimestamps` is module state keyed by session id, so each test's unique session id
+ * gives it a clean window without resetting anything global.
+ */
+describe("checkCompletionRateLimit on disk-backed state (via evaluateNativeTaskUpdatePath)", () => {
+  const BURST = MAX_COMPLETIONS_IN_WINDOW + 1
+  /** Distinguishes a rate-limit denial from the completion-threshold denial that shares the path. */
+  const RATE_LIMIT_MARKER = "in the last 5s"
+
+  /**
+   * Pending filler with distinct subjects and ids that cannot collide with the in-progress
+   * seeds. `seedPendingTask` writes one fixed subject, so seeding several of those trips the
+   * duplicate-subject gate long before the rate limiter is reached.
+   */
+  async function seedDistinctPendingTasks(sessionId: string, count: number): Promise<void> {
+    for (let i = 1; i <= count; i++) {
+      await writeTask(TASK_HOME, sessionId, {
+        id: `pending-${i}`,
+        subject: `Queued follow-on ${i}`,
+        status: "pending",
+      })
+    }
+  }
+
+  async function completeTask(
+    sessionId: string,
+    taskId: string
+  ): Promise<{ decision?: string; reason?: string }> {
+    const toolInput = { taskId, status: "completed" }
+    const input = {
+      session_id: sessionId,
+      tool_name: "TaskUpdate",
+      tool_input: toolInput,
+      _taskHome: TASK_HOME,
+    }
+    const parsed = input as unknown as Parameters<typeof evaluateNativeTaskUpdatePath>[2]
+    const result = await evaluateNativeTaskUpdatePath(input, toolInput, parsed)
+    return { decision: permissionDecision(result), reason: decisionReason(result) }
+  }
+
+  test(`denies completion ${BURST} of a rapid burst when the planning buffer is thin`, async () => {
+    const sessionId = uniqueSessionId("rate-limit-thin-buffer")
+    try {
+      await cleanupSession(sessionId)
+      // One pending task only: below the pending >= 2 the bypass requires.
+      await seedInProgressTasks(sessionId, BURST + 1)
+      await seedDistinctPendingTasks(sessionId, 1)
+
+      const outcomes = []
+      for (let i = 1; i <= BURST; i++) outcomes.push(await completeTask(sessionId, String(i)))
+
+      // The completions up to the limit pass; each one is recorded in the window, and only the
+      // one that exceeds it is refused.
+      for (const outcome of outcomes.slice(0, BURST - 1)) {
+        expect(outcome.decision).not.toBe("deny")
+      }
+      const last = outcomes[BURST - 1]!
+      expect(last.decision).toBe("deny")
+      expect(last.reason).toContain(RATE_LIMIT_MARKER)
+      expect(last.reason).toContain(String(MAX_COMPLETIONS_IN_WINDOW))
+    } finally {
+      await cleanupSession(sessionId)
+    }
+  })
+
+  test(`stands down for the same ${BURST}-completion burst when the planning buffer is healthy`, async () => {
+    const sessionId = uniqueSessionId("rate-limit-healthy-buffer")
+    try {
+      await cleanupSession(sessionId)
+      // Enough in-progress work to keep one running through the burst, and pending >= 2 throughout,
+      // which is exactly the bypass condition the thin-buffer test above lacks.
+      await seedInProgressTasks(sessionId, BURST + 1)
+      await seedDistinctPendingTasks(sessionId, 3)
+
+      for (let i = 1; i <= BURST; i++) {
+        const outcome = await completeTask(sessionId, String(i))
+        expect(outcome.reason ?? "").not.toContain(RATE_LIMIT_MARKER)
+        expect(outcome.decision).not.toBe("deny")
+      }
     } finally {
       await cleanupSession(sessionId)
     }
