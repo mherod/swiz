@@ -24,6 +24,11 @@ interface BypassState {
   activatedAt: number
   expiresAt: number
   repoKey: string
+  /**
+   * Session the bypass is bound to. Set by --session at activation, or claimed
+   * by the first attributable preToolUse dispatch afterwards (issue #840).
+   */
+  sessionId?: string
 }
 
 async function readBypassState(): Promise<BypassState | null> {
@@ -45,6 +50,43 @@ export async function isEmergencyBypassActive(repoKey: string): Promise<boolean>
   }
 }
 
+/**
+ * Whether the bypass applies to this dispatch, binding the bypass to exactly
+ * one session (issue #840). The repo-keyed sentinel alone disarmed every
+ * preToolUse guard for every session sharing the checkout; the bypass now
+ * belongs to a single session — the one named by --session at activation, or,
+ * because the activating session cannot always know its own id, the first
+ * attributable dispatch to arrive afterwards claims it. Unattributable
+ * dispatches (no session_id in the payload) never bypass. A concurrent claim
+ * is last-write-wins; the loser falls back to guarded dispatches, which is
+ * the safe side.
+ */
+export async function resolveEmergencyBypassForSession(
+  repoKey: string,
+  sessionId: string | null
+): Promise<boolean> {
+  if (!sessionId) return false
+  let state: BypassState
+  try {
+    const raw = await readFile(swizEmergencyBypassPath(repoKey), "utf8")
+    state = JSON.parse(raw) as BypassState
+  } catch {
+    return false
+  }
+  if (Date.now() >= state.expiresAt) return false
+  if (state.sessionId) return state.sessionId === sessionId
+  try {
+    await writeFile(
+      swizEmergencyBypassPath(repoKey),
+      JSON.stringify({ ...state, sessionId }, null, 2)
+    )
+  } catch {
+    // Claim write failed — honour the bypass for this dispatch; the next
+    // attributable dispatch retries the claim.
+  }
+  return true
+}
+
 async function showBypassStatus(): Promise<void> {
   const state = await readBypassState()
   if (!state || Date.now() >= state.expiresAt) {
@@ -57,29 +99,43 @@ async function showBypassStatus(): Promise<void> {
   stderrLog("emergency-bypass status", `  Expires:   ${new Date(state.expiresAt).toISOString()}`)
 }
 
+function parseDurationArg(args: string[]): number {
+  const durationIdx = args.indexOf("--duration")
+  if (durationIdx === -1) return DEFAULT_DURATION_S
+  const parsed = parseInt(args[durationIdx + 1] ?? "", 10)
+  if (Number.isNaN(parsed) || parsed <= 0) {
+    throw new Error("Duration must be a positive integer (seconds)")
+  }
+  return parsed
+}
+
+function parseSessionArg(args: string[]): string | undefined {
+  const sessionIdx = args.indexOf("--session")
+  if (sessionIdx === -1) return undefined
+  const rawSession = (args[sessionIdx + 1] ?? "").trim()
+  if (!rawSession) throw new Error("--session requires a session id")
+  return rawSession
+}
+
 export const emergencyBypassCommand: Command = {
   name: "emergency-bypass",
   description: "Activate a time-limited PreToolUse hook bypass for deadlock recovery",
   usage: "swiz emergency-bypass [--duration <seconds>] [--status]",
   options: [
     { flags: "--duration <seconds>", description: "Override duration (max 300s, default 120s)" },
+    {
+      flags: "--session <id>",
+      description:
+        "Bind the bypass to one agent session id (default: the first dispatch after activation claims it)",
+    },
     { flags: "--status", description: "Show current bypass state" },
   ],
 
   async run(args: string[]) {
     if (args.includes("--status")) return showBypassStatus()
 
-    // Parse duration
-    let durationS = DEFAULT_DURATION_S
-    const durationIdx = args.indexOf("--duration")
-    if (durationIdx !== -1) {
-      const rawDuration = args[durationIdx + 1] ?? ""
-      const parsed = parseInt(rawDuration, 10)
-      if (Number.isNaN(parsed) || parsed <= 0) {
-        throw new Error("Duration must be a positive integer (seconds)")
-      }
-      durationS = parsed
-    }
+    const durationS = parseDurationArg(args)
+    const sessionId = parseSessionArg(args)
 
     const durationMs = Math.min(durationS * 1000, MAX_DURATION_MS)
     if (durationS * 1000 > MAX_DURATION_MS) {
@@ -107,6 +163,7 @@ export const emergencyBypassCommand: Command = {
       activatedAt: now,
       expiresAt: now + durationMs,
       repoKey: getCanonicalPathHash(process.cwd()),
+      ...(sessionId ? { sessionId } : {}),
     }
 
     await writeFile(
@@ -118,7 +175,13 @@ export const emergencyBypassCommand: Command = {
     stderrLog("emergency-bypass activate", `Emergency bypass ACTIVATED for ${expirySec}s`)
     stderrLog(
       "emergency-bypass activate",
-      `  All preToolUse hook denials will be skipped until ${new Date(state.expiresAt).toISOString()}`
+      `  preToolUse hook denials will be skipped until ${new Date(state.expiresAt).toISOString()}`
+    )
+    stderrLog(
+      "emergency-bypass activate",
+      sessionId
+        ? `  Scope: session ${sessionId} only.`
+        : `  Scope: the first agent session to dispatch after activation claims the bypass; other sessions stay guarded.`
     )
     stderrLog("emergency-bypass activate", `  Stop and postToolUse hooks remain active.`)
     stderrLog("emergency-bypass activate", `  Next activation available in 60 minutes.`)

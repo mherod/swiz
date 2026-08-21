@@ -7,7 +7,7 @@
 
 import { readFile, writeFile } from "node:fs/promises"
 import { merge, omit } from "lodash-es"
-import { isEmergencyBypassActive } from "../commands/emergency-bypass.ts"
+import { resolveEmergencyBypassForSession } from "../commands/emergency-bypass.ts"
 import { detectProjectStack } from "../detect-frameworks.ts"
 import { getCanonicalPathHash } from "../git-helpers.ts"
 import { type HookGroup, hookIdentifier, isInlineHookDef } from "../manifest.ts"
@@ -257,7 +257,7 @@ async function loadFilterSettings(
     ...(settings.disabledHooks ?? []),
     ...(projectSettings?.disabledHooks ?? []),
   ])
-  return { cwd, effective, disabledSet, detectedStacks }
+  return { cwd, sessionId, effective, disabledSet, detectedStacks }
 }
 
 export async function applyHookSettingFilters(
@@ -265,7 +265,7 @@ export async function applyHookSettingFilters(
   payload: Record<string, any>,
   preloadedProjectSettings?: ProjectSwizSettings | null
 ): Promise<HookGroup[]> {
-  const { cwd, effective, disabledSet, detectedStacks } = await loadFilterSettings(
+  const { cwd, sessionId, effective, disabledSet, detectedStacks } = await loadFilterSettings(
     payload,
     preloadedProjectSettings
   )
@@ -273,9 +273,13 @@ export async function applyHookSettingFilters(
   const filtered = applyFilterPipeline(groups, effective, disabledSet, detectedStacks)
   const stateFiltered = await filterStateHooks(filtered, cwd)
 
-  if (cwd) {
+  // Session-scoped bypass (issue #840): only a dispatch that actually carries
+  // preToolUse groups may consult — and thereby claim — the bypass, so a
+  // peer's stop/postToolUse dispatch can neither disarm its own guards nor
+  // steal the claim from the activating session.
+  if (cwd && stateFiltered.some((g) => g.event === "preToolUse")) {
     const repoKey = getCanonicalPathHash(cwd)
-    if (await isEmergencyBypassActive(repoKey)) {
+    if (await resolveEmergencyBypassForSession(repoKey, sessionId)) {
       return stateFiltered.filter((g) => g.event !== "preToolUse")
     }
   }
