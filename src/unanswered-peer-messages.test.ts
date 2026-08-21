@@ -108,6 +108,45 @@ describe("findUnansweredPeerMessages", () => {
     expect(result).toHaveLength(1)
   })
 
+  // Regression: the first version reported a peer named "peer" from its own test fixture. Writing
+  // a file that documents the tag, reading it back, or quoting it all put the characters in the
+  // transcript without a peer having spoken.
+  it("ignores the tag inside an assistant tool call that writes a file", () => {
+    const write = JSON.stringify({
+      type: "assistant",
+      message: {
+        role: "assistant",
+        content: [
+          {
+            type: "tool_use",
+            name: "Write",
+            input: { content: `${TAG} from="uds:/x.sock" from-name="peer">` },
+          },
+        ],
+      },
+    })
+    expect(findUnansweredPeerMessages([write, toolCallLine()])).toEqual([])
+  })
+
+  it("ignores the tag inside a tool result that read a file back", () => {
+    const toolResult = JSON.stringify({
+      type: "user",
+      message: {
+        role: "user",
+        content: [{ type: "tool_result", content: `${TAG} from-name="peer">` }],
+      },
+    })
+    expect(findUnansweredPeerMessages([toolResult, toolCallLine()])).toEqual([])
+  })
+
+  it("ignores the tag quoted in assistant prose", () => {
+    const prose = JSON.stringify({
+      type: "assistant",
+      message: { role: "assistant", content: [{ type: "text", text: `${TAG} from-name="peer">` }] },
+    })
+    expect(findUnansweredPeerMessages([prose, toolCallLine()])).toEqual([])
+  })
+
   it("reports nothing when no peer message was ever received", () => {
     expect(findUnansweredPeerMessages([toolCallLine(), toolCallLine()])).toEqual([])
   })

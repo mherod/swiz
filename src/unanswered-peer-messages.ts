@@ -63,9 +63,30 @@ function normalizeAddress(value: string): string {
     .toLowerCase()
 }
 
-function readInbound(line: string): { peer: string; address: string | null } | null {
+/**
+ * The text of a record that is genuinely a delivered peer message, or null.
+ *
+ * The tag string appears in the transcript for several reasons, and only one of them is a
+ * delivery. Writing a file that documents the tag, reading that file back, or quoting it in an
+ * assistant message all put the same characters in the log — and the first version of this scan
+ * reported a peer called `peer` from its own test fixture within minutes of being registered.
+ *
+ * Deliveries take exactly three shapes, none of which an assistant record or a tool result can
+ * imitate: a `queue-operation`, an `attachment`, and a `user` record whose content is a plain
+ * string. A tool result is also a `user` record but carries an array, which is what separates
+ * "a peer spoke" from "I read a file that mentions peers".
+ */
+function deliveryText(record: TranscriptRecord, rawLine: string): string | null {
+  const type = record.type
+  if (type === "queue-operation" || type === "attachment") return rawLine
+  if (type !== "user") return null
+  const content = record.message?.content
+  return typeof content === "string" ? content : null
+}
+
+function readInbound(text: string): { peer: string; address: string | null } | null {
   INBOUND_TAG_RE.lastIndex = 0
-  const tag = INBOUND_TAG_RE.exec(line)
+  const tag = INBOUND_TAG_RE.exec(text)
   if (!tag) return null
   const attrs = tag[1] ?? ""
   const peer = FROM_NAME_RE.exec(attrs)?.[1]?.trim()
@@ -82,6 +103,7 @@ const contentBlockSchema = z.looseObject({
 })
 
 const transcriptRecordSchema = z.looseObject({
+  type: z.string().optional(),
   message: z
     .looseObject({
       content: z.union([z.string(), z.array(contentBlockSchema)]).optional(),
@@ -158,6 +180,25 @@ function recordOutbound(
 }
 
 /**
+ * Fold one transcript line into the peer states, returning its tool-call count.
+ *
+ * A line that cannot be parsed contributes nothing and counts zero — it is skipped rather than
+ * failing the scan, because a truncated tail is normal on a live transcript.
+ */
+function scanLine(line: string, states: Map<string, PeerState>, index: number): number {
+  if (!line.trim()) return 0
+  const record = parseTranscriptRecord(line)
+  if (!record) return 0
+
+  const delivered = deliveryText(record, line)
+  const inbound = delivered ? readInbound(delivered) : null
+  if (inbound) recordInbound(states, inbound, index)
+
+  recordOutbound(states, readOutboundRecipients(record), index)
+  return toolUseBlocks(record).length
+}
+
+/**
  * Peers whose most recent message is still unanswered, oldest first.
  *
  * Lines are raw transcript JSONL lines. Unparseable lines are skipped rather than failing the
@@ -168,23 +209,7 @@ export function findUnansweredPeerMessages(lines: readonly string[]): Unanswered
   const toolUsesAtLine: number[] = []
 
   for (let i = 0; i < lines.length; i++) {
-    const line = lines[i]
-    if (!line?.trim()) {
-      toolUsesAtLine.push(0)
-      continue
-    }
-
-    const inbound = readInbound(line)
-    if (inbound) recordInbound(states, inbound, i)
-
-    const record = parseTranscriptRecord(line)
-    if (!record) {
-      toolUsesAtLine.push(0)
-      continue
-    }
-
-    toolUsesAtLine.push(toolUseBlocks(record).length)
-    recordOutbound(states, readOutboundRecipients(record), i)
+    toolUsesAtLine.push(scanLine(lines[i] ?? "", states, i))
   }
 
   const unanswered: UnansweredPeer[] = []
