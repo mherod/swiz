@@ -26,6 +26,7 @@ import {
 import {
   appendSessionFileOwnershipContext,
   resolveSessionFileOwnership,
+  type SessionFileOwnership,
 } from "../../src/utils/session-file-ownership.ts"
 import type { GitContext, GitStatus } from "./types.ts"
 
@@ -84,21 +85,17 @@ async function getVisibleUnpushedCommitSummaries(
   }
 }
 
-async function appendUncommittedFileContext(
+function appendUncommittedFileContext(
   gitLine: string,
-  cwd: string,
-  sessionId: string | undefined,
-  gitStatus: GitStatus
-): Promise<string> {
-  if (gitStatus.total <= 0 || !gitStatus.lines || gitStatus.lines.length === 0) return gitLine
-
-  const ownership = await resolveSessionFileOwnership(cwd, sessionId, gitStatus.lines)
+  ownership: SessionFileOwnership | null
+): string {
+  if (!ownership) return gitLine
   return appendSessionFileOwnershipContext(gitLine, ownership)
 }
 
 async function buildStopGitSummary(
   cwd: string,
-  sessionId: string | undefined,
+  ownership: SessionFileOwnership | null,
   gitStatus: GitStatus,
   upstream: string,
   effective: Awaited<ReturnType<typeof resolveEffectiveSettings>>
@@ -115,7 +112,7 @@ async function buildStopGitSummary(
     },
     unpushedCommitSummaries
   )
-  gitLine = await appendUncommittedFileContext(gitLine, cwd, sessionId, gitStatus)
+  gitLine = appendUncommittedFileContext(gitLine, ownership)
 
   return [constructiveSummary, "Git context:", gitLine].filter(Boolean).join("\n\n")
 }
@@ -151,9 +148,15 @@ export async function resolveGitContext(input: StopHookInput): Promise<GitContex
   const defaultBranch = await getDefaultBranch(cwd)
   const trunkMode = effective.trunkMode
   const upstream = gitStatus.upstream ?? `origin/${branch}`
+  // Resolved once here so both the prose summary and the action plan see the
+  // same ownership snapshot — the plan previously ignored it (issue #841).
+  const ownership =
+    hasUncommitted && gitStatus.lines && gitStatus.lines.length > 0
+      ? await resolveSessionFileOwnership(cwd, input.session_id, gitStatus.lines)
+      : null
   const summary = await buildStopGitSummary(
     cwd,
-    input.session_id,
+    ownership,
     gitStatus as GitStatus,
     upstream,
     effective
@@ -171,5 +174,6 @@ export async function resolveGitContext(input: StopHookInput): Promise<GitContex
     pushCooldownMinutes: effective.pushCooldownMinutes,
     defaultBranch,
     trunkMode,
+    ownership,
   }
 }

@@ -149,6 +149,7 @@ async function collectGitWorkflowStopAfterDetachedCheck(
     trunkMode,
     defaultBranch,
     hookPayload: input as Record<string, unknown>,
+    ownership: ctx.ownership,
   })
 
   const willNeedPush = ahead > 0 || (hasUncommitted && hasRemote)

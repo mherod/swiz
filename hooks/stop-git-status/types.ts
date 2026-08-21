@@ -8,6 +8,7 @@
  */
 
 import type { GitStatusV2 } from "../../src/utils/git-utils.ts"
+import type { SessionFileOwnership } from "../../src/utils/session-file-ownership.ts"
 
 export type GitStatus = GitStatusV2
 
@@ -23,6 +24,8 @@ export interface GitContext {
   pushCooldownMinutes: number
   defaultBranch: string
   trunkMode: boolean
+  /** Dirty-file ownership across live sessions; null when the tree is clean (issue #841). */
+  ownership: SessionFileOwnership | null
 }
 
 export type ActionPlanItem = string | string[]

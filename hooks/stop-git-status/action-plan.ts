@@ -9,7 +9,14 @@ import { getCollaborationModePolicy } from "../../src/collaboration-policy.ts"
 import type { CollaborationMode } from "../../src/settings.ts"
 import { skillExistsForHookPayload } from "../../src/skill-utils.ts"
 import { isDefaultBranch } from "../../src/utils/git-utils.ts"
+import type { SessionFileOwnership } from "../../src/utils/session-file-ownership.ts"
 import type { ActionPlanItem } from "./types.ts"
+
+/** Bounded, comma-joined path list for plan text. */
+function formatPathList(paths: readonly string[], max = 20): string {
+  const shown = paths.slice(0, max).join(", ")
+  return paths.length > max ? `${shown} (and ${paths.length - max} more)` : shown
+}
 
 /**
  * Check if collaboration mode allows direct push to main/master.
@@ -87,12 +94,41 @@ function pushSubStepsForPolicy(
 
 /**
  * Build commit action plan step.
+ *
+ * When another live session's edits sit in the tree, a whole-tree `git add .`
+ * would sweep their in-flight work into this session's commit under this
+ * session's authorship (issue #841) — the plan then stages only paths this
+ * session's edit ledger owns, and names what it deliberately leaves.
  */
-function buildCommitSteps(payload?: Record<string, unknown>): [string, ActionPlanItem[]] {
+function buildCommitSteps(
+  payload?: Record<string, unknown>,
+  ownership?: SessionFileOwnership | null
+): [string, ActionPlanItem[]] {
   const subSteps: ActionPlanItem[] = []
   if (skillExistsForHookPayload("commit", payload ?? {})) {
     subSteps.push("/commit — Stage and commit with Conventional Commits")
   }
+
+  if (ownership && ownership.editedByOthers.length > 0) {
+    subSteps.push(
+      ownership.editedByUs.length > 0
+        ? `git add ${formatPathList(ownership.editedByUs)}`
+        : "No dirty files are recorded to this session — do not stage anything yet.",
+      'git commit -m "<type>(<scope>): <summary>"',
+      `Leave the peer session's files uncommitted: ${formatPathList(ownership.editedByOthers)}`
+    )
+    if (ownership.unattributed.length > 0) {
+      subSteps.push(
+        "Unattributed files (not evidence of a peer — may be yours): establish ownership " +
+          `before staging: ${formatPathList(ownership.unattributed)}`
+      )
+    }
+    subSteps.push(
+      "Types: feat, fix, refactor, docs, style, test, chore. Keep summary under 50 characters."
+    )
+    return ["Commit YOUR changes only — another live session has edits in this checkout:", subSteps]
+  }
+
   subSteps.push(
     "git add .",
     'git commit -m "<type>(<scope>): <summary>"',
@@ -104,10 +140,21 @@ function buildCommitSteps(payload?: Record<string, unknown>): [string, ActionPla
 /**
  * Build pull action plan step.
  */
-function buildPullSteps(payload?: Record<string, unknown>): [string, ActionPlanItem[]] {
+function buildPullSteps(
+  payload?: Record<string, unknown>,
+  ownership?: SessionFileOwnership | null
+): [string, ActionPlanItem[]] {
   const subSteps: ActionPlanItem[] = []
   if (skillExistsForHookPayload("resolve-conflicts", payload ?? {})) {
     subSteps.push("/resolve-conflicts — Use if conflicts arise during rebase")
+  }
+  if (ownership && ownership.editedByOthers.length > 0) {
+    // --autostash would stash and reapply the peer's uncommitted files; a
+    // conflicted reapply strands their work in a stash they never created.
+    subSteps.push(
+      "A peer session has uncommitted files here — prefer waiting for them to commit " +
+        "before rebasing; --autostash would sweep their work through a stash."
+    )
   }
   subSteps.push("git pull --rebase --autostash")
   return ["Pull and rebase:", subSteps]
@@ -167,6 +214,7 @@ export function buildGitWorkflowSections(opts: {
   trunkMode: boolean
   defaultBranch: string
   hookPayload?: Record<string, unknown>
+  ownership?: SessionFileOwnership | null
 }): ActionPlanItem[] {
   const {
     summary: _,
@@ -180,16 +228,17 @@ export function buildGitWorkflowSections(opts: {
     trunkMode,
     defaultBranch,
     hookPayload,
+    ownership,
   } = opts
 
   const steps: ActionPlanItem[] = []
 
   if (hasUncommitted) {
-    const [header, subSteps] = buildCommitSteps(hookPayload)
+    const [header, subSteps] = buildCommitSteps(hookPayload, ownership)
     steps.push(header, ...subSteps)
   }
   if (behind > 0) {
-    const [header, subSteps] = buildPullSteps(hookPayload)
+    const [header, subSteps] = buildPullSteps(hookPayload, ownership)
     steps.push(header, ...subSteps)
   }
   if (ahead > 0 || (hasUncommitted && hasRemote)) {
