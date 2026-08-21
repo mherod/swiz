@@ -60,6 +60,10 @@ export const GATE_REQUIRED_SKILLS = {
     name: "convert-to-kotlin",
     hooks: ["pretooluse-require-convert-to-kotlin"],
   },
+  collaborateWithAnotherAgent: {
+    name: "collaborate-with-another-agent",
+    hooks: ["pretooluse-collaborate-skill-gate"],
+  },
   endOfDay: {
     name: "end-of-day",
     hooks: ["stop-required-skills"],

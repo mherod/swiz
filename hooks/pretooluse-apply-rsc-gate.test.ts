@@ -1,64 +1,29 @@
 import { afterEach, beforeEach, describe, expect, it, test } from "bun:test"
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
+import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { clearSkillCache } from "../src/skill-utils.ts"
+import {
+  makeSkillGateSummary as makeSummary,
+  runSkillGateWithSkillInstalled,
+  skillInvocationLine,
+} from "../src/utils/skill-gate-test-utils.ts"
 import { neutralAgentEnvOverrides, runHookInProcess } from "../src/utils/test-utils.ts"
 import { isRscGatedFile } from "./pretooluse-apply-rsc-gate.ts"
 
 const HOOK_SCRIPT = "hooks/pretooluse-apply-rsc-gate.ts"
 
-function makeSummary(sessionLines: string[] = []) {
-  return {
-    toolNames: [],
-    toolCallCount: 0,
-    bashCommands: [],
-    skillInvocations: [],
-    hasGitPush: false,
-    sessionLines,
-    sessionDurationMs: 0,
-    successfulTestRuns: 0,
-    lastVerificationTime: null,
-    sessionScope: "trivial",
-  }
-}
-
-function skillInvocationLine(skillName: string, msAgo = 1000): string {
-  return JSON.stringify({
-    timestamp: new Date(Date.now() - msAgo).toISOString(),
-    type: "assistant",
-    message: { content: [{ type: "tool_use", name: "Skill", input: { skill: skillName } }] },
-  })
-}
-
 async function runWithSkillInstalled(
   filePath: string,
   sessionLines: string[] = []
 ): Promise<Record<string, any>> {
-  const projectDir = await mkdtemp(join(tmpdir(), "rsc-gate-"))
-  try {
-    const skillDir = join(projectDir, ".skills", "apply-rsc")
-    await mkdir(skillDir, { recursive: true })
-    await writeFile(join(skillDir, "SKILL.md"), "# apply-rsc\n")
-
-    const result = await runHookInProcess(
-      HOOK_SCRIPT,
-      {
-        tool_name: "Edit",
-        tool_input: { file_path: filePath },
-        transcript_path: "fake.json",
-        cwd: projectDir,
-        _transcriptSummary: makeSummary(sessionLines),
-      },
-      {
-        cwd: projectDir,
-        env: neutralAgentEnvOverrides({ CLAUDECODE: "1" }),
-      }
-    )
-    return result.json ?? {}
-  } finally {
-    await rm(projectDir, { recursive: true, force: true })
-  }
+  return await runSkillGateWithSkillInstalled({
+    hookScript: HOOK_SCRIPT,
+    skillName: "apply-rsc",
+    payload: { tool_name: "Edit", tool_input: { file_path: filePath } },
+    sessionLines,
+    tempPrefix: "rsc-gate-",
+  })
 }
 
 // ─── Pure path predicate ────────────────────────────────────────────────────
