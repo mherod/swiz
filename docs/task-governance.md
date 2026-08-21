@@ -103,13 +103,15 @@ without passing the native-tool gates.
   `in_progress` completes normally. The swiz MCP `TaskUpdate` forwards its `description` as
   evidence (native parity). This is the service-layer analogue of
   `pretooluse-no-phantom-task-completion`.
-- **Last-task-standing is consistently enforced.** `validateLastTaskStanding` blocks any
-  completion that would leave zero incomplete tasks. The CLI's cross-session exemption
-  (`skipLastTaskGuard = !!explicit --session`, Fixes #420) now applies uniformly across
-  `runCompleteTask` (first `updateStatus` attempt, not just the auto-transition fallback)
-  and `runStatusTask`. Task-enabled agents cannot reach these CLI paths
-  (`enforceNativeTaskTools`), and the native/MCP path never sets `skipLastTaskGuard`, so the
-  agent invariant is never relaxed.
+- **Last-task-standing is advisory, not enforced** (Fixes #834). Completing the final open task
+  is permitted; `taskQueueHint` reports the empty queue in the board the task tools return. It
+  used to throw, which combined with `pretooluse-require-tasks` (an open task is needed before
+  Bash/Edit/Write) to form a ratchet: no legal transition ended with an empty queue, so the only
+  way to close the last task was to invent a successor. Agents did exactly that — one session
+  logged 8 such rejections and resolved every one by creating a task it did not need — so the
+  rule manufactured the fabricated state it was meant to prevent. The invariant that matters is
+  about session end, and the stop gates own it (clean git state, unpushed-commits handoff).
+  `skipLastTaskGuard` remains on the CLI options for compatibility but no longer gates anything.
 - **Path guards canonicalize single-path tools.** `isProtectedTaskStoragePathResolved`
   (`hooks/sandbox-path-utils.ts`) expands `~`/`$HOME` and resolves `realpath` before
   matching, so a symlink whose parent points into the tasks dir, or a `${HOME}/...` form, is

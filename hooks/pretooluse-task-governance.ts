@@ -1131,10 +1131,26 @@ function unexpectedHookFailureOutput(err: unknown): SwizHookOutput {
   )
 }
 
+/**
+ * Tools that must stay reachable at zero queue depth.
+ *
+ * Requiring an open task before Bash/Edit/Write is only recoverable because the tools that
+ * *create* a task are not themselves gated. Today that holds by omission — those names simply do
+ * not appear in this hook's matcher — and a future matcher widening would turn the gate into an
+ * unrecoverable deadlock: no task means no tool call, and the only escape is blocked. The
+ * exemption is stated here so it survives that change, and `require-tasks-escape-hatch.test.ts`
+ * asserts it.
+ */
+export function isQueueRecoveryTool(toolName: string): boolean {
+  return isAnyProviderTaskCreateTool(toolName) || isAnyProviderTaskUpdateTool(toolName)
+}
+
 export async function evaluatePretooluseRequireTasks(
   input: Record<string, any>
 ): Promise<SwizHookOutput> {
   if (!agentHasTaskToolsForHookPayload(input)) return {}
+  // Never gate the way out of an empty queue.
+  if (isQueueRecoveryTool(String(input.tool_name ?? ""))) return {}
 
   const toolName = String(input.tool_name ?? "")
   const taskFileAccess = evaluateTaskFileAccess(input, toolName)

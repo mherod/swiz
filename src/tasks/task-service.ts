@@ -430,17 +430,17 @@ export function isGitWorkingTreeClean(cwd?: string): boolean {
  * Validate that completing a task won't leave zero incomplete tasks in the session.
  * Returns an error string if blocked, null if allowed.
  */
-export function validateLastTaskStanding(
+/**
+ * Whether completing `taskId` would empty the queue.
+ *
+ * Advisory only — see the note in {@link updateStatus}. Kept because "the queue is about to be
+ * empty" is worth reporting; it just must not refuse the completion.
+ */
+export function completingEmptiesQueue(
   taskId: string,
   allTasks: Array<{ id: string; status: string }>
-): string | null {
-  const otherIncomplete = allTasks.filter(
-    (t) => t.id !== taskId && isIncompleteTaskStatus(t.status)
-  )
-  if (otherIncomplete.length === 0) {
-    return `Completing task #${taskId} would leave zero incomplete tasks. Create a new task before completing this one.`
-  }
-  return null
+): boolean {
+  return !allTasks.some((t) => t.id !== taskId && isIncompleteTaskStatus(t.status))
 }
 
 function applyTaskTimestamps(
@@ -505,14 +505,17 @@ export async function updateStatus(
     if (verifyError) throw new Error(verifyError)
   }
 
-  // Enforce last-task-standing invariant: completing a task must never leave
-  // zero incomplete tasks. Callers must create the next task explicitly before
-  // completing the current final task.
-  if (newStatus === "completed" && !options.skipLastTaskGuard) {
-    const allTasks = await readTasks(effectiveSessionId)
-    const lastTaskError = validateLastTaskStanding(taskId, allTasks)
-    if (lastTaskError) throw new Error(lastTaskError)
-  }
+  // Last-task-standing is advisory, not a rejection. Refusing the completion made this rule and
+  // `pretooluse-require-tasks` (which needs an open task before Bash/Edit/Write) compose into a
+  // ratchet: no legal transition ends with an empty queue, so the only way to close the final
+  // task is to invent a successor. Two sessions did exactly that today — 8 rejections in one and
+  // several in the other — and some of those successors exist only to satisfy the gate, which
+  // means the task store now holds fabricated rows that its own dashboard totals count.
+  //
+  // The invariant worth protecting is about session end, not about each completion, and the stop
+  // gates already own it (clean-git-state and the unpushed-commits handoff). The nudge survives
+  // where it is actually useful: `taskQueueHint` tells the caller the queue is empty in the very
+  // board returned by the task tools.
 
   const oldStatus = task.status
   const now = new Date().toISOString()
