@@ -61,6 +61,12 @@ export interface SkillGateRunOptions {
   sessionLines?: string[]
   /** Prefix for the temp project directory. */
   tempPrefix?: string
+  /**
+   * Transcript path the hook should read. Defaults to a non-existent file, which is enough for
+   * gates that only consult the pre-parsed summary; supply a real path for a gate that reads the
+   * transcript itself.
+   */
+  transcriptPath?: string
 }
 
 /**
@@ -73,6 +79,7 @@ export async function runSkillGateWithSkillInstalled({
   payload,
   sessionLines = [],
   tempPrefix = "skill-gate-",
+  transcriptPath = "fake.json",
 }: SkillGateRunOptions): Promise<Record<string, any>> {
   const projectDir = await mkdtemp(join(tmpdir(), tempPrefix))
   try {
@@ -84,7 +91,7 @@ export async function runSkillGateWithSkillInstalled({
       hookScript,
       {
         ...payload,
-        transcript_path: "fake.json",
+        transcript_path: transcriptPath,
         cwd: projectDir,
         _transcriptSummary: makeSkillGateSummary(sessionLines),
       },

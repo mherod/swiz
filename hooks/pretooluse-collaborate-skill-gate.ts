@@ -25,11 +25,30 @@ import {
 import {
   formatSkillReferenceForAgent,
   getRecentlyInvokedSkillsForCurrentSession,
+  hasSkillInSessionLines,
   resolveSkillRecencyOptions,
   skillExistsForHookPayload,
 } from "../src/skill-utils.ts"
 
 const SKILL_NAME = GATE_REQUIRED_SKILLS.collaborateWithAnotherAgent.name
+
+/**
+ * Whether the skill was invoked anywhere earlier in this session.
+ *
+ * The recency check answers "is the protocol active right now"; this answers "has this session
+ * already been through it", which is the question that decides whether a reload buys anything.
+ */
+async function wasSkillInvokedEarlierInSession(input: Record<string, unknown>): Promise<boolean> {
+  const transcriptPath = input.transcript_path
+  if (typeof transcriptPath !== "string" || !transcriptPath) return false
+  try {
+    const text = await Bun.file(transcriptPath).text()
+    return hasSkillInSessionLines(text.split("\n"), SKILL_NAME)
+  } catch {
+    // Unreadable transcript means no evidence of an earlier invocation; the gate stands.
+    return false
+  }
+}
 
 function formatInvokedSkills(skills: string[]): string {
   return skills.length === 0 ? "(none)" : skills.map((skill) => `/${skill}`).join(", ")
@@ -50,6 +69,14 @@ export async function evaluateCollaborateSkillGate(
 
   if (invokedSkills.includes(SKILL_NAME)) {
     return preToolUseAllow(`${skillRef} was invoked recently — peer message allowed.`)
+  }
+
+  // Gate the session's FIRST peer message, not every one. A session that already read the skill
+  // has the protocol in context; re-blocking it later forces a reload of a document it was
+  // handed in full — the exact anti-pattern the skill itself warns against — and the cost falls
+  // hardest on the sessions coordinating most, because they send the most messages.
+  if (await wasSkillInvokedEarlierInSession(input)) {
+    return preToolUseAllow(`${skillRef} was invoked earlier this session — peer message allowed.`)
   }
 
   return preToolUseDeny(
