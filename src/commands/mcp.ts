@@ -1,12 +1,13 @@
 import { createHash } from "node:crypto"
 import { readFileSync, unlinkSync, utimesSync, watch, writeFileSync } from "node:fs"
 import { appendFile, mkdir } from "node:fs/promises"
-import { dirname } from "node:path"
+import { dirname, join } from "node:path"
 import { z } from "zod"
 import { CHANNEL_DELIVERABLE_TRIGGERS } from "../auto-steer-store.ts"
 import { getHomeDirWithFallback } from "../home.ts"
 import { projectKeyFromCwd } from "../project-key.ts"
 import { readSwizSettings } from "../settings.ts"
+import { createDefaultTaskStore } from "../task-roots.ts"
 import { getTaskToolName } from "../tasks/task-governance-messages.ts"
 import {
   describeTaskChanges,
@@ -18,7 +19,8 @@ import {
   type TaskListSummary,
   truncateForLine,
 } from "../tasks/task-mcp-view.ts"
-import { readTasks } from "../tasks/task-repository.ts"
+import { pruneStaleCompletedTasks } from "../tasks/task-prune.ts"
+import { isSafeSessionId, readTasks, type Task } from "../tasks/task-repository.ts"
 import {
   completeTaskWithAutoTransition,
   createTaskInProcess,
@@ -644,6 +646,23 @@ function registerReplyTool(server: McpToolServer, cwd: string): void {
   )
 }
 
+/**
+ * Read the project-keyed store, deleting completed tasks past the retention
+ * age (COMPLETED_TASK_PRUNE_AGE_MS). The MCP task tools are the one surface
+ * allowed to prune this store: a task mutation or query here is an explicit
+ * agent action. Passive read paths must stay non-destructive — the daemon
+ * status line once deleted the tasks it was counting (see
+ * readProjectStoreTasks in compliance-routes.ts).
+ */
+export async function readProjectTasksWithPrune(
+  projectKey: string,
+  tasksDir = createDefaultTaskStore().tasksDir
+): Promise<Task[]> {
+  const tasks = await readTasks(projectKey, tasksDir)
+  if (!isSafeSessionId(projectKey, tasksDir)) return tasks
+  return pruneStaleCompletedTasks(join(tasksDir, projectKey), tasks)
+}
+
 function registerTaskCreateTool(server: McpToolServer, cwd: string): void {
   server.registerTool(
     "TaskCreate",
@@ -667,7 +686,7 @@ function registerTaskCreateTool(server: McpToolServer, cwd: string): void {
       try {
         const projectKey = projectKeyFromCwd(cwd)
         const task = await createTaskInProcess({ sessionId: projectKey, ...input, cwd })
-        const tasks = await readTasks(projectKey)
+        const tasks = await readProjectTasksWithPrune(projectKey)
         const headline = `Created #${task.id} — ${truncateForLine(task.subject)}`
         return {
           content: [
@@ -793,7 +812,7 @@ async function handleTaskUpdate(input: TaskUpdateToolInput, cwd: string) {
   const taskUpdateName = getTaskToolName("TaskUpdate")
   try {
     const projectKey = projectKeyFromCwd(cwd)
-    const tasksBefore = await readTasks(projectKey)
+    const tasksBefore = await readProjectTasksWithPrune(projectKey)
     const task = tasksBefore.find((candidate) => candidate.id === input.taskId)
     if (!task) {
       return {
@@ -905,7 +924,7 @@ function registerTaskListTool(server: McpToolServer, cwd: string): void {
     },
     async () => {
       try {
-        const allTasks = await readTasks(projectKeyFromCwd(cwd))
+        const allTasks = await readProjectTasksWithPrune(projectKeyFromCwd(cwd))
         const headline =
           allTasks.length === 0 ? "No tasks in this project yet." : "Task queue for this project."
         return {

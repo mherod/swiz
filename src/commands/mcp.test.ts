@@ -9,6 +9,7 @@ import {
   buildMcpInstructions,
   evaluatePermissionPolicy,
   loadPermissionPolicy,
+  readProjectTasksWithPrune,
   summarizeTasks,
 } from "./mcp.ts"
 
@@ -60,6 +61,60 @@ describe("TaskList summary", () => {
       completed: 0,
       cancelled: 0,
     })
+  })
+})
+
+describe("readProjectTasksWithPrune", () => {
+  const STALE_MS = 16 * 60_000 // past the 15-minute COMPLETED_TASK_PRUNE_AGE_MS retention
+
+  async function writeProjectTask(
+    tasksDir: string,
+    projectKey: string,
+    task: Partial<Task> & { id: string; status: Task["status"] }
+  ): Promise<string> {
+    const dir = join(tasksDir, projectKey)
+    await mkdir(dir, { recursive: true })
+    const filePath = join(dir, `${task.id}.json`)
+    await writeFile(
+      filePath,
+      JSON.stringify({
+        subject: `Task ${task.id}`,
+        description: "",
+        blocks: [],
+        blockedBy: [],
+        ...task,
+      })
+    )
+    return filePath
+  }
+
+  it("prunes stale completed tasks from the project store on read", async () => {
+    const tasksDir = await mkdtemp(join(tmpdir(), "swiz-mcp-prune-"))
+    const projectKey = "proj-key"
+    const stalePath = await writeProjectTask(tasksDir, projectKey, {
+      id: "1",
+      status: "completed",
+      completedAt: Date.now() - STALE_MS,
+    })
+    const freshPath = await writeProjectTask(tasksDir, projectKey, {
+      id: "2",
+      status: "completed",
+      completedAt: Date.now(),
+    })
+    const openPath = await writeProjectTask(tasksDir, projectKey, { id: "3", status: "pending" })
+
+    const tasks = await readProjectTasksWithPrune(projectKey, tasksDir)
+
+    expect(tasks.map((t) => t.id)).toEqual(["2", "3"])
+    expect(await Bun.file(stalePath).exists()).toBe(false)
+    expect(await Bun.file(freshPath).exists()).toBe(true)
+    expect(await Bun.file(openPath).exists()).toBe(true)
+  })
+
+  it("returns without pruning when the project key escapes the store", async () => {
+    const tasksDir = await mkdtemp(join(tmpdir(), "swiz-mcp-prune-escape-"))
+    const tasks = await readProjectTasksWithPrune("../outside", tasksDir)
+    expect(tasks).toEqual([])
   })
 })
 
