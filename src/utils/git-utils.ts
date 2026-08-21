@@ -828,6 +828,31 @@ export const FORCE_PUSH_RE = new RegExp(
 /** Matches `ls`, `rg`, `grep`, `curl`, or `wget` — pure read commands. */
 export const READ_CMD_RE = shellStatementCommandRe("(ls|rg|grep|curl|wget)\\b")
 
+/**
+ * File-inspection commands: `cat`, `head`, `tail`, and read-only `sed -n`.
+ *
+ * Separate from READ_CMD_RE because these need a redirect check. Reading a file is how an agent
+ * decides what to plan, so gating it behind "you must already have a task" forces the plan to be
+ * written before the code is read — which is how fabricated tasks get created. Reported by
+ * another session that wrote two task descriptions before reading the files they described; its
+ * operating instructions tell it to read via `cat`/`sed -n`/`head`, and every one of those was
+ * gated while `grep` and `rg` were already exempt. That split was arbitrary.
+ *
+ * `sed` is admitted only in its `-n` form: bare `sed` can carry `-i` and edit in place.
+ */
+const INSPECT_CMD_RE = shellStatementCommandRe("(cat|head|tail)\\b|sed\\s+-n\\b")
+
+/**
+ * Any redirect or pipe-to-write that would turn an inspection command into a write.
+ * `cat > file` reads like a read and is not one.
+ */
+const WRITE_REDIRECT_RE = /(^|[^0-9<>])>{1,2}[^&]|\|\s*tee\b/
+
+/** True for a file-inspection command that cannot write. */
+function isReadOnlyInspectCommand(command: string): boolean {
+  return INSPECT_CMD_RE.test(command) && !WRITE_REDIRECT_RE.test(command)
+}
+
 /** Matches diagnostic/cleanup commands recommended by other hooks (e.g., index-lock recovery). */
 export const RECOVERY_CMD_RE = shellStatementCommandRe("(ps|lsof|trash|wc)\\b")
 
@@ -925,6 +950,7 @@ function isExemptGitCommand(command: string): boolean {
 function isExemptUtilityCommand(command: string): boolean {
   return (
     READ_CMD_RE.test(command) ||
+    isReadOnlyInspectCommand(command) ||
     RECOVERY_CMD_RE.test(command) ||
     GH_CMD_RE.test(command) ||
     SWIZ_CMD_RE.test(command) ||
