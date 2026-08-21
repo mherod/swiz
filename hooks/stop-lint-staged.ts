@@ -4,12 +4,17 @@
 // Dual-mode: SwizStopHook for inline dispatch + subprocess via runSwizHookAsMain.
 
 import { join } from "node:path"
+import { git } from "../src/git-helpers.ts"
 import type { SwizHookOutput, SwizStopHook } from "../src/SwizHook.ts"
 import { runSwizHookAsMain } from "../src/SwizHook.ts"
 import { type StopHookInput, stopHookInputSchema } from "../src/schemas.ts"
 import { blockStopObj } from "../src/utils/hook-response.ts"
 import type { PackageManager } from "../src/utils/package-detection.ts"
 import { spawnWithTimeout } from "../src/utils/process-utils.ts"
+import {
+  resolveSessionFileOwnership,
+  type SessionFileOwnership,
+} from "../src/utils/session-file-ownership.ts"
 
 const PM_LOCKFILE_MAP: Array<{ pm: PackageManager; files: string[] }> = [
   { pm: "bun", files: ["bun.lockb", "bun.lock"] },
@@ -48,12 +53,49 @@ async function detectLintStaged(
 
 const LINT_STAGED_TIMEOUT_MS = 25_000
 
+/**
+ * Always pass --no-stash: lint-staged's default backup stash is stranded when
+ * the timeout kills the process mid-run, silently parking every session's
+ * uncommitted work in a stash nobody knows to look for (issue #839).
+ */
+export function buildLintStagedCommand(pm: PackageManager, hasScript: boolean): string[] {
+  return hasScript
+    ? [pm, "run", "lint-staged", "--", "--no-stash"]
+    : ["npx", "--yes", "lint-staged", "--no-stash"]
+}
+
+/**
+ * A whole-index mutator must not run over another live session's staged or
+ * dirty files — lint-staged rewrites and re-stages everything staged,
+ * regardless of owner (issue #839). Unattributed files stay eligible: absence
+ * of a peer's edit record is the normal solo case.
+ */
+export function shouldSkipForPeerOwnership(ownership: SessionFileOwnership): boolean {
+  return ownership.editedByOthers.length > 0
+}
+
+async function listDirtyFiles(cwd: string): Promise<string[]> {
+  try {
+    const out = await git(["status", "--porcelain"], cwd)
+    return out
+      .split("\n")
+      .map((line) => {
+        const path = line.slice(3).trim()
+        const renameArrow = path.lastIndexOf(" -> ")
+        return renameArrow === -1 ? path : path.slice(renameArrow + 4)
+      })
+      .filter(Boolean)
+  } catch {
+    return []
+  }
+}
+
 async function runLintStaged(
   cwd: string,
   detected: { hasScript: boolean }
 ): Promise<{ exitCode: number; output: string }> {
   const pm = await detectPackageManagerForProject(cwd)
-  const cmd = detected.hasScript ? [pm, "run", "lint-staged"] : ["npx", "--yes", "lint-staged"]
+  const cmd = buildLintStagedCommand(pm, detected.hasScript)
   const result = await spawnWithTimeout(cmd, { cwd, timeoutMs: LINT_STAGED_TIMEOUT_MS })
   if (result.timedOut) {
     return {
@@ -70,6 +112,12 @@ export async function evaluateStopLintStaged(input: StopHookInput): Promise<Swiz
 
   const detected = await detectLintStaged(cwd)
   if (!detected) return {}
+
+  const dirty = await listDirtyFiles(cwd)
+  if (dirty.length > 0) {
+    const ownership = await resolveSessionFileOwnership(cwd, parsed.session_id, dirty)
+    if (shouldSkipForPeerOwnership(ownership)) return {}
+  }
 
   const { exitCode, output } = await runLintStaged(cwd, detected)
   if (exitCode === 0) return {}
