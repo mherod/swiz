@@ -1,41 +1,27 @@
 import { createHash } from "node:crypto"
 import { readFileSync, unlinkSync, utimesSync, watch, writeFileSync } from "node:fs"
-import { appendFile, mkdir } from "node:fs/promises"
-import { dirname, join } from "node:path"
 import { z } from "zod"
 import { CHANNEL_DELIVERABLE_TRIGGERS } from "../auto-steer-store.ts"
-import { getHomeDirWithFallback } from "../home.ts"
+import {
+  type McpToolInput,
+  type McpToolName,
+  type McpToolResult,
+  mcpToolResultSchema,
+  runMcpTool,
+  type TaskUpdateToolInput,
+} from "../mcp-tool-core.ts"
 import { projectKeyFromCwd } from "../project-key.ts"
 import { readSwizSettings } from "../settings.ts"
-import { createDefaultTaskStore } from "../task-roots.ts"
-import { getTaskToolName } from "../tasks/task-governance-messages.ts"
-import {
-  describeTaskChanges,
-  findNewlyUnblockedTasks,
-  MAX_LISTED_PER_GROUP,
-  renderTaskToolResult,
-  renderUnblockedLine,
-  summarizeTasks,
-  type TaskListSummary,
-  truncateForLine,
-} from "../tasks/task-mcp-view.ts"
-import { pruneStaleCompletedTasks } from "../tasks/task-prune.ts"
-import { isSafeSessionId, readTasks, type Task } from "../tasks/task-repository.ts"
-import {
-  completeTaskWithAutoTransition,
-  createTaskInProcess,
-  updateStatus,
-  writeTaskUpdate,
-} from "../tasks/task-service.ts"
+import { summarizeTasks, type TaskListSummary } from "../tasks/task-mcp-view.ts"
 import {
   SWIZ_MCP_CHANNEL_DRAIN_INTERVAL_MS,
   swizMcpChannelHeartbeatPath,
   swizMcpChannelNotifyPath,
   swizMcpChannelStatusPath,
-  swizMcpRepliesLogPath,
 } from "../temp-paths.ts"
 import type { Command } from "../types.ts"
 import { messageFromUnknownError } from "../utils/hook-json-helpers.ts"
+import { getDaemonPort } from "./daemon/daemon-admin.ts"
 
 // Run swiz as a Model Context Protocol (MCP) stdio server.
 //
@@ -584,28 +570,69 @@ function registerPermissionRelay(lowLevel: McpLowLevelServer, cwd: string): void
   })
 }
 
-// ─── Reply tool sink ────────────────────────────────────────────────────────
+// ─── Daemon-first tool execution ────────────────────────────────────────────
+// Mirrors dispatch.ts: this stdio server is a long-lived process bound to the
+// agent session, so code loaded at its start goes stale across commits. Tool
+// calls forward to the daemon (restarted on every commit by lefthook) and fall
+// back to in-process execution only when the daemon is unavailable. A backoff
+// avoids burning the timeout budget on every call while the daemon is down.
 
-let replyWriteChain = Promise.resolve()
+const MCP_TOOL_DAEMON_TIMEOUT_MS = 5_000
+const MCP_TOOL_BACKOFF_MS = 30_000
+let lastMcpDaemonFailureAt = 0
 
-export async function appendReplyToSink(
-  cwd: string,
-  payload: { content: string; kind: string },
-  home = getHomeDirWithFallback("/tmp")
-): Promise<void> {
-  const path = swizMcpRepliesLogPath(home)
-  await mkdir(dirname(path), { recursive: true })
-  const row = `${JSON.stringify({
-    ts: Date.now(),
-    project_key: projectKeyFromCwd(cwd),
-    cwd,
-    kind: payload.kind,
-    content: payload.content,
-  })}\n`
-  const queued = replyWriteChain.then(() => appendFile(path, row))
-  replyWriteChain = queued.catch(() => {})
-  await queued
+/** Exported for testing — reset backoff state between test cases. */
+export function resetMcpToolDaemonBackoff(): void {
+  lastMcpDaemonFailureAt = 0
 }
+
+async function tryDaemonMcpTool(
+  tool: McpToolName,
+  input: McpToolInput,
+  cwd: string
+): Promise<McpToolResult | null> {
+  if (process.env.SWIZ_NO_DAEMON === "1") return null
+  if (lastMcpDaemonFailureAt > 0 && Date.now() - lastMcpDaemonFailureAt < MCP_TOOL_BACKOFF_MS) {
+    return null
+  }
+
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), MCP_TOOL_DAEMON_TIMEOUT_MS)
+  try {
+    const resp = await fetch(`http://127.0.0.1:${getDaemonPort()}/mcp/tool`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ tool, input, cwd }),
+      signal: controller.signal,
+    })
+    if (!resp.ok) {
+      lastMcpDaemonFailureAt = Date.now()
+      return null
+    }
+    const parsed = mcpToolResultSchema.safeParse(await resp.json())
+    return parsed.success ? parsed.data : null
+  } catch {
+    lastMcpDaemonFailureAt = Date.now()
+    return null
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+/** Run a tool daemon-first with in-process fallback. */
+export async function executeMcpTool(
+  tool: McpToolName,
+  input: McpToolInput,
+  cwd: string
+): Promise<McpToolResult> {
+  const viaDaemon = await tryDaemonMcpTool(tool, input, cwd)
+  if (viaDaemon) return viaDaemon
+  return runMcpTool(tool, input, cwd)
+}
+
+// Re-exported so existing consumers keep importing these from mcp.ts after the
+// business logic moved into mcp-tool-core.ts for daemon sharing.
+export { appendReplyToSink, readProjectTasksWithPrune } from "../mcp-tool-core.ts"
 
 // ─── Server entry point ─────────────────────────────────────────────────────
 
@@ -630,37 +657,9 @@ function registerReplyTool(server: McpToolServer, cwd: string): void {
         kind: z.string().optional().describe('Reply kind, e.g. "note" or "status"'),
       },
     },
-    async ({ content, kind }: { content: string; kind?: string }) => {
-      try {
-        await appendReplyToSink(cwd, { content, kind: kind ?? "note" })
-        return { content: [{ type: "text" as const, text: "ok" }] }
-      } catch (error) {
-        return {
-          content: [
-            { type: "text" as const, text: `reply failed: ${messageFromUnknownError(error)}` },
-          ],
-          isError: true,
-        }
-      }
-    }
+    ({ content, kind }: { content: string; kind?: string }) =>
+      executeMcpTool("reply", { content, kind }, cwd)
   )
-}
-
-/**
- * Read the project-keyed store, deleting completed tasks past the retention
- * age (COMPLETED_TASK_PRUNE_AGE_MS). The MCP task tools are the one surface
- * allowed to prune this store: a task mutation or query here is an explicit
- * agent action. Passive read paths must stay non-destructive — the daemon
- * status line once deleted the tasks it was counting (see
- * readProjectStoreTasks in compliance-routes.ts).
- */
-export async function readProjectTasksWithPrune(
-  projectKey: string,
-  tasksDir = createDefaultTaskStore().tasksDir
-): Promise<Task[]> {
-  const tasks = await readTasks(projectKey, tasksDir)
-  if (!isSafeSessionId(projectKey, tasksDir)) return tasks
-  return pruneStaleCompletedTasks(join(tasksDir, projectKey), tasks)
 }
 
 function registerTaskCreateTool(server: McpToolServer, cwd: string): void {
@@ -682,188 +681,9 @@ function registerTaskCreateTool(server: McpToolServer, cwd: string): void {
           .describe("Present continuous form for spinner display (e.g., 'Fixing login bug')"),
       },
     },
-    async (input: { subject: string; description: string; activeForm?: string }) => {
-      try {
-        const projectKey = projectKeyFromCwd(cwd)
-        const task = await createTaskInProcess({ sessionId: projectKey, ...input, cwd })
-        const tasks = await readProjectTasksWithPrune(projectKey)
-        const headline = `Created #${task.id} — ${truncateForLine(task.subject)}`
-        return {
-          content: [
-            { type: "text" as const, text: renderTaskToolResult(headline, tasks, task.id) },
-          ],
-        }
-      } catch (error) {
-        const name = getTaskToolName("TaskCreate")
-        return {
-          content: [
-            { type: "text" as const, text: `${name} failed: ${messageFromUnknownError(error)}` },
-          ],
-          isError: true,
-        }
-      }
-    }
+    (input: { subject: string; description: string; activeForm?: string }) =>
+      executeMcpTool("TaskCreate", { ...input }, cwd)
   )
-}
-
-interface TaskUpdateToolInput {
-  taskId: string
-  status?: "pending" | "in_progress" | "completed" | "cancelled"
-  subject?: string
-  description?: string
-  addBlocks?: string[]
-  removeBlocks?: string[]
-  addBlockedBy?: string[]
-  removeBlockedBy?: string[]
-}
-
-/** Apply the non-status fields of an update, returning a label per field actually changed. */
-function applyTaskFieldUpdates(
-  task: Awaited<ReturnType<typeof readTasks>>[number],
-  input: TaskUpdateToolInput
-): string[] {
-  const changes: string[] = []
-  if (input.subject !== undefined) {
-    task.subject = input.subject
-    changes.push("subject")
-  }
-  if (input.description !== undefined) {
-    task.description = input.description
-    changes.push("description")
-  }
-  if (input.addBlocks) {
-    task.blocks = [...new Set([...task.blocks, ...input.addBlocks])]
-    changes.push(`blocks +#${input.addBlocks.join(", #")}`)
-  }
-  if (input.removeBlocks) {
-    task.blocks = task.blocks.filter((id) => !input.removeBlocks!.includes(id))
-    changes.push(`blocks -#${input.removeBlocks.join(", #")}`)
-  }
-  if (input.addBlockedBy) {
-    task.blockedBy = [...new Set([...task.blockedBy, ...input.addBlockedBy])]
-    changes.push(`blockedBy +#${input.addBlockedBy.join(", #")}`)
-  }
-  if (input.removeBlockedBy) {
-    task.blockedBy = task.blockedBy.filter((id) => !input.removeBlockedBy!.includes(id))
-    changes.push(`blockedBy -#${input.removeBlockedBy.join(", #")}`)
-  }
-  return changes
-}
-
-async function persistTaskUpdate(
-  projectKey: string,
-  cwd: string,
-  task: Awaited<ReturnType<typeof readTasks>>[number],
-  input: TaskUpdateToolInput,
-  fieldsUpdated: boolean
-): Promise<void> {
-  if (input.status === undefined || input.status === task.status) {
-    if (fieldsUpdated) await writeTaskUpdate(projectKey, input.taskId, task)
-    return
-  }
-  if (fieldsUpdated) await writeTaskUpdate(projectKey, input.taskId, task)
-  if (input.status === "completed") {
-    await completeTaskWithAutoTransition(projectKey, input.taskId, {
-      filterCwd: cwd,
-      evidence: input.description,
-    })
-  } else {
-    await updateStatus(projectKey, input.taskId, input.status, { filterCwd: cwd })
-  }
-}
-
-/** A not-found error names the open tasks, so the caller can retry without a TaskList round trip. */
-function renderUnknownTaskId(
-  taskUpdateName: string,
-  taskId: string,
-  tasks: readonly Awaited<ReturnType<typeof readTasks>>[number][]
-): string {
-  const open = tasks.filter((task) => task.status === "pending" || task.status === "in_progress")
-  if (open.length === 0) {
-    return `${taskUpdateName} failed: task ${taskId} not found — this project has no open tasks.`
-  }
-  const listed = open
-    .slice(0, MAX_LISTED_PER_GROUP)
-    .map((task) => `#${task.id} ${truncateForLine(task.subject, 40)}`)
-    .join(", ")
-  const hidden = open.length - Math.min(open.length, MAX_LISTED_PER_GROUP)
-  const suffix = hidden > 0 ? ` (+${hidden} more)` : ""
-  return `${taskUpdateName} failed: task ${taskId} not found — open tasks: ${listed}${suffix}`
-}
-
-function buildUpdateHeadline(
-  taskId: string,
-  subject: string,
-  previousStatus: string,
-  input: TaskUpdateToolInput,
-  fieldChanges: readonly string[]
-): string {
-  const parts: string[] = []
-  if (input.status !== undefined && input.status !== previousStatus) {
-    parts.push(`${previousStatus} → ${input.status}`)
-  }
-  const fields = describeTaskChanges(fieldChanges)
-  if (fields) parts.push(fields)
-  const detail = parts.length > 0 ? ` (${parts.join("; ")})` : " (no change)"
-  return `Updated #${taskId} — ${truncateForLine(subject)}${detail}`
-}
-
-async function handleTaskUpdate(input: TaskUpdateToolInput, cwd: string) {
-  const taskUpdateName = getTaskToolName("TaskUpdate")
-  try {
-    const projectKey = projectKeyFromCwd(cwd)
-    const tasksBefore = await readProjectTasksWithPrune(projectKey)
-    const task = tasksBefore.find((candidate) => candidate.id === input.taskId)
-    if (!task) {
-      return {
-        content: [
-          {
-            type: "text" as const,
-            text: renderUnknownTaskId(taskUpdateName, input.taskId, tasksBefore),
-          },
-        ],
-        isError: true,
-      }
-    }
-    const previousStatus = task.status
-    // Snapshot before applyTaskFieldUpdates mutates `task` in place, so the unblock comparison
-    // sees the pre-update blockedBy edges rather than the ones this call just wrote.
-    const snapshotBefore = tasksBefore.map((candidate) => ({
-      ...candidate,
-      blockedBy: [...candidate.blockedBy],
-    }))
-    const fieldChanges = applyTaskFieldUpdates(task, input)
-    await persistTaskUpdate(projectKey, cwd, task, input, fieldChanges.length > 0)
-    const tasksAfter = await readTasks(projectKey)
-    const finalTask = tasksAfter.find((candidate) => candidate.id === input.taskId)
-    const headline = buildUpdateHeadline(
-      input.taskId,
-      finalTask?.subject ?? task.subject,
-      previousStatus,
-      input,
-      fieldChanges
-    )
-    const unblocked = renderUnblockedLine(findNewlyUnblockedTasks(snapshotBefore, tasksAfter))
-    const fullHeadline = unblocked ? `${headline}\n${unblocked}` : headline
-    return {
-      content: [
-        {
-          type: "text" as const,
-          text: renderTaskToolResult(fullHeadline, tasksAfter, input.taskId),
-        },
-      ],
-    }
-  } catch (error) {
-    return {
-      content: [
-        {
-          type: "text" as const,
-          text: `${taskUpdateName} failed: ${messageFromUnknownError(error)}`,
-        },
-      ],
-      isError: true,
-    }
-  }
 }
 
 function registerTaskUpdateTool(server: McpToolServer, cwd: string): void {
@@ -902,7 +722,7 @@ function registerTaskUpdateTool(server: McpToolServer, cwd: string): void {
           .describe("List of task IDs to remove from blockedBy"),
       },
     },
-    (input: TaskUpdateToolInput) => handleTaskUpdate(input, cwd)
+    (input: TaskUpdateToolInput) => executeMcpTool("TaskUpdate", { ...input }, cwd)
   )
 }
 
@@ -922,23 +742,7 @@ function registerTaskListTool(server: McpToolServer, cwd: string): void {
         "Long lists are truncated with an explicit remainder count.",
       inputSchema: {},
     },
-    async () => {
-      try {
-        const allTasks = await readProjectTasksWithPrune(projectKeyFromCwd(cwd))
-        const headline =
-          allTasks.length === 0 ? "No tasks in this project yet." : "Task queue for this project."
-        return {
-          content: [{ type: "text" as const, text: renderTaskToolResult(headline, allTasks) }],
-        }
-      } catch (error) {
-        return {
-          content: [
-            { type: "text" as const, text: `TaskList failed: ${messageFromUnknownError(error)}` },
-          ],
-          isError: true,
-        }
-      }
-    }
+    () => executeMcpTool("TaskList", {}, cwd)
   )
 }
 

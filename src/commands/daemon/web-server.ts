@@ -20,6 +20,7 @@ import {
   handleProjectPrsRoute,
   handleProjectSyncNow,
 } from "./issue-routes.ts"
+import { handleMcpToolRoute } from "./mcp-tool-routes.ts"
 import {
   handleCacheStatus,
   handleGhRateLimit,
@@ -228,6 +229,7 @@ const TOP_ROUTE_TABLE: Record<string, TopRouteHandler> = {
   "GET /dispatch/active": (_req, url, ctx) =>
     handleDispatchActive(url, buildDispatchRoutesContext(ctx)),
   "GET /metrics": (_req, url, ctx) => handleMetricsRoute(url, buildMetricsRoutesContext(ctx)),
+  "POST /mcp/tool": (req) => handleMcpToolRoute(req),
   "GET /api/hook-logs": (_req, url) => handleHookLogs(url),
   "GET /api/gh-rate-limit": () => handleGhRateLimit(),
   "GET /process/agents": () => handleProcessAgents(),

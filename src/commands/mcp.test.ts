@@ -8,8 +8,10 @@ import {
   buildMcpCapabilities,
   buildMcpInstructions,
   evaluatePermissionPolicy,
+  executeMcpTool,
   loadPermissionPolicy,
   readProjectTasksWithPrune,
+  resetMcpToolDaemonBackoff,
   summarizeTasks,
 } from "./mcp.ts"
 
@@ -115,6 +117,52 @@ describe("readProjectTasksWithPrune", () => {
     const tasksDir = await mkdtemp(join(tmpdir(), "swiz-mcp-prune-escape-"))
     const tasks = await readProjectTasksWithPrune("../outside", tasksDir)
     expect(tasks).toEqual([])
+  })
+})
+
+describe("executeMcpTool", () => {
+  it("falls back to in-process execution when the daemon is unavailable", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "swiz-mcp-exec-"))
+    const prior = process.env.SWIZ_NO_DAEMON
+    process.env.SWIZ_NO_DAEMON = "1"
+    try {
+      resetMcpToolDaemonBackoff()
+      const result = await executeMcpTool("TaskList", {}, cwd)
+      expect(result.isError).toBeUndefined()
+      expect(result.content[0]?.text).toContain("No tasks in this project yet.")
+    } finally {
+      if (prior === undefined) delete process.env.SWIZ_NO_DAEMON
+      else process.env.SWIZ_NO_DAEMON = prior
+    }
+  })
+
+  it("prefers the daemon response when the daemon answers", async () => {
+    const server = Bun.serve({
+      port: 0,
+      fetch: async (req) => {
+        const url = new URL(req.url)
+        if (req.method === "POST" && url.pathname === "/mcp/tool") {
+          const body = (await req.json()) as { tool?: string }
+          return Response.json({ content: [{ type: "text", text: `daemon:${body.tool}` }] })
+        }
+        return new Response("Not Found", { status: 404 })
+      },
+    })
+    const priorPort = process.env.SWIZ_DAEMON_PORT
+    const priorNoDaemon = process.env.SWIZ_NO_DAEMON
+    delete process.env.SWIZ_NO_DAEMON
+    process.env.SWIZ_DAEMON_PORT = String(server.port)
+    try {
+      resetMcpToolDaemonBackoff()
+      const result = await executeMcpTool("TaskList", {}, "/never-read-locally")
+      expect(result.content[0]?.text).toBe("daemon:TaskList")
+    } finally {
+      if (priorPort === undefined) delete process.env.SWIZ_DAEMON_PORT
+      else process.env.SWIZ_DAEMON_PORT = priorPort
+      if (priorNoDaemon !== undefined) process.env.SWIZ_NO_DAEMON = priorNoDaemon
+      resetMcpToolDaemonBackoff()
+      void server.stop(true)
+    }
   })
 })
 
