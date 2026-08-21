@@ -14,13 +14,14 @@ const GIT_DIR = `${REPO_ROOT}/.git`
 
 interface HarnessOptions {
   activeGit?: boolean
+  /** The active git row names the repo in argv (git -C /repo …) instead of via cwd. */
+  gitArgvNamesRepo?: boolean
   lockExists?: boolean
-  lockOld?: boolean
   disappearAfterValidation?: boolean
   unlinkFailures?: number
   unlinkAlwaysFails?: boolean
   processInspectionTimesOut?: boolean
-  processInspectionThrowsOn?: "pgrep" | "ps" | "lsof"
+  processInspectionThrowsOn?: "ps" | "lsof"
   lsofExitCode?: number
 }
 
@@ -71,9 +72,6 @@ function createHarness(options: HarnessOptions = {}): Harness {
       lockExists = false
       return Promise.resolve()
     },
-    fileMtimeMs() {
-      return Promise.resolve(options.lockOld ? now - 20_000 : now)
-    },
     spawn(cmd) {
       processCalls.push(cmd)
       if (cmd[0] === options.processInspectionThrowsOn) {
@@ -83,13 +81,20 @@ function createHarness(options: HarnessOptions = {}): Harness {
         now += 100
         return Promise.resolve(processResult("", { timedOut: true }))
       }
-      if (cmd[0] === "pgrep") {
-        return Promise.resolve(
-          options.activeGit ? processResult("200") : processResult("", { exitCode: 1 })
-        )
-      }
       if (cmd[0] === "ps") {
-        return Promise.resolve(processResult("PID PPID\n200 1\n100 50\n50 1"))
+        // Decoy rows always present: an executable merely mentioning git, and
+        // a non-git process whose argv contains the repo path — neither may
+        // count as an active git process.
+        const rows = [
+          "PID PPID COMMAND",
+          "300 1 /usr/bin/legit-status git",
+          `310 1 vim ${REPO_ROOT}/.git/config`,
+          "100 50 bun hook",
+          "50 1 zsh",
+        ]
+        if (options.gitArgvNamesRepo) rows.push(`200 1 git -C ${REPO_ROOT} commit`)
+        else if (options.activeGit) rows.push("200 1 git commit")
+        return Promise.resolve(processResult(rows.join("\n")))
       }
       if (cmd[0] === "lsof") {
         if (options.lsofExitCode !== undefined) {
@@ -161,6 +166,12 @@ describe("pretooluse-git-index-lock", () => {
       let now = 1_000
       const calls: Array<{ cmd: string[]; timeoutMs?: number }> = []
       const candidatePids = Array.from({ length: 184 }, (_, index) => index + 200)
+      const psTable = [
+        "PID PPID COMMAND",
+        "100 50 bun hook",
+        "50 1 zsh",
+        ...candidatePids.map((pid) => `${pid} 1 git status`),
+      ].join("\n")
 
       const active = await inspectGitProcessesForRepo("/repo", now + 100, {
         now: () => now,
@@ -169,19 +180,17 @@ describe("pretooluse-git-index-lock", () => {
         spawn: (cmd, options) => {
           calls.push({ cmd, timeoutMs: options.timeoutMs })
           now += 25
-          if (cmd[0] === "pgrep") {
-            return Promise.resolve(processResult(candidatePids.join("\n")))
-          }
           if (cmd[0] === "ps") {
-            return Promise.resolve(processResult("PID PPID\n100 50\n50 1"))
+            return Promise.resolve(processResult(psTable))
           }
           return Promise.resolve(processResult(""))
         },
       })
 
       expect(active).toBe(false)
-      expect(calls).toHaveLength(3)
-      expect(calls[2]?.cmd).toEqual([
+      expect(calls).toHaveLength(2)
+      expect(calls[0]?.cmd).toEqual(["ps", "-axo", "pid,ppid,command"])
+      expect(calls[1]?.cmd).toEqual([
         "lsof",
         "-a",
         "-p",
@@ -190,7 +199,23 @@ describe("pretooluse-git-index-lock", () => {
         "cwd",
         "-Fn",
       ])
-      expect(calls.map((call) => call.timeoutMs)).toEqual([100, 75, 50])
+      expect(calls.map((call) => call.timeoutMs)).toEqual([100, 75])
+    })
+
+    test("detects a git -C invocation whose cwd is elsewhere, without lsof", async () => {
+      const harness = createHarness({ gitArgvNamesRepo: true })
+      const active = await inspectGitProcessesForRepo(REPO_ROOT, 1_100, harness.runtime)
+
+      expect(active).toBe(true)
+      expect(harness.processCalls.map((cmd) => cmd[0])).toEqual(["ps"])
+    })
+
+    test("ignores processes that merely mention git or the repo path", async () => {
+      const harness = createHarness({ activeGit: false })
+      const active = await inspectGitProcessesForRepo(REPO_ROOT, 1_100, harness.runtime)
+
+      expect(active).toBe(false)
+      expect(harness.processCalls.map((cmd) => cmd[0])).toEqual(["ps"])
     })
 
     test("detects a candidate process using the repository", async () => {
@@ -198,7 +223,7 @@ describe("pretooluse-git-index-lock", () => {
       const active = await inspectGitProcessesForRepo(REPO_ROOT, 1_100, harness.runtime)
 
       expect(active).toBe(true)
-      expect(harness.processCalls.map((cmd) => cmd[0])).toEqual(["pgrep", "ps", "lsof"])
+      expect(harness.processCalls.map((cmd) => cmd[0])).toEqual(["ps", "lsof"])
     })
 
     test("fails safe when process inspection exceeds the deadline", async () => {
@@ -216,7 +241,7 @@ describe("pretooluse-git-index-lock", () => {
       const active = await inspectGitProcessesForRepo(REPO_ROOT, 1_100, harness.runtime)
 
       expect(active).toBe(true)
-      expect(harness.processCalls.map((cmd) => cmd[0])).toEqual(["pgrep", "ps", "lsof"])
+      expect(harness.processCalls.map((cmd) => cmd[0])).toEqual(["ps", "lsof"])
     })
 
     test("treats an empty non-zero lsof result as a vanished candidate", async () => {
@@ -224,7 +249,7 @@ describe("pretooluse-git-index-lock", () => {
       const active = await inspectGitProcessesForRepo(REPO_ROOT, 1_100, harness.runtime)
 
       expect(active).toBe(false)
-      expect(harness.processCalls.map((cmd) => cmd[0])).toEqual(["pgrep", "ps", "lsof"])
+      expect(harness.processCalls.map((cmd) => cmd[0])).toEqual(["ps", "lsof"])
     })
   })
 
@@ -276,8 +301,30 @@ describe("pretooluse-git-index-lock", () => {
   })
 
   describe("active process handling", () => {
-    test("denies a recent lock while a repository git process is active", async () => {
+    test("denies while a repository git process is active", async () => {
       const harness = createHarness({ activeGit: true })
+      const result = await runHook("git status", harness)
+
+      expect(result.decision).toBe("deny")
+      expect(result.reason).toContain("active git process")
+      expect(result.reason).toContain("peer session")
+      expect(harness.unlinkCalls()).toBe(0)
+    })
+
+    // Issue #838: the old stale-age override unlinked a live lock after 10s
+    // while gitActive was true — a routine lefthook commit holds it for 30s+.
+    test("never removes the lock while a git process is active, however long held", async () => {
+      const harness = createHarness({ activeGit: true })
+      await harness.runtime.sleep(60_000)
+      const result = await runHook("git status", harness)
+
+      expect(result.decision).toBe("deny")
+      expect(harness.unlinkCalls()).toBe(0)
+      expect(harness.lockExists()).toBe(true)
+    })
+
+    test("denies when process inspection cannot start", async () => {
+      const harness = createHarness({ processInspectionThrowsOn: "ps" })
       const result = await runHook("git status", harness)
 
       expect(result.decision).toBe("deny")
@@ -285,27 +332,6 @@ describe("pretooluse-git-index-lock", () => {
       expect(harness.unlinkCalls()).toBe(0)
     })
 
-    test("removes an old lock despite a matching long-lived process", async () => {
-      const harness = createHarness({ activeGit: true, lockOld: true })
-      const result = await runHook("git status", harness)
-
-      expect(result.decision).toBe("allow")
-      expect(result.reason).toContain("Auto-removed")
-      expect(harness.lockExists()).toBe(false)
-    })
-
-    test("removes an old lock when process inspection cannot start", async () => {
-      const harness = createHarness({
-        activeGit: true,
-        lockOld: true,
-        processInspectionThrowsOn: "lsof",
-      })
-      const result = await runHook("git status", harness)
-
-      expect(result.decision).toBe("allow")
-      expect(result.reason).toContain("Auto-removed")
-      expect(harness.lockExists()).toBe(false)
-    })
     test("denies safely when process inspection times out", async () => {
       const harness = createHarness({ processInspectionTimesOut: true })
       const result = await runHook("git status", harness)
@@ -387,7 +413,8 @@ describe("pretooluse-git-index-lock", () => {
           waitIntervalMs: 5,
           removeRetryDelayMs: 5,
           runtime: {
-            spawn: () => Promise.resolve(processResult("", { exitCode: 1 })),
+            // Valid, empty process table: ps succeeded and found no git rows.
+            spawn: () => Promise.resolve(processResult("PID PPID COMMAND")),
           },
         }
       )

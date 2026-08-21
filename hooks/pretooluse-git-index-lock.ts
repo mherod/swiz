@@ -10,7 +10,6 @@
 
 import { unlink } from "node:fs/promises"
 import { join } from "node:path"
-import { compact } from "lodash-es"
 import { GIT_DIR_NAME, GIT_INDEX_LOCK, git } from "../src/git-helpers.ts"
 import {
   preToolUseAllow,
@@ -34,7 +33,6 @@ const LOCK_RELEASE_TIMEOUT_MS = 10_000
 const LSOF_TIMEOUT_MS = 500
 const MAX_ANCESTRY_DEPTH = 20
 const REMOVE_RETRY_DELAY_MS = 200
-const STALE_LOCK_AGE_MS = 10_000
 
 export interface GitIndexLockEvaluationOptions {
   lockReleaseTimeoutMs?: number
@@ -48,7 +46,6 @@ export interface GitIndexLockRuntime {
   git(args: string[], cwd: string): Promise<string>
   fileExists(path: string): Promise<boolean>
   unlink(path: string): Promise<void>
-  fileMtimeMs(path: string): Promise<number>
   spawn(
     cmd: string[],
     options: { cwd?: string; timeoutMs?: number; stdin?: string }
@@ -63,7 +60,6 @@ const defaultRuntime: GitIndexLockRuntime = {
   git,
   fileExists: async (path) => await Bun.file(path).exists(),
   unlink,
-  fileMtimeMs: async (path) => (await Bun.file(path).stat()).mtimeMs,
   spawn: spawnWithTimeout,
   sleep: async (ms) => {
     if (ms <= 0) return
@@ -140,23 +136,16 @@ async function handleLockResolution(
     )
   }
 
-  // Git process appears active, but the lock may be stale if it's old enough.
-  // Attempt removal for aged locks — pgrep false-positives are common.
-  const lockAge = await getLockAgeMs(lockPath, runtime)
-  if (lockAge >= STALE_LOCK_AGE_MS) {
-    return await autoRemoveStaleLock(
-      lockPath,
-      releaseDeadlineMs,
-      removeRetryDelayMs,
-      lockReleaseTimeoutMs,
-      runtime
-    )
-  }
-
-  // A relevant git process IS active and lock is recent — block to prevent corruption.
+  // A relevant git process IS active — never unlink, whatever the lock's age.
+  // The old stale-age override deleted a live lock after 10s, but a routine
+  // lefthook commit chain holds it for 30s+, and in a shared checkout the
+  // holder may be a peer session's commit (issue #838).
   return preToolUseDeny(
     [
       `\`${LOCK_RELATIVE_PATH}\` exists and an active git process was detected for this repository.`,
+      "",
+      "The holder may be this session's own hook chain or a peer session's",
+      "in-flight commit — a lefthook pre-commit run holds the lock for 30s+.",
       "",
       "This lock will cause your git command to fail with:",
       `  "fatal: Unable to create '.../${LOCK_RELATIVE_PATH}': File exists."`,
@@ -264,33 +253,55 @@ async function waitForLockResolution(
   return { lockExists, gitActive }
 }
 
-async function getLockAgeMs(lockPath: string, runtime: GitIndexLockRuntime): Promise<number> {
-  try {
-    return runtime.now() - (await runtime.fileMtimeMs(lockPath))
-  } catch {
-    return 0
-  }
-}
-
 /**
  * Ancestry-aware, repo-scoped process check.
  * Returns true if a git process is actively using this repo's index.
  *
- * Two-stage filter (consistent with stop-git-status.ts):
- *   1. Ancestry: exclude git processes that are ancestors of this process
+ * Three-stage filter:
+ *   1. Executable: only processes whose argv[0] basename is `git` (or a
+ *      `git-*` helper) count — a substring match over command lines counted
+ *      editors, wrappers, and anything mentioning "git" (issue #838).
+ *   2. Ancestry: exclude git processes that are ancestors of this process
  *      (e.g., git push -> pre-push hook -> bun -> this hook).
- *   2. Repo scope: exclude git processes whose CWD is outside our repo root.
+ *   3. Repo scope: a candidate whose argv names this repo (git -C <repo> …)
+ *      is active wherever its cwd points; otherwise fall back to the lsof
+ *      cwd check. The old cwd-only probe was blind to -C invocations and
+ *      unlinked their live locks.
  */
-function parseParentMap(out: string): Map<number, number> {
+interface GitProcessRow {
+  pid: number
+  ppid: number
+  command: string
+}
+
+function parseGitProcessLine(line: string): GitProcessRow | null {
+  const match = line.trim().match(/^(\d+)\s+(\d+)\s+(.+)$/)
+  if (!match) return null
+  const pid = parseInt(match[1] ?? "", 10)
+  const ppid = parseInt(match[2] ?? "", 10)
+  if (Number.isNaN(pid) || Number.isNaN(ppid)) return null
+  return { pid, ppid, command: match[3] ?? "" }
+}
+
+function isGitExecutable(command: string): boolean {
+  const executable = command.split(/\s+/, 1)[0] ?? ""
+  const base = executable.slice(executable.lastIndexOf("/") + 1)
+  return base === "git" || base.startsWith("git-")
+}
+
+function parseGitProcessTable(out: string): {
+  rows: GitProcessRow[]
+  parentMap: Map<number, number>
+} {
+  const rows: GitProcessRow[] = []
   const parentMap = new Map<number, number>()
   for (const line of out.trim().split("\n").slice(1)) {
-    const parts = line.trim().split(/\s+/)
-    const pid = parseInt(parts[0] ?? "", 10)
-    const ppid = parseInt(parts[1] ?? "", 10)
-    if (!Number.isNaN(pid) && !Number.isNaN(ppid)) parentMap.set(pid, ppid)
+    const row = parseGitProcessLine(line)
+    if (!row) continue
+    parentMap.set(row.pid, row.ppid)
+    if (isGitExecutable(row.command)) rows.push(row)
   }
-
-  return parentMap
+  return { rows, parentMap }
 }
 
 function walkAncestry(parentMap: Map<number, number>, startPpid: number): Set<number> {
@@ -338,38 +349,23 @@ async function spawnForProcessInspection(
   }
 }
 
-async function findGitProcessIds(
+async function listCandidateGitProcesses(
   deadlineMs: number,
   runtime: ProcessInspectionRuntime
-): Promise<number[] | null> {
+): Promise<GitProcessRow[] | null> {
   const timeoutMs = boundedTimeoutMs(deadlineMs, 3_000, runtime)
   if (timeoutMs === null) return null
-  const result = await spawnForProcessInspection(runtime, ["pgrep", "-f", "git"], timeoutMs)
-  if (result === null || result.timedOut) return null
-  if (result.exitCode !== 0) return []
-
-  return compact(
-    result.stdout
-      .trim()
-      .split("\n")
-      .map(Number)
-      .filter((pid) => Number.isInteger(pid) && pid > 0)
+  const result = await spawnForProcessInspection(
+    runtime,
+    ["ps", "-axo", "pid,ppid,command"],
+    timeoutMs
   )
-}
-
-async function excludeAncestorProcesses(
-  gitPids: number[],
-  deadlineMs: number,
-  runtime: ProcessInspectionRuntime
-): Promise<number[] | null> {
-  const timeoutMs = boundedTimeoutMs(deadlineMs, 3_000, runtime)
-  if (timeoutMs === null) return null
-  const result = await spawnForProcessInspection(runtime, ["ps", "-eo", "pid,ppid"], timeoutMs)
   if (result === null || result.timedOut || result.exitCode !== 0) return null
 
-  const ancestors = walkAncestry(parseParentMap(result.stdout), runtime.ppid())
+  const { rows, parentMap } = parseGitProcessTable(result.stdout)
+  const ancestors = walkAncestry(parentMap, runtime.ppid())
   const currentPid = runtime.pid()
-  return gitPids.filter((pid) => pid !== currentPid && !ancestors.has(pid))
+  return rows.filter((row) => row.pid !== currentPid && !ancestors.has(row.pid))
 }
 
 async function processesUseRepo(
@@ -393,7 +389,8 @@ async function processesUseRepo(
 
 /**
  * Inspect running Git processes without allowing subprocess work to exceed the
- * lock-release deadline. Candidate PIDs are checked in one lsof invocation so
+ * lock-release deadline. One ps pass supplies executables, argv, and the
+ * parent map; candidate PIDs are then checked in one lsof invocation so
  * long-lived fsmonitor daemons cannot multiply the timeout.
  */
 export async function inspectGitProcessesForRepo(
@@ -401,15 +398,19 @@ export async function inspectGitProcessesForRepo(
   deadlineMs: number,
   runtime: ProcessInspectionRuntime = defaultRuntime
 ): Promise<boolean> {
-  const gitPids = await findGitProcessIds(deadlineMs, runtime)
-  if (gitPids === null) return true
-  if (gitPids.length === 0) return false
+  const candidates = await listCandidateGitProcesses(deadlineMs, runtime)
+  if (candidates === null) return true
+  if (candidates.length === 0) return false
 
-  const nonAncestorPids = await excludeAncestorProcesses(gitPids, deadlineMs, runtime)
-  if (nonAncestorPids === null) return true
-  if (nonAncestorPids.length === 0) return false
+  // argv-aware repo association: `git -C <repo> …` runs with its cwd anywhere.
+  if (candidates.some((row) => row.command.includes(repoRoot))) return true
 
-  return await processesUseRepo(nonAncestorPids, repoRoot, deadlineMs, runtime)
+  return await processesUseRepo(
+    candidates.map((row) => row.pid),
+    repoRoot,
+    deadlineMs,
+    runtime
+  )
 }
 
 export async function evaluatePretooluseGitIndexLock(
