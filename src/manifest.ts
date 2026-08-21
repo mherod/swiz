@@ -96,6 +96,7 @@ import pretooluseNoReadyToBacklog from "../hooks/pretooluse-no-ready-to-backlog.
 import pretoolusNoSecrets from "../hooks/pretooluse-no-secrets.ts"
 import pretooluseNoTaskDelegation from "../hooks/pretooluse-no-task-delegation.ts"
 import pretooluseOffensiveLanguage from "../hooks/pretooluse-offensive-language.ts"
+import pretooluesePeerStagedPathDeletion from "../hooks/pretooluse-peer-staged-path-deletion.ts"
 import pretoolusePrAgeGate from "../hooks/pretooluse-pr-age-gate.ts"
 import pretoolusePrChangesBranchGuard from "../hooks/pretooluse-pr-changes-branch-guard.ts"
 import pretoolusePrCommentReadGate from "../hooks/pretooluse-pr-comment-read-gate.ts"
@@ -377,6 +378,7 @@ export const bundledHookManifest: HookGroup[] = [
       { hook: pretooluseGuardianAwareness },
       { hook: pretooluseEnforceTaskupdate },
       { hook: pretooluseBannedCommands },
+      { hook: pretooluesePeerStagedPathDeletion },
       { hook: pretooluseInlineScriptWriteGate },
       { hook: pretooluseNoMergeConflictComments },
       { hook: pretooluseNoCp },
