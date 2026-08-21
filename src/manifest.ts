@@ -40,6 +40,7 @@ import {
   taskListSyncHook as posttooluseTaskListSync,
 } from "../hooks/posttooluse-task-sync.ts"
 import posttooluseTestPairing from "../hooks/posttooluse-test-pairing.ts"
+import posttooluseUnansweredPeerMessage from "../hooks/posttooluse-unanswered-peer-message.ts"
 import posttoolusUpstreamSyncOnPush from "../hooks/posttooluse-upstream-sync-on-push.ts"
 import posttoolusVerifyPush from "../hooks/posttooluse-verify-push.ts"
 import posttoolusefailureRetryAdvisor from "../hooks/posttoolusefailure-retry-advisor.ts"
@@ -449,6 +450,7 @@ export const bundledHookManifest: HookGroup[] = [
       { hook: posttoolusGitContext },
       { hook: posttooluseLastCommitAge },
       { hook: posttooluseMcpChannelTrace },
+      { hook: posttooluseUnansweredPeerMessage },
       { hook: speakNarrator },
       { hook: posttooluseAutoSteer },
     ],

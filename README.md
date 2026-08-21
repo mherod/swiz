@@ -6,7 +6,7 @@ One manifest of TypeScript hook scripts gets installed across Claude Code, Curso
 
 When `swiz idea` and `swiz continue` are used together, the system can enter a **self-directed loop** — a closed-loop state where the agent's own outputs become the next inputs, expanding the project without external prompts. See [docs/ai-providers.md](docs/ai-providers.md#self-directed-loop) for the canonical terminology.
 
-**160 hooks. 17 event types. Every agent. Zero compromises.**
+**161 hooks. 17 event types. Every agent. Zero compromises.**
 
 ## Install
 
@@ -228,7 +228,7 @@ PreToolUse hooks intercept tool calls *before* they execute. A blocking hook her
 | `pretooluse-measure-test-time.ts`              | Identifies full test suite runs and writes start times to temporary sentinel files. Excludes single file or limited directory test runs to focus on complete suite evaluations. |
 | `pretooluse-measure-lint-time.ts`              | Identifies full lint suite runs and writes start times to temporary sentinel files. Excludes single file or limited directory lint runs to focus on complete suite evaluations. |
 
-### PostToolUse (33)
+### PostToolUse (34)
 
 PostToolUse hooks run after a tool completes. They can feed error context back to the agent or inject advisory information.
 
@@ -238,6 +238,7 @@ PostToolUse hooks run after a tool completes. They can feed error context back t
 | `posttooluse-git-context.ts` | Injects current git status context after every tool use (branch, upstream, uncommitted count, ahead/behind). After git Bash commands, also injects active swiz settings (trunk mode, push gate, collab mode) and synced branch protection rules. Keeps the agent informed of repo state and policy without repeated status/settings queries. |
 | `posttooluse-last-commit-age.ts` | Injects how long ago the current HEAD commit was made after tool use, refreshing at most once per minute so prolonged periods without committed progress stay visible. |
 | `posttooluse-commit-author-verification.ts` | After `git commit`, verifies the landed HEAD author and committer match git config and are not placeholder identities. Blocks immediately so incorrect author metadata is amended before push. |
+| `posttooluse-unanswered-peer-message.ts` | Reminds the session when a peer agent's message has gone unanswered for three or more tool calls, naming the peer and the address to reply to. Scans the transcript for delivered `from-name` peer messages and later `SendMessage` calls addressed to that name, socket, or `[ref]` form. Context only; non-blocking, two-minute cooldown. |
 | `posttooluse-mcp-channel-trace.ts` | Injects a compact auto-steer transport trace after every tool use: terminal transport, MCP channel availability, heartbeat/status age, watcher state, and delivery count. Debug context only; non-blocking. |
 | `posttooluse-git-task-autocomplete.ts` | After a successful `git commit` or `git push`, automatically marks any matching "Commit" or "Push" tasks as completed. After a push, reminds the agent to create a CI-wait task. |
 | `posttooluse-json-validation.ts` | Re-validates JSON files after any edit or write. Catches any JSON that got corrupted during a tool call. |
