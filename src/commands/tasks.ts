@@ -17,6 +17,7 @@ import {
   legacySessionPrefix,
   parseTaskId,
   readTasks,
+  sessionDirPath,
   sessionPrefix,
 } from "../tasks/task-repository.ts"
 import {
@@ -617,7 +618,9 @@ async function runRepairTasks(rest: string[]): Promise<void> {
   const reconstructed = reconstructTaskStates(auditEntries)
   const currentTasks = await readTasks(sessionId, tasksDir)
   const currentById = new Map(currentTasks.map((t) => [t.id, t]))
-  const sessionDir = join(tasksDir, sessionId)
+  // Repair rewrites task files, so an id that escapes the store must stop the command outright
+  // rather than repair something outside it.
+  const sessionDir = sessionDirPath(sessionId, tasksDir)
   let repaired = 0
   let verified = 0
   const actions: RepairAction[] = []

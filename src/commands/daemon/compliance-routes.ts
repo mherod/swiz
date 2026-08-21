@@ -2,12 +2,12 @@
  * Status line snapshot & compliance route handlers for the daemon web server.
  * Extracted from web-server.ts (issue #685) to keep routing code focused.
  */
-import { join } from "node:path"
 import { stderrLog } from "../../debug.ts"
 import { complianceBaselineWantedLevel } from "../../infractions.ts"
 import { projectKeyFromCwd } from "../../project-key.ts"
 import { findTaskStoreForSession } from "../../task-roots.ts"
 import { mergeTaskStoresByRecency, readTasks } from "../../tasks/task-repository.ts"
+import { sessionDirPath } from "../../tasks/task-store-path.ts"
 import type { TaskCounts, WarmStatusLineSnapshot } from "../status-line.ts"
 import { buildTaskCountsFromTasks } from "../status-line.ts"
 import type { CappedMap } from "./cache/capped-map.ts"
@@ -56,7 +56,9 @@ async function resolveTaskCountsFromCache(
   try {
     const { tasksDir } = findTaskStoreForSession(sessionId)
     const projectKey = projectKeyFromCwd(cwd)
-    const sessionState = await cache.getState(sessionId, join(tasksDir, sessionId))
+    // Throws inside the try for a traversing id, taking the same null exit as any other failure
+    // so a malformed payload cannot break the compliance route.
+    const sessionState = await cache.getState(sessionId, sessionDirPath(sessionId, tasksDir))
     const projectTasks =
       projectKey && projectKey !== sessionId
         ? await readProjectStoreTasks(projectKey, tasksDir)

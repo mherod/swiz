@@ -13,6 +13,7 @@ import { applyCacheTaskListSnapshot } from "./task-recovery.ts"
 import {
   atomicWriteJson,
   readTasks,
+  sessionDirPath,
   type Task,
   type TaskBatchWrite,
   type TaskStatus,
@@ -163,8 +164,14 @@ function planMarkerCacheKey(sessionId: string, tasksDir: string): string {
   return `${tasksDir}\0${sessionId}`
 }
 
+/**
+ * Marker path for a session, refusing an id that escapes the task store.
+ *
+ * Throwing suits both callers: the writer must not create a marker outside the store, and the
+ * reader already treats any failure as "no marker" inside its own try/catch.
+ */
 export function codexPlanSyncMarkerPath(sessionId: string, tasksDir: string): string {
-  return join(tasksDir, sessionId, CODEX_PLAN_SYNC_MARKER_FILE)
+  return join(sessionDirPath(sessionId, tasksDir), CODEX_PLAN_SYNC_MARKER_FILE)
 }
 
 async function readAppliedPlanMarker(
@@ -200,7 +207,7 @@ async function writeAppliedPlanMarker(
     appliedAt: new Date().toISOString(),
   }
   const markerPath = codexPlanSyncMarkerPath(sessionId, tasksDir)
-  await mkdir(join(tasksDir, sessionId), { recursive: true })
+  await mkdir(sessionDirPath(sessionId, tasksDir), { recursive: true })
   if (writeMarker) await writeMarker(markerPath, marker)
   else await atomicWriteJson(markerPath, marker)
   appliedPlanMarkers.set(planMarkerCacheKey(sessionId, tasksDir), marker)

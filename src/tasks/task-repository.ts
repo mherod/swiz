@@ -5,7 +5,7 @@
  */
 
 import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises"
-import { join, resolve, sep } from "node:path"
+import { join } from "node:path"
 import { z } from "zod"
 import { debugLog } from "../debug.ts"
 import { legacySessionPrefix, sessionPrefix } from "../session-id.ts"
@@ -13,6 +13,7 @@ import { createDefaultTaskStore } from "../task-roots.ts"
 import { CappedMap } from "../utils/capped-map.ts"
 import { appendJsonlEntry, parseJsonl } from "../utils/jsonl.ts"
 import { isSessionTaskJsonFile } from "./task-file-utils.ts"
+import { isSafeSessionId, sessionDirPath } from "./task-store-path.ts"
 import { backfillTaskTimingFields } from "./task-timing.ts"
 
 const AUDIT_LOG_FILENAME = ".audit-log.jsonl"
@@ -20,42 +21,12 @@ const AUDIT_LOG_FILENAME = ".audit-log.jsonl"
 export { legacySessionPrefix, sessionPrefix }
 
 // ─── Session directory containment ──────────────────────────────────────────
+// Defined in `task-store-path.ts` so callers that this module imports can share it; re-exported
+// here because most consumers already reach the guard through the repository. The import above
+// is what binds it for this module's own calls — `export … from` alone re-exports without
+// introducing a local binding, which leaves readTasks throwing "isSafeSessionId is not defined".
 
-/**
- * Whether `sessionId` stays inside the task store when joined onto `tasksDir`.
- *
- * `session_id` arrives verbatim from agent hook stdin and reaches `join(tasksDir, sessionId)`
- * unsanitized, so `..` segments escape the store: `"../../etc/passwd"` created a real
- * `~/etc/passwd/` task directory two levels above `~/.claude/tasks`. Reproduction and the
- * per-case containment table live in `scripts/debug-session-dir-traversal.ts`.
- *
- * Containment is checked on the resolved path rather than by stripping characters, because
- * stripping silently reroutes writes: `"$(whoami)"` sanitizes to `"whoami"`, which is a
- * *different, valid* session whose tasks would then be mixed with the caller's. An id that
- * cannot be honoured exactly is refused, never rewritten. An absolute-looking id is safe —
- * `join` keeps it under the store, unlike `resolve`.
- */
-export function isSafeSessionId(sessionId: string, tasksDir: string): boolean {
-  if (!sessionId.trim()) return false
-  const root = resolve(tasksDir)
-  const dir = resolve(join(root, sessionId))
-  return dir === root ? false : dir.startsWith(root + sep)
-}
-
-/**
- * Resolve a session's directory inside the task store, refusing ids that escape it.
- *
- * Hard backstop for every write path; read paths that prefer an empty result over a throw
- * should test {@link isSafeSessionId} first.
- */
-export function sessionDirPath(sessionId: string, tasksDir: string): string {
-  if (!isSafeSessionId(sessionId, tasksDir)) {
-    throw new Error(
-      `Unsafe task session id ${JSON.stringify(sessionId)}: resolves outside the task store.`
-    )
-  }
-  return join(tasksDir, sessionId)
-}
+export { isSafeSessionId, sessionDirPath }
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 

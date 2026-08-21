@@ -2,7 +2,6 @@
  * Dispatch route handlers for the daemon web server.
  * Extracted from web-server.ts (issue #685) to keep routing code focused.
  */
-import { join } from "node:path"
 import { ZodError } from "zod"
 import { debugLog } from "../../debug.ts"
 import { ensureDispatchId } from "../../dispatch/dispatch-id.ts"
@@ -31,6 +30,7 @@ import type { DispatchStageDurations } from "../../dispatch/timing.ts"
 import { DISPATCH_TIMEOUTS } from "../../manifest.ts"
 import { taskCompletedHookInputSchema, taskCreatedHookInputSchema } from "../../schemas.ts"
 import { createTaskStoreForHookPayload } from "../../task-roots.ts"
+import { sessionDirPath } from "../../tasks/task-store-path.ts"
 import type { CurrentSessionToolUsage } from "../../transcript-summary.ts"
 import type { WarmStatusLineSnapshot } from "../status-line.ts"
 import type { CappedMap } from "./cache/capped-map.ts"
@@ -615,7 +615,9 @@ async function seedTaskStateAndCapturePayload(
     const sessionId = typeof parsedPayload.session_id === "string" ? parsedPayload.session_id : null
     if (sessionId && ctx.taskStateCache) {
       const { tasksDir } = createTaskStoreForHookPayload(parsedPayload)
-      const sessionTasksDir = join(tasksDir, sessionId)
+      // session_id is raw hook stdin here. The surrounding catch already swallows failures as
+      // best-effort seeding, so a traversing id simply seeds nothing.
+      const sessionTasksDir = sessionDirPath(sessionId, tasksDir)
       ctx.taskStateCache.watchSession(sessionId, sessionTasksDir)
       const { seedSessionFromDisk } = await import("../../tasks/task-event-state.ts")
       await seedSessionFromDisk(sessionId, sessionTasksDir)

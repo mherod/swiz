@@ -8,6 +8,7 @@ import { stat } from "node:fs/promises"
 import { join } from "node:path"
 import type { LRUCache } from "lru-cache"
 import { findTaskStoreForSession } from "../../task-roots.ts"
+import { isSafeSessionId } from "../../tasks/task-store-path.ts"
 import type { WarmStatusLineSnapshot } from "../status-line.ts"
 import { getCachedAgentProcesses } from "./agent-process-discovery.ts"
 import type { CappedMap } from "./cache/capped-map.ts"
@@ -158,6 +159,9 @@ export function buildSessionRoutesContext(ctx: DaemonWebServerContext): SessionR
       getSessionData(cwd, sessionId, limit, ctx.sessionToolCalls),
     getSessionTasks: async (sessionId: string, limit: number) => {
       const { tasksDir } = findTaskStoreForSession(sessionId)
+      // null is this route's existing "unknown session" answer (a 404), which is exactly right
+      // for an id that escapes the store.
+      if (!isSafeSessionId(sessionId, tasksDir)) return null
       const sessionDir = join(tasksDir, sessionId)
       try {
         await stat(sessionDir)

@@ -19,6 +19,7 @@ import { projectKeyFromCwd } from "../../project-key.ts"
 import { defaultTrashPath } from "../../session-data-delete.ts"
 import { createDefaultTaskStore } from "../../task-roots.ts"
 import { isSessionTaskJsonFile } from "../../tasks/task-file-utils.ts"
+import { isSafeSessionId } from "../../tasks/task-repository.ts"
 import { formatBytes } from "../../utils/format.ts"
 import { getDaemonStatus } from "../daemon/daemon-admin.ts"
 import { findAntigravityCleanupGroups } from "./cleanup-antigravity.ts"
@@ -295,6 +296,9 @@ async function processTaskSessionDir(
   cutoffMs: number
 ): Promise<OldTaskFileInfo[]> {
   const oldTaskFiles: OldTaskFileInfo[] = []
+  // Enumeration stops at the store boundary. Refusing here rather than at the `rm` means a
+  // traversing id never produces a deletion candidate in the first place.
+  if (!isSafeSessionId(sessionId, tasksDir)) return oldTaskFiles
   const sessionDir = join(tasksDir, sessionId)
   const sessionDirStat = await stat(sessionDir).catch(() => null)
   if (!sessionDirStat?.isDirectory()) return oldTaskFiles
@@ -496,6 +500,9 @@ async function resolveTaskDirInfo(
   tasksDir: string,
   sessionId: string
 ): Promise<{ taskDirPath: string | null; taskDirSizeBytes: number }> {
+  // A null taskDirPath is the existing "nothing to clean" signal, so an unsafe id reuses it and
+  // the caller never receives a deletion target outside the store.
+  if (!isSafeSessionId(sessionId, tasksDir)) return { taskDirPath: null, taskDirSizeBytes: 0 }
   const taskDirPath = join(tasksDir, sessionId)
   try {
     const tStat = await stat(taskDirPath)
@@ -651,6 +658,9 @@ async function getTaskFileMtime(path: string): Promise<number | null> {
 }
 
 async function orphanTaskSession(tasksDir: string, sessionId: string): Promise<SessionInfo | null> {
+  // Null is the existing "not an orphan session" signal; an unsafe id takes the same exit so its
+  // path never reaches the caller's delete list.
+  if (!isSafeSessionId(sessionId, tasksDir)) return null
   const taskDirPath = join(tasksDir, sessionId)
   try {
     const taskDirStat = await stat(taskDirPath)

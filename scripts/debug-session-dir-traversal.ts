@@ -56,6 +56,44 @@ for (const [i, testCase] of CASES.entries()) {
   }
 }
 
+// The other entry points that take a session id. `createTaskInProcess` above was only the first
+// one found; these are the sites the original fix missed, and each should now either refuse the
+// id (write and delete paths) or answer empty (read paths) rather than resolving outside.
+const { codexPlanSyncMarkerPath } = await import("../src/tasks/codex-update-plan.ts")
+const { readAuditLog, readRecentAuditEntries } = await import(
+  "../src/tasks/task-audit-verification.ts"
+)
+
+const ENTRY_POINTS: Array<{ name: string; kind: "write" | "read"; call: (id: string) => unknown }> =
+  [
+    {
+      name: "codexPlanSyncMarkerPath",
+      kind: "write",
+      call: (id) => codexPlanSyncMarkerPath(id, tasksDir),
+    },
+    { name: "readAuditLog", kind: "read", call: (id) => readAuditLog(id, tasksDir) },
+    {
+      name: "readRecentAuditEntries",
+      kind: "read",
+      call: (id) => readRecentAuditEntries(id, 5, tasksDir),
+    },
+  ]
+
+console.log("\n\n=== other guarded entry points ===")
+for (const entry of ENTRY_POINTS) {
+  console.log(`\n--- ${entry.name} (${entry.kind} path) ---`)
+  for (const testCase of CASES) {
+    try {
+      const value = await entry.call(testCase.sessionId)
+      const rendered = Array.isArray(value) ? `[${value.length} entries]` : String(value)
+      console.log(`  ${testCase.label.padEnd(22)} -> ${rendered}`)
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      console.log(`  ${testCase.label.padEnd(22)} -> refused: ${message.slice(0, 70)}`)
+    }
+  }
+}
+
 // What actually exists on disk decides it — not what the calls returned.
 console.log("\n--- resulting directories ---")
 for (const dir of [tasksDir, join(home, "etc"), join(home, ".claude")]) {
