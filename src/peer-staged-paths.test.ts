@@ -6,6 +6,8 @@ import { git } from "./git-helpers.ts"
 import {
   extractDeletionTargets,
   findStagedPaths,
+  findUntrackedPaths,
+  formatPeerCreatedDenial,
   formatStagedPathDenial,
   isDeliberatelyStaged,
   readPathStatus,
@@ -118,6 +120,18 @@ describe("findStagedPaths against a real repository", () => {
     })
   })
 
+  it("separates untracked paths, which staging never covers", async () => {
+    await withRepo(async (dir) => {
+      await writeFile(join(dir, "untracked.ico"), "never staged")
+      await writeFile(join(dir, "staged.ico"), "staged")
+      await git(["add", "staged.ico"], dir)
+      expect(await readPathStatus("untracked.ico", dir)).toBe("??")
+      expect(await findUntrackedPaths(["untracked.ico", "staged.ico"], dir)).toEqual([
+        "untracked.ico",
+      ])
+    })
+  })
+
   it("reports nothing for a path that does not exist", async () => {
     await withRepo(async (dir) => {
       expect(await findStagedPaths(["nope.txt"], dir)).toEqual([])
@@ -142,6 +156,21 @@ describe("formatStagedPathDenial", () => {
     expect(text).toContain("AD")
     expect(text).toContain("git status --short")
     expect(text).toContain("Ask the peer")
+  })
+
+  it("says plainly that untracked deletion cannot be recovered", () => {
+    const text = formatPeerCreatedDenial(["app/favicon.ico"])
+    expect(text).toContain("BLOCKED")
+    expect(text).toContain("unrecoverable")
+    expect(text).toContain("no git object")
+  })
+
+  it("does not claim the path is definitely not yours", () => {
+    // The hook cannot know that — sessions share one git identity, so it can only say that
+    // provenance is unestablished.
+    expect(formatStagedPathDenial([{ path: "a", status: "AD" }])).toContain(
+      "does not say the path is not yours"
+    )
   })
 
   it("pluralises for several paths", () => {

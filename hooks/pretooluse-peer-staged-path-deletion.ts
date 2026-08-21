@@ -16,6 +16,8 @@
 import {
   extractDeletionTargets,
   findStagedPaths,
+  findUntrackedPaths,
+  formatPeerCreatedDenial,
   formatStagedPathDenial,
 } from "../src/peer-staged-paths.ts"
 import {
@@ -26,6 +28,25 @@ import {
 } from "../src/SwizHook.ts"
 import type { ShellHookInput } from "../src/schemas.ts"
 import { isShellTool } from "../src/tool-matchers.ts"
+import { resolveSessionFileOwnership } from "../src/utils/session-file-ownership.ts"
+
+/**
+ * Untracked targets that another live session is recorded as having created or edited.
+ *
+ * Positive evidence only: a path missing from every edit log stays allowed. Tool integrations
+ * bypass that log, so absence is not proof of a peer, and treating it as proof would block a
+ * session from cleaning up its own scratch files.
+ */
+async function findPeerCreatedPaths(
+  targets: readonly string[],
+  cwd: string,
+  sessionId: string | undefined
+): Promise<string[]> {
+  const untracked = await findUntrackedPaths(targets, cwd)
+  if (untracked.length === 0) return []
+  const ownership = await resolveSessionFileOwnership(cwd, sessionId, untracked)
+  return ownership.editedByOthers
+}
 
 export async function evaluatePeerStagedPathDeletion(
   input: ShellHookInput
@@ -40,9 +61,12 @@ export async function evaluatePeerStagedPathDeletion(
 
   const cwd = input.cwd ?? process.cwd()
   const staged = await findStagedPaths(targets, cwd)
-  if (staged.length === 0) return {}
+  if (staged.length > 0) return preToolUseDeny(formatStagedPathDenial(staged))
 
-  return preToolUseDeny(formatStagedPathDenial(staged))
+  const peerCreated = await findPeerCreatedPaths(targets, cwd, input.session_id)
+  if (peerCreated.length > 0) return preToolUseDeny(formatPeerCreatedDenial(peerCreated))
+
+  return {}
 }
 
 const pretooluesePeerStagedPathDeletion: SwizHook<ShellHookInput> = {

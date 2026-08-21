@@ -56,6 +56,27 @@ export async function readPathStatus(path: string, cwd: string): Promise<string 
   return line ? line.slice(0, 2) : null
 }
 
+/**
+ * Untracked paths, which are the *less* recoverable case.
+ *
+ * A staged file survives its own deletion: the blob is already in the object store, so
+ * `git checkout-index` or the reflog can bring it back. An untracked file has no git object
+ * anywhere — trashing it is final. So the staged check above protects the recoverable case, and
+ * this one exists because the unrecoverable case must not be the permissive default.
+ *
+ * Untracked alone cannot justify a block: a session's own scratch files are untracked too, and a
+ * blanket deny would make ordinary cleanup impossible. The caller pairs this with edit-ownership
+ * evidence and blocks only what another session is known to have created.
+ */
+export async function findUntrackedPaths(paths: readonly string[], cwd: string): Promise<string[]> {
+  const untracked: string[] = []
+  for (const path of paths) {
+    const status = await readPathStatus(path, cwd)
+    if (status === "??") untracked.push(path)
+  }
+  return untracked
+}
+
 /** Every path in the list that Git reports as deliberately staged. */
 export async function findStagedPaths(
   paths: readonly string[],
@@ -146,18 +167,42 @@ export function formatStagedPathDenial(findings: readonly StagedPathFinding[]): 
     `BLOCKED: ${subject} staged in the index — someone put it there on purpose.`,
     ...lines,
     "",
-    "A leading `A` means staged as a new file. That is the direct negation of build residue,",
-    "and in a shared checkout the person who staged it may be another live session, mid-work.",
+    "This does not say the path is not yours; it says whose it is has not been established.",
+    "A leading `A` means staged as a new file, which is the direct negation of build residue,",
+    "and in a shared checkout the session that staged it may be another one, mid-work.",
     "",
     "Being single-path is not evidence of safety: `trash <path>` and `git rm --cached <path>` are",
     "as narrowly scoped as anything and still destroy the file completely.",
     "",
     "Before deleting, establish provenance in this order:",
-    "  1. `git status --short -- <path>` — `A`/`AD` settles it; stop here.",
-    "  2. Does the build actually emit this path? An mtime matching your build does not prove it.",
+    "  1. `git status --short -- <path>` — `A`/`AD` settles that it was staged; stop here.",
+    "  2. Does the build actually emit this path? For generated-vs-source specifically, an mtime",
+    "     matching your last build is consistent with a source file someone just added.",
     "  3. Ask the peer. Authoritative, and cheaper than every inference above.",
     "",
-    "If it is genuinely yours and genuinely disposable, unstage it first (`git restore --staged <path>`)",
+    "If it is yours and genuinely disposable, unstage it first (`git restore --staged <path>`)",
     "so the index no longer claims otherwise, then delete.",
+  ].join("\n")
+}
+
+/**
+ * The refusal text for deleting an untracked file another session created.
+ *
+ * Kept separate from the staged denial because the stakes differ: this deletion cannot be undone
+ * from git at all, and the reader needs to know that before deciding to argue with the block.
+ */
+export function formatPeerCreatedDenial(paths: readonly string[]): string {
+  const subject = paths.length === 1 ? "This path is" : "These paths are"
+
+  return [
+    `BLOCKED: ${subject} untracked and another live session created or edited it.`,
+    ...paths.map((path) => `  - ${path}`),
+    "",
+    "Untracked deletion is unrecoverable. A staged file survives being trashed because its blob",
+    "is already in the object store; an untracked file has no git object anywhere, so there is no",
+    "`git checkout-index` and no reflog entry to recover from. This is the irreversible case.",
+    "",
+    "The peer may be mid-work on a file it has not staged yet. Ask before removing it, or leave it",
+    "and say so — an unfamiliar file in a shared checkout is not evidence that it is disposable.",
   ].join("\n")
 }
