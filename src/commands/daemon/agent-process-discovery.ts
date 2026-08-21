@@ -71,6 +71,25 @@ async function resolvePidCwds(allPids: number[]): Promise<Record<number, string>
   return pidCwds
 }
 
+/** Final path segment of an executable path (argv[0]). */
+function executableBasename(executable: string): string {
+  const idx = executable.lastIndexOf("/")
+  return idx === -1 ? executable : executable.slice(idx + 1)
+}
+
+/**
+ * A live Claude CLI session process: argv[0] basename is exactly `claude`
+ * (bare `claude` or any path ending `/claude`). Substring matching over the
+ * whole command line is deliberately avoided — it also catches Claude.app
+ * Electron helpers, chrome-native-host extension helpers, `script` wrappers,
+ * and swiz's own MCP servers (issue #835). Desktop-app binaries under
+ * /Applications are excluded explicitly; `executable` arrives lowercased.
+ */
+export function isClaudeCliExecutable(executable: string): boolean {
+  if (executable.startsWith("/applications/")) return false
+  return executableBasename(executable) === "claude"
+}
+
 /** Pluggable provider classifier — order matters (first match wins). */
 export interface ProviderClassifier {
   id: string
@@ -79,7 +98,7 @@ export interface ProviderClassifier {
 
 /** Registry of provider classifiers. Add new providers here instead of editing an if-chain. */
 export const PROVIDER_CLASSIFIERS: ProviderClassifier[] = [
-  { id: "claude", match: (cmd) => cmd.includes("claude-agent-sdk/cli.js") },
+  { id: "claude", match: (_cmd, exe) => isClaudeCliExecutable(exe) },
   { id: "codex", match: (cmd) => cmd.includes("/codex") || cmd.includes(" codex ") },
   { id: "gemini", match: (cmd) => cmd.includes("gemini") },
   {
@@ -95,30 +114,61 @@ function classifyProviderPid(command: string, executable: string): string | null
   return null
 }
 
-function parseProviderPids(stdout: string): Map<string, Set<number>> {
-  const providers = new Map<string, Set<number>>()
-  for (const row of stdout.split("\n")) {
-    const trimmed = row.trim()
-    if (!trimmed) continue
-    const match = trimmed.match(/^(\d+)\s+(.+)$/)
-    if (!match) continue
-    const pid = Number(match[1])
-    const command = (match[2] ?? "").toLowerCase()
-    const executable = command.split(/\s+/, 1)[0] ?? ""
-    if (!pid || !command) continue
+interface ClassifiedPsRow {
+  pid: number
+  ppid: number
+  provider: string
+}
 
-    const provider = classifyProviderPid(command, executable)
-    if (!provider) continue
-    const existing = providers.get(provider) ?? new Set<number>()
-    existing.add(pid)
-    providers.set(provider, existing)
+function classifyPsRow(row: string): ClassifiedPsRow | null {
+  const trimmed = row.trim()
+  if (!trimmed) return null
+  const match = trimmed.match(/^(\d+)\s+(\d+)\s+(.+)$/)
+  if (!match) return null
+  const pid = Number(match[1])
+  const ppid = Number(match[2])
+  const command = (match[3] ?? "").toLowerCase()
+  const executable = command.split(/\s+/, 1)[0] ?? ""
+  if (!pid || !command) return null
+  const provider = classifyProviderPid(command, executable)
+  return provider ? { pid, ppid, provider } : null
+}
+
+/**
+ * One session, one pid: a claude process whose parent is also a claude
+ * process is that session's subprocess, not a second session (issue #835).
+ */
+function collapseClaudeSubprocesses(
+  providers: Map<string, Set<number>>,
+  claudeParents: Map<number, number>
+): void {
+  const claudePids = providers.get("claude")
+  if (!claudePids) return
+  for (const [pid, ppid] of claudeParents) {
+    if (claudePids.has(ppid)) claudePids.delete(pid)
   }
+  if (claudePids.size === 0) providers.delete("claude")
+}
+
+/** Exported for tests — classifies a `ps -Ao pid,ppid,command` table. */
+export function parseProviderPids(stdout: string): Map<string, Set<number>> {
+  const providers = new Map<string, Set<number>>()
+  const claudeParents = new Map<number, number>()
+  for (const row of stdout.split("\n")) {
+    const classified = classifyPsRow(row)
+    if (!classified) continue
+    if (classified.provider === "claude") claudeParents.set(classified.pid, classified.ppid)
+    const existing = providers.get(classified.provider) ?? new Set<number>()
+    existing.add(classified.pid)
+    providers.set(classified.provider, existing)
+  }
+  collapseClaudeSubprocesses(providers, claudeParents)
   return providers
 }
 
 export async function getActiveAgentProcesses(): Promise<AgentProcessSnapshot> {
   try {
-    const proc = Bun.spawn(["ps", "-Ao", "pid,command"], {
+    const proc = Bun.spawn(["ps", "-Ao", "pid,ppid,command"], {
       stdout: "pipe",
       stderr: "pipe",
     })
