@@ -479,7 +479,12 @@ export async function listProjectSessions(
   })
   const visible = ensurePinnedInList(withMessages, pinnedSessionId, limit)
   return {
-    sessionCount: withMessages.length,
+    // The project's session total, not the scan window's. `withMessages` is drawn from the first
+    // `limit * 2` candidates, so counting it saturated at that cap: swiz (2252 sessions),
+    // plugg-platform (170) and openai-sba-dashboard (24) all reported the same 16, which read as
+    // the dashboard mixing projects up. Scanning every session just to count them is far too
+    // expensive here, so the total comes from discovery and the scan stays a preview window.
+    sessionCount: all.length,
     sessions: visible.map(({ session, scan }) => ({
       id: session.id,
       provider: session.provider,
