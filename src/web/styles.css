@@ -1688,6 +1688,12 @@ tbody tr:hover {
   display: flex;
   flex-direction: column;
   gap: var(--gap);
+  /* Keep controls clear of the scrollbar. macOS overlay scrollbars ignore `scrollbar-gutter` and
+     paint over the right edge of the content, where they swallow clicks: the new-task "+" button
+     sits flush against that edge and stopped responding as soon as the page was long enough to
+     scroll. Real padding is what actually moves the content out from under it. */
+  scrollbar-gutter: stable;
+  padding-right: var(--space-2);
 }
 
 /* ── Settings Page ── */
@@ -2805,6 +2811,228 @@ tbody tr:hover {
 }
 
 .session-completed-tasks > .session-task-list {
+  margin-top: var(--space-2);
+}
+
+/* ── Task board: topology groups, distribution, dependency chips ───────────── */
+
+.task-board {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.task-distribution {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.task-distribution-bar {
+  display: flex;
+  gap: 2px;
+  height: 6px;
+  border-radius: var(--radius-pill);
+  overflow: hidden;
+  background: rgba(86, 112, 166, 0.18);
+}
+
+.task-distribution-segment {
+  min-width: 4px;
+  border-radius: var(--radius-pill);
+}
+
+.task-distribution-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-2);
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  color: var(--text-muted);
+  font-size: 0.68rem;
+}
+
+.task-distribution-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35em;
+}
+
+.task-distribution-dot,
+.task-group-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+}
+
+.task-distribution-inProgress {
+  background: #4dcde5;
+}
+
+.task-distribution-ready {
+  background: #ecbf52;
+}
+
+.task-distribution-blocked {
+  background: #ec7777;
+}
+
+.task-distribution-completed {
+  background: #6cd77c;
+}
+
+.task-distribution-cancelled {
+  background: rgba(159, 176, 203, 0.55);
+}
+
+.task-queue-hint {
+  margin: 0;
+  padding: var(--space-1) var(--space-2);
+  border-left: 2px solid rgba(123, 166, 255, 0.7);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  background: rgba(96, 140, 241, 0.12);
+  color: var(--color-blue-100);
+  font-size: 0.72rem;
+  line-height: 1.45;
+}
+
+.task-group {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.task-group-summary {
+  cursor: default;
+  list-style: none;
+  user-select: none;
+}
+
+.task-group-collapsible > .task-group-summary {
+  cursor: pointer;
+}
+
+.task-group-summary::-webkit-details-marker {
+  display: none;
+}
+
+.task-group-heading {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45em;
+  font-family: "Bricolage Grotesque", "IBM Plex Sans", sans-serif;
+  font-size: 0.66rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: #9fb4dd;
+}
+
+.task-group-count {
+  border-radius: var(--radius-pill);
+  background: rgba(86, 112, 166, 0.24);
+  color: var(--text-muted);
+  padding: 0 0.5em;
+  font-size: 0.64rem;
+  letter-spacing: 0.04em;
+}
+
+.task-group-empty {
+  margin: 0;
+  font-size: 0.7rem;
+}
+
+.task-group-collapsible > .task-group-summary + .session-task-list {
+  margin-top: var(--space-1);
+}
+
+.task-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  margin-top: var(--space-1);
+}
+
+.task-chip {
+  border-radius: var(--radius-pill);
+  border: 1px solid rgba(86, 112, 166, 0.34);
+  background: rgba(67, 88, 138, 0.16);
+  color: #9fb4dd;
+  font-size: 0.64rem;
+  padding: 0.1em 0.6em;
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+}
+
+.task-chip-warn {
+  color: #f4ce7a;
+  border-color: rgba(236, 191, 82, 0.42);
+  background: rgba(236, 191, 82, 0.14);
+}
+
+.task-chip-blocked {
+  color: #ef9d9d;
+  border-color: rgba(236, 119, 119, 0.42);
+  background: rgba(236, 119, 119, 0.14);
+}
+
+.task-chip-leverage {
+  color: #88de98;
+  border-color: rgba(108, 215, 124, 0.42);
+  background: rgba(108, 215, 124, 0.14);
+}
+
+.task-store-group {
+  border: 1px solid rgba(86, 112, 166, 0.24);
+  border-radius: var(--radius-md);
+  background: rgba(28, 32, 40, 0.6);
+  padding: var(--space-2);
+  margin-top: var(--space-2);
+}
+
+.task-store-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+
+.task-store-summary::-webkit-details-marker {
+  display: none;
+}
+
+.task-store-label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  color: #c3d2ee;
+  font-size: 0.74rem;
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.task-store-badge {
+  border-radius: var(--radius-pill);
+  border: 1px solid rgba(123, 166, 255, 0.4);
+  background: rgba(96, 140, 241, 0.18);
+  color: var(--color-blue-200);
+  font-size: 0.6rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 0.1em 0.55em;
+  font-family: "Bricolage Grotesque", "IBM Plex Sans", sans-serif;
+}
+
+.task-store-counts {
+  color: var(--text-muted);
+  font-size: 0.68rem;
+  white-space: nowrap;
+}
+
+.task-store-body {
+  display: grid;
+  gap: var(--space-2);
   margin-top: var(--space-2);
 }
 

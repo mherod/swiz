@@ -31,10 +31,17 @@ export interface ProjectSessions {
 export interface SessionTask {
   id: string
   subject: string
+  description: string | null
   status: "pending" | "in_progress" | "completed" | "cancelled"
   statusChangedAt: string | null
   completionTimestamp: string | null
   completionEvidence: string | null
+  /** Ids this task waits on. Edges to unknown or finished tasks do not block. */
+  blockedBy: string[]
+  /** Ids this task holds up. */
+  blocks: string[]
+  startedAt: number | null
+  elapsedMs: number | null
 }
 
 export interface ProjectTask extends SessionTask {

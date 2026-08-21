@@ -1,33 +1,22 @@
+/**
+ * The tasks view's two queues: the selected session, and the project around it.
+ *
+ * Both render through `TaskBoard`, so "ready" and "blocked" mean the same thing here as in the
+ * MCP text board. The project queue additionally groups by store, because a project's tasks are
+ * not one queue: the task store is dual-keyed (per session id, and per project key), and a flat
+ * timestamp-ordered list silently interleaved a live session's work with a project-keyed backlog
+ * and with throwaway test-session ids, which is exactly the confusion this view exists to remove.
+ */
+
 import { type ReactElement, useCallback, useMemo, useRef, useState } from "react"
+import { projectKeyFromCwd } from "../../project-key.ts"
 import { cn } from "../lib/cn.ts"
 import { postJson } from "../lib/http.ts"
 import type { ProjectTask, SessionTask, SessionTaskSummary } from "./session-browser-types.ts"
-import { formatTime } from "./session-browser-utils.ts"
+import { TaskBoard } from "./task-board.tsx"
 
-function TaskStatusBadge({ status }: { status: SessionTask["status"] }) {
-  const label = status.replace("_", " ")
-  return <span className={cn("task-status", `task-status-${status}`)}>{label}</span>
-}
-
-function TaskChecklistMark({ status }: { status: SessionTask["status"] }) {
-  const mark =
-    status === "completed"
-      ? "☑"
-      : status === "cancelled"
-        ? "☒"
-        : status === "in_progress"
-          ? "◐"
-          : "☐"
-  return (
-    <span
-      className={cn("task-checkmark", `task-checkmark-${status}`)}
-      aria-hidden="true"
-      title={status.replace("_", " ")}
-    >
-      {mark}
-    </span>
-  )
-}
+/** Store groups rendered before the remainder collapses behind a button. */
+const PREVIEW_GROUP_LIMIT = 4
 
 export function SessionTasksSection({
   tasks,
@@ -37,16 +26,7 @@ export function SessionTasksSection({
   tasks: SessionTask[]
   summary: SessionTaskSummary | null
   loading: boolean
-}): React.ReactElement {
-  const openTasks = useMemo(
-    () => tasks.filter((task) => task.status === "pending" || task.status === "in_progress"),
-    [tasks]
-  )
-  const completedTasks = useMemo(
-    () => tasks.filter((task) => task.status === "completed" || task.status === "cancelled"),
-    [tasks]
-  )
-
+}): ReactElement {
   return (
     <section className="session-tasks-section" aria-label="Current tasks for selected session">
       <h3 className="session-tasks-title mb-2">Session tasks</h3>
@@ -62,200 +42,129 @@ export function SessionTasksSection({
           No tasks recorded for this session. Tasks appear once an agent starts work.
         </p>
       ) : (
-        <>
-          {openTasks.length > 0 ? (
-            <ul className="session-task-list">
-              {openTasks.map((task) => (
-                <SessionTaskRow key={task.id} task={task} />
-              ))}
-            </ul>
-          ) : (
-            <p className="empty">No open tasks in this session.</p>
-          )}
-          {completedTasks.length > 0 ? (
-            <details className="session-completed-tasks mt-3">
-              <summary className="py-2 sm:py-0 min-h-[32px] sm:min-h-0 flex items-center w-full">
-                Show completed ({completedTasks.length})
-              </summary>
-              <ul className="session-task-list mt-2">
-                {completedTasks.map((task) => (
-                  <SessionTaskRow key={task.id} task={task} />
-                ))}
-              </ul>
-            </details>
-          ) : null}
-        </>
+        <TaskBoard tasks={tasks} />
       )}
     </section>
   )
 }
 
-function ProjectTaskRow({ task }: { task: ProjectTask }) {
-  const taskTime = task.statusChangedAt ?? task.completionTimestamp
-  return (
-    <li key={`${task.sessionId}:${task.id}`} className="session-task-row">
-      <div className="session-task-meta flex-wrap sm:flex-nowrap gap-y-2">
-        <span className="session-task-id truncate max-w-[75%] sm:max-w-none text-[0.65rem] sm:text-[0.7rem]">
-          {task.sessionId.slice(0, 8)}... · #{task.id}
-        </span>
-        <TaskStatusBadge status={task.status} />
-      </div>
-      <p className={cn("session-task-subject min-w-0", `session-task-subject-${task.status}`)}>
-        <TaskChecklistMark status={task.status} />
-        <span className="line-clamp-3 sm:line-clamp-none break-words flex-1">{task.subject}</span>
-      </p>
-      {taskTime ? (
-        <p className="session-task-time text-[0.65rem] sm:text-[0.68rem]">
-          {formatTime(new Date(taskTime).getTime())}
-        </p>
-      ) : null}
-    </li>
-  )
-}
-
-function SessionTaskRow({ task }: { task: SessionTask }) {
-  const taskTime = task.statusChangedAt ?? task.completionTimestamp
-  return (
-    <li key={task.id} className="session-task-row">
-      <div className="session-task-meta flex-wrap sm:flex-nowrap gap-y-2">
-        <span className="session-task-id truncate max-w-[75%] sm:max-w-none text-[0.65rem] sm:text-[0.7rem]">
-          #{task.id}
-        </span>
-        <TaskStatusBadge status={task.status} />
-      </div>
-      <p className={cn("session-task-subject min-w-0", `session-task-subject-${task.status}`)}>
-        <TaskChecklistMark status={task.status} />
-        <span className="line-clamp-3 sm:line-clamp-none break-words flex-1">{task.subject}</span>
-      </p>
-      {taskTime ? (
-        <p className="session-task-time text-[0.65rem] sm:text-[0.68rem]">
-          {formatTime(new Date(taskTime).getTime())}
-        </p>
-      ) : null}
-      {task.completionEvidence ? (
-        <p className="session-task-evidence line-clamp-2 sm:line-clamp-none break-words text-[0.68rem] sm:text-[0.72rem]">
-          {task.completionEvidence}
-        </p>
-      ) : null}
-    </li>
-  )
-}
-
-function ProjectTaskListControls({
-  visibility,
-  openTasks,
-  tasks,
-  setVisibility,
-  setExpanded,
-}: {
-  visibility: "open" | "all"
-  openTasks: ProjectTask[]
+interface TaskStoreGroup {
+  /** The store key these tasks were read from — a session id, or the project key. */
+  storeKey: string
+  label: string
+  /** True when this is the project-keyed store rather than one agent session. */
+  isProjectStore: boolean
   tasks: ProjectTask[]
-  setVisibility: (v: "open" | "all") => void
-  setExpanded: (v: boolean) => void
-}): React.ReactElement {
+  openCount: number
+  latestActivityMs: number
+}
+
+function storeLabel(storeKey: string, isProjectStore: boolean): string {
+  if (isProjectStore) return "Project store (MCP tasks)"
+  if (storeKey.length <= 16) return storeKey
+  return `${storeKey.slice(0, 8)}…${storeKey.slice(-4)}`
+}
+
+function taskActivityMs(task: ProjectTask): number {
+  const stamp = task.statusChangedAt ?? task.completionTimestamp
+  if (!stamp) return 0
+  const parsed = Date.parse(stamp)
+  return Number.isFinite(parsed) ? parsed : 0
+}
+
+/**
+ * Bucket project tasks by the store they came from, most active first.
+ *
+ * Ordering by open work rather than recency keeps the group a reader needs at the top: a store
+ * with running or startable tasks matters more than one whose last event happens to be newer.
+ */
+export function groupTasksByStore(tasks: ProjectTask[], cwd: string | null): TaskStoreGroup[] {
+  const projectKey = cwd ? projectKeyFromCwd(cwd) : null
+  const groups = new Map<string, TaskStoreGroup>()
+  for (const task of tasks) {
+    const isProjectStore = projectKey !== null && task.sessionId === projectKey
+    const existing = groups.get(task.sessionId)
+    const group =
+      existing ??
+      ({
+        storeKey: task.sessionId,
+        label: storeLabel(task.sessionId, isProjectStore),
+        isProjectStore,
+        tasks: [],
+        openCount: 0,
+        latestActivityMs: 0,
+      } satisfies TaskStoreGroup)
+    group.tasks.push(task)
+    if (task.status === "pending" || task.status === "in_progress") group.openCount += 1
+    group.latestActivityMs = Math.max(group.latestActivityMs, taskActivityMs(task))
+    if (!existing) groups.set(task.sessionId, group)
+  }
+  return [...groups.values()].sort((a, b) => {
+    if (a.openCount !== b.openCount) return b.openCount - a.openCount
+    if (a.isProjectStore !== b.isProjectStore) return a.isProjectStore ? -1 : 1
+    return b.latestActivityMs - a.latestActivityMs
+  })
+}
+
+function TaskStoreGroupCard({ group }: { group: TaskStoreGroup }): ReactElement {
   return (
-    <div className="session-task-controls flex flex-col sm:flex-row gap-2.5 sm:gap-2 mb-3 sm:mb-2.5 mt-2.5">
-      <button
-        type="button"
-        className={cn(
-          "task-filter-btn w-full sm:w-auto text-center justify-center min-h-[32px] sm:min-h-0",
-          visibility === "open" && "active"
-        )}
-        onClick={() => {
-          setVisibility("open")
-          setExpanded(false)
-        }}
-        aria-pressed={visibility === "open"}
-      >
-        Open only ({openTasks.length} shown)
-      </button>
-      <button
-        type="button"
-        className={cn(
-          "task-filter-btn w-full sm:w-auto text-center justify-center min-h-[32px] sm:min-h-0",
-          visibility === "all" && "active"
-        )}
-        onClick={() => {
-          setVisibility("all")
-          setExpanded(false)
-        }}
-        aria-pressed={visibility === "all"}
-      >
-        All ({tasks.length} loaded)
-      </button>
-    </div>
+    <details className="task-store-group" open={group.openCount > 0}>
+      <summary className="task-store-summary">
+        <span className="task-store-label">
+          {group.label}
+          {group.isProjectStore ? <span className="task-store-badge">project key</span> : null}
+        </span>
+        <span className="task-store-counts">
+          {group.openCount} open · {group.tasks.length} total
+        </span>
+      </summary>
+      <div className="task-store-body">
+        <TaskBoard tasks={group.tasks} showHint={false} />
+      </div>
+    </details>
   )
 }
 
-function ProjectTaskEmptyState({ visibility }: { visibility: "open" | "all" }) {
-  return visibility === "open" ? (
-    <p className="empty">No open tasks in this project. New agent tasks will appear here.</p>
-  ) : (
-    <p className="empty">
-      No tasks recorded for this project. Project history appears after task activity.
-    </p>
-  )
-}
-
-function ProjectTaskList({
+function ProjectTaskGroups({
   tasks,
-  scopedTasks,
-  summary,
-  openTasks,
-  visibility,
-  setVisibility,
+  cwd,
   loading,
 }: {
   tasks: ProjectTask[]
-  scopedTasks: ProjectTask[]
-  summary: SessionTaskSummary | null
-  openTasks: ProjectTask[]
-  visibility: "open" | "all"
-  setVisibility: (v: "open" | "all") => void
+  cwd: string | null
   loading: boolean
-}): React.ReactElement {
-  const [expanded, setExpanded] = useState(false)
-  const previewLimit = 16
-  const visibleTasks = expanded ? scopedTasks : scopedTasks.slice(0, previewLimit)
-  const hiddenCount = Math.max(scopedTasks.length - visibleTasks.length, 0)
+}): ReactElement {
+  const [showAllGroups, setShowAllGroups] = useState(false)
+  const groups = useMemo(() => groupTasksByStore(tasks, cwd), [tasks, cwd])
+  const visibleGroups = showAllGroups ? groups : groups.slice(0, PREVIEW_GROUP_LIMIT)
+  const hiddenCount = groups.length - visibleGroups.length
+
+  if (loading) return <p className="empty">Loading project tasks...</p>
+  if (groups.length === 0) {
+    return (
+      <p className="empty">
+        No tasks recorded for this project. Project history appears after task activity.
+      </p>
+    )
+  }
 
   return (
     <>
-      <ProjectTaskListControls
-        visibility={visibility}
-        openTasks={openTasks}
-        tasks={tasks}
-        setVisibility={setVisibility}
-        setExpanded={setExpanded}
-      />
-      {summary && tasks.length < summary.total ? (
-        <p className="session-tasks-summary">
-          Showing latest {tasks.length} of {summary.total} tasks.
-        </p>
+      <p className="session-tasks-summary">
+        {groups.length} task store{groups.length === 1 ? "" : "s"} in this project
+      </p>
+      {visibleGroups.map((group) => (
+        <TaskStoreGroupCard key={group.storeKey} group={group} />
+      ))}
+      {hiddenCount > 0 || showAllGroups ? (
+        <button
+          type="button"
+          className="task-show-more-btn w-full sm:w-auto text-center justify-center min-h-[36px] sm:min-h-0 mt-3"
+          onClick={() => setShowAllGroups((value) => !value)}
+        >
+          {showAllGroups ? "Show fewer stores" : `Show ${hiddenCount} more task stores`}
+        </button>
       ) : null}
-      {loading ? (
-        <p className="empty">Loading project tasks...</p>
-      ) : scopedTasks.length === 0 ? (
-        <ProjectTaskEmptyState visibility={visibility} />
-      ) : (
-        <>
-          <ul className="session-task-list">
-            {visibleTasks.map((task) => (
-              <ProjectTaskRow key={`${task.sessionId}:${task.id}`} task={task} />
-            ))}
-          </ul>
-          {hiddenCount > 0 ? (
-            <button
-              type="button"
-              className="task-show-more-btn w-full sm:w-auto text-center justify-center min-h-[36px] sm:min-h-0 mt-3"
-              onClick={() => setExpanded((value) => !value)}
-            >
-              {expanded ? "Show fewer tasks" : `Show ${hiddenCount} more tasks`}
-            </button>
-          ) : null}
-        </>
-      )}
     </>
   )
 }
@@ -339,18 +248,15 @@ export function ProjectTasksSection({
   tasks,
   summary,
   loading,
+  cwd,
 }: {
   tasks: ProjectTask[]
   summary: SessionTaskSummary | null
   loading: boolean
+  /** Used only to name the project-keyed store; omitting it leaves that group unlabelled. */
+  cwd?: string | null
 }): ReactElement {
-  const [collapsed, setCollapsed] = useState(true)
-  const [visibility, setVisibility] = useState<"open" | "all">("open")
-  const openTasks = useMemo(
-    () => tasks.filter((task) => task.status === "pending" || task.status === "in_progress"),
-    [tasks]
-  )
-  const scopedTasks = visibility === "open" ? openTasks : tasks
+  const [collapsed, setCollapsed] = useState(false)
 
   return (
     <section className="session-tasks-section" aria-label="All tasks for selected project">
@@ -358,7 +264,10 @@ export function ProjectTasksSection({
         <h3 className="session-tasks-title">Project tasks</h3>
         <button
           type="button"
-          className="task-collapse-btn w-full sm:w-auto text-center min-h-[32px] sm:min-h-0"
+          className={cn(
+            "task-collapse-btn w-full sm:w-auto text-center min-h-[32px] sm:min-h-0",
+            collapsed && "active"
+          )}
           onClick={() => setCollapsed((value) => !value)}
           aria-expanded={!collapsed}
         >
@@ -369,19 +278,10 @@ export function ProjectTasksSection({
         <p className="session-tasks-summary mb-3 sm:mb-2 mt-1">
           {summary.total} total · {summary.open} open · {summary.completed} completed ·{" "}
           {summary.cancelled} cancelled
+          {tasks.length < summary.total ? ` · showing latest ${tasks.length}` : ""}
         </p>
       ) : null}
-      {collapsed ? null : (
-        <ProjectTaskList
-          tasks={tasks}
-          scopedTasks={scopedTasks}
-          summary={summary}
-          openTasks={openTasks}
-          visibility={visibility}
-          setVisibility={setVisibility}
-          loading={loading}
-        />
-      )}
+      {collapsed ? null : <ProjectTaskGroups tasks={tasks} cwd={cwd ?? null} loading={loading} />}
     </section>
   )
 }

@@ -25,6 +25,7 @@ import {
   type SessionTaskPreview,
   type SessionTaskSummary,
   supplementMessagesWithCapturedToolCalls,
+  toSessionTaskPreview,
 } from "./utils.ts"
 
 interface SessionScanResult {
@@ -559,15 +560,7 @@ export async function getProjectTasks(
     )
     for (const { sid, tasks } of results) {
       for (const task of tasks) {
-        allTasks.push({
-          sessionId: sid,
-          id: task.id,
-          subject: task.subject,
-          status: task.status,
-          statusChangedAt: task.statusChangedAt ?? null,
-          completionTimestamp: task.completionTimestamp ?? null,
-          completionEvidence: task.completionEvidence ?? null,
-        })
+        allTasks.push({ sessionId: sid, ...toSessionTaskPreview(task) })
       }
     }
   }

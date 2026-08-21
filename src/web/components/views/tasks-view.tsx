@@ -33,6 +33,7 @@ export function TasksView({
         tasks={projectTasks}
         summary={projectTaskSummary}
         loading={projectTasksLoading}
+        cwd={cwd}
       />
     </div>
   )

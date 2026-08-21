@@ -20,6 +20,23 @@
 import { formatDuration } from "../format-duration.ts"
 import type { Task } from "./task-repository.ts"
 import { getTaskCompletedAtMs, getTaskCurrentDurationMs } from "./task-timing.ts"
+import {
+  countTasksFreedBy,
+  findDependencyCycle,
+  indexTasksById,
+  isBlocked,
+  openBlockersOf,
+  partitionTasks,
+  pickCriticalPathTask,
+} from "./task-topology.ts"
+
+export {
+  countTasksFreedBy,
+  findDependencyCycle,
+  findNewlyUnblockedTasks,
+  isOpenStatus,
+  openBlockersOf,
+} from "./task-topology.ts"
 
 /** Subject text longer than this is elided; keeps one task to one line. */
 export const MAX_SUBJECT_LENGTH = 72
@@ -69,109 +86,6 @@ export function truncateForLine(text: string, max = MAX_SUBJECT_LENGTH): string 
   return `${flattened.slice(0, Math.max(0, max - 1)).trimEnd()}…`
 }
 
-// ─── Topology ───────────────────────────────────────────────────────────────
-
-export function isOpenStatus(status: Task["status"]): boolean {
-  return status === "pending" || status === "in_progress"
-}
-
-function indexById(tasks: readonly Task[]): ReadonlyMap<string, Task> {
-  return new Map(tasks.map((task) => [task.id, task]))
-}
-
-/**
- * The blockers of `task` that are still open.
- *
- * A `blockedBy` id with no matching task counts as not blocking: the edge may point at another
- * session's task, and guessing "blocked" there would leave the task permanently stuck in the view.
- * Both sides of the before/after comparison apply the same rule, so an unknown edge can never
- * fabricate an unblock event.
- */
-export function openBlockersOf(task: Task, byId: ReadonlyMap<string, Task>): string[] {
-  return task.blockedBy.filter((id) => {
-    const blocker = byId.get(id)
-    return blocker !== undefined && isOpenStatus(blocker.status)
-  })
-}
-
-function isBlocked(task: Task, byId: ReadonlyMap<string, Task>): boolean {
-  return openBlockersOf(task, byId).length > 0
-}
-
-/**
- * How many still-open tasks this task is the last blocker for — its leverage.
- *
- * Counting only tasks whose *sole* remaining blocker is this one keeps the number honest:
- * "unblocks 2" then means finishing this task really does free two tasks, not that two tasks
- * mention it among several blockers and stay stuck anyway.
- */
-export function countTasksFreedBy(
-  task: Task,
-  tasks: readonly Task[],
-  byId: ReadonlyMap<string, Task>
-): number {
-  return tasks.filter((candidate) => {
-    if (!isOpenStatus(candidate.status)) return false
-    const blockers = openBlockersOf(candidate, byId)
-    return blockers.length === 1 && blockers[0] === task.id
-  }).length
-}
-
-/**
- * The first dependency cycle among open tasks, as the ids on the loop.
- *
- * A cycle is a deadlock the status view cannot show: every task on it is "blocked", none can ever
- * start, and the caller keeps looking for something to do. Edges to finished tasks are ignored,
- * so only live deadlocks are reported.
- */
-export function findDependencyCycle(tasks: readonly Task[]): string[] | null {
-  const byId = indexById(tasks)
-  const open = tasks.filter((task) => isOpenStatus(task.status))
-  const state = new Map<string, "visiting" | "done">()
-  const stack: string[] = []
-
-  const visit = (task: Task): string[] | null => {
-    const mark = state.get(task.id)
-    if (mark === "done") return null
-    if (mark === "visiting") return stack.slice(stack.indexOf(task.id))
-    state.set(task.id, "visiting")
-    stack.push(task.id)
-    for (const blockerId of openBlockersOf(task, byId)) {
-      const blocker = byId.get(blockerId)
-      if (!blocker) continue
-      const cycle = visit(blocker)
-      if (cycle) return cycle
-    }
-    stack.pop()
-    state.set(task.id, "done")
-    return null
-  }
-
-  for (const task of open) {
-    const cycle = visit(task)
-    if (cycle) return cycle
-  }
-  return null
-}
-
-/**
- * Tasks that were waiting on a blocker before the update and are now free to start.
- *
- * This is the payoff of completing a task and the one thing the caller cannot see from the status
- * change alone — the freed task lives further down the list, and its `blockedBy` edge still names
- * the (now completed) blocker.
- */
-export function findNewlyUnblockedTasks(before: readonly Task[], after: readonly Task[]): Task[] {
-  const beforeById = indexById(before)
-  const afterById = indexById(after)
-  return after.filter((task) => {
-    if (!isOpenStatus(task.status)) return false
-    const previous = beforeById.get(task.id)
-    if (!previous) return false
-    return isBlocked(previous, beforeById) && !isBlocked(task, afterById)
-  })
-}
-
 // ─── Lines ──────────────────────────────────────────────────────────────────
 
 function namedTaskList(tasks: readonly Task[], limit = MAX_INLINE_TASKS): string {
@@ -207,7 +121,7 @@ export function formatTaskLine(
   highlight = false
 ): string {
   const marker = highlight ? "→" : " "
-  const suffix = taskSuffix(task, tasks, indexById(tasks))
+  const suffix = taskSuffix(task, tasks, indexTasksById(tasks))
   return `  ${marker} #${task.id}  ${truncateForLine(task.subject)}${suffix}`
 }
 
@@ -266,7 +180,7 @@ export function renderUnblockedLine(unblocked: readonly Task[]): string | null {
  * about to walk into, so it is named here with the move that resolves it.
  */
 export function taskQueueHint(tasks: readonly Task[]): string | null {
-  const byId = indexById(tasks)
+  const byId = indexTasksById(tasks)
   const inProgress = tasks.filter((task) => task.status === "in_progress")
   const pending = tasks.filter((task) => task.status === "pending")
   const ready = pending.filter((task) => !isBlocked(task, byId))
@@ -280,14 +194,8 @@ export function taskQueueHint(tasks: readonly Task[]): string | null {
   if (inProgress.length + pending.length === 0) {
     return "No open tasks — create the next step with TaskCreate before more work."
   }
-  if (inProgress.length === 0 && ready.length > 0) {
-    // Critical path first: among startable tasks, the one that frees the most downstream work.
-    // Ties keep queue order, so an ordinary flat queue still suggests the oldest ready task.
-    const next = ready.reduce((best, candidate) =>
-      countTasksFreedBy(candidate, tasks, byId) > countTasksFreedBy(best, tasks, byId)
-        ? candidate
-        : best
-    )
+  const next = inProgress.length === 0 ? pickCriticalPathTask(ready, tasks) : null
+  if (next) {
     return `Start next: TaskUpdate #${next.id} status:"in_progress" — ${truncateForLine(next.subject, MAX_INLINE_SUBJECT_LENGTH)}.`
   }
   // With no in-progress work and no ready task, every pending task waits on another pending task,
@@ -304,18 +212,13 @@ export function taskQueueHint(tasks: readonly Task[]): string | null {
 /** The bounded open-work board shared by every task tool response. */
 export function renderTaskBoard(tasks: readonly Task[], highlightId?: string): string {
   const summary = summarizeTasks(tasks)
-  const byId = indexById(tasks)
-  const byStatus = (status: Task["status"]): Task[] =>
-    tasks.filter((task) => task.status === status)
-  const pending = byStatus("pending")
-  const ready = pending.filter((task) => !isBlocked(task, byId))
-  const blocked = pending.filter((task) => isBlocked(task, byId))
+  const { inProgress, ready, blocked, completed } = partitionTasks(tasks)
 
   const lines = [
-    ...formatGroup("IN PROGRESS", byStatus("in_progress"), tasks, highlightId),
+    ...formatGroup("IN PROGRESS", inProgress, tasks, highlightId),
     ...formatGroup("READY", ready, tasks, highlightId),
     ...formatGroup("BLOCKED", blocked, tasks, highlightId),
-    ...formatCompletedLine(byStatus("completed")),
+    ...formatCompletedLine(completed),
     formatTotals(summary, ready.length, blocked.length),
   ]
   const hint = taskQueueHint(tasks)

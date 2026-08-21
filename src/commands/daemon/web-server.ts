@@ -78,6 +78,40 @@ export function resolveWebAssetPath(pathname: string): string | null {
   return join(WEB_ROOT, relative)
 }
 
+/**
+ * Modules outside `src/web` that a browser bundle is allowed to import.
+ *
+ * A dashboard component importing `../../tasks/task-topology.ts` makes the browser request
+ * `/tasks/task-topology.ts`, which resolves outside WEB_ROOT and 404s — the module silently never
+ * loads and the whole app fails to mount. Rather than serving the source tree wholesale, each
+ * shared module is listed here: these are pure, browser-safe helpers whose logic must not be
+ * duplicated into `src/web` just to be reachable, because the copy would drift from the CLI's.
+ *
+ * Add a path here only when the module is pure — no filesystem, no process, no Node builtins.
+ */
+export const SHARED_WEB_MODULES: ReadonlySet<string> = new Set([
+  "/format-duration.ts",
+  "/project-key.ts",
+  "/tasks/task-timing.ts",
+  "/tasks/task-topology.ts",
+])
+
+/**
+ * The `src/` directory, located from this file rather than from `Bun.main`.
+ *
+ * `dirname(Bun.main)` is the entrypoint's directory, which is the repo root when the daemon runs
+ * but the test runner's path under `bun test` — a shared module would then resolve to a file that
+ * does not exist, and the only symptom would be a 404 in the browser. This file's own location is
+ * stable under `bun link`, `bun test`, and direct execution alike.
+ */
+const SRC_ROOT = join(import.meta.dir, "..", "..")
+
+/** Absolute path for an allowlisted shared module, or null when the request is not one. */
+export function resolveSharedModulePath(pathname: string): string | null {
+  if (!SHARED_WEB_MODULES.has(pathname)) return null
+  return join(SRC_ROOT, pathname.replace(/^\/+/, ""))
+}
+
 // ─── Web asset cache ──────────────────────────────────────────────────────
 // Avoids per-request transpile/build when source files haven't changed.
 // Keyed by filePath; invalidated when mtime changes.
@@ -120,12 +154,40 @@ async function buildWebAsset(
   return { body: await file.arrayBuffer(), contentType }
 }
 
+/** Serve one allowlisted shared module, or null when the path is not in SHARED_WEB_MODULES. */
+export async function serveSharedModule(pathname: string): Promise<Response | null> {
+  const filePath = resolveSharedModulePath(pathname)
+  return filePath ? await serveResolvedFile(filePath) : null
+}
+
+/**
+ * One exact GET route per shared module.
+ *
+ * Exact paths rather than a prefix wildcard: `/tasks/*` also matches `POST /tasks/create`, and
+ * shadowing that route silently turned dashboard task creation into a 404.
+ */
+export function sharedModuleRoutes(
+  notFound: () => Response
+): Record<string, (req: Request) => Promise<Response>> {
+  const routes: Record<string, (req: Request) => Promise<Response>> = {}
+  for (const pathname of SHARED_WEB_MODULES) {
+    routes[pathname] = async (req: Request) => {
+      if (req.method !== "GET") return notFound()
+      return (await serveSharedModule(pathname)) ?? notFound()
+    }
+  }
+  return routes
+}
+
 export async function serveWebAsset(pathname: string): Promise<Response | null> {
-  const filePath = resolveWebAssetPath(pathname)
+  const filePath = resolveSharedModulePath(pathname) ?? resolveWebAssetPath(pathname)
   if (!filePath) {
     return new Response("Bad Request", { status: 400 })
   }
+  return await serveResolvedFile(filePath)
+}
 
+async function serveResolvedFile(filePath: string): Promise<Response | null> {
   const file = Bun.file(filePath)
   if (!(await file.exists())) return null
 
@@ -237,6 +299,9 @@ export function startDaemonWebServer(ctx: DaemonWebServerContext): DaemonWebServ
         if (req.method !== "GET") return notFound()
         return (await serveWebAsset(new URL(req.url).pathname)) ?? notFound()
       },
+      // Shared pure modules a web bundle imports as ../../<path>. Registered as exact paths, not
+      // a /tasks/* wildcard: that wildcard shadowed POST /tasks/create and broke task creation.
+      ...sharedModuleRoutes(notFound),
       "/public/*": async (req) => {
         if (req.method !== "GET") return notFound()
         const pathname = new URL(req.url).pathname

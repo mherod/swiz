@@ -92,13 +92,26 @@ export interface SessionToolUsageState extends CurrentSessionToolUsage {
   nextTurnIndex?: number
 }
 
+/**
+ * One task as the dashboard sees it.
+ *
+ * The dependency edges and timing fields are part of the payload, not decoration: the web board
+ * splits pending work into ready and blocked and reports how much each task unblocks, and it can
+ * only do that with the same `blockedBy`/`blocks` edges the MCP board reads. Dropping them left
+ * the browser rendering a flat status list of work whose actual shape lived on disk.
+ */
 export interface SessionTaskPreview {
   id: string
   subject: string
+  description: string | null
   status: string
   statusChangedAt: string | null
   completionTimestamp: string | null
   completionEvidence: string | null
+  blockedBy: string[]
+  blocks: string[]
+  startedAt: number | null
+  elapsedMs: number | null
 }
 
 export interface ProjectTaskPreview extends SessionTaskPreview {
@@ -764,10 +777,32 @@ function taskStatusRank(status: string): number {
 interface TaskViewInput {
   id: string
   subject: string
+  description?: string | null
   status: string
   statusChangedAt?: string | null
   completionTimestamp?: string | null
   completionEvidence?: string | null
+  blockedBy?: readonly string[] | null
+  blocks?: readonly string[] | null
+  startedAt?: number | null
+  elapsedMs?: number | null
+}
+
+/** Project the on-disk record onto the dashboard payload, edges and timing included. */
+export function toSessionTaskPreview(task: TaskViewInput): SessionTaskPreview {
+  return {
+    id: task.id,
+    subject: task.subject,
+    description: task.description ?? null,
+    status: task.status,
+    statusChangedAt: task.statusChangedAt ?? null,
+    completionTimestamp: task.completionTimestamp ?? null,
+    completionEvidence: task.completionEvidence ?? null,
+    blockedBy: [...(task.blockedBy ?? [])],
+    blocks: [...(task.blocks ?? [])],
+    startedAt: task.startedAt ?? null,
+    elapsedMs: task.elapsedMs ?? null,
+  }
 }
 
 export function buildSessionTasksView(
@@ -789,14 +824,7 @@ export function buildSessionTasksView(
     return b.id.localeCompare(a.id)
   })
   return {
-    tasks: sorted.slice(0, limit).map((task) => ({
-      id: task.id,
-      subject: task.subject,
-      status: task.status,
-      statusChangedAt: task.statusChangedAt ?? null,
-      completionTimestamp: task.completionTimestamp ?? null,
-      completionEvidence: task.completionEvidence ?? null,
-    })),
+    tasks: sorted.slice(0, limit).map(toSessionTaskPreview),
     summary,
   }
 }
