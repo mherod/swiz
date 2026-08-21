@@ -199,6 +199,28 @@ function downgradesDeny(mode: FileEditDenyDowngrade, hookFile: string): boolean 
   return false
 }
 
+/** Mandate footer that `preToolUseDeny` appends; meaningless once the call was allowed. */
+const DENY_MANDATE_FOOTER_RE =
+  /\n*You must act on this now\. Do not try to stop again without completing the required action\.\s*$/
+
+/**
+ * Reword a deny that was downgraded, so it cannot claim a block that did not happen.
+ *
+ * A downgraded deny is pushed into advisory context verbatim, and deny copy is written to
+ * prevent: it opens `BLOCKED:` and closes with a mandate to act before doing anything else.
+ * Presented after the tool was allowed, that text asserts something false — the agent is told
+ * its edit was refused while the edit is already on disk. Reported from another session as three
+ * occurrences, caught only because an unrelated assertion did not add up.
+ *
+ * The downgrade itself is deliberate (see `resolveFileEditDenyDowngrade` — edit gates firing
+ * mid-skill create catch-22s). Only the wording is wrong, so only the wording is changed.
+ */
+export function softenDowngradedDenyReason(reason: string): string {
+  const withoutMandate = reason.replace(DENY_MANDATE_FOOTER_RE, "")
+  const withoutBlocked = withoutMandate.replace(/^\s*BLOCKED:\s*/, "")
+  return `ADVISORY (this call was allowed to proceed): ${withoutBlocked.trimStart()}`
+}
+
 export function collectPreToolResults(
   results: Array<{ execution: HookExecution; parsed: Record<string, any> | null }>,
   executions: HookExecution[],
@@ -214,7 +236,7 @@ export function collectPreToolResults(
     if (resp && isDeny(resp) && downgradesDeny(downgradeMode, execution.file)) {
       execution.status = "allow-with-reason"
       const reason = extractDenyReason(resp)
-      if (reason) contexts.push(reason)
+      if (reason) contexts.push(softenDowngradedDenyReason(reason))
       log(`   ~ ${execution.file} (deny downgraded: ${downgradeMode}, file edit)`)
       executions.push(execution)
       continue
