@@ -2,6 +2,7 @@ import { existsSync } from "node:fs"
 import { mkdir } from "node:fs/promises"
 import { dirname, isAbsolute, join } from "node:path"
 import { z } from "zod"
+import { debugLog } from "../debug.ts"
 import { ensureGitExclude } from "../git-helpers.ts"
 import { getHomeDirOrNull } from "../home.ts"
 import { type FileHookDef, type HookGroup, isInlineHookDef } from "../hook-types.ts"
@@ -495,7 +496,9 @@ export async function writeProjectState(
   } catch {
     // Lock unavailable (stale holder or contention past the timeout): the
     // transition must still land — an occasional unserialized write beats a
-    // dropped one, which is exactly the pre-lock behaviour.
+    // dropped one, which is exactly the pre-lock behaviour. Logged so the
+    // fallback frequency is observable rather than silent.
+    debugLog(`writeProjectState: lock unavailable for ${path}; falling back to unserialized write`)
     await appendTransition()
   }
   await ensureGitExclude(cwd, ".swiz/")
