@@ -118,6 +118,22 @@ function appendUnquotedChar(state: SegmentSplitState, command: string, index: nu
   return index
 }
 
+/** Characters that never need quoting as a POSIX shell word. */
+const SHELL_SAFE_ARG_RE = /^[A-Za-z0-9._/@%+=:,-]+$/
+
+/**
+ * Quote a value for safe copy-paste as a single POSIX shell argument.
+ *
+ * Single quotes neutralize every metacharacter — including `$`, backticks, and
+ * `!` — which double quotes do NOT (a filename like `a$(cmd).ts` still
+ * command-substitutes inside double quotes). Values made only of safe
+ * characters pass through bare so common paths stay readable.
+ */
+export function quotePosixShellArg(value: string): string {
+  if (value.length > 0 && SHELL_SAFE_ARG_RE.test(value)) return value
+  return `'${value.replaceAll("'", "'\\''")}'`
+}
+
 /**
  * Split a shell command into executable segments at unquoted separators.
  *

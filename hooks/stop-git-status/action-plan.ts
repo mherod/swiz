@@ -10,6 +10,7 @@ import type { CollaborationMode } from "../../src/settings.ts"
 import { skillExistsForHookPayload } from "../../src/skill-utils.ts"
 import { isDefaultBranch } from "../../src/utils/git-utils.ts"
 import type { SessionFileOwnership } from "../../src/utils/session-file-ownership.ts"
+import { quotePosixShellArg } from "../../src/utils/shell-patterns.ts"
 import type { ActionPlanItem } from "./types.ts"
 
 /** Bounded, comma-joined path list for plan text. */
@@ -21,13 +22,12 @@ function formatPathList(paths: readonly string[], max = 20): string {
 /**
  * Bounded, space-joined path list that stays copy-runnable as command
  * arguments — comma-joined prose glued pathspecs together ("mine.ts,").
- * Paths containing whitespace are quoted.
+ * Every non-trivial path is single-quote escaped: file names come from
+ * `git status` (repo-controlled), and double quotes would still let `$`
+ * and backticks substitute — a filename-to-command-injection channel.
  */
 function formatPathArgs(paths: readonly string[], max = 20): string {
-  const shown = paths
-    .slice(0, max)
-    .map((path) => (/\s/.test(path) ? JSON.stringify(path) : path))
-    .join(" ")
+  const shown = paths.slice(0, max).map(quotePosixShellArg).join(" ")
   return paths.length > max
     ? `${shown} # and ${paths.length - max} more — list with git status`
     : shown

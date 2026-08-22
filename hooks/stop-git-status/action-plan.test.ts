@@ -48,7 +48,7 @@ describe("buildGitWorkflowSections ownership gating (issue #841)", () => {
     expect(plan).toContain("another live session has edits in this checkout")
   })
 
-  test("paths with whitespace are quoted in the staged-command advice", () => {
+  test("paths with whitespace are single-quoted in the staged-command advice", () => {
     const plan = planFor({
       ownership: {
         editedByUs: ["my file.ts", "plain.ts"],
@@ -56,7 +56,30 @@ describe("buildGitWorkflowSections ownership gating (issue #841)", () => {
         unattributed: [],
       },
     })
-    expect(plan).toContain('git add \\"my file.ts\\" plain.ts')
+    expect(plan).toContain("git add 'my file.ts' plain.ts")
+  })
+
+  test("metacharacter paths are single-quoted even without whitespace", () => {
+    const plan = planFor({
+      ownership: {
+        editedByUs: ["a$(cmd).ts", "b`tick`.ts", "c;rm.ts"],
+        editedByOthers: ["theirs.ts"],
+        unattributed: [],
+      },
+    })
+    // Single quotes neutralize $, backticks, and ; — double quotes would not.
+    expect(plan).toContain("git add 'a$(cmd).ts' 'b`tick`.ts' 'c;rm.ts'")
+  })
+
+  test("embedded single quotes use the POSIX escape splice", () => {
+    const plan = planFor({
+      ownership: {
+        editedByUs: ["it's.ts"],
+        editedByOthers: ["theirs.ts"],
+        unattributed: [],
+      },
+    })
+    expect(plan).toContain("git add 'it'\\\\''s.ts'")
   })
 
   test("peer edits present: unattributed files get ownership guidance, not staging", () => {
