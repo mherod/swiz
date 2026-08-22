@@ -6,6 +6,7 @@ import { ensureGitExclude } from "../git-helpers.ts"
 import { getHomeDirOrNull } from "../home.ts"
 import { type FileHookDef, type HookGroup, isInlineHookDef } from "../hook-types.ts"
 import { CappedMap } from "../utils/capped-map.ts"
+import { getLockPathForFile, withFileLock } from "../utils/file-lock.ts"
 import { deriveDefaultsFromRegistry, deriveSchemaShape } from "./registry"
 import {
   ALL_STATUS_LINE_SEGMENTS,
@@ -477,13 +478,26 @@ export async function writeProjectState(
 ): Promise<void> {
   const path = getStatePath(cwd)
   await mkdir(dirname(path), { recursive: true })
-  const existing = await readStateData(cwd)
 
-  const previousState = existing?.state ?? null
-  const history = existing?.stateHistory ?? []
-  history.push({ from: previousState, to: state, timestamp: new Date().toISOString() })
+  const appendTransition = async (): Promise<void> => {
+    const existing = await readStateData(cwd)
+    const previousState = existing?.state ?? null
+    const history = existing?.stateHistory ?? []
+    history.push({ from: previousState, to: state, timestamp: new Date().toISOString() })
+    await Bun.write(path, `${JSON.stringify({ state, stateHistory: history }, null, 2)}\n`)
+  }
 
-  await Bun.write(path, `${JSON.stringify({ state, stateHistory: history }, null, 2)}\n`)
+  try {
+    // Serialize the read-modify-write: two sessions transitioning concurrently
+    // otherwise drop stateHistory entries or tear the file (issue #848). The
+    // read happens inside the lock so each writer sees the previous one's entry.
+    await withFileLock(getLockPathForFile(path), appendTransition, 2_000)
+  } catch {
+    // Lock unavailable (stale holder or contention past the timeout): the
+    // transition must still land — an occasional unserialized write beats a
+    // dropped one, which is exactly the pre-lock behaviour.
+    await appendTransition()
+  }
   await ensureGitExclude(cwd, ".swiz/")
 }
 

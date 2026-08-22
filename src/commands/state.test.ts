@@ -93,6 +93,26 @@ describe("readProjectState / writeProjectState", () => {
     expect(state).toBe("reviewing")
   })
 
+  test("concurrent writers preserve every stateHistory entry (issue #848)", async () => {
+    const dir = await createTempDir()
+    const states = [
+      "planning",
+      "developing",
+      "reviewing",
+      "addressing-feedback",
+      "developing",
+    ] as const
+    await Promise.all(states.map((state) => writeProjectState(dir, state)))
+    const stateData = await Bun.file(join(dir, ".swiz", "state.json")).json()
+    const history = stateData.stateHistory as Array<{ from: string | null; to: string }>
+    expect(history).toHaveLength(states.length)
+    // Serialized read-modify-write: each entry chains off the previous one.
+    expect(history[0]?.from).toBeNull()
+    for (let i = 1; i < history.length; i++) {
+      expect(history[i]?.from).toBe(history[i - 1]?.to)
+    }
+  }, 15000)
+
   test("writes state to state.json, not config.json", async () => {
     const dir = await createTempDir()
     const configPath = join(dir, ".swiz", "config.json")
