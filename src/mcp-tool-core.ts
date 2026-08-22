@@ -257,7 +257,11 @@ async function runTaskUpdateTool(rawInput: McpToolInput, cwd: string): Promise<M
   if (typeof rawInput.taskId !== "string") {
     return errorResult(`${taskUpdateName} failed: taskId must be a string`)
   }
-  const input = rawInput as TaskUpdateToolInput
+  // Every task tool renders ids as "#<id>", so accept that copy-pasted form back (issue #846).
+  const input: TaskUpdateToolInput = {
+    ...(rawInput as TaskUpdateToolInput),
+    taskId: rawInput.taskId.replace(/^#/, ""),
+  }
   try {
     const projectKey = projectKeyFromCwd(cwd)
     const tasksBefore = await readProjectTasksWithPrune(projectKey)
