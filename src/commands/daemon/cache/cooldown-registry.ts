@@ -37,7 +37,9 @@ export class CooldownRegistry {
 
   invalidateProject(cwd: string): void {
     for (const k of this.entries.keys()) {
-      if (k.endsWith(`\x00${cwd}`)) this.entries.delete(k)
+      // Session-scoped keys carry a trailing \x00<sessionId> segment, so a
+      // suffix match alone would leave them behind (issue #847 follow-up).
+      if (k.endsWith(`\x00${cwd}`) || k.includes(`\x00${cwd}\x00`)) this.entries.delete(k)
     }
   }
 
