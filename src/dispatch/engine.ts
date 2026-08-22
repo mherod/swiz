@@ -95,12 +95,19 @@ function getHookCooldownScope(hook: HookDef): "session" | "repo" | undefined {
 }
 
 /**
- * Session id for the cooldown sentinel key — set only when the hook opts into
- * `cooldownScope: "session"` (issue #847); undefined keeps the repo-scoped key.
+ * Resolve the cooldown key parts for a hook (issue #847). A session-scoped
+ * hook whose payload carries no session id must not degrade to the shared
+ * repo-scoped window — the cooldown is skipped entirely so the guard still
+ * fires for every session.
  */
-function cooldownSessionId(hook: HookDef, payloadStr: string): string | undefined {
-  if (getHookCooldownScope(hook) !== "session") return undefined
-  return extractPayloadSessionId(payloadStr)
+export function cooldownScopeFor(
+  hook: HookDef,
+  payloadStr: string,
+  cwd: string
+): HookCooldownScope {
+  if (getHookCooldownScope(hook) !== "session") return { cwd }
+  const sessionId = extractPayloadSessionId(payloadStr)
+  return sessionId ? { cwd, sessionId } : { cwd, skipCooldown: true }
 }
 
 function isHookAsync(hook: HookDef): boolean {
@@ -594,6 +601,7 @@ async function tryRecordSkippedHook(
   const cooldownSeconds = getHookCooldownSeconds(hook)
   if (
     cooldownSeconds &&
+    !scope.skipCooldown &&
     (await isWithinCooldown(id, cooldownSeconds, scope.cwd, scope.sessionId))
   ) {
     log(`   ⏭ ${id} [cooldown active, skipping]`)
@@ -603,10 +611,14 @@ async function tryRecordSkippedHook(
   return false
 }
 
-/** Cooldown sentinel key parts: cwd always; sessionId only for session-scoped hooks. */
-interface HookCooldownScope {
+/**
+ * Cooldown sentinel key parts: cwd always; sessionId only for session-scoped
+ * hooks; skipCooldown when a session-scoped hook has no session id to key by.
+ */
+export interface HookCooldownScope {
   cwd: string
   sessionId?: string
+  skipCooldown?: boolean
 }
 
 /**
@@ -636,7 +648,7 @@ function finalizeExecution(
   const cooldownMode = getHookCooldownMode(hook)
   const alwaysMode = cooldownMode === "always"
   const blockResult = parsed !== null && (isDeny(parsed) || isBlock(parsed))
-  if (alwaysMode || blockResult) {
+  if ((alwaysMode || blockResult) && !scope.skipCooldown) {
     void markHookCooldown(hookIdentifier(hook), scope.cwd, scope.sessionId)
   }
   return execution
@@ -866,7 +878,7 @@ export async function runEntry(
   }
 
   const skipExecs: HookExecution[] = []
-  const scope: HookCooldownScope = { cwd, sessionId: cooldownSessionId(hook, payloadStr) }
+  const scope = cooldownScopeFor(hook, payloadStr, cwd)
   if (await tryRecordSkippedHook(hook, matcher, scope, skipExecs)) {
     return { execution: skipExecs[0]!, parsed: null }
   }

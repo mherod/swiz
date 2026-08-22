@@ -4,6 +4,7 @@ import { hookIdentifier } from "../manifest.ts"
 import { stripInternalDispatchFields } from "./dispatch-wire.ts"
 import {
   classifyHookOutput,
+  cooldownScopeFor,
   extractContext,
   flatSyncHooks,
   type HookEntry,
@@ -15,6 +16,29 @@ import {
   runsInSyncPipeline,
   toolMatchesToken,
 } from "./engine.ts"
+
+// ─── cooldownScopeFor: session scoping and missing-id degradation (issue #847) ─
+
+describe("cooldownScopeFor", () => {
+  const sessionHook: HookDef = { file: "x.ts", cooldownSeconds: 60, cooldownScope: "session" }
+  const repoHook: HookDef = { file: "x.ts", cooldownSeconds: 60 }
+
+  it("repo-scoped hooks ignore the payload session id", () => {
+    const scope = cooldownScopeFor(repoHook, JSON.stringify({ session_id: "s1" }), "/repo")
+    expect(scope).toEqual({ cwd: "/repo" })
+  })
+
+  it("session-scoped hooks key by the payload session id", () => {
+    const scope = cooldownScopeFor(sessionHook, JSON.stringify({ session_id: "s1" }), "/repo")
+    expect(scope).toEqual({ cwd: "/repo", sessionId: "s1" })
+  })
+
+  it("session-scoped hooks without a session id skip the cooldown instead of sharing it", () => {
+    const scope = cooldownScopeFor(sessionHook, JSON.stringify({ cwd: "/repo" }), "/repo")
+    expect(scope.skipCooldown).toBe(true)
+    expect(scope.sessionId).toBeUndefined()
+  })
+})
 
 // ─── extractContext: per-hook additionalContext only ─────────────────────────
 
