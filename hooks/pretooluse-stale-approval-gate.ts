@@ -135,6 +135,7 @@ const pretooluseStaleApprovalGate: SwizToolHook = {
   event: "preToolUse",
   timeout: 10,
   cooldownSeconds: 300,
+  cooldownScope: "session",
   run(input) {
     return evaluatePretooluseStaleApprovalGate(input)
   },

@@ -422,6 +422,14 @@ export interface SwizHookMeta {
    */
   cooldownMode?: "block-only" | "always"
   /**
+   * What the cooldown sentinel is keyed by (issue #847).
+   * - `"repo"` (default): hook name + cwd — one session tripping the guard
+   *   suppresses it for every session in that checkout.
+   * - `"session"`: hook name + cwd + session id — right for guards that shape
+   *   one session's behaviour; a peer session keeps its own independent window.
+   */
+  cooldownScope?: "session" | "repo"
+  /**
    * Optional environment-based skip condition (e.g. `"env:CI!=true"`).
    * Evaluated before run(); falsy conditions skip the hook entirely.
    */

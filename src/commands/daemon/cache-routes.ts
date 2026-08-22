@@ -90,6 +90,7 @@ async function handleCooldownCheck(req: Request, ctx: CacheRoutesContext): Promi
     hookFile?: string
     cooldownSeconds?: number
     cwd?: string
+    sessionId?: string
   } | null
   if (
     typeof body?.hookFile !== "string" ||
@@ -107,7 +108,8 @@ async function handleCooldownCheck(req: Request, ctx: CacheRoutesContext): Promi
   const withinCooldown = ctx.cooldownRegistry.isWithinCooldown(
     body.hookFile,
     body.cooldownSeconds,
-    body.cwd
+    body.cwd,
+    typeof body.sessionId === "string" ? body.sessionId : undefined
   )
   return Response.json({ withinCooldown })
 }
@@ -116,6 +118,7 @@ async function handleCooldownMark(req: Request, ctx: CacheRoutesContext): Promis
   const body = (await req.json().catch(() => null)) as {
     hookFile?: string
     cwd?: string
+    sessionId?: string
   } | null
   if (typeof body?.hookFile !== "string" || typeof body?.cwd !== "string" || !body.cwd) {
     return Response.json(
@@ -123,7 +126,11 @@ async function handleCooldownMark(req: Request, ctx: CacheRoutesContext): Promis
       { status: 400 }
     )
   }
-  ctx.cooldownRegistry.mark(body.hookFile, body.cwd)
+  ctx.cooldownRegistry.mark(
+    body.hookFile,
+    body.cwd,
+    typeof body.sessionId === "string" ? body.sessionId : undefined
+  )
   return Response.json({ marked: true })
 }
 

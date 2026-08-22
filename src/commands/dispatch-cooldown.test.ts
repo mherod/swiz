@@ -123,6 +123,37 @@ describe("markHookCooldown", () => {
   })
 })
 
+describe("session-scoped cooldown keys (issue #847)", () => {
+  test("session id changes the sentinel path; omitting it keeps the repo-scoped path", () => {
+    const cwd = uniqueCwd("scope")
+    const repoScoped = hookCooldownPath(TEST_HOOK, cwd)
+    const sessionA = hookCooldownPath(TEST_HOOK, cwd, "session-a")
+    const sessionB = hookCooldownPath(TEST_HOOK, cwd, "session-b")
+    expect(sessionA).not.toBe(repoScoped)
+    expect(sessionB).not.toBe(repoScoped)
+    expect(sessionA).not.toBe(sessionB)
+    // Repo-scoped path is byte-identical to the pre-#847 golden value.
+    expect(hookCooldownPath(TEST_HOOK, "/tmp/swiz-cooldown-golden")).toBe(
+      `${TMP_ROOT}/swiz-hook-cooldown-cb5998f7.timestamp`
+    )
+  })
+
+  test("session A's cooldown does not suppress session B", async () => {
+    const cwd = uniqueCwd("peer-independent")
+    await markHookCooldown(TEST_HOOK, cwd, "session-a")
+    expect(await isWithinCooldown(TEST_HOOK, 60, cwd, "session-a")).toBe(true)
+    expect(await isWithinCooldown(TEST_HOOK, 60, cwd, "session-b")).toBe(false)
+    // Control: the same session re-triggering within the window stays suppressed.
+    expect(await isWithinCooldown(TEST_HOOK, 60, cwd, "session-a")).toBe(true)
+  })
+
+  test("session-scoped marks do not arm the repo-scoped sentinel", async () => {
+    const cwd = uniqueCwd("no-repo-bleed")
+    await markHookCooldown(TEST_HOOK, cwd, "session-a")
+    expect(await isWithinCooldown(TEST_HOOK, 60, cwd)).toBe(false)
+  })
+})
+
 describe("extractCwd", () => {
   test("extracts cwd from a valid JSON payload", () => {
     const payload = JSON.stringify({ cwd: "/my/project", session_id: "abc" })

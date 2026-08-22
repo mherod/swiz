@@ -340,6 +340,7 @@ const pretooluseUpdateMemoryEnforcement: SwizToolHook = {
   event: "preToolUse",
   timeout: 5,
   cooldownSeconds: 300,
+  cooldownScope: "session",
 
   async run(input) {
     return await evaluatePretooluseUpdateMemoryEnforcement(input as Record<string, any>)

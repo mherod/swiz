@@ -431,6 +431,7 @@ const pretooluseStuckState: SwizToolHook = {
   matcher: "Edit|Write|Bash",
   timeout: 5,
   cooldownSeconds: 600,
+  cooldownScope: "session",
   requiredSettings: ["enforceUnblockMyself"],
   run(input) {
     return evaluatePretooluseStuckState(input)

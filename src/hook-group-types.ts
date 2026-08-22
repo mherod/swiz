@@ -25,6 +25,8 @@ export interface FileHookDef {
   asyncMode?: "fire-and-forget" | "block-until-complete"
   cooldownSeconds?: number
   cooldownMode?: "block-only" | "always"
+  /** "session" keys the cooldown per session id; default "repo" (issue #847). */
+  cooldownScope?: "session" | "repo"
   condition?: string
   stacks?: string[]
   /** Setting keys that must be truthy for this hook to run. */

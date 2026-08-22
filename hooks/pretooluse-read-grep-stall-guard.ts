@@ -71,6 +71,7 @@ const pretooluseReadGrepStallGuard: SwizToolHook = {
   matcher: "Read|Grep|Glob",
   timeout: 5,
   cooldownSeconds: 300,
+  cooldownScope: "session",
 
   async run(input): Promise<SwizHookOutput> {
     try {

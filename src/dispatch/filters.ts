@@ -43,8 +43,10 @@ const PR_MERGE_MODE_DISABLED_HOOKS = new Set([
  * or platforms, so upgrading Bun could change sentinel paths and silently break
  * cooldown throttling (orphaned old files, hooks re-running too often).
  */
-function stableCooldownKeyHex(hookFile: string, cwd: string): string {
-  const input = hookFile + cwd
+function stableCooldownKeyHex(hookFile: string, cwd: string, sessionId?: string): string {
+  // The NUL separator keeps session-scoped keys disjoint from repo-scoped ones
+  // while leaving every existing repo-scoped sentinel path unchanged (issue #847).
+  const input = hookFile + cwd + (sessionId ? `\0${sessionId}` : "")
   let hash = 5381
   for (let i = 0; i < input.length; i++) {
     hash = ((hash << 5) + hash) ^ input.charCodeAt(i)
@@ -52,16 +54,17 @@ function stableCooldownKeyHex(hookFile: string, cwd: string): string {
   return (hash >>> 0).toString(16)
 }
 
-export function hookCooldownPath(hookFile: string, cwd: string): string {
-  return swizHookCooldownPath(stableCooldownKeyHex(hookFile, cwd))
+export function hookCooldownPath(hookFile: string, cwd: string, sessionId?: string): string {
+  return swizHookCooldownPath(stableCooldownKeyHex(hookFile, cwd, sessionId))
 }
 
 export async function isWithinCooldown(
   hookFile: string,
   cooldownSeconds: number,
-  cwd: string
+  cwd: string,
+  sessionId?: string
 ): Promise<boolean> {
-  const sentinelPath = hookCooldownPath(hookFile, cwd)
+  const sentinelPath = hookCooldownPath(hookFile, cwd, sessionId)
   try {
     const raw = (await readFile(sentinelPath, "utf8")).trim()
     const lastRun = parseInt(raw, 10)
@@ -72,8 +75,8 @@ export async function isWithinCooldown(
   }
 }
 
-export function markHookCooldown(hookFile: string, cwd: string): Promise<void> {
-  return writeFile(hookCooldownPath(hookFile, cwd), String(Date.now())).catch(() => {
+export function markHookCooldown(hookFile: string, cwd: string, sessionId?: string): Promise<void> {
+  return writeFile(hookCooldownPath(hookFile, cwd, sessionId), String(Date.now())).catch(() => {
     // Non-fatal: if sentinel write fails the hook just runs again next time
   })
 }

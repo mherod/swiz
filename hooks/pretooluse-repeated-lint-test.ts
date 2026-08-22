@@ -783,6 +783,7 @@ const pretooluseRepeatedLintTest: SwizToolHook = {
   event: "preToolUse",
   timeout: 5,
   cooldownSeconds: 120,
+  cooldownScope: "session",
   run(input) {
     return evaluatePretooluseRepeatedLintTest(input)
   },

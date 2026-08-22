@@ -39,6 +39,7 @@ import {
   DEFAULT_TIMEOUT,
   extractCallerEnv,
   extractPayloadCwd,
+  extractPayloadSessionId,
   HOOKS_DIR,
   SIGKILL_GRACE_MS,
 } from "./worker-types.ts"
@@ -87,6 +88,19 @@ function getHookCooldownSeconds(hook: HookDef): number | undefined {
 
 function getHookCooldownMode(hook: HookDef): "block-only" | "always" | undefined {
   return isInlineHookDef(hook) ? hook.hook.cooldownMode : hook.cooldownMode
+}
+
+function getHookCooldownScope(hook: HookDef): "session" | "repo" | undefined {
+  return isInlineHookDef(hook) ? hook.hook.cooldownScope : hook.cooldownScope
+}
+
+/**
+ * Session id for the cooldown sentinel key — set only when the hook opts into
+ * `cooldownScope: "session"` (issue #847); undefined keeps the repo-scoped key.
+ */
+function cooldownSessionId(hook: HookDef, payloadStr: string): string | undefined {
+  if (getHookCooldownScope(hook) !== "session") return undefined
+  return extractPayloadSessionId(payloadStr)
 }
 
 function isHookAsync(hook: HookDef): boolean {
@@ -567,7 +581,7 @@ function createSkippedExecution(
 async function tryRecordSkippedHook(
   hook: HookDef,
   matcher: string | undefined,
-  cwd: string,
+  scope: HookCooldownScope,
   executions: HookExecution[]
 ): Promise<boolean> {
   const id = hookIdentifier(hook)
@@ -578,12 +592,21 @@ async function tryRecordSkippedHook(
     return true
   }
   const cooldownSeconds = getHookCooldownSeconds(hook)
-  if (cooldownSeconds && (await isWithinCooldown(id, cooldownSeconds, cwd))) {
+  if (
+    cooldownSeconds &&
+    (await isWithinCooldown(id, cooldownSeconds, scope.cwd, scope.sessionId))
+  ) {
     log(`   ⏭ ${id} [cooldown active, skipping]`)
     executions.push(createSkippedExecution(hook, matcher, "cooldown-active"))
     return true
   }
   return false
+}
+
+/** Cooldown sentinel key parts: cwd always; sessionId only for session-scoped hooks. */
+interface HookCooldownScope {
+  cwd: string
+  sessionId?: string
 }
 
 /**
@@ -599,7 +622,7 @@ function finalizeExecution(
   execution: HookExecution,
   matcher: string | undefined,
   hook: HookDef,
-  cwd: string,
+  scope: HookCooldownScope,
   parsed: Record<string, any> | null
 ): HookExecution {
   if (matcher) execution.matcher = matcher
@@ -614,7 +637,7 @@ function finalizeExecution(
   const alwaysMode = cooldownMode === "always"
   const blockResult = parsed !== null && (isDeny(parsed) || isBlock(parsed))
   if (alwaysMode || blockResult) {
-    void markHookCooldown(hookIdentifier(hook), cwd)
+    void markHookCooldown(hookIdentifier(hook), scope.cwd, scope.sessionId)
   }
   return execution
 }
@@ -843,7 +866,8 @@ export async function runEntry(
   }
 
   const skipExecs: HookExecution[] = []
-  if (await tryRecordSkippedHook(hook, matcher, cwd, skipExecs)) {
+  const scope: HookCooldownScope = { cwd, sessionId: cooldownSessionId(hook, payloadStr) }
+  if (await tryRecordSkippedHook(hook, matcher, scope, skipExecs)) {
     return { execution: skipExecs[0]!, parsed: null }
   }
 
@@ -869,7 +893,7 @@ export async function runEntry(
     }
   }
 
-  finalizeExecution(result.execution, matcher, hook, cwd, result.parsed)
+  finalizeExecution(result.execution, matcher, hook, scope, result.parsed)
   return result
 }
 

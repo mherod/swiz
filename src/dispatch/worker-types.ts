@@ -196,3 +196,17 @@ export function extractPayloadCwd(payloadStr: string): string | undefined {
   }
   return undefined
 }
+
+/** Extract the session id from the hook JSON payload (issue #847: session-scoped cooldowns). */
+export function extractPayloadSessionId(payloadStr: string): string | undefined {
+  try {
+    const parsed = JSON.parse(payloadStr) as Record<string, any>
+    const raw = parsed.session_id ?? parsed.sessionId
+    if (typeof raw === "string" && raw.trim()) {
+      return raw.trim()
+    }
+  } catch {
+    // malformed payload — fall back to repo-scoped behaviour
+  }
+  return undefined
+}
