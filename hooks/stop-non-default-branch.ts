@@ -23,9 +23,9 @@ import { runSwizHookAsMain } from "../src/SwizHook.ts"
 import { type StopHookInput, stopHookInputSchema } from "../src/schemas.ts"
 import { readProjectSettings } from "../src/settings.ts"
 import { skillAdvice } from "../src/skill-utils.ts"
-import { getDefaultBranch, getGitStatusV2, isDefaultBranch } from "../src/utils/git-utils.ts"
+import { getDefaultBranch, isDefaultBranch } from "../src/utils/git-utils.ts"
 import { blockStopObj } from "../src/utils/hook-response.ts"
-import { resolveSessionFileOwnership } from "../src/utils/session-file-ownership.ts"
+import { resolvePeerHeldFiles } from "../src/utils/session-file-ownership.ts"
 import type { WorktreePreservationDecision } from "../src/worktree-preservation.ts"
 import { evaluateWorktreePreservation } from "../src/worktree-preservation.ts"
 
@@ -56,17 +56,6 @@ function buildPeerHoldCaution(defaultBranch: string, peerHeldFiles: readonly str
     `a switch carries those files onto '${defaultBranch}' or fails midway, stranding the peer's work. ` +
     `Wait for the peer's commit, then continue with the steps below.\n\n`
   )
-}
-
-async function resolvePeerHeldFiles(cwd: string, sessionId: string | undefined): Promise<string[]> {
-  try {
-    const status = await getGitStatusV2(cwd)
-    if (!status || status.lines.length === 0) return []
-    const ownership = await resolveSessionFileOwnership(cwd, sessionId, status.lines)
-    return ownership.editedByOthers
-  } catch {
-    return []
-  }
 }
 
 export function buildTrunkModeOutput(

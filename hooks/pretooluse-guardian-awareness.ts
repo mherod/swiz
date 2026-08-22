@@ -18,6 +18,7 @@ import {
 } from "../src/SwizHook.ts"
 import { shellHookInputSchema } from "../src/schemas.ts"
 import { isShellTool } from "../src/tool-matchers.ts"
+import { resolvePeerHeldFiles } from "../src/utils/session-file-ownership.ts"
 import { gitSubcommandRe, stripQuotedShellStrings } from "../src/utils/shell-patterns.ts"
 
 const GIT_ADD_RE = gitSubcommandRe("add\\b")
@@ -41,18 +42,39 @@ function avoidanceMessage(evidence: Exclude<SandboxAttemptEvidence, "permission-
   ].join("\n")
 }
 
-function gitAddAvoidanceMessage(recentDenialCount: number): string {
+/**
+ * The commit -a route is only offered when no other live session holds dirty
+ * files here: `git status` renders a peer's tracked modifications identically
+ * to the session's own, so the "no unrelated tracked changes" condition is
+ * unfalsifiable from status output alone and `commit -a` would stage the
+ * peer's work (issue #843, finding A).
+ */
+export function gitAddAvoidanceMessage(
+  recentDenialCount: number,
+  peerHeldFiles: readonly string[] = []
+): string {
   const denialNumber = Math.min(recentDenialCount + 1, GIT_ADD_GUARDIAN_DENIAL_LIMIT)
+  const commitRoute =
+    peerHeldFiles.length > 0
+      ? [
+          "Do not use `git commit -a` here: another live session holds uncommitted edits " +
+            `(${peerHeldFiles.slice(0, 10).join(", ")}${peerHeldFiles.length > 10 ? ", …" : ""}), ` +
+            "and `-a` would stage their tracked modifications as yours.",
+          "Retry only the same narrowly scoped `git add` for your own files.",
+        ]
+      : [
+          "Prefer the non-escalating commit route after checking `git status --short` and `git diff --check`:",
+          '  - If every intended file is already tracked, no unrelated tracked changes would be included, and no intended file is untracked, run the normal commit workflow and then `git commit -a -m "<message>"`.',
+          "  - `git commit -a` stages tracked modifications and deletions inside the already-approved commit path; the pre-commit hook validates the final index.",
+          "  - If any intended file is untracked or unrelated tracked changes exist, do not use `git commit -a`; retry only the same narrowly scoped `git add`.",
+        ]
   return [
     `${GIT_ADD_GUARDIAN_DENIAL_MARKER} only needs escalation because the sandbox cannot write Git's index lock.`,
     "",
     `Guardian denial ${denialNumber} of at most ${GIT_ADD_GUARDIAN_DENIAL_LIMIT} in the last minute.`,
     "Retry permitted by guard: you may retry this same narrowly scoped `git add` after this denial.",
     "After three guardian denials in one minute, this guard stands down so the next retry can reach the approval path.",
-    "Prefer the non-escalating commit route after checking `git status --short` and `git diff --check`:",
-    '  - If every intended file is already tracked, no unrelated tracked changes would be included, and no intended file is untracked, run the normal commit workflow and then `git commit -a -m "<message>"`.',
-    "  - `git commit -a` stages tracked modifications and deletions inside the already-approved commit path; the pre-commit hook validates the final index.",
-    "  - If any intended file is untracked or unrelated tracked changes exist, do not use `git commit -a`; retry only the same narrowly scoped `git add`.",
+    ...commitRoute,
   ].join("\n")
 }
 
@@ -63,7 +85,7 @@ function gitAddRetryContext(): string {
   ].join("\n")
 }
 
-export function evaluateGuardianAwareness(input: unknown): SwizHookOutput {
+export async function evaluateGuardianAwareness(input: unknown): Promise<SwizHookOutput> {
   const parsed = shellHookInputSchema.parse(input)
   if (!isShellTool(parsed.tool_name ?? "")) return preToolUseAllow("")
 
@@ -80,7 +102,13 @@ export function evaluateGuardianAwareness(input: unknown): SwizHookOutput {
           { rephrase: false }
         )
       }
-      return preToolUseDeny(gitAddAvoidanceMessage(context.recentGitAddGuardianDenialCount))
+      const peerHeldFiles = await resolvePeerHeldFiles(
+        parsed.cwd ?? process.cwd(),
+        parsed.session_id
+      )
+      return preToolUseDeny(
+        gitAddAvoidanceMessage(context.recentGitAddGuardianDenialCount, peerHeldFiles)
+      )
     }
 
     return preToolUseAllowWithContext(

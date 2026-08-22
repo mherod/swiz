@@ -117,6 +117,26 @@ export async function resolveSessionFileOwnership(
   }
 }
 
+/**
+ * Dirty files confirmed to belong to another live session; [] when the tree is
+ * clean, ownership cannot be resolved, or any step fails (fail-open).
+ * Shared by hooks that must not sweep or carry peer WIP (issues #841–#843).
+ */
+export async function resolvePeerHeldFiles(
+  cwd: string,
+  sessionId: string | undefined
+): Promise<string[]> {
+  try {
+    const { getGitStatusV2 } = await import("./git-utils.ts")
+    const status = await getGitStatusV2(cwd)
+    if (!status || status.lines.length === 0) return []
+    const ownership = await resolveSessionFileOwnership(cwd, sessionId, status.lines)
+    return ownership.editedByOthers
+  } catch {
+    return []
+  }
+}
+
 function appendFileSection(
   sections: string[],
   heading: string,

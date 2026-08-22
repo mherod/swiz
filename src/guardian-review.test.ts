@@ -304,7 +304,7 @@ describe("guardian review transcript detection", () => {
     expect(payload._guardianReview).toEqual(context!)
   })
 
-  test("allows the hook decision after a doubly encoded sandbox failure", () => {
+  test("allows the hook decision after a doubly encoded sandbox failure", async () => {
     const payload = {
       tool_name: "Bash",
       tool_input: { command: COMMAND },
@@ -320,7 +320,7 @@ describe("guardian review transcript detection", () => {
       ],
     })
 
-    const specific = getHookSpecificOutput(evaluateGuardianAwareness(payload))
+    const specific = getHookSpecificOutput(await evaluateGuardianAwareness(payload))
     expect(specific?.permissionDecision).toBe("allow")
     expect(specific?.additionalContext).toContain("narrowly scoped")
   })
