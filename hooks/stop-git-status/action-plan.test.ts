@@ -41,9 +41,22 @@ describe("buildGitWorkflowSections ownership gating (issue #841)", () => {
   test("peer edits present: stages only session-owned paths, never the whole tree", () => {
     const plan = planFor({ ownership: PEER_OWNERSHIP })
     expect(plan).not.toContain("git add .")
-    expect(plan).toContain("git add mine.ts, also-mine.ts")
+    // Space-joined so the advice is copy-runnable — comma-joined prose would
+    // glue pathspecs together ("mine.ts,").
+    expect(plan).toContain("git add mine.ts also-mine.ts")
     expect(plan).toContain("Leave the peer session's files uncommitted: theirs.ts")
     expect(plan).toContain("another live session has edits in this checkout")
+  })
+
+  test("paths with whitespace are quoted in the staged-command advice", () => {
+    const plan = planFor({
+      ownership: {
+        editedByUs: ["my file.ts", "plain.ts"],
+        editedByOthers: ["theirs.ts"],
+        unattributed: [],
+      },
+    })
+    expect(plan).toContain('git add \\"my file.ts\\" plain.ts')
   })
 
   test("peer edits present: unattributed files get ownership guidance, not staging", () => {

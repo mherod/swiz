@@ -19,6 +19,21 @@ function formatPathList(paths: readonly string[], max = 20): string {
 }
 
 /**
+ * Bounded, space-joined path list that stays copy-runnable as command
+ * arguments — comma-joined prose glued pathspecs together ("mine.ts,").
+ * Paths containing whitespace are quoted.
+ */
+function formatPathArgs(paths: readonly string[], max = 20): string {
+  const shown = paths
+    .slice(0, max)
+    .map((path) => (/\s/.test(path) ? JSON.stringify(path) : path))
+    .join(" ")
+  return paths.length > max
+    ? `${shown} # and ${paths.length - max} more — list with git status`
+    : shown
+}
+
+/**
  * Check if collaboration mode allows direct push to main/master.
  */
 function allowsDirectMainCollaborationWorkflow(mode: CollaborationMode): boolean {
@@ -112,7 +127,7 @@ function buildCommitSteps(
   if (ownership && ownership.editedByOthers.length > 0) {
     subSteps.push(
       ownership.editedByUs.length > 0
-        ? `git add ${formatPathList(ownership.editedByUs)}`
+        ? `git add ${formatPathArgs(ownership.editedByUs)}`
         : "No dirty files are recorded to this session — do not stage anything yet.",
       'git commit -m "<type>(<scope>): <summary>"',
       `Leave the peer session's files uncommitted: ${formatPathList(ownership.editedByOthers)}`
