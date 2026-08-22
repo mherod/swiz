@@ -11,6 +11,9 @@ interface DriverResult {
   bareUpdateOk: boolean
   unknownBareIsError: boolean
   unknownPrefixedIsError: boolean
+  edgeId: string
+  storedBlocks: string[] | null
+  blocksAfterRemove: string[] | null
 }
 
 /**
@@ -50,6 +53,28 @@ async function runDriver(): Promise<DriverResult> {
       { taskId: "#zzzz-99", status: "pending" },
       cwd
     )
+    const edgeFixture = await runMcpTool(
+      "TaskCreate",
+      { subject: "Verify the edge fixture wiring", description: "note: edge normalization probe" },
+      cwd
+    )
+    const edgeId = /Created #(\\S+)/.exec(textOf(edgeFixture))?.[1] ?? ""
+    await runMcpTool("TaskUpdate", { taskId: createdId, addBlocks: ["#" + edgeId] }, cwd)
+    const { readdir } = await import("node:fs/promises")
+    const tasksRoot = process.env.HOME + "/.claude/tasks"
+    const readBlocks = async () => {
+      for (const projectDir of await readdir(tasksRoot)) {
+        for (const file of await readdir(tasksRoot + "/" + projectDir)) {
+          if (!file.endsWith(".json")) continue
+          const data = await Bun.file(tasksRoot + "/" + projectDir + "/" + file).json()
+          if (data.id === createdId) return data.blocks ?? null
+        }
+      }
+      return null
+    }
+    const storedBlocks = await readBlocks()
+    await runMcpTool("TaskUpdate", { taskId: createdId, removeBlocks: [edgeId] }, cwd)
+    const blocksAfterRemove = await readBlocks()
     console.log(
       JSON.stringify({
         createdId,
@@ -58,6 +83,9 @@ async function runDriver(): Promise<DriverResult> {
         bareUpdateOk: !bare.isError,
         unknownBareIsError: prefixed.isError !== true && unknownBare.isError === true,
         unknownPrefixedIsError: unknownPrefixed.isError === true,
+        edgeId,
+        storedBlocks,
+        blocksAfterRemove,
       })
     )
   `
@@ -87,5 +115,10 @@ describe("runTaskUpdateTool id normalization (issue #846)", () => {
     // Controls: a genuinely unknown id still errors in both forms.
     expect(result.unknownBareIsError).toBe(true)
     expect(result.unknownPrefixedIsError).toBe(true)
+    // Edge arrays normalize the rendered "#" form on write, and bare-form
+    // removal matches the stored edge (store-corruption regression).
+    expect(result.edgeId).not.toBe("")
+    expect(result.storedBlocks).toEqual([result.edgeId])
+    expect(result.blocksAfterRemove).toEqual([])
   }, 30000)
 })

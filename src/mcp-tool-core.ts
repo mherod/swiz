@@ -164,6 +164,22 @@ export type TaskUpdateToolInput = {
   removeBlockedBy?: string[]
 }
 
+/**
+ * Strip the rendered "#" prefix from every id in an edge array and dedupe.
+ * The change labels render edges as "blocks +#id", inviting exact copy-back;
+ * a raw spread would let "#id" land in the store, where raw-equality removal
+ * can never match it again (issue #846 follow-up).
+ */
+function normalizeTaskIdList(ids: readonly string[]): string[] {
+  return [...new Set(ids.map((id) => id.replace(/^#/, "")))]
+}
+
+/** Remove ids from an edge array, tolerating "#"-prefixed entries on either side. */
+function removeTaskIds(edges: readonly string[], remove: readonly string[]): string[] {
+  const removeSet = new Set(normalizeTaskIdList(remove))
+  return edges.filter((id) => !removeSet.has(id.replace(/^#/, "")))
+}
+
 /** Apply the non-status fields of an update, returning a label per field actually changed. */
 function applyTaskFieldUpdates(task: Task, input: TaskUpdateToolInput): string[] {
   const changes: string[] = []
@@ -176,20 +192,22 @@ function applyTaskFieldUpdates(task: Task, input: TaskUpdateToolInput): string[]
     changes.push("description")
   }
   if (input.addBlocks) {
-    task.blocks = [...new Set([...task.blocks, ...input.addBlocks])]
-    changes.push(`blocks +#${input.addBlocks.join(", #")}`)
+    const added = normalizeTaskIdList(input.addBlocks)
+    task.blocks = [...new Set([...task.blocks, ...added])]
+    changes.push(`blocks +#${added.join(", #")}`)
   }
   if (input.removeBlocks) {
-    task.blocks = task.blocks.filter((id) => !input.removeBlocks!.includes(id))
-    changes.push(`blocks -#${input.removeBlocks.join(", #")}`)
+    task.blocks = removeTaskIds(task.blocks, input.removeBlocks)
+    changes.push(`blocks -#${normalizeTaskIdList(input.removeBlocks).join(", #")}`)
   }
   if (input.addBlockedBy) {
-    task.blockedBy = [...new Set([...task.blockedBy, ...input.addBlockedBy])]
-    changes.push(`blockedBy +#${input.addBlockedBy.join(", #")}`)
+    const added = normalizeTaskIdList(input.addBlockedBy)
+    task.blockedBy = [...new Set([...task.blockedBy, ...added])]
+    changes.push(`blockedBy +#${added.join(", #")}`)
   }
   if (input.removeBlockedBy) {
-    task.blockedBy = task.blockedBy.filter((id) => !input.removeBlockedBy!.includes(id))
-    changes.push(`blockedBy -#${input.removeBlockedBy.join(", #")}`)
+    task.blockedBy = removeTaskIds(task.blockedBy, input.removeBlockedBy)
+    changes.push(`blockedBy -#${normalizeTaskIdList(input.removeBlockedBy).join(", #")}`)
   }
   return changes
 }
