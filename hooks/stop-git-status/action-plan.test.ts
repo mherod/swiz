@@ -42,8 +42,9 @@ describe("buildGitWorkflowSections ownership gating (issue #841)", () => {
     const plan = planFor({ ownership: PEER_OWNERSHIP })
     expect(plan).not.toContain("git add .")
     // Space-joined so the advice is copy-runnable — comma-joined prose would
-    // glue pathspecs together ("mine.ts,").
-    expect(plan).toContain("git add mine.ts also-mine.ts")
+    // glue pathspecs together ("mine.ts,") — and `--` ends option parsing so
+    // a leading-dash filename can never become a git option.
+    expect(plan).toContain("git add -- mine.ts also-mine.ts")
     expect(plan).toContain("Leave the peer session's files uncommitted: theirs.ts")
     expect(plan).toContain("another live session has edits in this checkout")
   })
@@ -56,7 +57,7 @@ describe("buildGitWorkflowSections ownership gating (issue #841)", () => {
         unattributed: [],
       },
     })
-    expect(plan).toContain("git add 'my file.ts' plain.ts")
+    expect(plan).toContain("git add -- 'my file.ts' plain.ts")
   })
 
   test("metacharacter paths are single-quoted even without whitespace", () => {
@@ -68,7 +69,18 @@ describe("buildGitWorkflowSections ownership gating (issue #841)", () => {
       },
     })
     // Single quotes neutralize $, backticks, and ; — double quotes would not.
-    expect(plan).toContain("git add 'a$(cmd).ts' 'b`tick`.ts' 'c;rm.ts'")
+    expect(plan).toContain("git add -- 'a$(cmd).ts' 'b`tick`.ts' 'c;rm.ts'")
+  })
+
+  test("option-like paths are quoted and fenced behind --", () => {
+    const plan = planFor({
+      ownership: {
+        editedByUs: ["-rf.ts", "=cmd.ts"],
+        editedByOthers: ["theirs.ts"],
+        unattributed: [],
+      },
+    })
+    expect(plan).toContain("git add -- '-rf.ts' '=cmd.ts'")
   })
 
   test("embedded single quotes use the POSIX escape splice", () => {
@@ -79,7 +91,7 @@ describe("buildGitWorkflowSections ownership gating (issue #841)", () => {
         unattributed: [],
       },
     })
-    expect(plan).toContain("git add 'it'\\\\''s.ts'")
+    expect(plan).toContain("git add -- 'it'\\\\''s.ts'")
   })
 
   test("peer edits present: unattributed files get ownership guidance, not staging", () => {

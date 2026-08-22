@@ -118,8 +118,12 @@ function appendUnquotedChar(state: SegmentSplitState, command: string, index: nu
   return index
 }
 
-/** Characters that never need quoting as a POSIX shell word. */
-const SHELL_SAFE_ARG_RE = /^[A-Za-z0-9._/@%+=:,-]+$/
+/**
+ * Characters that never need quoting as a POSIX shell word. A leading "-"
+ * (option-like) or "=" (zsh =cmd expansion) forces quoting even though the
+ * characters are otherwise safe mid-word.
+ */
+const SHELL_SAFE_ARG_RE = /^(?![=-])[A-Za-z0-9._/@%+=:,-]+$/
 
 /**
  * Quote a value for safe copy-paste as a single POSIX shell argument.

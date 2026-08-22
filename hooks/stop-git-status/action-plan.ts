@@ -127,7 +127,9 @@ function buildCommitSteps(
   if (ownership && ownership.editedByOthers.length > 0) {
     subSteps.push(
       ownership.editedByUs.length > 0
-        ? `git add ${formatPathArgs(ownership.editedByUs)}`
+        ? // `--` ends option parsing: a filename starting with "-" must not
+          // become a git option (quoting alone cannot prevent that).
+          `git add -- ${formatPathArgs(ownership.editedByUs)}`
         : "No dirty files are recorded to this session — do not stage anything yet.",
       'git commit -m "<type>(<scope>): <summary>"',
       `Leave the peer session's files uncommitted: ${formatPathList(ownership.editedByOthers)}`

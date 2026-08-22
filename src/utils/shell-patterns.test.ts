@@ -1,9 +1,33 @@
 import { describe, expect, test } from "bun:test"
 import {
   hasGitStashMutation,
+  quotePosixShellArg,
   splitShellSegments,
   stripQuotedShellStrings,
 } from "./shell-patterns.ts"
+
+describe("quotePosixShellArg", () => {
+  test("safe words pass through bare", () => {
+    expect(quotePosixShellArg("src/mine.ts")).toBe("src/mine.ts")
+  })
+
+  test("metacharacters force single quoting even without whitespace", () => {
+    expect(quotePosixShellArg("a$(cmd).ts")).toBe("'a$(cmd).ts'")
+    expect(quotePosixShellArg("b`tick`.ts")).toBe("'b`tick`.ts'")
+  })
+
+  test("option-like and zsh-expansion-prone leading characters are quoted", () => {
+    expect(quotePosixShellArg("-rf.ts")).toBe("'-rf.ts'")
+    expect(quotePosixShellArg("=cmd.ts")).toBe("'=cmd.ts'")
+    // Control: the same characters mid-word stay bare.
+    expect(quotePosixShellArg("a-b=c.ts")).toBe("a-b=c.ts")
+  })
+
+  test("embedded single quotes use the POSIX splice and empty strings quote", () => {
+    expect(quotePosixShellArg("it's.ts")).toBe("'it'\\''s.ts'")
+    expect(quotePosixShellArg("")).toBe("''")
+  })
+})
 
 describe("stripQuotedShellStrings", () => {
   test("preserves empty quote pairs when requested", () => {
