@@ -193,6 +193,42 @@ describe("handleSessionTasks unknown session", () => {
 })
 
 describe("handleProjectsList compat shim", () => {
+  test("keeps project discovery available when process inspection fails", async () => {
+    const selectedProjectCwd = process.cwd()
+    const ctx: SessionRoutesContext = {
+      touchProject: () => {},
+      registerProjectWatchers: () => {},
+      getKnownProjects: () => [selectedProjectCwd],
+      getProjectLastSeen: () => 123,
+      getProjectStatusLine: async () => "ready",
+      listProjectSessions: async () => ({
+        sessionCount: 1,
+        sessions: [{ id: "selected-session", provider: "claude", mtime: 123 }],
+      }),
+      getSessionData: async () => ({ messages: [], toolStats: [] }),
+      getSessionTasks: async () => null,
+      getProjectTasks: async () => ({
+        tasks: [],
+        summary: { total: 0, open: 0, completed: 0, cancelled: 0 },
+      }),
+      getAgentProcessSnapshot: async () => {
+        throw new Error("process inspection unavailable")
+      },
+    }
+    const req = new Request("http://localhost/sessions/projects", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ selectedProjectCwd }),
+    })
+
+    const res = await handleSessionRoutes(req, new URL(req.url), ctx)
+    const body = await res!.json()
+
+    expect(res!.status).toBe(200)
+    expect(body.projects[0].cwd).toBe(selectedProjectCwd)
+    expect(body.projects[0].sessions[0].processAlive).toBe(false)
+  })
+
   test("includes and touches an explicitly selected project on the first request", async () => {
     const selectedProjectCwd = process.cwd()
     const registered: string[] = []

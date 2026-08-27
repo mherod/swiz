@@ -38,8 +38,13 @@ export function renderInline(text: string): string {
   out = out.replace(/(?<!\*)\*([^*]+)\*(?!\*)/g, "<em>$1</em>")
 
   // 5. Restore placeholders
-  while (/__PLACEHOLDER_/.test(out)) {
-    out = out.replace(/__PLACEHOLDER_(\d+)__/g, (_, i) => placeholders[Number(i)]!)
+  for (let remaining = placeholders.length; remaining > 0; remaining--) {
+    const next = out.replace(
+      /__PLACEHOLDER_(\d+)__/g,
+      (match, i) => placeholders[Number(i)] ?? match
+    )
+    if (next === out) break
+    out = next
   }
 
   return out

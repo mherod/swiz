@@ -136,7 +136,10 @@ async function handleProjectsList(req: Request, ctx: SessionRoutesContext): Prom
       .sort((a, b) => b.lastSeenAt - a.lastSeenAt)
       .slice(0, limitProjects)
 
-    const agentSnapshot = await ctx.getAgentProcessSnapshot()
+    const agentSnapshotPromise = ctx.getAgentProcessSnapshot().catch(() => ({
+      providers: {},
+      pidCwds: {},
+    }))
 
     const allProjects = await Promise.all(
       ordered.map(async ({ cwd, lastSeenAt }) => {
@@ -148,6 +151,7 @@ async function handleProjectsList(req: Request, ctx: SessionRoutesContext): Prom
             cwd,
             pinnedSessionId ?? firstSession?.id
           )
+          const agentSnapshot = await agentSnapshotPromise
           return {
             cwd,
             name: cwd.split("/").at(-1) ?? cwd,

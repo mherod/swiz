@@ -21,6 +21,25 @@ async function createSession(name: string, timestamp: string) {
 }
 
 describe("sessionDataCache", () => {
+  test("coalesces concurrent reads of the same transcript", async () => {
+    await mkdir(TEST_DIR, { recursive: true })
+    try {
+      const session = await createSession("concurrent-session", "2026-08-26T10:00:00.000Z")
+      const results = await Promise.all([
+        sessionDataCache.get(session, TEST_DIR),
+        sessionDataCache.get(session, TEST_DIR),
+        sessionDataCache.get(session, TEST_DIR),
+      ])
+
+      expect(results[0]).not.toBeNull()
+      expect(results[1]).toBe(results[0])
+      expect(results[2]).toBe(results[0])
+    } finally {
+      sessionDataCache.invalidateAll()
+      await rm(TEST_DIR, { recursive: true, force: true })
+    }
+  })
+
   test("assigns a stable fallback to malformed message timestamps", async () => {
     await rm(TEST_DIR, { recursive: true, force: true })
     await mkdir(TEST_DIR, { recursive: true })

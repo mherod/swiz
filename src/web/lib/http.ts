@@ -1,4 +1,5 @@
 const MAX_ATTEMPTS = 3
+const REQUEST_TIMEOUT_MS = 5000
 const RETRYABLE_HTTP_STATUSES = new Set([408, 425, 429, 500, 502, 503, 504])
 
 class JsonRequestError extends Error {
@@ -76,7 +77,12 @@ async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
   let lastError: unknown = null
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt += 1) {
     try {
-      const response = await fetch(url, init)
+      const response = await fetch(url, {
+        ...init,
+        signal: init?.signal
+          ? AbortSignal.any([init.signal, AbortSignal.timeout(REQUEST_TIMEOUT_MS)])
+          : AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      })
       return await parseJsonResponse<T>(response, url)
     } catch (error) {
       lastError = error

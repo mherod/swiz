@@ -45,6 +45,16 @@ export interface AgentProcessesResponse {
   providers?: Record<string, number[]>
 }
 
+function applyFulfilled<T>(result: PromiseSettledResult<T>, apply: (value: T) => void): void {
+  if (result.status === "fulfilled") apply(result.value)
+}
+
+function settledError(results: PromiseSettledResult<unknown>[]): string {
+  const failure = results.find((result) => result.status === "rejected")
+  if (!failure || failure.status !== "rejected") return ""
+  return failure.reason instanceof Error ? failure.reason.message : String(failure.reason)
+}
+
 export function createSingleFlight(task: () => Promise<void>): () => Promise<void> {
   let active: Promise<void> | null = null
   return () => {
@@ -109,7 +119,7 @@ export function useDashboardOverviewPolling(deps: OverviewPollingDeps): void {
     async function fetchAllData() {
       const project = getQueryParam("project")
       const session = getQueryParam("session")
-      const [m, cs, w, pr, ap, ad] = await Promise.all([
+      const [m, cs, w, pr, ap, ad] = await Promise.allSettled([
         fetchJson<MetricsResponse>("/metrics"),
         fetchJson<Record<string, number>>("/cache/status"),
         fetchJson<WatchesResponse>("/ci-watches"),
@@ -130,29 +140,30 @@ export function useDashboardOverviewPolling(deps: OverviewPollingDeps): void {
     function applyUpdates(data: Awaited<ReturnType<typeof fetchAllData>>) {
       const { m, cs, w, pr, ap, ad } = data
       const coreSnapshot = JSON.stringify({ m, w, pr, ap, ad })
-      const cacheSnapshot = JSON.stringify(cs)
+      const cacheSnapshot = cs.status === "fulfilled" ? JSON.stringify(cs.value) : null
       const coreChanged = coreSnapshot !== prevCoreSnapshotRef.current
       const cacheChanged = cacheSnapshot !== prevCacheSnapshotRef.current
       if (!coreChanged && !cacheChanged) return
       if (cacheChanged) {
-        prevCacheSnapshotRef.current = cacheSnapshot
-        depsRef.current.onCacheStatus(cs)
+        applyFulfilled(cs, (value) => {
+          prevCacheSnapshotRef.current = JSON.stringify(value)
+          depsRef.current.onCacheStatus(value)
+        })
       }
       if (!coreChanged) return
       prevCoreSnapshotRef.current = coreSnapshot
-      const loadedProjects = pr.projects ?? []
       const currentDeps = depsRef.current
-      currentDeps.onMetrics(m)
-      currentDeps.onWatches(w)
-      currentDeps.onProjects(loadedProjects)
-      currentDeps.onAgentProcesses(ap.providers ?? {})
-      currentDeps.onActiveDispatches(ad.active ?? [])
-      currentDeps.onError("")
+      applyFulfilled(m, currentDeps.onMetrics)
+      applyFulfilled(w, currentDeps.onWatches)
+      applyFulfilled(pr, (value) => currentDeps.onProjects(value.projects ?? []))
+      applyFulfilled(ap, (value) => currentDeps.onAgentProcesses(value.providers ?? {}))
+      applyFulfilled(ad, (value) => currentDeps.onActiveDispatches(value.active ?? []))
+      currentDeps.onError(settledError([m, cs, w, pr, ap, ad]))
       currentDeps.onLastUpdated(new Date().toISOString())
 
-      if (!initialLoadDone.current) {
+      if (!initialLoadDone.current && pr.status === "fulfilled") {
         initialLoadDone.current = true
-        currentDeps.onInitialLoad(loadedProjects)
+        currentDeps.onInitialLoad(pr.value.projects ?? [])
       }
     }
 
@@ -253,7 +264,7 @@ export function useSessionPolling(deps: SessionPollingDeps): void {
 
     const pollSessionData = createSingleFlight(async () => {
       try {
-        const [messagesResult, tasksResult, projectTasksResult] = await Promise.all([
+        const [messagesResult, tasksResult, projectTasksResult] = await Promise.allSettled([
           postJson<{
             messages: SessionMessage[]
             toolStats?: ToolStat[]
@@ -274,21 +285,29 @@ export function useSessionPolling(deps: SessionPollingDeps): void {
           }),
         ])
 
-        const msgs = messagesResult.messages ?? []
-        const snap = JSON.stringify(msgs)
-        if (snap !== messagesPrevSnapshotRef.current) {
-          messagesPrevSnapshotRef.current = snap
-          const fresh = computeFreshMessageKeys(msgs, knownKeysRef.current)
-          knownKeysRef.current = new Set(msgs.map(msgKey))
-          handleMessagesUpdate(msgs, messagesResult.toolStats, fresh, messagesResult.tokenStats)
+        if (messagesResult.status === "fulfilled") {
+          const msgs = messagesResult.value.messages ?? []
+          const snap = JSON.stringify(msgs)
+          if (snap !== messagesPrevSnapshotRef.current) {
+            messagesPrevSnapshotRef.current = snap
+            const fresh = computeFreshMessageKeys(msgs, knownKeysRef.current)
+            knownKeysRef.current = new Set(msgs.map(msgKey))
+            handleMessagesUpdate(
+              msgs,
+              messagesResult.value.toolStats,
+              fresh,
+              messagesResult.value.tokenStats
+            )
+          }
         }
 
         const currentDeps = depsRef.current
-        currentDeps.onTasks(tasksResult.tasks ?? [], tasksResult.summary ?? null)
-        currentDeps.onProjectTasks(
-          projectTasksResult.tasks ?? [],
-          projectTasksResult.summary ?? null
-        )
+        applyFulfilled(tasksResult, (value) => {
+          currentDeps.onTasks(value.tasks ?? [], value.summary ?? null)
+        })
+        applyFulfilled(projectTasksResult, (value) => {
+          currentDeps.onProjectTasks(value.tasks ?? [], value.summary ?? null)
+        })
       } catch {
         // ignore polling errors
       }

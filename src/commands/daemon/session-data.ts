@@ -139,6 +139,7 @@ function isCacheFresh(
 
 class SessionDataCache {
   private entries = new LRUCache<string, CachedSessionData>({ max: 200 })
+  private readonly inflight = new Map<string, Promise<CachedSessionData | null>>()
 
   private buildFromEntries(
     entries: ReturnType<typeof parseTranscriptEntries>,
@@ -351,6 +352,20 @@ class SessionDataCache {
   }
 
   async get(
+    session: Pick<Session, "path" | "format">,
+    cwd?: string
+  ): Promise<CachedSessionData | null> {
+    const pending = this.inflight.get(session.path)
+    if (pending) return pending
+
+    const loading = this.load(session, cwd).finally(() => {
+      this.inflight.delete(session.path)
+    })
+    this.inflight.set(session.path, loading)
+    return loading
+  }
+
+  private async load(
     session: Pick<Session, "path" | "format">,
     cwd?: string
   ): Promise<CachedSessionData | null> {
