@@ -44,7 +44,7 @@ async function resolvePidCwds(allPids: number[]): Promise<Record<number, string>
   for (let i = 0; i < allPids.length; i += chunkSize) {
     const pidChunk = allPids.slice(i, i + chunkSize)
     try {
-      const lsofProc = Bun.spawn(["lsof", "-p", pidChunk.join(","), "-d", "cwd", "-Fn"], {
+      const lsofProc = Bun.spawn(["lsof", "-a", "-p", pidChunk.join(","), "-d", "cwd", "-Fn"], {
         stdout: "pipe",
         stderr: "pipe",
       })
@@ -90,6 +90,13 @@ export function isClaudeCliExecutable(executable: string): boolean {
   return executableBasename(executable) === "claude"
 }
 
+export function isCodexCliExecutable(command: string, executable: string): boolean {
+  if (command.includes("/contents/frameworks/") || command.includes(".app/contents/macos/")) {
+    return false
+  }
+  return executableBasename(executable) === "codex"
+}
+
 /** Pluggable provider classifier — order matters (first match wins). */
 export interface ProviderClassifier {
   id: string
@@ -99,7 +106,7 @@ export interface ProviderClassifier {
 /** Registry of provider classifiers. Add new providers here instead of editing an if-chain. */
 export const PROVIDER_CLASSIFIERS: ProviderClassifier[] = [
   { id: "claude", match: (_cmd, exe) => isClaudeCliExecutable(exe) },
-  { id: "codex", match: (cmd) => cmd.includes("/codex") || cmd.includes(" codex ") },
+  { id: "codex", match: (cmd, exe) => isCodexCliExecutable(cmd, exe) },
   { id: "gemini", match: (cmd) => cmd.includes("gemini") },
   {
     id: "cursor",

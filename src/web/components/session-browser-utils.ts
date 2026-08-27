@@ -73,6 +73,7 @@ export function parseProjectStatusLine(statusLine?: string): ParsedStatusToken[]
   })
   return parsed.filter((token) => {
     if (token.tone === "state") return false
+    if (/^0\s+(?:issues?|prs?)$/i.test(token.label)) return false
     if (token.tone !== "neutral") return true
     // Drop dense git shorthand tokens like "± main ~10 ?1 $3".
     if (/[±~?$]/.test(token.label)) return false
@@ -501,6 +502,32 @@ export function toolCategoryIcon(category: ToolCategory): string {
 export interface WrappedToolPresentation {
   name: string
   category: ToolCategory
+}
+
+export interface ShellReadPresentation extends WrappedToolPresentation {
+  path: string
+  summary: string
+}
+
+function extractSingleCatPath(code: string): string | null {
+  const normalized = code.trim()
+  const wrappedCommand = /\b(?:cmd|command)\s*:\s*(["'])(.*?)\1/.exec(normalized)?.[2]
+  const command = wrappedCommand ?? normalized
+  const match = /^cat\s+(?:"([^"]+)"|'([^']+)'|([^\s;&|<>]+))\s*$/.exec(command)
+  return match?.[1] ?? match?.[2] ?? match?.[3] ?? null
+}
+
+export function inferShellReadPresentation(code: string): ShellReadPresentation | null {
+  const path = extractSingleCatPath(code)
+  if (!path) return null
+
+  const skillName = /\/skills\/([^/]+)\/SKILL\.md$/.exec(path)?.[1]
+  if (skillName) return { name: "Skill read", category: "skill", path, summary: skillName }
+
+  const memoryPath = /\/\.codex\/memories\/(.+)$/.exec(path)?.[1]
+  if (memoryPath) return { name: "Memory read", category: "file", path, summary: memoryPath }
+
+  return null
 }
 
 /**

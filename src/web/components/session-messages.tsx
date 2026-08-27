@@ -25,6 +25,7 @@ import {
   compactPath,
   formatTime,
   groupMessages,
+  inferShellReadPresentation,
   inferWrappedToolPresentation,
   isInternalToolName,
   parseFileToolCall,
@@ -336,17 +337,50 @@ function codeFieldFromJson(rawJson: string | null): string | null {
   }
 }
 
+function resolveCodeToolPresentation(code: string, name: string) {
+  if (name.trim().toLowerCase() !== "exec") {
+    return {
+      category: "shell" as const,
+      displayName: name,
+      preview: summarizeCodeCall(code),
+      showIcon: false,
+    }
+  }
+
+  const shellRead = inferShellReadPresentation(code)
+  if (shellRead) {
+    return {
+      category: shellRead.category,
+      displayName: shellRead.name,
+      preview: shellRead.summary,
+      showIcon: true,
+    }
+  }
+
+  const wrappedTool = inferWrappedToolPresentation(code)
+  if (wrappedTool) {
+    return {
+      category: wrappedTool.category,
+      displayName: wrappedTool.name,
+      preview: `via ${name} · ${summarizeCodeCall(code, wrappedTool.name)}`,
+      showIcon: true,
+    }
+  }
+
+  return {
+    category: "shell" as const,
+    displayName: name,
+    preview: summarizeCodeCall(code),
+    showIcon: false,
+  }
+}
+
 function CodeToolCall({ code, count, name }: { code: string; count: number; name: string }) {
-  const wrappedTool =
-    name.trim().toLowerCase() === "exec" ? inferWrappedToolPresentation(code) : null
-  const category = wrappedTool?.category ?? "shell"
-  const displayName = wrappedTool?.name ?? name
-  const summary = summarizeCodeCall(code, wrappedTool?.name)
-  const preview = wrappedTool ? `via ${name} · ${summary}` : summary
+  const { category, displayName, preview, showIcon } = resolveCodeToolPresentation(code, name)
   return (
     <details className={`tool-call tool-call-verbose tool-call-exec tool-category-${category}`}>
       <summary className="tool-call-exec-summary">
-        {wrappedTool ? (
+        {showIcon ? (
           <span className="tool-category-icon" aria-hidden="true">
             {toolCategoryIcon(category)}
           </span>

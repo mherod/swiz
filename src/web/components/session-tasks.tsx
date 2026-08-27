@@ -244,7 +244,8 @@ function TaskStoreGroupCard({
           {group.isProjectStore ? <span className="task-store-badge">project key</span> : null}
         </span>
         <span className="task-store-counts">
-          {group.openCount} open · {group.tasks.length} total
+          <strong className="task-store-open-count">{group.openCount} open</strong>
+          <span>{group.tasks.length} total</span>
         </span>
       </summary>
       <div className="task-store-body">
@@ -380,6 +381,34 @@ export function NewTaskForm({
   )
 }
 
+function ProjectTaskSummary({
+  summary,
+  visibleTaskCount,
+}: {
+  summary: SessionTaskSummary
+  visibleTaskCount: number
+}): ReactElement {
+  return (
+    <div className="project-task-summary">
+      <span className="project-task-summary-item project-task-summary-open">
+        <strong>{summary.open}</strong> open
+      </span>
+      <span className="project-task-summary-item">
+        <strong>{summary.completed}</strong> completed
+      </span>
+      {summary.cancelled > 0 ? (
+        <span className="project-task-summary-item">
+          <strong>{summary.cancelled}</strong> cancelled
+        </span>
+      ) : null}
+      <span className="project-task-summary-total">{summary.total} total</span>
+      {visibleTaskCount < summary.total ? (
+        <span className="project-task-summary-scope">Showing latest {visibleTaskCount}</span>
+      ) : null}
+    </div>
+  )
+}
+
 export function ProjectTasksSection({
   tasks,
   summary,
@@ -410,13 +439,7 @@ export function ProjectTasksSection({
           {collapsed ? "Expand" : "Collapse"}
         </button>
       </div>
-      {summary ? (
-        <p className="session-tasks-summary mb-3 sm:mb-2 mt-1">
-          {summary.total} total · {summary.open} open · {summary.completed} completed ·{" "}
-          {summary.cancelled} cancelled
-          {tasks.length < summary.total ? ` · showing latest ${tasks.length}` : ""}
-        </p>
-      ) : null}
+      {summary ? <ProjectTaskSummary summary={summary} visibleTaskCount={tasks.length} /> : null}
       {collapsed ? null : <ProjectTaskGroups tasks={tasks} cwd={cwd ?? null} loading={loading} />}
     </section>
   )

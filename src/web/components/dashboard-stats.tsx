@@ -10,7 +10,10 @@ interface EventMetric {
   name: string
   count: number
   avgMs: number
-  routes?: Record<string, { count?: number; stages?: Record<string, { avgMs?: number }> }>
+  routes?: Record<
+    string,
+    { count?: number; stages?: Record<string, { avgMs?: number; count?: number }> }
+  >
 }
 
 interface MonitorMetric {
@@ -47,71 +50,131 @@ interface ProjectPerformanceStatsProps {
   monitor?: MonitorMetric
 }
 
-function ProjectMetricExplainers() {
+type DiagnosticRoute = NonNullable<EventMetric["routes"]>[string]
+
+function hookStageMetric(route: DiagnosticRoute, stage: "syncHooks" | "asyncHooks") {
+  const metric = route.stages?.[stage]
+  return { avgMs: metric?.avgMs ?? 0, count: metric?.count ?? 0 }
+}
+
+function routeHookWallTime(route: DiagnosticRoute): number {
+  const syncHooks = hookStageMetric(route, "syncHooks")
+  const asyncHooks = hookStageMetric(route, "asyncHooks")
+  const wallTime = Math.max(syncHooks.avgMs, asyncHooks.avgMs)
+  const sampleCount = Math.max(syncHooks.count, asyncHooks.count) || route.count || 0
+  return wallTime * sampleCount
+}
+
+export function calculateHookWallTimeMs(events: EventMetric[]): number {
+  const totalDispatches = events.reduce((total, event) => total + event.count, 0)
+  if (totalDispatches === 0) return 0
+
+  const totalHookWallTime = events.reduce(
+    (total, event) =>
+      total +
+      Object.values(event.routes ?? {}).reduce(
+        (routeTotal, route) => routeTotal + routeHookWallTime(route),
+        0
+      ),
+    0
+  )
+
+  return Math.round(totalHookWallTime / totalDispatches)
+}
+
+export function formatDiagnosticDuration(value: number | undefined, sampleCount: number): string {
+  if (sampleCount <= 0 || value === undefined || !Number.isFinite(value)) return "Not recorded"
+  if (value === 0) return "<1 ms"
+  if (value < 1) return `${value.toFixed(2).replace(/0+$/, "").replace(/\.$/, "")} ms`
+  return `${Math.round(value)} ms`
+}
+
+function ProjectMetricExplainers({ hasMonitorSamples }: { hasMonitorSamples: boolean }) {
   return (
     <dl className="metric-explainers">
       <div>
-        <dt>Total / avg / hottest</dt>
-        <dd>Project dispatches since daemon start, weighted mean latency, and most-used event.</dd>
+        <dt>Dispatch activity</dt>
+        <dd>Project dispatches since daemon start, weighted response time, and busiest event.</dd>
       </div>
       <div>
-        <dt>Hooks avg</dt>
-        <dd>Dispatch-weighted time spent inside synchronous and asynchronous Swiz hooks.</dd>
+        <dt>Hook wall time</dt>
+        <dd>Average time occupied by concurrent hook stages across all project dispatches.</dd>
       </div>
-      <div>
-        <dt>Monitor avg / p95</dt>
-        <dd>Transcript scan duration; p95 is the slow-end threshold for 95% of scans.</dd>
-      </div>
+      {hasMonitorSamples ? (
+        <div>
+          <dt>Transcript monitor</dt>
+          <dd>Average scan duration and the threshold containing 95% of observed scans.</dd>
+        </div>
+      ) : null}
     </dl>
   )
 }
 
-function ProjectPerformanceStats({
+function ProjectDiagnosticOverview({
   totalDispatches,
   avgLatency,
   hottestEvent,
+}: Pick<ProjectPerformanceStatsProps, "totalDispatches" | "avgLatency" | "hottestEvent">) {
+  return (
+    <div className="project-diagnostic-overview">
+      <span className="project-diagnostic-metric">
+        <strong>
+          <NumberTicker value={totalDispatches} />
+        </strong>
+        <span>Project dispatches</span>
+      </span>
+      <span className="project-diagnostic-metric">
+        <strong>
+          <NumberTicker value={avgLatency} /> ms
+        </strong>
+        <span>Average response</span>
+      </span>
+      {hottestEvent !== "n/a" ? (
+        <span className="project-diagnostic-metric">
+          <strong>{hottestEvent}</strong>
+          <span>Busiest event</span>
+        </span>
+      ) : null}
+    </div>
+  )
+}
+
+function ProjectTimingBreakdown({
   hookRuntimeMs,
   monitor,
-}: ProjectPerformanceStatsProps) {
+}: Pick<ProjectPerformanceStatsProps, "hookRuntimeMs" | "monitor">) {
+  const monitorSamples = monitor?.count ?? 0
+  return (
+    <div className="project-diagnostic-timings">
+      <span className="project-diagnostic-timing">
+        <span>Hook wall time</span>
+        <strong>{hookRuntimeMs} ms</strong>
+      </span>
+      {monitorSamples > 0 ? (
+        <>
+          <span className="project-diagnostic-timing">
+            <span>Monitor average</span>
+            <strong>{formatDiagnosticDuration(monitor?.avgMs, monitorSamples)}</strong>
+          </span>
+          <span className="project-diagnostic-timing">
+            <span>Monitor p95</span>
+            <strong>{formatDiagnosticDuration(monitor?.p95Ms, monitorSamples)}</strong>
+          </span>
+        </>
+      ) : (
+        <span className="project-diagnostic-monitor-empty">No transcript scans recorded yet.</span>
+      )}
+    </div>
+  )
+}
+
+function ProjectPerformanceStats(props: ProjectPerformanceStatsProps) {
   return (
     <>
-      <div className="metric-kpis">
-        {totalDispatches > 0 && (
-          <span className="metric-kpi">
-            <strong>
-              <NumberTicker value={totalDispatches} />
-            </strong>{" "}
-            total
-          </span>
-        )}
-        {avgLatency > 0 && (
-          <span className="metric-kpi">
-            <strong>
-              <NumberTicker value={avgLatency} />
-              ms
-            </strong>{" "}
-            avg
-          </span>
-        )}
-        {hottestEvent !== "n/a" && (
-          <span className="metric-kpi">
-            <strong>{hottestEvent}</strong> hottest
-          </span>
-        )}
-      </div>
-      <p className="metric-note">Performance metrics for the current project scope.</p>
-      <div className="diagnostic-breakdown" title="Bounded daemon timing samples">
-        <span>
-          <strong>{hookRuntimeMs}ms</strong> hooks avg
-        </span>
-        <span>
-          <strong>{Math.round(monitor?.avgMs ?? 0)}ms</strong> monitor avg
-        </span>
-        <span>
-          <strong>{Math.round(monitor?.p95Ms ?? 0)}ms</strong> monitor p95
-        </span>
-      </div>
-      <ProjectMetricExplainers />
+      <p className="project-diagnostic-scope">Current project · Since daemon started</p>
+      <ProjectDiagnosticOverview {...props} />
+      <ProjectTimingBreakdown {...props} />
+      <ProjectMetricExplainers hasMonitorSamples={(props.monitor?.count ?? 0) > 0} />
     </>
   )
 }
@@ -144,31 +207,25 @@ function SessionKpis({
   totalToolCalls: number
 }) {
   return (
-    <div className="metric-kpis">
-      {(activeSession?.dispatches ?? 0) > 0 && (
-        <span className="metric-kpi">
-          <strong>
-            <NumberTicker value={activeSession?.dispatches ?? 0} />
-          </strong>{" "}
-          dispatches
-        </span>
-      )}
-      {loadedMessageCount > 0 && (
-        <span className="metric-kpi">
-          <strong>
-            <NumberTicker value={loadedMessageCount} />
-          </strong>{" "}
-          messages
-        </span>
-      )}
-      {totalToolCalls > 0 && (
-        <span className="metric-kpi">
-          <strong>
-            <NumberTicker value={totalToolCalls} />
-          </strong>{" "}
-          tool calls
-        </span>
-      )}
+    <div className="metric-kpis session-metric-kpis">
+      <span className="metric-kpi session-metric-kpi">
+        <strong>
+          <NumberTicker value={activeSession?.dispatches ?? 0} />
+        </strong>
+        <span className="session-metric-label">Dispatches</span>
+      </span>
+      <span className="metric-kpi session-metric-kpi">
+        <strong>
+          <NumberTicker value={loadedMessageCount} />
+        </strong>
+        <span className="session-metric-label">Messages loaded</span>
+      </span>
+      <span className="metric-kpi session-metric-kpi">
+        <strong>
+          <NumberTicker value={totalToolCalls} />
+        </strong>
+        <span className="session-metric-label">Tool calls</span>
+      </span>
     </div>
   )
 }
@@ -219,8 +276,8 @@ function CurrentSessionStats({
           activeRuntimeSeconds={activeRuntimeSeconds}
         />
       )}
-      <p className="metric-note">
-        Last activity:{" "}
+      <p className="metric-note session-last-activity">
+        Last session activity{" "}
         <SessionActivityTime value={activeSession?.lastMessageAt ?? activeSession?.mtime ?? null} />
       </p>
     </>
@@ -262,25 +319,7 @@ export function DashboardStats({
     [events, totalDispatches]
   )
   const hottestEvent = events[0]?.name ?? "n/a"
-  const hookRuntimeMs = useMemo(
-    () =>
-      Math.round(
-        events.reduce((sum, event) => {
-          const stages = event.routes
-          return (
-            sum +
-            Object.values(stages ?? {}).reduce(
-              (routeSum, route) =>
-                routeSum +
-                ((route.stages?.syncHooks?.avgMs ?? 0) + (route.stages?.asyncHooks?.avgMs ?? 0)) *
-                  (route.count ?? 0),
-              0
-            )
-          )
-        }, 0) / Math.max(totalDispatches, 1)
-      ),
-    [events, totalDispatches]
-  )
+  const hookRuntimeMs = useMemo(() => calculateHookWallTimeMs(events), [events])
 
   // Session logic
   const visibleToolStats = sessionToolStats.filter((stat) => !isInternalToolName(stat.name))
@@ -336,7 +375,10 @@ export function DashboardStats({
         </details>
       </div>
       <details className="stats-diagnostics">
-        <summary>Project diagnostics</summary>
+        <summary>
+          <span>Project diagnostics</span>
+          <span className="stats-diagnostics-hint">Dispatch timing and hook performance</span>
+        </summary>
         <div className="stats-diagnostics-content">
           <ProjectPerformanceStats
             totalDispatches={totalDispatches}

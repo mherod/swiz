@@ -818,16 +818,58 @@ function ProjectSessionsHeader({
         </h2>
         <span className="nav-count-badge">{counts.total}</span>
       </div>
-      <p className="nav-inline-project">
-        {project.name} · {counts.active} active · {counts.recent} recent
-      </p>
-      <StatusChips
-        tokens={statusTokens}
-        keyPrefix={`${project.cwd}-selected`}
-        statusLine={project.statusLine}
-      />
+      <div className="selected-project-summary">
+        <p className="selected-project-name">{project.name}</p>
+        <p className="selected-project-meta">
+          <span className="selected-project-count selected-project-count-active">
+            {counts.active} active
+          </span>
+          <span className="selected-project-count">{counts.recent} recent</span>
+        </p>
+        <StatusChips
+          tokens={statusTokens}
+          keyPrefix={`${project.cwd}-selected`}
+          statusLine={project.statusLine}
+        />
+      </div>
     </>
   )
+}
+
+function SessionListEmptyState({
+  filterQuery,
+  onFilterChange,
+}: {
+  filterQuery: string
+  onFilterChange: (query: string) => void
+}) {
+  return (
+    <li className="session-list-empty">
+      <p className="session-list-empty-title">
+        {filterQuery ? "No matching sessions" : "No sessions yet"}
+      </p>
+      <p className="session-list-empty-description">
+        {filterQuery
+          ? "Try another session ID, provider, or tool."
+          : "Sessions will appear when an agent starts working in this project."}
+      </p>
+      {filterQuery ? (
+        <button type="button" className="session-filter-reset" onClick={() => onFilterChange("")}>
+          Clear search
+        </button>
+      ) : null}
+    </li>
+  )
+}
+
+interface SelectedProjectPanelProps {
+  selectedProject: ProjectSessions
+  sortedSessions: SessionPreview[] | null
+  activeSessions: SessionPreview[] | undefined
+  recentSessions: SessionPreview[] | undefined
+  filterQuery: string
+  onFilterChange: (query: string) => void
+  sessionRowProps: Omit<SessionRowProps, "session" | "groupKind">
 }
 
 function SelectedProjectPanel({
@@ -838,15 +880,7 @@ function SelectedProjectPanel({
   filterQuery,
   onFilterChange,
   sessionRowProps,
-}: {
-  selectedProject: ProjectSessions
-  sortedSessions: SessionPreview[] | null
-  activeSessions: SessionPreview[] | undefined
-  recentSessions: SessionPreview[] | undefined
-  filterQuery: string
-  onFilterChange: (query: string) => void
-  sessionRowProps: Omit<SessionRowProps, "session" | "groupKind">
-}) {
+}: SelectedProjectPanelProps) {
   const filteredActive = useMemo(
     () => computeFilteredSessions(activeSessions, filterQuery),
     [activeSessions, filterQuery]
@@ -887,6 +921,9 @@ function SelectedProjectPanel({
           sessions={filteredRecent}
           sessionRowProps={sessionRowProps}
         />
+        {counts.total === 0 ? (
+          <SessionListEmptyState filterQuery={filterQuery} onFilterChange={onFilterChange} />
+        ) : null}
       </ul>
     </>
   )
@@ -924,8 +961,24 @@ function sessionMatches(
   )
 }
 
+function useProjectSelection(
+  {
+    selectedProjectCwd,
+    onSelectProject,
+  }: Pick<SessionNavProps, "selectedProjectCwd" | "onSelectProject">,
+  setFilterQuery: (query: string) => void
+) {
+  return useCallback(
+    (cwd: string) => {
+      if (cwd !== selectedProjectCwd) setFilterQuery("")
+      onSelectProject(cwd)
+    },
+    [onSelectProject, selectedProjectCwd, setFilterQuery]
+  )
+}
+
 export function SessionNav(props: SessionNavProps): ReactElement {
-  const { selectedProjectCwd, selectedSessionId, onSelectProject } = props
+  const { selectedProjectCwd, selectedSessionId } = props
   const navRef = useRef<HTMLElement>(null)
   const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(null)
   const [confirmingKill, setConfirmingKill] = useState<KillConfirmation>(null)
@@ -933,6 +986,7 @@ export function SessionNav(props: SessionNavProps): ReactElement {
   const navState = useSessionNavState(props.projects, selectedProjectCwd)
   const isSelectedVisible = sessionMatches(navState.sortedSessions, selectedSessionId, filterQuery)
   useSelectedSessionScroll(navRef, selectedSessionId, isSelectedVisible)
+  const handleSelectProject = useProjectSelection(props, setFilterQuery)
 
   const sessionRowProps = {
     selectedSessionId,
@@ -961,7 +1015,7 @@ export function SessionNav(props: SessionNavProps): ReactElement {
             key={project.cwd}
             project={project}
             selectedProjectCwd={selectedProjectCwd}
-            onSelectProject={onSelectProject}
+            onSelectProject={handleSelectProject}
           />
         ))}
       </ul>

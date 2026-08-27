@@ -1,5 +1,9 @@
 import { describe, expect, it } from "bun:test"
-import { isClaudeCliExecutable, parseProviderPids } from "./agent-process-discovery.ts"
+import {
+  isClaudeCliExecutable,
+  isCodexCliExecutable,
+  parseProviderPids,
+} from "./agent-process-discovery.ts"
 
 // Process shapes observed live in issue #835 — six real Claude sessions on a
 // machine where the old `claude-agent-sdk/cli.js` substring matched nothing.
@@ -60,6 +64,54 @@ describe("parseProviderPids claude classification", () => {
     expect(claude.has(40004)).toBe(false)
     expect(claude.has(60001)).toBe(false)
     expect(providers.get("gemini")?.has(50001)).toBe(true)
+  })
+})
+
+describe("Codex process classification", () => {
+  const desktopCodex = "/applications/chatgpt.app/contents/resources/codex"
+  const frameworkRenderer =
+    "/applications/chatgpt.app/contents/frameworks/codex framework.framework/helpers/codex (renderer)"
+
+  it("matches actual Codex CLI executables, including desktop agent workers", () => {
+    expect(isCodexCliExecutable("codex --profile default", "codex")).toBe(true)
+    expect(isCodexCliExecutable(desktopCodex, desktopCodex)).toBe(true)
+  })
+
+  it("rejects Electron renderers, crash handlers, and code-mode hosts", () => {
+    expect(
+      isCodexCliExecutable(frameworkRenderer, "/applications/chatgpt.app/contents/frameworks/codex")
+    ).toBe(false)
+    expect(
+      isCodexCliExecutable(
+        "/applications/chatgpt.app/contents/resources/codex-code-mode-host",
+        "/applications/chatgpt.app/contents/resources/codex-code-mode-host"
+      )
+    ).toBe(false)
+    expect(
+      isCodexCliExecutable(
+        "/applications/chatgpt.app/contents/frameworks/codex framework.framework/helpers/browser_crashpad_handler",
+        "/applications/chatgpt.app/contents/frameworks/codex"
+      )
+    ).toBe(false)
+    expect(
+      isCodexCliExecutable(
+        "/users/example/.codex/computer-use/codex computer use.app/contents/macos/skycomputeruseservice",
+        "/users/example/.codex/computer-use/codex"
+      )
+    ).toBe(false)
+  })
+
+  it("counts only agent executables from mixed Codex desktop process rows", () => {
+    const fixture = [
+      "101 1 /Applications/ChatGPT.app/Contents/Resources/codex",
+      "102 1 codex --profile default",
+      "103 1 /Applications/ChatGPT.app/Contents/Resources/codex-code-mode-host",
+      "104 1 /Applications/ChatGPT.app/Contents/Frameworks/Codex Framework.framework/Helpers/Codex (Renderer)",
+      "105 1 /Applications/ChatGPT.app/Contents/Frameworks/Codex Framework.framework/Helpers/browser_crashpad_handler",
+      "106 1 /Users/example/.codex/computer-use/Codex Computer Use.app/Contents/MacOS/SkyComputerUseService",
+    ].join("\n")
+
+    expect([...(parseProviderPids(fixture).get("codex") ?? [])]).toEqual([101, 102])
   })
 })
 
