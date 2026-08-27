@@ -53,6 +53,7 @@ interface CachedSessionData {
   /** Fingerprint of the last assistant message text detected in this session. */
   lastMessageFingerprint?: string
   tokenStats?: SessionTokenStats
+  projectIdentity?: string
 }
 
 export interface SessionTokenStats {
@@ -120,6 +121,20 @@ function readTokenStats(text: string): SessionTokenStats | undefined {
 function messageFallbackKey(message: SessionMessage, occurrence: number): string {
   const toolSig = (message.toolCalls ?? []).map((tc) => `${tc.name}:${tc.detail}`).join("|")
   return `${message.role}\x00${message.text}\x00${toolSig}\x00${occurrence}`
+}
+
+function resolveSessionProjectIdentity(sessionPath: string, cwd?: string): string {
+  if (cwd) return projectKeyFromCwd(cwd)
+  const match = sessionPath.match(/.+projects\/([^/]+)\//)
+  return match ? match[1]! : "unknown"
+}
+
+function isCacheFresh(
+  cached: CachedSessionData | undefined,
+  mtimeMs: number,
+  size: number
+): cached is CachedSessionData {
+  return cached !== undefined && cached.mtimeMs === mtimeMs && cached.size === size
 }
 
 class SessionDataCache {
@@ -335,16 +350,21 @@ class SessionDataCache {
     return { seed, startedAt, lastMessageAt }
   }
 
-  async get(session: Pick<Session, "path" | "format">): Promise<CachedSessionData | null> {
+  async get(
+    session: Pick<Session, "path" | "format">,
+    cwd?: string
+  ): Promise<CachedSessionData | null> {
     try {
       const file = Bun.file(session.path)
       if (!(await file.exists())) return null
       const info = await file.stat()
       const mtimeMs = info.mtimeMs ?? 0
       const size = info.size
+      const projectIdentity = resolveSessionProjectIdentity(session.path, cwd)
 
       const cached = this.entries.get(session.path)
-      if (cached && cached.mtimeMs === mtimeMs && cached.size === size) {
+      if (isCacheFresh(cached, mtimeMs, size)) {
+        if (cwd) cached.projectIdentity = projectIdentity
         return cached
       }
 
@@ -353,6 +373,7 @@ class SessionDataCache {
       const next = this.buildFromEntries(parsed, mtimeMs, cached)
       next.tokenStats = readTokenStats(text)
       next.size = size
+      next.projectIdentity = projectIdentity
       this.entries.set(session.path, next)
       return next
     } catch {
@@ -367,23 +388,23 @@ class SessionDataCache {
     }
   }
 
-  /** Invalidate only entries whose session path contains the project key for `cwd`. */
+  /** Invalidate only entries owned by the exact canonical project identity for `cwd`. */
   invalidateProject(cwd: string): void {
     const projectKey = projectKeyFromCwd(cwd)
-    for (const key of this.entries.keys()) {
-      if (key.includes(projectKey)) this.entries.delete(key)
+    for (const [key, entry] of this.entries.entries()) {
+      if (entry.projectIdentity === projectKey) {
+        this.entries.delete(key)
+      } else if (!entry.projectIdentity && key.includes(projectKey)) {
+        this.entries.delete(key)
+      }
     }
   }
 
   /** Keep only the last `limit` sessions per project. */
   pruneSessionsPerProject(limit: number): void {
     const projectSessions = new Map<string, string[]>()
-    for (const sessionPath of this.entries.keys()) {
-      // Extract project directory from session path (heuristic)
-      // Claude sessions are in ~/.claude/projects/<key>/...
-      // Cursor sessions are in ~/.cursor/projects/<key>/...
-      const match = sessionPath.match(/.+projects\/([^/]+)\//)
-      const projectKey = match ? match[1]! : "unknown"
+    for (const [sessionPath, entry] of this.entries.entries()) {
+      const projectKey = entry.projectIdentity ?? resolveSessionProjectIdentity(sessionPath)
       const list = projectSessions.get(projectKey) ?? []
       list.push(sessionPath)
       projectSessions.set(projectKey, list)
@@ -410,9 +431,12 @@ class SessionDataCache {
 
 export const sessionDataCache = new SessionDataCache()
 
-async function scanSession(session: Pick<Session, "path" | "format">): Promise<SessionScanResult> {
+async function scanSession(
+  session: Pick<Session, "path" | "format">,
+  cwd?: string
+): Promise<SessionScanResult> {
   const empty = { hasMessages: false, startedAt: 0, lastMessageAt: 0 }
-  const cached = await sessionDataCache.get(session)
+  const cached = await sessionDataCache.get(session, cwd)
   if (!cached) return empty
   if (cached.messages.length === 0) return empty
   return {
@@ -454,7 +478,7 @@ export async function listProjectSessions(
     pinned && !candidates.some((session) => session.id === pinned.id)
       ? [...candidates, pinned]
       : candidates
-  const scans = await Promise.all(scanTargets.map((s) => scanSession(s)))
+  const scans = await Promise.all(scanTargets.map((s) => scanSession(s, cwd)))
   const withMessages: Array<{ session: Session; scan: SessionScanResult }> = []
   for (let i = 0; i < scanTargets.length; i++) {
     if (scans[i]!.hasMessages) withMessages.push({ session: scanTargets[i]!, scan: scans[i]! })
@@ -503,7 +527,7 @@ async function resolveSession(cwd: string, sessionId: string) {
     (candidate) => candidate.id === sessionId || candidate.id.startsWith(sessionId)
   )
   if (!session) return null
-  const cached = await sessionDataCache.get(session)
+  const cached = await sessionDataCache.get(session, cwd)
   return cached ? { session, cached } : null
 }
 

@@ -287,7 +287,7 @@ export class TranscriptMonitor {
     if (!latestSession) return
 
     const [data, manifestGroups] = await Promise.all([
-      sessionDataCache.get(latestSession),
+      sessionDataCache.get(latestSession, cwd),
       this.caches.manifestCache.get(cwd),
     ])
     if (!data) return
