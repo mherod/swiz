@@ -47,15 +47,48 @@ interface AssistantBlock {
 interface AssistantEntry {
   type?: string
   message?: { content?: AssistantBlock[] }
+  payload?: {
+    type?: string
+    role?: string
+    content?: AssistantBlock[]
+  }
 }
 
-function collectAssistantText(entry: AssistantEntry | undefined, texts: string[]): void {
-  if (!entry || entry.type !== "assistant") return
-  for (const block of entry.message?.content ?? []) {
-    if (block.type === "text" && block.text) {
+interface AssistantContent {
+  blocks: AssistantBlock[] | undefined
+  textType: string
+}
+
+function resolveAssistantContent(entry: AssistantEntry): AssistantContent | null {
+  if (entry.type === "assistant") {
+    return { blocks: entry.message?.content, textType: "text" }
+  }
+
+  const payload = entry.payload
+  if (
+    entry.type !== "response_item" ||
+    payload?.type !== "message" ||
+    payload.role !== "assistant"
+  ) {
+    return null
+  }
+
+  return { blocks: payload.content, textType: "output_text" }
+}
+
+export function extractAssistantText(entry: AssistantEntry | undefined): string[] {
+  if (!entry) return []
+
+  const content = resolveAssistantContent(entry)
+  if (!content || !Array.isArray(content.blocks)) return []
+
+  const texts: string[] = []
+  for (const block of content.blocks) {
+    if (block.type === content.textType && typeof block.text === "string" && block.text) {
       texts.push(block.text)
     }
   }
+  return texts
 }
 
 async function extractNewAssistantText(
@@ -69,7 +102,7 @@ async function extractNewAssistantText(
     totalLines++
     if (totalLines <= lastPos) continue
     const entry = tryParseJsonLine(line) as AssistantEntry | undefined
-    collectAssistantText(entry, texts)
+    texts.push(...extractAssistantText(entry))
   }
   return { texts, totalLines }
 }

@@ -1,10 +1,61 @@
 import { describe, expect, it } from "bun:test"
-import { spawnSpeak } from "../src/speech.ts"
+import { extractAssistantText, spawnSpeak } from "../src/speech.ts"
 
 const NO_VOICE: { narratorVoice: string; narratorSpeed: number } = {
   narratorVoice: "",
   narratorSpeed: 0,
 }
+
+describe("extractAssistantText", () => {
+  it("extracts assistant text from Claude transcript entries", () => {
+    expect(
+      extractAssistantText({
+        type: "assistant",
+        message: {
+          content: [
+            { type: "thinking", text: "private reasoning" },
+            { type: "text", text: "Claude can narrate this reply." },
+          ],
+        },
+      })
+    ).toEqual(["Claude can narrate this reply."])
+  })
+
+  it("extracts assistant output text from Codex response items", () => {
+    expect(
+      extractAssistantText({
+        type: "response_item",
+        payload: {
+          type: "message",
+          role: "assistant",
+          content: [{ type: "output_text", text: "Codex can narrate this reply." }],
+        },
+      })
+    ).toEqual(["Codex can narrate this reply."])
+  })
+
+  it("does not narrate Codex user messages or tool calls", () => {
+    expect(
+      extractAssistantText({
+        type: "response_item",
+        payload: {
+          type: "message",
+          role: "user",
+          content: [{ type: "input_text", text: "Do not read my prompt aloud." }],
+        },
+      })
+    ).toEqual([])
+
+    expect(
+      extractAssistantText({
+        type: "response_item",
+        payload: {
+          type: "function_call",
+        },
+      })
+    ).toEqual([])
+  })
+})
 
 describe("spawnSpeak", () => {
   it("resolves silently when given a nonexistent script path", async () => {
