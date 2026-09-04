@@ -1,4 +1,5 @@
 import type { DispatchStageDurations } from "../../../dispatch/timing.ts"
+import type { MemoryPressureSnapshot, MemoryRuntimeSnapshot } from "../memory-pressure.ts"
 
 export const HISTOGRAM_BUCKET_COUNT = 86
 const HISTOGRAM_UPPER_BOUNDS_MS = Array.from(
@@ -45,6 +46,8 @@ export interface DaemonMetrics {
   transcriptDispatch?: TranscriptDispatchMetrics
   transcriptMonitor?: DistributionMetrics
   memoryUsage?: NodeJS.MemoryUsage
+  memoryPressure?: MemoryPressureSnapshot
+  memoryRuntime?: MemoryRuntimeSnapshot
 }
 
 export function recordTranscriptMonitorCheck(metrics: DaemonMetrics, durationMs: number): void {
@@ -82,6 +85,8 @@ export interface SerializedDaemonMetrics {
   transcriptDispatch?: TranscriptDispatchMetrics
   transcriptMonitor?: SerializedDistributionMetrics
   memoryUsage?: NodeJS.MemoryUsage
+  memoryPressure?: MemoryPressureSnapshot
+  memoryRuntime?: MemoryRuntimeSnapshot
 }
 
 export interface RecordDispatchOptions {
@@ -240,6 +245,8 @@ export function serializeMetrics(metrics: DaemonMetrics): SerializedDaemonMetric
       transcriptMonitor: serializeDistribution(metrics.transcriptMonitor),
     }),
     ...(metrics.memoryUsage && { memoryUsage: metrics.memoryUsage }),
+    ...(metrics.memoryPressure && { memoryPressure: metrics.memoryPressure }),
+    ...(metrics.memoryRuntime && { memoryRuntime: metrics.memoryRuntime }),
   }
 }
 

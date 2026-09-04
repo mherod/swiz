@@ -1,6 +1,7 @@
 import { dirname, join } from "node:path"
 import { Worker } from "node:worker_threads"
 import { stderrLog } from "../../../debug.ts"
+import type { WorkerMemorySnapshot } from "../memory-pressure.ts"
 import type {
   TranscriptMonitorParentMessage,
   TranscriptMonitorWorkerMessage,
@@ -15,6 +16,23 @@ export class WorkerTranscriptMonitor
 {
   private worker: Worker
   private initialized: Promise<void>
+  private degraded = false
+  private memorySnapshot: WorkerMemorySnapshot | null = null
+
+  getMemorySnapshot(now = Date.now()): WorkerMemorySnapshot | null {
+    return this.memorySnapshot && now - this.memorySnapshot.sampledAt <= 90_000
+      ? this.memorySnapshot
+      : null
+  }
+
+  setMemoryPressure(degraded: boolean): void {
+    if (degraded) this.degraded = true
+    this.worker.postMessage({
+      type: "memoryPressure",
+      degraded,
+    } satisfies TranscriptMonitorWorkerMessage)
+    this.degraded = degraded
+  }
 
   constructor(private caches: ConstructorParameters<typeof TranscriptMonitor>[0]) {
     const workerPath = join(
@@ -26,6 +44,9 @@ export class WorkerTranscriptMonitor
     const handleWorkerMessage = async (msg: TranscriptMonitorParentMessage): Promise<void> => {
       try {
         switch (msg.type) {
+          case "memorySnapshot":
+            this.memorySnapshot = msg.snapshot
+            break
           case "getManifest": {
             const manifest = await this.caches.manifestCache.get(msg.cwd)
             this.worker.postMessage({
@@ -69,6 +90,7 @@ export class WorkerTranscriptMonitor
     })
 
     this.worker.on("exit", (code) => {
+      this.memorySnapshot = null
       if (code !== 0) {
         stderrLog("worker-transcript-monitor", `Worker stopped with exit code ${code}`)
       }
@@ -89,7 +111,9 @@ export class WorkerTranscriptMonitor
   }
 
   async checkProject(cwd: string): Promise<void> {
+    if (this.degraded) return
     await this.initialized
+    if (this.degraded) return
     this.worker.postMessage({ type: "checkProject", cwd } satisfies TranscriptMonitorWorkerMessage)
   }
 

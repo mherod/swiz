@@ -21,6 +21,7 @@ import {
   handleProjectSyncNow,
 } from "./issue-routes.ts"
 import { handleMcpToolRoute } from "./mcp-tool-routes.ts"
+import { memoryPressureResponse } from "./memory-pressure.ts"
 import {
   handleCacheStatus,
   handleGhRateLimit,
@@ -289,6 +290,7 @@ export function startDaemonWebServer(ctx: DaemonWebServerContext): DaemonWebServ
     port: ctx.port,
     routes: {
       "/health": new Response("ok"),
+      "/memory": () => memoryPressureResponse("/memory", ctx.globalMetrics)!,
       "/": async (req) => {
         if (req.method !== "GET") return notFound()
         return (await serveWebAsset("/")) ?? notFound()
@@ -323,9 +325,11 @@ export function startDaemonWebServer(ctx: DaemonWebServerContext): DaemonWebServ
       },
     },
     async fetch(req) {
+      const url = new URL(req.url)
+      const pressureResponse = memoryPressureResponse(url.pathname, ctx.globalMetrics)
+      if (pressureResponse) return pressureResponse
       ctx.pruneTranscriptMemory()
       reapStaleDispatches(ctx.activeHookDispatches)
-      const url = new URL(req.url)
       return handleFetchRoutes(req, url, ctx)
     },
   })

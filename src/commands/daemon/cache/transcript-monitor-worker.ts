@@ -1,5 +1,7 @@
 import { parentPort } from "node:worker_threads"
 import { stderrLog } from "../../../debug.ts"
+import { getFileCacheMemoryStats } from "../../../utils/file-cache.ts"
+import { releaseTranscriptHistory } from "../memory-relief.ts"
 import type {
   TranscriptMonitorParentMessage,
   TranscriptMonitorWorkerMessage,
@@ -11,6 +13,45 @@ if (!parentPort) {
 }
 
 let monitor: TranscriptMonitor | null = null
+let degraded = false
+let activeChecks = 0
+let pendingRequests = 0
+
+function publishMemorySnapshot(): void {
+  const memory = process.memoryUsage()
+  const cache = getFileCacheMemoryStats()
+  const dispatch = monitor?.getDispatchConcurrencyMetrics()
+  parentPort?.postMessage({
+    type: "memorySnapshot",
+    snapshot: {
+      sampledAt: Date.now(),
+      degraded,
+      heapUsed: memory.heapUsed,
+      external: memory.external,
+      arrayBuffers: memory.arrayBuffers,
+      activeChecks,
+      pendingRequests,
+      activeDispatches: dispatch?.active ?? 0,
+      queuedDispatches: dispatch?.queued ?? 0,
+      fileCacheEntries: cache.entries,
+      fileCacheEstimatedBytes: cache.estimatedBytes,
+    },
+  } satisfies TranscriptMonitorParentMessage)
+}
+
+async function checkProject(cwd: string): Promise<void> {
+  if (!monitor || degraded) return
+  activeChecks++
+  try {
+    await monitor.checkProject(cwd)
+  } catch (err) {
+    stderrLog("transcript-monitor-worker", `Error checking project: ${err}`)
+  } finally {
+    activeChecks--
+    if (degraded) releaseTranscriptHistory()
+    publishMemorySnapshot()
+  }
+}
 
 if (parentPort) {
   const pp = parentPort
@@ -26,10 +67,12 @@ if (parentPort) {
                   const handler = (m: TranscriptMonitorWorkerMessage) => {
                     if (m.type === "manifestResponse" && m.id === id) {
                       pp.off("message", handler)
+                      pendingRequests--
                       resolve(m.manifest)
                     }
                   }
                   pp.on("message", handler)
+                  pendingRequests++
                   pp.postMessage({
                     type: "getManifest",
                     cwd,
@@ -45,10 +88,12 @@ if (parentPort) {
                   const handler = (m: TranscriptMonitorWorkerMessage) => {
                     if (m.type === "cooldownCheckResponse" && m.requestId === requestId) {
                       pp.off("message", handler)
+                      pendingRequests--
                       resolve(m.withinCooldown)
                     }
                   }
                   pp.on("message", handler)
+                  pendingRequests++
                   pp.postMessage({
                     type: "checkAndMarkCooldown",
                     requestId,
@@ -66,10 +111,12 @@ if (parentPort) {
                   const handler = (m: TranscriptMonitorWorkerMessage) => {
                     if (m.type === "settingsResponse" && m.id === id) {
                       pp.off("message", handler)
+                      pendingRequests--
                       resolve({ settings: m.settings })
                     }
                   }
                   pp.on("message", handler)
+                  pendingRequests++
                   pp.postMessage({
                     type: "getSettings",
                     cwd,
@@ -80,12 +127,7 @@ if (parentPort) {
             },
           })
           pp.postMessage({ type: "initialized" } satisfies TranscriptMonitorParentMessage)
-          break
-        }
-        case "checkProject": {
-          if (monitor) {
-            await monitor.checkProject(msg.cwd)
-          }
+          publishMemorySnapshot()
           break
         }
         case "pruneOldSessions": {
@@ -110,5 +152,16 @@ if (parentPort) {
       stderrLog("transcript-monitor-worker", `Error in worker: ${err}`)
     }
   }
-  pp.on("message", (msg: TranscriptMonitorWorkerMessage): void => void handleMessage(msg))
+  pp.on("message", (msg: TranscriptMonitorWorkerMessage): void => {
+    if (msg.type === "memoryPressure") {
+      degraded = msg.degraded
+      if (degraded) releaseTranscriptHistory()
+      publishMemorySnapshot()
+    } else if (msg.type === "checkProject") {
+      void checkProject(msg.cwd)
+    } else {
+      void handleMessage(msg)
+    }
+  })
+  setInterval(publishMemorySnapshot, 30_000).unref()
 }

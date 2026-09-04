@@ -17,7 +17,7 @@ import { TaskStateCache } from "../tasks/task-state-cache.ts"
 import { invalidateTurnsCache } from "../transcript-turns.ts"
 import { findAllProviderSessions, type Session } from "../transcript-utils.ts"
 import type { Command } from "../types.ts"
-import { clearFileCache } from "../utils/file-cache.ts"
+import { clearFileCache, getFileCacheMemoryStats } from "../utils/file-cache.ts"
 import { recordTranscriptMonitorCheck } from "./daemon/cache/metrics.ts"
 import type { TranscriptMonitor } from "./daemon/cache/transcript-monitor.ts"
 import { WorkerTranscriptMonitor } from "./daemon/cache/worker-transcript-monitor.ts"
@@ -26,6 +26,8 @@ import { DAEMON_PORT, fetchDaemonStatus } from "./daemon/daemon-admin.ts"
 import { logPseudoHook } from "./daemon/daemon-logging.ts"
 import type { SessionDivergenceState } from "./daemon/divergence.ts"
 import { LifecycleTaskRegistry } from "./daemon/lifecycle-task-registry.ts"
+import { memoryPressureConfig, readOsRss, startMemoryMonitoring } from "./daemon/memory-pressure.ts"
+import { applyDaemonMemoryPressure } from "./daemon/memory-relief.ts"
 import {
   CappedMap,
   CooldownRegistry,
@@ -447,13 +449,6 @@ export function setupWatchers(
   return { registeredProjects, registerProjectWatchers, evictProject, invalidateProject }
 }
 
-/** Sample memory into metrics state (no stdout; exposed via /metrics endpoint). */
-function startMemoryMonitoring(metrics: DaemonMetrics) {
-  setInterval(() => {
-    metrics.memoryUsage = process.memoryUsage()
-  }, 30000)
-}
-
 export function evictIdleProjects(
   now: number,
   state: DaemonState,
@@ -657,6 +652,7 @@ export async function hydratePersistedSessionToolState(
 
 // eslint-disable-next-line max-lines-per-function -- daemon startup intentionally keeps lifecycle wiring together
 async function startDaemonProcess(_args: string[], port: number): Promise<void> {
+  const memoryConfig = memoryPressureConfig()
   // The thin CLI bootstrap deliberately skips loading the manifest on daemon
   // success. Validate the same routing contract once when the long-lived
   // daemon starts, while local fallback and general CLI startup retain their
@@ -665,20 +661,57 @@ async function startDaemonProcess(_args: string[], port: number): Promise<void> 
   const state = createDaemonState()
   const caches = createDaemonCaches()
   setGlobalTaskStateCache(caches.taskStateCache)
-  const transcriptMonitor = new WorkerTranscriptMonitor(caches) as unknown as TranscriptMonitor
+  const workerTranscriptMonitor = new WorkerTranscriptMonitor(caches)
+  const transcriptMonitor = workerTranscriptMonitor as unknown as TranscriptMonitor
   const { registeredProjects, registerProjectWatchers, evictProject } = setupWatchers(
     caches,
     transcriptMonitor,
     state.projectLastSeen
   )
 
-  startMemoryMonitoring(state.globalMetrics)
+  const memoryMonitoring = startMemoryMonitoring(
+    state.globalMetrics,
+    (degraded) => {
+      applyDaemonMemoryPressure(degraded, {
+        transcriptIndex: caches.transcriptIndex,
+        snapshots: caches.snapshots,
+        transcriptMonitor: workerTranscriptMonitor,
+      })
+      stderrLog(
+        "daemon memory pressure",
+        degraded
+          ? "Sustained RSS pressure: pausing transcript checks and history reads; see /memory."
+          : "RSS recovered: resuming transcript checks and history reads."
+      )
+    },
+    memoryConfig,
+    {
+      osRss: readOsRss,
+      now: Date.now,
+      memory: () => {
+        const fileCache = getFileCacheMemoryStats()
+        state.globalMetrics.memoryRuntime = {
+          sampledAt: Date.now(),
+          fileCacheEntries: fileCache.entries,
+          fileCacheEstimatedBytes: fileCache.estimatedBytes,
+          transcriptIndexEntries: caches.transcriptIndex.size,
+          snapshotEntries: caches.snapshots.size,
+          activeHookDispatches: state.activeHookDispatches.size,
+          pendingPersistenceWrites: sessionToolCallPersistenceQueue.pendingCount(),
+          transcriptWorker: workerTranscriptMonitor.getMemorySnapshot(),
+          otherWorkerMemory: null,
+        }
+        return process.memoryUsage()
+      },
+    }
+  )
   const stopHookLogMaintenance = startHookLogMaintenance()
 
   let isClosing = false
   const cleanup = async (reason: string) => {
     if (isClosing) return
     isClosing = true
+    memoryMonitoring.stop()
     process.stderr.write(`\nClosing daemon components (${reason})... `)
     if (reason !== "exit") {
       await Promise.race([sessionToolCallPersistenceQueue.flush(), Bun.sleep(2_000)])

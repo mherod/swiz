@@ -1,5 +1,6 @@
 import type { HookGroup } from "../../hook-types.ts"
 import type { ProjectSwizSettings } from "../../settings/types.ts"
+import type { WorkerMemorySnapshot } from "./memory-pressure.ts"
 
 export interface FileWatcherStatus {
   path: string
@@ -31,6 +32,7 @@ export type FileWatcherParentMessage =
 
 export type TranscriptMonitorWorkerMessage =
   | { type: "init" }
+  | { type: "memoryPressure"; degraded: boolean }
   | { type: "checkProject"; cwd: string }
   | { type: "pruneOldSessions"; activeSessions: string[] }
   | { type: "getDispatchConcurrencyMetrics"; requestId: string }
@@ -40,6 +42,7 @@ export type TranscriptMonitorWorkerMessage =
 
 export type TranscriptMonitorParentMessage =
   | { type: "initialized" }
+  | { type: "memorySnapshot"; snapshot: WorkerMemorySnapshot }
   | { type: "getManifest"; id: string; cwd: string }
   | { type: "getSettings"; id: string; cwd: string }
   | {

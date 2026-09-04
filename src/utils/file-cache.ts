@@ -5,6 +5,17 @@ import { stat } from "node:fs/promises"
  * of stable files (those not modified in the last 2 hours).
  */
 const FILE_CACHE = new Map<string, { content: string; mtime: number; cachedAt: number }>()
+let estimatedStringBytes = 0
+
+/** String storage estimate (UTF-16 code units), not measured allocator ownership. */
+export function getFileCacheMemoryStats(): { entries: number; estimatedBytes: number } {
+  return { entries: FILE_CACHE.size, estimatedBytes: estimatedStringBytes }
+}
+
+function cacheContent(key: string, content: string, mtime: number, cachedAt: number): void {
+  estimatedStringBytes += (content.length - (FILE_CACHE.get(key)?.content.length ?? 0)) * 2
+  FILE_CACHE.set(key, { content, mtime, cachedAt })
+}
 
 const TWO_HOURS_MS = 2 * 60 * 60 * 1000
 
@@ -34,7 +45,7 @@ export async function getCachedFileText(path: string): Promise<string> {
     const content = await Bun.file(path).text()
 
     // Update cache
-    FILE_CACHE.set(path, { content, mtime, cachedAt: now })
+    cacheContent(path, content, mtime, now)
 
     return content
   } catch {
@@ -89,7 +100,7 @@ export async function getCachedPrefix(path: string, maxBytes: number): Promise<s
     const file = Bun.file(path)
     const content = await file.slice(0, maxBytes).text()
 
-    FILE_CACHE.set(cacheKey, { content, mtime, cachedAt: now })
+    cacheContent(cacheKey, content, mtime, now)
     return content
   } catch {
     return ""
@@ -98,4 +109,5 @@ export async function getCachedPrefix(path: string, maxBytes: number): Promise<s
 
 export function clearFileCache(): void {
   FILE_CACHE.clear()
+  estimatedStringBytes = 0
 }
