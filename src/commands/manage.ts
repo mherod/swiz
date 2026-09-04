@@ -1,25 +1,23 @@
-import { mkdir } from "node:fs/promises"
-import { dirname, join } from "node:path"
+import { join } from "node:path"
+import { isDeepStrictEqual } from "node:util"
 import { type AgentSettingsId, getAgentSettingsPath } from "../agent-paths.ts"
+import { detectInstalledAgents } from "../agents.ts"
 import { stderrLog } from "../debug.ts"
 import { getHomeDirOrNull } from "../home.ts"
 import type { Command } from "../types.ts"
+import {
+  type McpFileData,
+  type McpServerDef,
+  portableServers,
+  readMcpFile,
+  renderMcpFile,
+  writeMcpFile,
+} from "./mcp-config.ts"
 
 type ManageSubject = "mcp"
-type ManageAction = "list" | "add" | "remove" | "validate" | "show" | "merge"
-type AgentId = Exclude<AgentSettingsId, "codex"> | "claude-desktop" | "junie" | "ai"
+type ManageAction = "list" | "add" | "remove" | "validate" | "show" | "merge" | "sync"
+type AgentId = AgentSettingsId | "claude-desktop" | "junie" | "ai"
 type AgentScope = "global" | "project"
-
-interface McpServerDef {
-  command: string
-  args?: string[]
-  env?: Record<string, string>
-}
-
-interface McpFileData {
-  mcpServers?: Record<string, McpServerDef>
-  [key: string]: unknown
-}
 
 interface AgentConfig {
   id: AgentId
@@ -41,9 +39,25 @@ interface ParsedManageArgs {
   sourceAgents: AgentId[]
   /** When true, target project-scoped config files resolved from cwd. */
   project: boolean
+  explicitTargets: boolean
+  dryRun: boolean
 }
 
 const GLOBAL_AGENTS: AgentConfig[] = [
+  {
+    id: "antigravity",
+    scope: "global",
+    flag: "--antigravity",
+    displayName: "Antigravity",
+    resolvePath: (base) => join(base, ".gemini", "config", "mcp_config.json"),
+  },
+  {
+    id: "codex",
+    scope: "global",
+    flag: "--codex",
+    displayName: "Codex",
+    resolvePath: (base) => join(base, ".codex", "config.toml"),
+  },
   {
     id: "cursor",
     scope: "global",
@@ -92,6 +106,20 @@ const GLOBAL_AGENTS: AgentConfig[] = [
 /** Project-level MCP config files, resolved relative to the project root (cwd). */
 const PROJECT_AGENTS: AgentConfig[] = [
   {
+    id: "antigravity",
+    scope: "project",
+    flag: "--antigravity",
+    displayName: "Antigravity (project)",
+    resolvePath: (base) => join(base, ".agents", "mcp_config.json"),
+  },
+  {
+    id: "codex",
+    scope: "project",
+    flag: "--codex",
+    displayName: "Codex (project)",
+    resolvePath: (base) => join(base, ".codex", "config.toml"),
+  },
+  {
     id: "cursor",
     scope: "project",
     flag: "--cursor",
@@ -135,8 +163,11 @@ function agentList(project: boolean): AgentConfig[] {
 
 function usage(): string {
   return [
-    "Usage: swiz manage mcp <list|show|add|remove|validate|merge> [options]",
+    "Usage: swiz manage mcp <list|show|add|remove|validate|merge|sync> [options]",
     "Examples:",
+    "  swiz manage mcp list --agy",
+    "  swiz manage mcp sync --dry-run",
+    "  swiz manage mcp merge --from agy --codex",
     "  swiz manage mcp list",
     "  swiz manage mcp list --project",
     "  swiz manage mcp show figma --cursor",
@@ -147,7 +178,7 @@ function usage(): string {
     "  swiz manage mcp validate --project",
     "  swiz manage mcp merge --from ai --junie",
     "  swiz manage mcp merge --from all --cursor --project",
-    "Agent flags (optional): --cursor --claude --claude-desktop --gemini --junie --ai (default: all)",
+    "Agent flags (optional): --cursor --claude --claude-desktop --gemini --junie --ai --antigravity --agy --codex (default: all)",
     "Source flags (merge only): --from <agent|all>",
     "Scope flags (optional): --project (target project-level files; default: global home files)",
   ].join("\n")
@@ -165,6 +196,7 @@ interface ManageParseState {
   name?: string
   command?: string
   project: boolean
+  dryRun: boolean
   actionArgs: string[]
   env: Record<string, string>
   selectedAgentFlags: Set<AgentId>
@@ -201,6 +233,7 @@ function consumeManageValueFlag(
 }
 
 function consumeSourceAgent(value: string, state: ManageParseState): void {
+  if (value === "agy") value = "antigravity"
   if (value === "all") {
     state.sourceAgentFlags.add("all")
     return
@@ -222,7 +255,11 @@ function consumeManageFlag(
     return 0
   }
 
-  const byFlag = GLOBAL_AGENTS.find((a) => a.flag === token)
+  if (token === "--dry-run") {
+    state.dryRun = true
+    return 0
+  }
+  const byFlag = GLOBAL_AGENTS.find((a) => a.flag === (token === "--agy" ? "--antigravity" : token))
   if (byFlag) {
     state.selectedAgentFlags.add(byFlag.id)
     return 0
@@ -246,6 +283,7 @@ const VALID_MCP_ACTIONS = new Set<ManageAction>([
   "remove",
   "validate",
   "merge",
+  "sync",
 ])
 const ACTIONS_REQUIRING_NAME = new Set<ManageAction>(["add", "remove", "show"])
 
@@ -278,6 +316,7 @@ export function parseManageArgs(args: string[]): ParsedManageArgs {
   const action = validateManageAction((args[1] ?? "list").toLowerCase())
   const state: ManageParseState = {
     project: false,
+    dryRun: false,
     actionArgs: [],
     env: {},
     selectedAgentFlags: new Set(),
@@ -302,10 +341,22 @@ export function parseManageArgs(args: string[]): ParsedManageArgs {
     targetAgents: resolveTargetAgents(state),
     sourceAgents: resolveSourceAgents(state),
     project: state.project,
+    explicitTargets: state.selectedAgentFlags.size > 0,
+    dryRun: state.dryRun,
   }
 }
 
+function validateManageOptions(action: ManageAction, state: ManageParseState): void {
+  if (state.project && state.selectedAgentFlags.has("claude-desktop"))
+    throw new Error("Claude Desktop has no project MCP configuration")
+  if (action === "sync" && state.sourceAgentFlags.size)
+    throw new Error("sync uses participating agents as sources; use merge for --from")
+  if (state.dryRun && action !== "sync" && action !== "merge")
+    throw new Error("--dry-run supports sync and merge only")
+}
+
 function validateManageParseState(action: ManageAction, state: ManageParseState): void {
+  validateManageOptions(action, state)
   if (ACTIONS_REQUIRING_NAME.has(action) && !state.name) {
     throw new Error(`"${action}" requires a server name\n${usage()}`)
   }
@@ -315,21 +366,6 @@ function validateManageParseState(action: ManageAction, state: ManageParseState)
   if (action === "merge" && state.sourceAgentFlags.size === 0) {
     throw new Error(`"merge" requires --from <agent|all>\n${usage()}`)
   }
-}
-
-async function readMcpFile(path: string): Promise<McpFileData> {
-  const file = Bun.file(path)
-  if (!(await file.exists())) return {}
-  const json = (await file.json()) as unknown
-  if (!json || typeof json !== "object" || Array.isArray(json)) {
-    throw new Error(`Invalid JSON object in ${path}`)
-  }
-  return json as McpFileData
-}
-
-async function writeMcpFile(path: string, value: McpFileData): Promise<void> {
-  await mkdir(dirname(path), { recursive: true })
-  await Bun.write(path, `${JSON.stringify(value, null, 2)}\n`)
 }
 
 function getAgentConfig(agentId: AgentId, project: boolean): AgentConfig {
@@ -373,6 +409,7 @@ function validateServerBinary(
   issues: string[],
   which: (command: string) => string | null
 ): void {
+  if (typeof server.command !== "string") return
   const command = server.command.trim()
   if (!command) return
   if (command.includes("/") || command.startsWith(".")) return
@@ -400,11 +437,15 @@ async function listMcpServers(
     }
     for (const name of names.sort()) {
       const server = servers[name]
-      const cmd = server?.command ?? "(missing command)"
+      const cmd = mcpEndpoint(server)
       console.log(`  - ${name}: ${cmd}`)
     }
   }
   console.log("")
+}
+
+function mcpEndpoint(server: McpServerDef | undefined): unknown {
+  return server?.command ?? server?.serverUrl ?? server?.url ?? "(missing command)"
 }
 
 async function showMcpServer(
@@ -424,7 +465,7 @@ async function showMcpServer(
       continue
     }
     console.log(`  ${name}:`)
-    console.log(`    command: ${server.command}`)
+    console.log(`    transport: ${mcpEndpoint(server)}`)
     if (server.args?.length) {
       console.log(`    args: ${server.args.join(" ")}`)
     }
@@ -487,7 +528,7 @@ async function validateMcpServers(
       for (const [name, server] of Object.entries(servers)) {
         const prefixed = `${agent.displayName} (${path}): `
         const localIssues: string[] = []
-        validateServerShape(name, server, localIssues)
+        validateAgentServer(agentId, name, server, localIssues)
         if (localIssues.length === 0) {
           validateServerBinary(name, server as McpServerDef, localIssues, which)
         }
@@ -509,85 +550,125 @@ async function validateMcpServers(
   throw new Error(`MCP validation failed with ${issues.length} issue(s)`)
 }
 
-async function mergeMcpServers(parsed: ParsedManageArgs, base: string): Promise<void> {
-  const sourceServers = await readSourceMcpServers(parsed, base)
-  if (Object.keys(sourceServers).length === 0) {
-    console.log("No MCP servers found in source agents to merge.")
+function validateAgentServer(
+  agentId: AgentId,
+  name: string,
+  server: McpServerDef,
+  issues: string[]
+): void {
+  const remoteKey = agentId === "antigravity" ? "serverUrl" : "url"
+  if (server && typeof server === "object" && Object.hasOwn(server, remoteKey)) {
+    if (typeof server[remoteKey] !== "string" || !URL.canParse(server[remoteKey] as string)) {
+      issues.push(`Server "${name}" has an invalid ${remoteKey}`)
+    }
+    if (server.command !== undefined) issues.push(`Server "${name}" must select one transport`)
     return
   }
-  for (const agentId of parsed.targetAgents) {
-    await mergeMcpServersIntoAgent(parsed, base, agentId, sourceServers)
-  }
+  validateServerShape(name, server, issues)
 }
 
-async function readSourceMcpServers(
+async function readMergeSources(
   parsed: ParsedManageArgs,
   base: string
 ): Promise<Record<string, McpServerDef>> {
-  const sourceServers: Record<string, McpServerDef> = {}
-  for (const agentId of parsed.sourceAgents) {
-    const agent = getAgentConfig(agentId, parsed.project)
-    const path = agent.resolvePath(base)
-    try {
-      const json = await readMcpFile(path)
-      const servers = json.mcpServers ?? {}
-      for (const [name, server] of Object.entries(servers)) {
-        // Simple merge: later sources overwrite earlier ones if there's a collision
-        // in source list, but we usually expect unique names or identical configs.
-        sourceServers[name] = server
-      }
-    } catch (error) {
-      stderrLog(
-        "manage",
-        `Warning: Could not read source config for ${agent.displayName}: ${error}`
-      )
-    }
+  const sourceIds = parsed.action === "sync" ? parsed.targetAgents : parsed.sourceAgents
+  const convert =
+    parsed.action === "sync" ||
+    [...sourceIds, ...parsed.targetAgents].some((id) => id === "codex" || id === "antigravity")
+  const sourceServers: Record<string, McpServerDef> = Object.create(null)
+  for (const id of sourceIds) {
+    const data = await readMcpFile(getAgentConfig(id, parsed.project).resolvePath(base))
+    const servers = convert ? portableServers(data.mcpServers ?? {}) : (data.mcpServers ?? {})
+    mergeSourceDefinitions(sourceServers, servers, parsed.action === "sync")
   }
   return sourceServers
 }
 
-function mergeServerDefinitions(
-  mcpServers: Record<string, McpServerDef>,
+function mergeSourceDefinitions(
+  target: Record<string, McpServerDef>,
+  source: Record<string, McpServerDef>,
+  rejectConflicts: boolean
+): void {
+  for (const [name, server] of Object.entries(source)) {
+    if (rejectConflicts && Object.hasOwn(target, name) && !mcpServersEqual(target[name]!, server)) {
+      throw new Error(
+        `Conflicting MCP server "${name}"; use merge --from <agent> to choose a definition before syncing`
+      )
+    }
+    target[name] = server
+  }
+}
+
+async function planAgentMerge(
+  parsed: ParsedManageArgs,
+  base: string,
+  id: AgentId,
   sourceServers: Record<string, McpServerDef>
-): { addedCount: number; updatedCount: number } {
+): Promise<{
+  agent: AgentConfig
+  path: string
+  next: McpFileData
+  addedCount: number
+  updatedCount: number
+}> {
+  const agent = getAgentConfig(id, parsed.project)
+  const path = agent.resolvePath(base)
+  const data = await readMcpFile(path)
+  const servers = { ...(data.mcpServers ?? {}) }
   let addedCount = 0
   let updatedCount = 0
   for (const [name, server] of Object.entries(sourceServers)) {
-    const existing = mcpServers[name]
-    if (existing && mcpServersEqual(existing, server)) continue
-    if (existing) updatedCount++
+    if (Object.hasOwn(servers, name) && mcpServersEqual(servers[name]!, server)) continue
+    if (Object.hasOwn(servers, name)) updatedCount++
     else addedCount++
-    mcpServers[name] = server
+    Object.defineProperty(servers, name, {
+      value: server,
+      enumerable: true,
+      configurable: true,
+      writable: true,
+    })
   }
-  return { addedCount, updatedCount }
+  const next = { ...data, mcpServers: servers }
+  if (addedCount + updatedCount) renderMcpFile(path, next)
+  return { agent, path, next, addedCount, updatedCount }
 }
 
-async function mergeMcpServersIntoAgent(
+async function mergeMcpServers(parsed: ParsedManageArgs, base: string): Promise<void> {
+  const sourceServers = await readMergeSources(parsed, base)
+  const plans = []
+  for (const id of parsed.targetAgents)
+    plans.push(await planAgentMerge(parsed, base, id, sourceServers))
+  for (const plan of plans) {
+    if (plan.addedCount + plan.updatedCount > 0 && !parsed.dryRun)
+      await writeMcpFile(plan.path, plan.next)
+    console.log(
+      `${parsed.dryRun ? "Would merge" : "Merged"} ${plan.addedCount} new and ${plan.updatedCount} updated servers into ${plan.agent.displayName} (${plan.path})`
+    )
+  }
+}
+
+async function resolveSyncTargets(
   parsed: ParsedManageArgs,
   base: string,
-  agentId: AgentId,
-  sourceServers: Record<string, McpServerDef>
+  detect: () => Promise<string[]>
 ): Promise<void> {
-  const agent = getAgentConfig(agentId, parsed.project)
-  const path = agent.resolvePath(base)
-  const json = await readMcpFile(path)
-  const mcpServers = { ...(json.mcpServers ?? {}) }
-  const { addedCount, updatedCount } = mergeServerDefinitions(mcpServers, sourceServers)
-  if (addedCount > 0 || updatedCount > 0) {
-    await writeMcpFile(path, { ...json, mcpServers })
-    console.log(
-      `Merged ${addedCount} new and ${updatedCount} updated servers into ${agent.displayName} (${path})`
-    )
-  } else {
-    console.log(`${agent.displayName} (${path}) is already up to date.`)
+  if (parsed.explicitTargets) return
+  const installed = new Set(await detect())
+  const targets: AgentId[] = []
+  for (const agent of agentList(parsed.project)) {
+    if (installed.has(agent.id) || (await Bun.file(agent.resolvePath(base)).exists()))
+      targets.push(agent.id)
   }
+  parsed.targetAgents = targets
+  if (!targets.length)
+    throw new Error("No installed or configured MCP agents detected; select agent flags explicitly")
 }
 
 const SWIZ_MCP_SERVER_NAME = "swiz"
 const SWIZ_MCP_SERVER_DEF: McpServerDef = { command: "swiz", args: ["mcp"] }
 
 function mcpServersEqual(a: McpServerDef, b: McpServerDef): boolean {
-  return JSON.stringify(a) === JSON.stringify(b)
+  return isDeepStrictEqual(a, b)
 }
 
 /**
@@ -648,6 +729,7 @@ export interface ManageCommandOptions {
   cwd?: string
   home?: string
   which?: (command: string) => string | null
+  detectAgents?: () => Promise<string[]>
 }
 
 async function runManageAction(
@@ -662,6 +744,7 @@ async function runManageAction(
     remove: () => removeMcpServer(parsed, base),
     validate: () => validateMcpServers(parsed, base, which),
     merge: () => mergeMcpServers(parsed, base),
+    sync: () => mergeMcpServers(parsed, base),
   }
   await actions[parsed.action]()
 }
@@ -669,8 +752,10 @@ async function runManageAction(
 export const manageCommand: Command<ManageCommandOptions> = {
   name: "manage",
   description: "Manage shared swiz resources (MCP, etc.)",
-  usage: "swiz manage mcp <list|show|add|remove|validate|merge> [options]",
+  usage: "swiz manage mcp <list|show|add|remove|validate|merge|sync> [options]",
   options: [
+    { flags: "mcp sync", description: "Union installed agents; conflicts fail before writes" },
+    { flags: "--dry-run", description: "Preview sync or merge without writes" },
     { flags: "mcp list", description: "List configured MCP servers across target agents" },
     { flags: "mcp show <name>", description: "Show a single MCP server definition" },
     {
@@ -684,7 +769,7 @@ export const manageCommand: Command<ManageCommandOptions> = {
       description: "Merge MCP servers from source agent(s) into target agents",
     },
     {
-      flags: "--cursor --claude --claude-desktop --gemini --junie --ai",
+      flags: "--cursor --claude --claude-desktop --gemini --junie --ai --antigravity --agy --codex",
       description: "Limit action to selected agents",
     },
     {
@@ -694,21 +779,25 @@ export const manageCommand: Command<ManageCommandOptions> = {
     {
       flags: "--project",
       description:
-        "Target project-level config files (.cursor/mcp.json, .mcp.json, .vscode/mcp.json, .junie/mcp/mcp.json, .ai/mcp/mcp.json)",
+        "Target project-level config files, including .agents/mcp_config.json and .codex/config.toml",
     },
   ],
-  async run(args, options) {
+  async run(args, options = {}) {
     const parsed = parseManageArgs(args)
-    const home = options?.home ?? getHomeDirOrNull()
+    const home = options.home ?? getHomeDirOrNull()
     if (!home) throw new Error("HOME is not set; cannot manage MCP configuration.")
 
-    if (parsed.subject !== "mcp") {
-      throw new Error(`Unsupported manage subject: ${parsed.subject}`)
-    }
-
     // Project-scoped actions resolve paths relative to cwd; global actions use home.
-    const base = parsed.project ? (options?.cwd ?? process.cwd()) : home
+    const base = parsed.project ? (options.cwd ?? process.cwd()) : home
 
-    await runManageAction(parsed, base, options?.which ?? Bun.which)
+    if (parsed.action === "sync") {
+      await resolveSyncTargets(
+        parsed,
+        base,
+        options.detectAgents ??
+          (async () => (await detectInstalledAgents()).map((agent) => agent.id))
+      )
+    }
+    await runManageAction(parsed, base, options.which ?? Bun.which)
   },
 }

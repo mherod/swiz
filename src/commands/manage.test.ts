@@ -36,6 +36,8 @@ describe("parseManageArgs", () => {
     const parsed = parseManageArgs(["mcp", "list"])
     expect(parsed.action).toBe("list")
     expect(parsed.targetAgents).toEqual([
+      "antigravity",
+      "codex",
       "cursor",
       "claude",
       "claude-desktop",

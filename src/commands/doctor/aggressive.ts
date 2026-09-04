@@ -6,6 +6,7 @@ import { type DiscoveredCodexHook, discoverCodexHooks } from "../../codex-hooks.
 import { getHomeDir } from "../../home.ts"
 import { canonicalizePath, isPathWithinRoot, resolveProjectRoot } from "../../project-identity.ts"
 import { readJsonFile } from "../../utils/file-utils.ts"
+import { stripTomlRoot } from "../../utils/toml.ts"
 import { collectCommands, mergeConfig } from "../install/config-helpers.ts"
 import { writeWithBackup } from "../install/file-helpers.ts"
 import { buildProposedAgentSettings, extractOldHooks } from "../install/settings-helpers.ts"
@@ -75,83 +76,8 @@ async function clearJsonHookSource(path: string, agent: AgentDef): Promise<numbe
   return countHookHandlers(oldHookEntries)
 }
 
-function tomlTablePath(line: string): string | null {
-  const trimmed = line.trim()
-  const arrayTable = trimmed.match(/^\[\[(.*?)\]\]\s*(?:#.*)?$/)
-  if (arrayTable) return arrayTable[1]!.trim()
-  const table = trimmed.match(/^\[(.*?)\]\s*(?:#.*)?$/)
-  return table ? table[1]!.trim() : null
-}
-
-function isHooksTomlPath(path: string): boolean {
-  return /^(?:hooks|"hooks"|'hooks')(?:\s*\.|\s*$)/.test(path.trim())
-}
-
-function isTopLevelHooksAssignment(line: string): boolean {
-  return /^\s*(?:hooks|"hooks"|'hooks')(?:\s*\.\s*(?:[A-Za-z0-9_-]+|"[^"]*"|'[^']*'))*\s*=/.test(
-    line
-  )
-}
-
-function nextMultilineStringKind(
-  line: string,
-  current: '"""' | "'''" | null
-): '"""' | "'''" | null {
-  const doubleIndex = line.indexOf('"""')
-  const literalIndex = line.indexOf("'''")
-  let firstDelimiter: '"""' | "'''" | null = null
-  if (doubleIndex >= 0 && (literalIndex < 0 || doubleIndex < literalIndex)) {
-    firstDelimiter = '"""'
-  } else if (literalIndex >= 0) {
-    firstDelimiter = "'''"
-  }
-  const delimiter = current ?? firstDelimiter
-  if (!delimiter) return null
-
-  const openingIndex = current ? -delimiter.length : line.indexOf(delimiter)
-  return line.indexOf(delimiter, openingIndex + delimiter.length) >= 0 ? null : delimiter
-}
-
-function assignmentEndLine(lines: string[], startLine: number): number {
-  for (let lineIndex = startLine; lineIndex < lines.length; lineIndex++) {
-    try {
-      const parsed = Bun.TOML.parse(lines.slice(startLine, lineIndex + 1).join("\n"))
-      if (Object.hasOwn(parsed, "hooks")) return lineIndex
-    } catch {
-      // Keep extending the candidate until the TOML value is complete.
-    }
-  }
-  return lines.length - 1
-}
-
 export function stripCodexHooksFromToml(text: string): string {
-  const lines = text.split("\n")
-  const kept: string[] = []
-  let skippingHooksTable = false
-  let seenTable = false
-  let multilineString: '"""' | "'''" | null = null
-
-  for (let index = 0; index < lines.length; index++) {
-    const line = lines[index]!
-    const startsInMultilineString = multilineString !== null
-    multilineString = nextMultilineStringKind(line, multilineString)
-    const tablePath = startsInMultilineString ? null : tomlTablePath(line)
-    if (tablePath !== null) {
-      seenTable = true
-      skippingHooksTable = isHooksTomlPath(tablePath)
-      if (!skippingHooksTable) kept.push(line)
-      continue
-    }
-    if (skippingHooksTable) continue
-
-    if (!seenTable && isTopLevelHooksAssignment(line)) {
-      index = assignmentEndLine(lines, index)
-      continue
-    }
-    kept.push(line)
-  }
-
-  return kept.join("\n")
+  return stripTomlRoot(text, "hooks")
 }
 
 async function clearTomlHookSource(path: string): Promise<number | null> {
