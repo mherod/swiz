@@ -690,10 +690,13 @@ async function startDaemonProcess(_args: string[], port: number): Promise<void> 
       now: Date.now,
       memory: () => {
         const fileCache = getFileCacheMemoryStats()
+        const sessionCache = sessionDataCache.getMemoryStats()
         state.globalMetrics.memoryRuntime = {
           sampledAt: Date.now(),
           fileCacheEntries: fileCache.entries,
           fileCacheEstimatedBytes: fileCache.estimatedBytes,
+          sessionCacheEntries: sessionCache.entries,
+          sessionCacheEstimatedBytes: sessionCache.estimatedBytes,
           transcriptIndexEntries: caches.transcriptIndex.size,
           snapshotEntries: caches.snapshots.size,
           activeHookDispatches: state.activeHookDispatches.size,

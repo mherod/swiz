@@ -46,6 +46,26 @@ Other workers' memory is null because those isolates are not instrumented.
 String-byte counts estimate UTF-16 content storage, not allocator overhead.
 Do not sum worker RSS or infer an allocation owner from these partial counters.
 
+## Session previews
+
+Dashboard previews read at most the newest 8 MiB of a JSONL transcript, plus
+one boundary byte, before parsing. A partial first record is discarded. This
+prevents a multi-gigabyte history from being loaded just to display 300 recent
+messages. At most two previews load concurrently across projects. Non-JSONL
+documents larger than 8 MiB are unavailable as previews; they cannot safely be
+parsed from a suffix. Original transcript files remain intact.
+
+The preview cache has a shared 32 MiB estimated string budget as well as its
+entry limit. `/memory` reports `sessionCacheEntries` and
+`sessionCacheEstimatedBytes`. Pressure relief invalidates pending cache fills
+and skips queued preview reads. Latest token totals remain cumulative provider
+values; tokens per minute uses the first and last usage samples within the
+preview window. Message timestamps and tool counts describe that recent window.
+
+Run `bun scripts/debug-session-preview-memory.ts 32` to compare three cold
+preview reads of a synthetic 32 MiB history. It prints memory counters and
+checks that the latest message survives; it does not read user transcripts.
+
 This is bounded degradation, not a hard process-memory cap or a fix for an
 unprofiled native leak. It does not force GC or terminate admitted work. If RSS
 stays high, inspect `/memory`, drain active work, and use `swiz daemon --restart`

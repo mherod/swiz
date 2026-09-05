@@ -4,7 +4,7 @@ import { sessionDataCache } from "./session-data.ts"
 /** Reconstructible history only: do not touch task stores, issue stores or pending writes. */
 export function releaseTranscriptHistory(): void {
   clearFileCache()
-  sessionDataCache.pruneOlderThan(Infinity)
+  sessionDataCache.invalidateAll()
 }
 
 export function applyDaemonMemoryPressure(

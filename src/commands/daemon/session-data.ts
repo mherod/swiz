@@ -11,6 +11,7 @@ import {
 } from "../../transcript-utils.ts"
 import { CappedMap } from "../../utils/capped-map.ts"
 import { splitJsonlLines, tryParseJsonLine } from "../../utils/jsonl.ts"
+import { MAX_SESSION_CACHE_BYTES, readSessionPreview } from "./session-preview.ts"
 import {
   buildProjectTasksView,
   buildSessionTasksView,
@@ -54,6 +55,7 @@ interface CachedSessionData {
   lastMessageFingerprint?: string
   tokenStats?: SessionTokenStats
   projectIdentity?: string
+  retainedBytes: number
 }
 
 export interface SessionTokenStats {
@@ -61,6 +63,7 @@ export interface SessionTokenStats {
   inputTokens: number
   outputTokens: number
   cachedInputTokens: number
+  /** Rate between the first and last usage samples in the bounded preview window. */
   outputTokensPerMinute: number
 }
 
@@ -138,8 +141,15 @@ function isCacheFresh(
 }
 
 class SessionDataCache {
-  private entries = new LRUCache<string, CachedSessionData>({ max: 200 })
+  private entries = new LRUCache<string, CachedSessionData>({
+    max: 200,
+    maxSize: MAX_SESSION_CACHE_BYTES,
+    sizeCalculation: (entry) => entry.retainedBytes,
+  })
   private readonly inflight = new Map<string, Promise<CachedSessionData | null>>()
+  private activeLoads = 0
+  private readonly waitingLoads: Array<() => void> = []
+  private generation = 0
 
   private buildFromEntries(
     entries: ReturnType<typeof parseTranscriptEntries>,
@@ -186,6 +196,7 @@ class SessionDataCache {
       lastAssignedFallbackMs,
       lastToolCallFingerprint,
       lastMessageFingerprint,
+      retainedBytes: 1,
     }
   }
 
@@ -269,6 +280,8 @@ class SessionDataCache {
     const trimOffset = Math.max(0, messages.length - MAX_SESSION_MESSAGES)
     if (trimOffset === 0) return
     messages.splice(0, trimOffset)
+    const firstRetained = pendingFallback.findIndex((entry) => entry.messageIndex >= trimOffset)
+    pendingFallback.splice(0, firstRetained === -1 ? pendingFallback.length : firstRetained)
     for (const fallback of pendingFallback) fallback.messageIndex -= trimOffset
   }
 
@@ -358,16 +371,35 @@ class SessionDataCache {
     const pending = this.inflight.get(session.path)
     if (pending) return pending
 
-    const loading = this.load(session, cwd).finally(() => {
+    const loading = this.loadWithSlot(session, cwd).finally(() => {
       this.inflight.delete(session.path)
     })
     this.inflight.set(session.path, loading)
     return loading
   }
 
-  private async load(
+  /** Multiple dashboard projects share the same two read/parse slots. */
+  private async loadWithSlot(
     session: Pick<Session, "path" | "format">,
     cwd?: string
+  ): Promise<CachedSessionData | null> {
+    const generation = this.generation
+    if (this.activeLoads >= 2) await new Promise<void>((resolve) => this.waitingLoads.push(resolve))
+    else this.activeLoads++
+    try {
+      if (generation !== this.generation) return null
+      return await this.load(session, cwd, generation)
+    } finally {
+      const next = this.waitingLoads.shift()
+      if (next) next()
+      else this.activeLoads--
+    }
+  }
+
+  private async load(
+    session: Pick<Session, "path" | "format">,
+    cwd: string | undefined,
+    generation: number
   ): Promise<CachedSessionData | null> {
     try {
       const file = Bun.file(session.path)
@@ -383,13 +415,15 @@ class SessionDataCache {
         return cached
       }
 
-      const text = await file.text()
+      const text = await readSessionPreview(file, size, session.format)
+      if (text === null) return null
       const parsed = parseTranscriptEntries(text, session.format)
       const next = this.buildFromEntries(parsed, mtimeMs, cached)
       next.tokenStats = readTokenStats(text)
       next.size = size
       next.projectIdentity = projectIdentity
-      this.entries.set(session.path, next)
+      next.retainedBytes = estimateRetainedBytes(next, text.length)
+      if (generation === this.generation) this.entries.set(session.path, next)
       return next
     } catch {
       return null
@@ -440,8 +474,29 @@ class SessionDataCache {
   }
 
   invalidateAll(): void {
+    this.generation++
     this.entries.clear()
   }
+
+  getMemoryStats(): { entries: number; estimatedBytes: number } {
+    return { entries: this.entries.size, estimatedBytes: this.entries.calculatedSize }
+  }
+}
+
+function messageRetainedChars(message: SessionMessage): number {
+  let chars = message.text.length + (message.timestamp?.length ?? 0)
+  for (const call of message.toolCalls ?? []) chars += call.name.length + call.detail.length
+  return chars
+}
+
+/** Include backing source strings and derived copies; deliberately overestimate shared strings. */
+function estimateRetainedBytes(data: CachedSessionData, sourceChars: number): number {
+  let chars = sourceChars + (data.lastToolCallFingerprint?.length ?? 0)
+  chars += data.lastMessageFingerprint?.length ?? 0
+  for (const message of data.messages) chars += messageRetainedChars(message)
+  for (const [key, timestamp] of data.fallbackTimestamps) chars += key.length + timestamp.length
+  for (const tool of data.toolStats) chars += tool.name.length
+  return Math.max(1, chars * 2)
 }
 
 export const sessionDataCache = new SessionDataCache()

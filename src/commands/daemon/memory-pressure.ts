@@ -269,6 +269,8 @@ export interface MemoryRuntimeSnapshot {
   sampledAt: number
   fileCacheEntries: number
   fileCacheEstimatedBytes: number
+  sessionCacheEntries: number
+  sessionCacheEstimatedBytes: number
   transcriptIndexEntries: number
   snapshotEntries: number
   activeHookDispatches: number

@@ -456,7 +456,7 @@ async function readTailSlice(
 ): Promise<{ text: string; meta: JsonlTailTextMeta }> {
   const rawStart = Math.max(0, fileSize - byteLimit)
   const readStart = rawStart > 0 ? rawStart - 1 : 0
-  const raw = await file.slice(readStart).text()
+  const raw = await file.slice(readStart, fileSize).text()
   const reachedStart = rawStart === 0
   const bytesRead = fileSize - readStart
   const text = completeJsonlTailText(raw, reachedStart)
