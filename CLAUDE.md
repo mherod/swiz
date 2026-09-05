@@ -45,7 +45,6 @@ alwaysApply: false
 - In `lefthook.yml`, use `SWIZ_DIRECT=1 bun run index.ts dispatch <event>`; omitting triggers the global-link check.
 - Hooks scanning staged diffs for code patterns (`.only`, `fdescribe`, etc.) must exclude `hooks/` and test files via `FOCUSED_TEST_EXCLUDE_RE` — regex definitions in hook source trigger false positives on themselves.
 - **Inline SwizHook imports**: Hooks imported by `manifest.ts` must NOT import from `hook-utils.ts` (circular dep via `skill-utils.ts` → `agents.ts`) or `git-utils.ts` (circular dep via `settings.ts` → `settings/persistence.ts` → `manifest.ts`). Safe: `tool-matchers.ts`, `git-helpers.ts`, `shell-patterns.ts`, `skill-utils.ts`, `node-modules-path.ts`, `command-utils.ts`, `utils/edit-projection.ts`, `utils/inline-hook-helpers.ts`, `utils/package-detection.ts`, `hooks/schemas.ts`.
-- **Inline SwizHook migration unit**: Helper extraction and dependent hook migration ship as one commit — run `bun run typecheck` after extraction, then migrate and commit together.
 - **Inline SwizHook output**: Use `preToolUseAllow()`/`preToolUseDeny()` from `SwizHook.ts` — return objects instead of calling `process.exit`. Use `runSwizHookAsMain()` for standalone `import.meta.main` compatibility.
 - **Inline SwizHook import.meta.main**: Use `if (import.meta.main) await runSwizHookAsMain(hook)`. DON'T keep a `Bun.stdin.json()` read alongside it — `runSwizHookAsMain` owns stdin; double-read causes null input, silent exit 0, empty subprocess stdout (`JSON.parse(stdout)` throws `Unexpected EOF`).
 - **Debt marker self-detection**: Hook files containing keywords in `//` comments trigger `pretooluse-todo-tracker`. Use JSDoc `/** */` format for headers or dynamic regex construction (`"TO" + "DO"`) to avoid self-detection.
@@ -66,7 +65,8 @@ alwaysApply: false
 - **Subprocess timeout**: Use `spawnWithTimeout(cmd, { cwd, timeoutMs })` from `hook-utils.ts`. DON'T use raw `Bun.spawn()` with manual timers.
 - **Dispatch abort**: Strategies with `AbortController` must listen on `ctx.signal` (from `DispatchRequest.signal` or `HookStrategyContext.signal`).
 - **Dispatch payload enrichment**: `performDispatch` injects `_effectiveSettings` and `_terminal` into payload. Read from payload; don't call `detectTerminal()` in daemon code.
-- **Cursor cwd + captures**: `normalizeAgentHookPayload` uses `workspace_roots` if cwd empty/outside; strips `…/.cursor` (not `…/projects/`). `swiz dispatch` injects `process.cwd()` if missing. Captured in `/tmp/swiz-incoming/` via `incoming-capture.ts` from `src/commands/dispatch.ts` (CLI) and `src/SwizHook.ts` `runSwizHookAsMain` (standalone subprocesses); each dispatch appends a sanitized raw payload line to `/tmp/swiz-incoming/{canonicalEventName}.jsonl` via `schedulePayloadJsonlAppend` in CLI dispatch and daemon. See `_envKeys`, `SWIZ_CAPTURE_INCOMING=0` (~10m retention).
+- **Agent detection in hooks**: `detectCurrentAgentFromHookPayload()` checks `_agent`, payload `_env`, and tool fingerprints (never ambient `process.env`). When testing hooks in-process or via runners where agent behavior differs (e.g. Codex stand-down), inject `_env` directly into the payload object.
+- **Cursor cwd + captures**: `normalizeAgentHookPayload` uses `workspace_roots` if cwd empty/outside; strips `…/.cursor`. `swiz dispatch` injects `process.cwd()` if missing. Captured in `/tmp/swiz-incoming/` via `incoming-capture.ts` (`src/commands/dispatch.ts`) and `SwizHook.ts` `runSwizHookAsMain`; each dispatch appends a sanitized payload line to `/tmp/swiz-incoming/{canonicalEventName}.jsonl` via `schedulePayloadJsonlAppend`. See `_envKeys`, `SWIZ_CAPTURE_INCOMING=0` (~10m retention).
 - **File-path guard**: `filePathGuardHook(predicate, denyReason, allowMsg?)` for file-path PreToolUse hooks.
 - **Git utilities**: Import canonical helpers; never define local copies. `src/utils/hook-utils.ts`: regexes, extractors, runtime helpers (`git`, `gh`, `ghJson`). `src/git-helpers.ts`: classifiers (`isDocsOrConfig`, `parseCommitType`), status types, queries; its `git()` strips `GIT_*` env vars.
 - **PR merge detection**: Use `isPullRequestMergeCommand()` from `src/utils/git-utils.ts` in behavioral gates; `GH_PR_MERGE_RE` matches only native `gh pr merge`. It detects REST `PUT .../pulls/{number}/merge` and GraphQL `mergePullRequest`, `enablePullRequestAutoMerge`, and `enqueuePullRequest`.
@@ -101,6 +101,7 @@ alwaysApply: false
 ## Task Data
 - Task storage: `createDefaultTaskStore()` in `src/task-roots.ts` via `getTaskRoots()` in `src/provider-adapters.ts`.
 - Cross-session checks: `stop-completion-auditor.ts` scans `~/.claude/tasks/` via `readSessionTasks()`.
+- **Codex task retirement**: Codex native task tools are retired (`codex.tasksEnabled = false`). Swiz task governance hooks stand down for Codex (`detectCurrentAgentFromHookPayload` returns `codex`). Never add `update_plan` to `TASK_TOOLS`, matchers, or dispatch routes.
 
 - After compaction, first action is `TaskList`/`TaskCreate`/`TaskUpdate`; close stale tasks via `git log --oneline -3`.
 - `pretooluse-require-tasks.ts` blocks Edit/Write/Bash unless ≥2 incomplete tasks AND ≥1 `pending`.
@@ -143,13 +144,13 @@ alwaysApply: false
 - Use `swiz push-wait` for pushes and cooldowns (no fixed sleeps or `--force-with-lease`) and `swiz ci-wait` for CI; no manual watch/view loops.
 - Don't call `TaskUpdate`/`TaskList` during steps 7-10.
 - Push is inseparable from commit: don't stop after step 3; the stop hook requires origin current.
-- Await background pushes (`TaskOutput block:true`) before CI, and active background tasks (`manage_task`) before concurrent `git commit`/`git push`, preventing `.git/index.lock` collisions. **DON'T** pass `TaskOutput` timeout > 120000ms; 300000 always fails.
+- Await background pushes (`TaskOutput block:true`) before CI and active tasks (`manage_task`) before `git commit`/`push`, preventing `.git/index.lock` collisions. **DON'T** pass `TaskOutput` timeout > 120000ms.
 - Use `swiz issue resolve <number> --body "<text>"`, not `gh issue comment` + `gh issue close`; close-only: `swiz issue close <number>`.
 - **DON'T** close as `duplicate`/`wontfix` without file+line evidence per acceptance criterion.
 - **DO** check issue state before resolving: `gh api repos/:owner/:repo/issues/{number} --jq '.state'`; `Fixes #N` auto-closes on push.
 ## Push and CI
 - **DO**: Run `swiz settings show --project` before `/commit`, `/push`, or `/rebase-and-merge-into-main`; its effective project settings are the branch-policy authority.
-- **DO**: With project `trunk-mode` enabled and `strict-no-direct-main` disabled, stay on the configured default branch and push it directly. Repository owner type, contributor or PR activity, and unknown collaboration auto-detection may affect timing but must not select a feature branch or PR flow; an actual remote or branch-protection rejection remains authoritative.
+- **DO**: With project `trunk-mode` enabled and `strict-no-direct-main` disabled, stay on default branch and push directly. Contributor/PR activity or unknown collaboration heuristics affect timing but cannot force a feature branch; remote or branch-protection rejection is authoritative.
 - CI `paths-ignore`: `.claude/**`, `docs/**` — only those paths skip; markdown triggers CI.
 - Pre-push checklist:
   0. Run `/push` before every push and reconcile its heuristics with `swiz settings show --project`; explicit project trunk mode wins the branch-model decision.
@@ -179,7 +180,7 @@ alwaysApply: false
 - LaunchAgent: `~/Library/LaunchAgents/com.swiz.daemon.plist`; `swiz daemon --install` / `--uninstall`.
 - **DO**: In daemon-served `src/web/**` modules, use browser-resolvable imports only (`./`, `../`, `/web/...`). **DON'T** use bare package imports unless daemon adds import-map/bundling support.
 - **DO**: Restart daemon after `src/web/**`, hook, or dispatch changes. If live `swiz dispatch` contradicts current code, replay raw payload with `bun hooks/<hook>.ts < /tmp/swiz-incoming/<file>.raw.json`; if standalone passes, restart port 7943 and confirm fresh `swiz daemon status`.
-- **DON'T** leave a hook file referencing an unimported symbol between tool calls: `lefthook` `pre-commit` runs `daemon-restart`, so a half-finished edit reaches the running daemon before `bun run typecheck` does and every dispatch fails with `<symbol> is not defined`. Add the import in the same edit as its first usage.
+- **DON'T** leave a hook referencing unimported symbols between tool calls: `lefthook pre-commit` runs `daemon-restart`, sending broken code to daemon before typecheck runs. Add imports in the same edit as their first usage.
 - **DO**: Use `IssueStore` (`src/issue-store.ts`) for issues/PRs/CI. Daemon `syncUpstreamState` keeps it fresh. **DON'T** use per-project file caches — `~/.swiz/issues.db` replaces them.
 - **DO**: Add consumer-needed fields (`mergeable`, `url`) to `syncUpstreamState` in `src/issue-store.ts`.
 - **DO**: Prefer `gh api repos/{owner}/{repo}/...` (REST) over `gh issue view`/`gh pr list` (GraphQL) — higher rate limits. Close: `gh api repos/:owner/:repo/issues/{number} -X PATCH -f state=closed`.
