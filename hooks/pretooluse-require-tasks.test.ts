@@ -410,7 +410,6 @@ describe("pretooluse-require-tasks", () => {
           content: [{ type: "tool_use", name: toolName, id: "x", input: {} }],
         },
       })
-    lines.push(makeEntry("update_plan"))
     for (let i = 0; i < 21; i++) lines.push(makeEntry("Read"))
 
     const transcriptPath = join(homeDir, "transcript-codex.jsonl")
@@ -455,24 +454,6 @@ describe("pretooluse-require-tasks", () => {
     await writeFile(transcriptPath, `${lines.join("\n")}\n`)
 
     const result = await runHook({ homeDir, toolName: "Edit", sessionId, transcriptPath })
-    expect(result.decision).toBeUndefined()
-  })
-
-  test("allows update_plan even when TaskList is stale", async () => {
-    const homeDir = await createTempHome()
-    const sessionId = "session-stale-update-plan"
-    // Write a stale sentinel (21 minutes ago)
-    const staleTime = Date.now() - 21 * 60 * 1000
-    await writeTaskListSyncSentinel(sessionId, staleTime)
-
-    const result = await runHook({
-      homeDir,
-      toolName: "update_plan",
-      sessionId,
-      envOverrides: { CODEX_THREAD_ID: "test-codex-stale" },
-      seedFreshTaskListSync: false, // Use our stale one
-    })
-    // update_plan itself should be allowed
     expect(result.decision).toBeUndefined()
   })
 

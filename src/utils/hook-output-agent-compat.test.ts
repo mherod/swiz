@@ -112,14 +112,14 @@ describe("sanitizeHookOutputForAgent", () => {
         hookSpecificOutput: {
           hookEventName: "PreToolUse",
           permissionDecision: "allow",
-          permissionDecisionReason: "use update_plan",
+          permissionDecisionReason: "hint for codex",
         },
       },
       "codex"
     )
 
     expect(output).toEqual({
-      systemMessage: "use update_plan",
+      systemMessage: "hint for codex",
     })
   })
 

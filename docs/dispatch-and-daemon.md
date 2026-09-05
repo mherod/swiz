@@ -168,7 +168,7 @@ Created once at startup (`createDaemonState` / `createDaemonCaches` in `daemon.t
 
 ### The manifest (`src/manifest.ts`)
 
-`bundledHookManifest: HookGroup[]` is the canonical hook registry. Each group: `{ event, matcher?, hooks[], scheduled? }`; each hook is either a `FileHookDef` (`file`, `timeout`, `async`, `asyncMode`, `condition`, `cooldownSeconds`, `cooldownMode`, `stacks`, `requiredSettings`) or an `InlineHookDef` (`{ hook: SwizHook }`) that runs in-process. `buildManifest()` strips the `TASK_HOOK_IDENTIFIERS` set and `Task*`/`TodoWrite`/`update_plan` matchers for agents with `tasksEnabled: false`.
+`bundledHookManifest: HookGroup[]` is the canonical hook registry. Each group: `{ event, matcher?, hooks[], scheduled? }`; each hook is either a `FileHookDef` (`file`, `timeout`, `async`, `asyncMode`, `condition`, `cooldownSeconds`, `cooldownMode`, `stacks`, `requiredSettings`) or an `InlineHookDef` (`{ hook: SwizHook }`) that runs in-process. `buildManifest()` strips the `TASK_HOOK_IDENTIFIERS` set and `Task*`/`TodoWrite` matchers for agents with `tasksEnabled: false`.
 
 ### Agent definitions (`src/agents.ts`)
 
@@ -179,7 +179,7 @@ Created once at startup (`createDaemonState` / `createDaemonCaches` in `daemon.t
 | claude | `~/.claude/settings.json` | nested matcher groups | ✓ | `Stop`, `PreToolUse` |
 | cursor | `~/.cursor/hooks.json` | flat list, wrapped `{version: 1, hooks}` | ✗ | `stop`, `preToolUse` |
 | gemini | `~/.gemini/settings.json` | nested; timeouts in **ms** (×1000) | ✗ | `AfterAgent`, `BeforeTool` |
-| codex | `~/.codex/hooks.json` | nested; 5-event public API | ✓ (`update_plan`) | `Stop`, `PreToolUse` |
+| codex | `~/.codex/hooks.json` | nested; 5-event public API | ✗ | `Stop`, `PreToolUse` |
 | antigravity | `~/.gemini/antigravity-cli/hooks.json` | flat-lifecycle | ✗ | `Stop`, `PreInvocation` |
 
 Translation is metadata-driven (`translateEvent`, `translateMatcher`, `toolNameForCurrentAgent`); nothing hard-codes agent tool/event names. Runtime agent detection (`src/agent-paths.ts`, re-exported by `src/detect.ts`) resolves in precedence order: explicit `--agent`/`_agent` field → env vars (`detectCurrentAgentFromEnv`) → parent `processPattern` → Codex payload fingerprinting.

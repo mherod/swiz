@@ -147,7 +147,6 @@ function translateActionPlanText(text: string, agent: AgentDef | null): string |
 
 function collapseDuplicateToolAlternatives(text: string): string {
   return text
-    .replace(/\b(update_plan)(?:\s+(?:or|and|\/)\s+\1)+\b/g, "$1")
     .replace(/\b(write_todos)(?:\s+(?:or|and|\/)\s+\1)+\b/g, "$1")
     .replace(/\b(TodoWrite)(?:\s+(?:or|and|\/)\s+\1)+\b/g, "$1")
 }

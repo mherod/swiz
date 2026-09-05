@@ -313,7 +313,7 @@ export const bundledHookManifest: HookGroup[] = [
   },
   {
     event: "preToolUse",
-    matcher: "TaskUpdate|update_plan",
+    matcher: "TaskUpdate",
     hooks: [
       { hook: pretooluseTaskupdateSchema },
       { hook: pretooluseEnforceTaskupdate },
@@ -635,7 +635,7 @@ const TASK_HOOK_IDENTIFIERS = new Set([
  */
 function stripTaskHooks(groups: HookGroup[]): HookGroup[] {
   return groups.map((group) => {
-    if (group.matcher && /Task|TodoWrite|update_plan/.test(group.matcher)) {
+    if (group.matcher && /Task|TodoWrite/.test(group.matcher)) {
       return { ...group, hooks: [] }
     }
     return {

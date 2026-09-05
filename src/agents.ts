@@ -337,20 +337,11 @@ export const AGENTS: AgentDef[] = registerAgents([
     hooksKey: "hooks",
     configStyle: "nested",
     binary: "codex",
-    tasksEnabled: true,
+    tasksEnabled: false,
     hooksConfigurable: true,
     envVars: ["CODEX_MANAGED_BY_NPM", "CODEX_THREAD_ID"],
     additionalToolNames: CODEX_BUILT_IN_TOOL_NAMES,
     knownToolNames: CODEX_ADDITIONAL_TOOL_NAMES,
-    // Codex emits update_plan for planning. Task* canonical names intentionally
-    // remain out of toolAliases because there is no exact emitted-tool equivalent.
-    taskToolAliases: {
-      Task: "update_plan",
-      TaskCreate: "update_plan",
-      TaskUpdate: "update_plan",
-      TaskList: null,
-      TaskGet: null,
-    },
     toolAliases: {
       Bash: "shell_command",
       exec_command: "exec_command",
@@ -361,8 +352,6 @@ export const AGENTS: AgentDef[] = registerAgents([
       Grep: "grep_files",
       Glob: "list_dir",
       NotebookEdit: "apply_patch",
-      update_plan: "update_plan",
-      "functions.update_plan": "functions.update_plan",
     },
     eventMap: {
       stop: "Stop",

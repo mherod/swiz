@@ -30,16 +30,9 @@ describe("Codex additional tool capabilities", () => {
       Grep: "grep_files",
       Glob: "list_dir",
       NotebookEdit: "apply_patch",
-      update_plan: "update_plan",
-      "functions.update_plan": "functions.update_plan",
     })
 
-    for (const toolName of [
-      "exec_command",
-      "apply_patch",
-      "update_plan",
-      ...CODEX_BUILT_IN_TOOL_NAMES,
-    ]) {
+    for (const toolName of ["exec_command", "apply_patch", ...CODEX_BUILT_IN_TOOL_NAMES]) {
       expect(agentSupportsTool(codex, toolName), toolName).toBe(true)
     }
     for (const toolName of CODEX_OPTIONAL_TOOL_NAMES) {

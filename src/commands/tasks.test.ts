@@ -1007,11 +1007,11 @@ describe("native task tool guard", () => {
     })
   })
 
-  it("blocks list invocation inside Codex CLI planning sessions", async () => {
+  it("allows list invocation inside Codex CLI now that native planning is retired", async () => {
     await serial(async () => {
       const home = join(TMP, "native-task-guard-codex-home")
-      // Codex is task-enabled through update_plan; "swiz tasks" must not bypass
-      // the native planning surface while running inside a Codex session.
+      // Codex has tasksEnabled=false now that update_plan is retired; "swiz tasks"
+      // is allowed inside Codex sessions because no native planning surface exists.
       const result = await runTasksCli(
         {
           HOME: home,
@@ -1041,8 +1041,7 @@ describe("native task tool guard", () => {
           )
         }
       )
-      expect(result.exitCode).toBe(1)
-      expect(result.stderr).toContain('"swiz tasks" (list) is not available inside Codex CLI.')
+      expect(result.exitCode).toBe(0)
     })
   })
 })

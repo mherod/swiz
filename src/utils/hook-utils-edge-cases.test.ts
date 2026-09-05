@@ -636,13 +636,12 @@ describe("tool classification with edge-case inputs", () => {
   })
 })
 
-// ─── update_plan / TaskList / TaskGet mapping regressions ───────────────────
-// Codex exposes task planning through update_plan. It is part of the broad task
-// family, but it is not treated as the exact TaskCreate command.
+// ─── TaskList / TaskGet mapping regressions ───────────────────
+// Codex has no task planning surface now that update_plan is retired.
 
-describe("isTaskTool — update_plan planning surface", () => {
-  it("recognises update_plan as a task planning tool", () => {
-    expect(isTaskTool("update_plan")).toBe(true)
+describe("isTaskTool — retired update_plan", () => {
+  it("does not recognise retired update_plan as a task tool", () => {
+    expect(isTaskTool("update_plan")).toBe(false)
   })
 
   it("does not recognise update_plan as a task-create tool", () => {
@@ -718,8 +717,8 @@ describe("Codex toolAliases — TaskList/TaskGet intentionally unmapped", () => 
 // If anyone reverts the alias change, these fail — that's the point.
 
 describe("mutation guards — TASK_TOOLS set membership", () => {
-  it("TASK_TOOLS contains update_plan as Codex's task planning surface", () => {
-    expect(TASK_TOOLS.has("update_plan")).toBe(true)
+  it("TASK_TOOLS does not contain update_plan (retired Codex planning tool)", () => {
+    expect(TASK_TOOLS.has("update_plan")).toBe(false)
   })
 
   it("TASK_TOOLS does not contain spawn_agent", () => {
@@ -738,8 +737,6 @@ describe("mutation guards — TASK_TOOLS set membership", () => {
 describe("Codex toolAliases — exhaustive table (snapshot regression)", () => {
   // Authoritative record of every Codex alias. Any addition, removal, or
   // value change breaks this test intentionally — that's the point.
-  // update_plan is a self-alias for Codex's planning surface. No Task*
-  // canonical translates to it directly.
   const EXPECTED_CODEX_ALIASES: Record<string, string> = {
     Bash: "shell_command",
     exec_command: "exec_command",
@@ -750,8 +747,6 @@ describe("Codex toolAliases — exhaustive table (snapshot regression)", () => {
     Grep: "grep_files",
     Glob: "list_dir",
     NotebookEdit: "apply_patch",
-    update_plan: "update_plan",
-    "functions.update_plan": "functions.update_plan",
   }
 
   it("toolAliases object matches expected table exactly (shape + values)", async () => {
@@ -774,14 +769,11 @@ describe("Codex toolAliases — exhaustive table (snapshot regression)", () => {
     expect(Object.values(codex.toolAliases)).not.toContain("spawn_agent")
   })
 
-  it("only update_plan self-aliases to update_plan; no Task* canonical maps to it", async () => {
+  it("update_plan is absent from Codex toolAliases", async () => {
     const { getAgent } = await import("../agents.ts")
     const codex = getAgent("codex")!
-    const mappedToUpdatePlan = Object.entries(codex.toolAliases)
-      .filter(([, v]) => v === "update_plan")
-      .map(([k]) => k)
-      .sort()
-    expect(mappedToUpdatePlan).toEqual(["update_plan"])
+    expect(codex.toolAliases).not.toHaveProperty("update_plan")
+    expect(codex.toolAliases).not.toHaveProperty("functions.update_plan")
   })
 
   it("TaskList and TaskGet are absent from Codex aliases (pass-through)", async () => {

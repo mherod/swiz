@@ -6,7 +6,7 @@ import { evaluateUserpromptsubmitTaskAdvisor } from "./userpromptsubmit-task-adv
 describe("userpromptsubmit-task-advisor inline validation", () => {
   const tmp = useTempDir("task-advisor-test-")
 
-  test("injects advisory context for codex/update_plan-style planning agents", async () => {
+  test("stands down for codex now that tasksEnabled is false", async () => {
     const homeDir = await tmp.create()
     const originalHome = process.env.HOME
     // process.env.HOME is process-global; serialize this window with the env
@@ -20,11 +20,7 @@ describe("userpromptsubmit-task-advisor inline validation", () => {
           CODEX_THREAD_ID: "via-test",
         },
       })
-      expect(result).toMatchObject({
-        hookSpecificOutput: {
-          additionalContext: expect.stringContaining("Task"),
-        },
-      })
+      expect(result).toEqual({})
     } finally {
       process.env.HOME = originalHome
       releaseEnvLockFn()

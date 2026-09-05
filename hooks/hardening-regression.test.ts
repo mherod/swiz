@@ -508,15 +508,13 @@ describe("PostToolUse task hooks — codex transcript compatibility", () => {
       },
       { HOME: homeDir, CODEX_THREAD_ID: undefined, CODEX_MANAGED_BY_NPM: undefined }
     )
-    expect(result.exitCode).toBe(0)
-    // PostToolUse task hooks rely on task-file events; Codex planning context is
-    // handled by userPromptSubmit/update_plan paths instead.
+    // PostToolUse task hooks rely on task-file events; Codex has tasksEnabled: false.
     expect((result.stdout ?? "").trim()).toBe("")
   })
 })
 
-describe("userpromptsubmit-task-advisor — codex planning context", () => {
-  test("codex transcript_path produces advisor context", async () => {
+describe("userpromptsubmit-task-advisor — codex stand-down", () => {
+  test("codex transcript_path stands down when tasks are disabled", async () => {
     const homeDir = await createTempHome()
     const result = await runHook(
       "hooks/userpromptsubmit-task-advisor.ts",
@@ -529,10 +527,10 @@ describe("userpromptsubmit-task-advisor — codex planning context", () => {
       { HOME: homeDir, CODEX_THREAD_ID: undefined, CODEX_MANAGED_BY_NPM: undefined }
     )
     expect(result.exitCode).toBe(0)
-    expect(result.json?.hookSpecificOutput?.additionalContext).toContain("Task")
+    expect(result.json?.hookSpecificOutput).toBeUndefined()
   })
 
-  test("codex payload _env produces advisor context", async () => {
+  test("codex payload _env stands down when tasks are disabled", async () => {
     const homeDir = await createTempHome()
     const result = await runHook(
       "hooks/userpromptsubmit-task-advisor.ts",
@@ -543,6 +541,6 @@ describe("userpromptsubmit-task-advisor — codex planning context", () => {
       { HOME: homeDir, CODEX_THREAD_ID: undefined, CODEX_MANAGED_BY_NPM: undefined }
     )
     expect(result.exitCode).toBe(0)
-    expect(result.json?.hookSpecificOutput?.additionalContext).toContain("Task")
+    expect(result.json?.hookSpecificOutput).toBeUndefined()
   })
 })

@@ -262,7 +262,7 @@ describe("manifest.ts", () => {
           const tools = matcher.split("|")
           tools.forEach((tool) => {
             expect(tool.length).toBeGreaterThan(0)
-            // Tools should be capitalized or snake_case (cross-agent aliases like update_plan)
+            // Tools should be capitalized or snake_case (cross-agent aliases)
             if (tool.length > 0) {
               const isCapitalized = tool[0] === tool[0]?.toUpperCase()
               const isSnakeCase = /^[a-z][a-z0-9_]*$/.test(tool)
@@ -421,7 +421,7 @@ describe("manifest.ts", () => {
       const tasklessManifest = buildManifestForAgent({ tasksEnabled: false })
       // The TaskCreate|TaskUpdate matcher group should have no hooks
       const taskMatcherGroups = tasklessManifest.filter(
-        (g) => g.matcher && /Task|TodoWrite|update_plan/.test(g.matcher)
+        (g) => g.matcher && /Task|TodoWrite/.test(g.matcher)
       )
       for (const g of taskMatcherGroups) {
         expect(g.hooks).toEqual([])

@@ -3,7 +3,7 @@ import { formatActionPlan } from "./action-plan.ts"
 import { getAgent } from "./agents.ts"
 
 describe("formatActionPlan", () => {
-  it("uses Codex planning aliases without mentioning unavailable task readers", () => {
+  it("omits unavailable task readers for Codex without update_plan", () => {
     const codex = getAgent("codex")!
     const result = formatActionPlan(
       [
@@ -14,11 +14,10 @@ describe("formatActionPlan", () => {
       { translateToolNames: true, agent: codex }
     )
 
-    expect(result).toContain("Use update_plan to update task state")
+    expect(result).toContain("Use TaskCreate or TaskUpdate to update task state")
     expect(result).not.toContain("TaskList")
     expect(result).not.toContain("TaskGet")
-    expect(result).not.toContain("TaskUpdate")
-    expect(result).not.toContain("update_plan or update_plan")
+    expect(result).not.toContain("update_plan")
   })
 
   it("omits TaskList action steps for Cursor", () => {

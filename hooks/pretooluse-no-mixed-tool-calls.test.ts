@@ -33,9 +33,9 @@ describe("pretooluse-no-mixed-tool-calls", () => {
   })
 
   test("blocks agent alias after env assignments", async () => {
-    const result = await runHook("DEBUG=1 update_plan")
+    const result = await runHook("DEBUG=1 StrReplace")
     expect(result.decision).toBe("deny")
-    expect(result.reason).toContain("update_plan")
+    expect(result.reason).toContain("StrReplace")
   })
 
   test("allows normal shell commands", async () => {

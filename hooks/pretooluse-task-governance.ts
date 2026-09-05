@@ -48,11 +48,6 @@ import {
   hasActiveSkillForHookPayload,
 } from "../src/skill-utils.ts"
 import { createTaskStoreForHookPayload } from "../src/task-roots.ts"
-import {
-  CODEX_UPDATE_PLAN_TOOL_NAMES,
-  codexPlanTaskId,
-  isCodexPlanTaskId,
-} from "../src/tasks/codex-update-plan.ts"
 import { hasHealthyPendingTaskBuffer } from "../src/tasks/task-buffer-health.ts"
 import {
   isBlockedSwizTaskFilesCommand,
@@ -192,8 +187,8 @@ async function readTasksForInput(input: Record<string, any>, sessionId: string) 
   return await readTasksAcrossStores(sessionId, projectKey, taskStoreForInput(input).tasksDir)
 }
 
-function hasTaskGovernanceSurface(input: Record<string, any>, toolName: string): boolean {
-  return agentHasTaskToolsForHookPayload(input) || isUpdatePlanTool(toolName)
+function hasTaskGovernanceSurface(input: Record<string, any>, _toolName?: string): boolean {
+  return agentHasTaskToolsForHookPayload(input)
 }
 
 function resolveGovernanceThresholds(
@@ -242,7 +237,7 @@ function denyTaskGovernance(
 export const taskupdateSchemaHook: SwizToolHook = {
   name: "pretooluse-taskupdate-schema",
   event: "preToolUse",
-  matcher: "TaskUpdate|update_plan",
+  matcher: "TaskUpdate",
   timeout: 5,
 
   run(rawInput) {
@@ -250,10 +245,6 @@ export const taskupdateSchemaHook: SwizToolHook = {
     const toolName = String(input.tool_name ?? "")
     if (!hasTaskGovernanceSurface(input, toolName)) return {}
     const toolInput: Record<string, any> = (input.tool_input as Record<string, any>) ?? {}
-
-    if (isUpdatePlanTool(toolName)) {
-      return validateUpdatePlanInput(toolInput) ?? {}
-    }
 
     const unsupported = Object.keys(toolInput).filter((k) => !TASK_UPDATE_ALLOWED_FIELDS.has(k))
     if (unsupported.length > 0) {
@@ -669,11 +660,7 @@ async function checkCanonicalTaskListSync(
   // Provider-prefixed creations count here: an agent whose only task tools are MCP is doing task
   // work when it calls `mcp__swiz__TaskCreate`, and excluding it made the sync gate fire on the
   // very call that satisfies it.
-  if (
-    isAnyProviderTaskListTool(toolName) ||
-    isAnyProviderTaskCreateTool(toolName) ||
-    isUpdatePlanTool(toolName)
-  ) {
+  if (isAnyProviderTaskListTool(toolName) || isAnyProviderTaskCreateTool(toolName)) {
     return undefined
   }
   if (!agentHasTaskListToolForHookPayload(input)) return undefined
@@ -1447,314 +1434,6 @@ async function checkInProgressTransitionCap(
 
 type NativeTaskUpdateResult = SwizHookOutput | "early_exit" | "continue"
 
-const UPDATE_PLAN_ALLOWED_FIELDS = new Set([
-  "explanation",
-  "plan",
-  "thought",
-  "notes",
-  "summary",
-  "rationale",
-  "call_id",
-  "id",
-])
-const UPDATE_PLAN_STATUSES = new Set(["pending", "in_progress", "completed", "cancelled"])
-const UPDATE_PLAN_STATUS_ALIASES: Record<string, string> = {
-  done: "completed",
-  "in-progress": "in_progress",
-  canceled: "cancelled",
-}
-
-function normalizeUpdatePlanStatus(rawStatus: unknown): string | null {
-  if (typeof rawStatus !== "string") return null
-  const lower = rawStatus.trim().toLowerCase()
-  const mapped = UPDATE_PLAN_STATUS_ALIASES[lower] ?? lower
-  return UPDATE_PLAN_STATUSES.has(mapped) ? mapped : null
-}
-
-function extractUpdatePlanStep(record: Record<string, any>): string | null {
-  const value = record.step ?? record.subject ?? record.description ?? record.title
-  if (typeof value === "string" && value.trim().length > 0) {
-    return value.trim()
-  }
-  return null
-}
-
-interface UpdatePlanTaskInput {
-  step: string
-  status: string
-}
-
-interface ProjectedPlanTask {
-  id: string
-  subject: string
-  status: string
-}
-
-interface UpdatePlanProjection {
-  existingTasks: ProjectedPlanTask[]
-  finalTasks: ProjectedPlanTask[]
-}
-
-function isUpdatePlanTool(toolName: string): boolean {
-  return CODEX_UPDATE_PLAN_TOOL_NAMES.has(toolName)
-}
-
-function unsupportedUpdatePlanFields(toolInput: Record<string, any>): string[] {
-  return Object.keys(toolInput).filter((key) => !UPDATE_PLAN_ALLOWED_FIELDS.has(key))
-}
-
-function validateUpdatePlanItem(item: unknown, index: number): string | null {
-  if (!item || typeof item !== "object" || Array.isArray(item)) {
-    return `update_plan item ${index + 1} must be an object.`
-  }
-  const record = item as Record<string, any>
-  const step = extractUpdatePlanStep(record)
-  if (!step) {
-    return `update_plan item ${index + 1} requires a non-empty \`step\`.`
-  }
-  const status = normalizeUpdatePlanStatus(record.status)
-  if (!status) {
-    return `update_plan item ${index + 1} has unsupported status \`${String(record.status ?? "")}\`.`
-  }
-  return null
-}
-
-function validateUpdatePlanInput(toolInput: Record<string, any>): SwizHookOutput | null {
-  const unsupported = unsupportedUpdatePlanFields(toolInput)
-  if (unsupported.length > 0) {
-    const allowed = [...UPDATE_PLAN_ALLOWED_FIELDS].join(", ")
-    return preToolUseDeny(
-      `update_plan received unsupported field(s): ${unsupported.map((f) => `\`${f}\``).join(", ")}.\n\n` +
-        `Allowed fields: ${allowed}.`
-    )
-  }
-
-  if (!Array.isArray(toolInput.plan)) {
-    return preToolUseDeny("update_plan requires a `plan` array.")
-  }
-
-  for (const [index, item] of toolInput.plan.entries()) {
-    const itemError = validateUpdatePlanItem(item, index)
-    if (itemError) return preToolUseDeny(itemError)
-  }
-
-  return null
-}
-
-function parseUpdatePlanTasks(toolInput: Record<string, any>): UpdatePlanTaskInput[] {
-  return (toolInput.plan as Record<string, any>[]).map((item) => ({
-    step: extractUpdatePlanStep(item) ?? "",
-    status: normalizeUpdatePlanStatus(item.status) ?? String(item.status),
-  }))
-}
-
-function projectUpdatePlanFinalTasks(
-  existingTasks: ProjectedPlanTask[],
-  plan: UpdatePlanTaskInput[]
-): ProjectedPlanTask[] {
-  const existingById = new Map(existingTasks.map((task) => [task.id, task]))
-  const finalById = new Map(existingTasks.map((task) => [task.id, { ...task }]))
-  const seenPlanIds = new Set<string>()
-
-  for (let index = 0; index < plan.length; index++) {
-    const item = plan[index]
-    if (!item) continue
-    const id = codexPlanTaskId(index)
-    seenPlanIds.add(id)
-    finalById.set(id, {
-      id,
-      subject: item.step,
-      status: item.status,
-    })
-  }
-
-  for (const existing of existingById.values()) {
-    if (!isCodexPlanTaskId(existing.id) || seenPlanIds.has(existing.id)) continue
-    if (isIncompleteTaskStatus(existing.status)) {
-      finalById.set(existing.id, { ...existing, status: "cancelled" })
-    }
-  }
-
-  return [...finalById.values()].sort((left, right) =>
-    left.id.localeCompare(right.id, undefined, { numeric: true })
-  )
-}
-
-function buildProjectedPlanTaskList(
-  tasks: ProjectedPlanTask[],
-  status: string = "in_progress"
-): string {
-  return tasks
-    .filter((task) => task.status === status)
-    .map((task) => `  • #${task.id}: ${task.subject}`)
-    .join("\n")
-}
-
-async function readUpdatePlanProjection(
-  input: Record<string, any>,
-  sessionId: string,
-  plan: UpdatePlanTaskInput[]
-): Promise<UpdatePlanProjection> {
-  const existingTasks = (await readTasksForInput(input, sessionId)).map((task) => ({
-    id: task.id,
-    subject: task.subject,
-    status: task.status,
-  }))
-  return {
-    existingTasks,
-    finalTasks: projectUpdatePlanFinalTasks(existingTasks, plan),
-  }
-}
-
-function findCompletedTransitions(projection: UpdatePlanProjection): ProjectedPlanTask[] {
-  const existingById = new Map(projection.existingTasks.map((task) => [task.id, task]))
-  return projection.finalTasks.filter((task) => {
-    const existing = existingById.get(task.id)
-    return !!existing && isIncompleteTaskStatus(existing.status) && task.status === "completed"
-  })
-}
-
-function findPendingCompletionShortcut(
-  projection: UpdatePlanProjection
-): ProjectedPlanTask | undefined {
-  const existingById = new Map(projection.existingTasks.map((task) => [task.id, task]))
-  return projection.finalTasks.find(
-    (task) => existingById.get(task.id)?.status === "pending" && task.status === "completed"
-  )
-}
-
-function checkUpdatePlanInProgressCap(projection: UpdatePlanProjection): SwizHookOutput | null {
-  const existingInProgress = projection.existingTasks.filter(
-    (task) => task.status === "in_progress"
-  )
-  const finalInProgress = projection.finalTasks.filter((task) => task.status === "in_progress")
-  const existingById = new Map(projection.existingTasks.map((task) => [task.id, task]))
-  const newlyStarted = finalInProgress.find(
-    (task) => existingById.get(task.id)?.status !== "in_progress"
-  )
-
-  if (!newlyStarted || finalInProgress.length <= getInProgressCap()) return null
-
-  return preToolUseDeny(
-    buildTaskGovernanceMessage({
-      kind: "in-progress-transition-cap",
-      taskId: newlyStarted.id,
-      inProgressCount: Math.max(existingInProgress.length, finalInProgress.length),
-      cap: getInProgressCap(),
-      taskList: buildProjectedPlanTaskList(finalInProgress),
-    })
-  )
-}
-
-/**
- * Integrity denials over a projected plan, checked ahead of the skill escape hatch: a skill must not
- * be able to shortcut a pending task straight to completed, nor plan the same work twice and satisfy
- * the queue with it. These are not state gates and never stand down.
- */
-function checkUpdatePlanIntegrity(
-  input: Record<string, any>,
-  projection: UpdatePlanProjection
-): SwizHookOutput | null {
-  const shortcut = findPendingCompletionShortcut(projection)
-  if (shortcut) {
-    return denyTaskGovernance(
-      { kind: "pending-completion-shortcut", taskId: shortcut.id, subject: shortcut.subject },
-      input
-    )
-  }
-
-  const duplicateGroups = findDuplicateSubjectGroups(projection.finalTasks)
-  if (duplicateGroups.length === 0) return null
-  return buildDuplicateSubjectStateBlock("update_plan", duplicateGroups)
-}
-
-function checkUpdatePlanFinalTaskState(
-  projection: UpdatePlanProjection,
-  thresholds: GovernanceThresholds
-): SwizHookOutput | null {
-  const capOutcome = checkUpdatePlanInProgressCap(projection)
-  if (capOutcome) return capOutcome
-
-  const pendingOverflowOutcome = checkPendingOverflow("update_plan", projection.finalTasks)
-  if (pendingOverflowOutcome) return pendingOverflowOutcome
-
-  const summary = buildIncompleteTaskSummary(projection.finalTasks)
-  if (summary.allTasksDone) return null
-  return checkTaskMinimums("update_plan", summary, thresholds) ?? null
-}
-
-function findDeferralPlanItem(plan: UpdatePlanTaskInput[]): UpdatePlanTaskInput | undefined {
-  return plan.find(
-    (item) => isIncompleteTaskStatus(item.status) && isTaskSubjectWorkDeferral(item.step)
-  )
-}
-
-async function checkUpdatePlanDirectMerge(
-  projection: UpdatePlanProjection,
-  sessionId: string,
-  cwd: string
-): Promise<SwizHookOutput | undefined> {
-  const summary = buildIncompleteTaskSummary(projection.finalTasks)
-  return await checkDirectMergeIntent("update_plan", sessionId, cwd, summary.incompleteTasks)
-}
-
-function checkUpdatePlanCompletionRate(
-  projection: UpdatePlanProjection,
-  sessionId: string
-): SwizHookOutput | null {
-  const finalSummary = buildIncompleteTaskSummary(projection.finalTasks)
-  if (finalSummary.allTasksDone) return null
-
-  const beforeSummary = buildIncompleteTaskSummary(projection.existingTasks)
-  return checkCompletionRateLimitForCount(sessionId, findCompletedTransitions(projection).length, {
-    pending: beforeSummary.pendingTasks.length,
-    inProgress: beforeSummary.inProgressTasks.length,
-  })
-}
-
-async function evaluateUpdatePlanGovernance(
-  input: Record<string, any>,
-  toolInput: Record<string, any>
-): Promise<NativeTaskUpdateResult> {
-  const validation = validateUpdatePlanInput(toolInput)
-  if (validation) return validation
-
-  const sessionId = resolveSafeSessionId(input.session_id as string | undefined)
-  if (!sessionId) return "early_exit"
-
-  const cwd = (input.cwd as string) ?? process.cwd()
-  const plan = parseUpdatePlanTasks(toolInput)
-  const deferralItem = findDeferralPlanItem(plan)
-  if (deferralItem) {
-    return preToolUseDeny(
-      `Deferral tactic detected: task subject "${deferralItem.step}" uses deferral framing. ` +
-        "All work is to be completed in this session. There is no follow-up session. " +
-        "Replace it with concrete current-session work, start it now, or record a real blocker with evidence."
-    )
-  }
-
-  const projection = await readUpdatePlanProjection(input, sessionId, plan)
-  const integrityDenied = checkUpdatePlanIntegrity(input, projection)
-  if (integrityDenied) return integrityDenied
-
-  // Escape hatch — see skillOwnsWorkflow. Placed after deferral framing, the pending-completion
-  // shortcut and duplicate subjects, which stay enforced, and before the state gates below.
-  if (await skillOwnsWorkflow(input, cwd)) return "continue"
-
-  const thresholds = await resolveGovernanceThresholdsForSession(input, sessionId, cwd)
-
-  const stateDenied = checkUpdatePlanFinalTaskState(projection, thresholds)
-  if (stateDenied) return stateDenied
-
-  const directMergeDenied = await checkUpdatePlanDirectMerge(projection, sessionId, cwd)
-  if (directMergeDenied) return directMergeDenied
-
-  const rateLimited = checkUpdatePlanCompletionRate(projection, sessionId)
-  if (rateLimited) return rateLimited
-
-  return "continue"
-}
-
 async function handleNativeInProgressUpdate(
   taskId: string,
   sessionId: string,
@@ -1829,12 +1508,7 @@ async function handleNativeTaskUpdateStatus(
 async function checkNativeTaskUpdateCompletion(
   input: Record<string, any>
 ): Promise<NativeTaskUpdateResult> {
-  const toolName = String(input.tool_name ?? "")
   const toolInput = (input.tool_input ?? {}) as Record<string, any>
-  if (isUpdatePlanTool(toolName)) {
-    return await evaluateUpdatePlanGovernance(input, toolInput)
-  }
-
   const taskId = String(toolInput.taskId ?? "")
   if (!taskId) return "early_exit"
 
@@ -1874,7 +1548,7 @@ export async function runSwizTasksEnforcement(input: Record<string, any>): Promi
 }
 
 function isNativeTaskTool(toolName: string): boolean {
-  return toolName === "TaskUpdate" || isUpdatePlanTool(toolName)
+  return toolName === "TaskUpdate"
 }
 
 export async function evaluatePretooluseEnforceTaskupdate(input: unknown): Promise<SwizHookOutput> {
@@ -1944,17 +1618,6 @@ async function completeNativeTaskUpdatePath(
   return shouldInspectShellInput(parsed) ? await runSwizTasksEnforcement(input) : {}
 }
 
-async function completeUpdatePlanPath(
-  input: Record<string, any>,
-  toolInput: Record<string, any>,
-  parsed: ParsedGovernanceInput
-): Promise<SwizHookOutput> {
-  const outcome = await evaluateUpdatePlanGovernance(input, toolInput)
-  if (outcome === "early_exit") return {}
-  if (outcome !== "continue") return outcome
-  return shouldInspectShellInput(parsed) ? await runSwizTasksEnforcement(input) : {}
-}
-
 /**
  * Pre-screen: reject any blocked-tool attempt to edit swiz task files or
  * run a swiz CLI command that mutates task files. Applies even outside a
@@ -1979,7 +1642,6 @@ export async function evaluatePendingOverflowGuard(
   toolName: string
 ): Promise<SwizHookOutput | null> {
   if (isTaskListTool(toolName)) return null
-  if (isUpdatePlanTool(toolName)) return null
   if (!hasTaskGovernanceSurface(input, toolName)) return null
 
   const sessionId = resolveSafeSessionId(input.session_id as string | undefined)
@@ -1994,7 +1656,7 @@ export async function evaluatePendingOverflowGuard(
 }
 
 /**
- * Native TaskUpdate / update_plan branch. Validates allowed schema fields,
+ * Native TaskUpdate branch. Validates allowed schema fields,
  * runs completion / deletion / rate-limit governance, and runs CLI input
  * enforcement when the call is a shell-based task command.
  */
@@ -2003,11 +1665,6 @@ export async function evaluateNativeTaskUpdatePath(
   toolInput: Record<string, any>,
   parsed: ParsedGovernanceInput
 ): Promise<SwizHookOutput> {
-  const toolName = String(input.tool_name ?? "")
-  if (isUpdatePlanTool(toolName)) {
-    return await completeUpdatePlanPath(input, toolInput, parsed)
-  }
-
   const invalidInput = validateNativeTaskUpdateInput(toolInput)
   if (invalidInput) return invalidInput
 
@@ -2127,7 +1784,7 @@ async function evaluatePretooluseTaskGovernance(rawInput: unknown): Promise<Swiz
   const blockedTaskFiles = evaluateBlockedTaskFilesPrecheck(input, toolName, toolInput)
   if (blockedTaskFiles) return blockedTaskFiles
 
-  // Codex can use update_plan, but its tools do not depend on task state.
+  // Codex has no native task planning tools; its tools do not depend on task state.
   // Keep the task-file integrity precheck above while bypassing workflow gates.
   if (isCodexTaskGovernanceExempt(input)) return {}
 

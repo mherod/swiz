@@ -13,7 +13,7 @@
 //   Grep         | Grep         | grep_search        | grep_search
 //   Glob         | Glob         | glob               | glob
 //   NotebookEdit | EditNotebook | apply_patch / functions.apply_patch | —
-//   Task/planning| TodoWrite    | update_plan        | write_todos
+//   Task/planning| TodoWrite    | —                  | write_todos
 
 export const SHELL_TOOLS = new Set([
   "Bash",
@@ -40,8 +40,6 @@ export const NOTEBOOK_TOOLS = new Set([
   "apply_patch",
   "functions.apply_patch",
 ])
-// Codex has a planning surface via `update_plan`, which is now treated as a task
-// surface in agent capability modeling.
 export const TASK_TOOLS = new Set([
   "Task",
   "TaskCreate",
@@ -50,8 +48,6 @@ export const TASK_TOOLS = new Set([
   "TaskGet",
   "TodoWrite",
   "write_todos",
-  "update_plan",
-  "functions.update_plan",
 ])
 export const TASK_CREATE_TOOLS = new Set(["TaskCreate", "TodoWrite", "write_todos"])
 export const TASK_UPDATE_TOOLS = new Set(["TaskUpdate"])

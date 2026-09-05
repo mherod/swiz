@@ -48,6 +48,7 @@ async function runHook(
     tool_input: { command },
     cwd,
     session_id: sessionId,
+    _env: envOverrides,
   }
   const agentEnvOverrides: Record<string, string | undefined> = {}
   for (const agent of AGENTS) {
@@ -114,13 +115,13 @@ describe("posttooluse-git-task-autocomplete: git push emits additionalContext", 
     expect(result.additionalContext).toContain("Wait for CI")
   })
 
-  test("git push guidance uses translated task name for Codex", async () => {
+  test("git push guidance stands down for Codex (no task tools)", async () => {
     const result = await runHook("git push origin main", "Bash", "test-session-id", {
       CODEX_THREAD_ID: "test-codex",
     })
     expect(result.exitedCleanly).toBe(true)
     expect(result.additionalContext).toBeUndefined()
-    expect(result.systemMessage).toContain("update_plan")
+    expect(result.systemMessage).toBeUndefined()
   })
 
   test("git push emits PR creation context when pr-merge-mode is disabled", async () => {

@@ -24,7 +24,7 @@ All consolidated in `hooks/pretooluse-task-governance.ts` (thin wrappers re-expo
 |---|---|
 | `pretooluse-require-tasks.ts` | Blocks Edit/Write/Bash without a valid task plan. **Strict**: ≥2 incomplete, ≥1 pending, ≥1 in_progress. **Relaxed**: ≥1 incomplete (`pretooluse-task-governance.ts:129-130`). Edit/Write payloads of ≥10 lines (`isLargeContentPayload`, `:299`) pass through with post-tool advisory instead of a hard block, so expensive generated content isn't lost. |
 | `pretooluse-task-subject-validation.ts` | One-verb subjects: rejects compound subjects (coordinators like "and"/"then") unless the pending buffer is healthy; rejects deferral framing ("future work", "carryover"); rejects compliance-gaming meta-subjects about the task tooling; rejects `~`/`$HOME` path references (`src/tasks/task-subject-validation.ts:137`). |
-| `pretooluse-taskupdate-schema.ts` | Restricts `TaskUpdate`/`update_plan` input to allowed fields. |
+| `pretooluse-taskupdate-schema.ts` | Restricts `TaskUpdate` input to allowed fields. |
 | `pretooluse-enforce-taskupdate.ts` | Completion rate limit: max **2 completions per 5-second window** (`MAX_COMPLETIONS_IN_WINDOW = 2`, `WINDOW_MS = 5_000`, `pretooluse-task-governance.ts:1022-1023`), bypassed when the planning buffer is healthy. Blocks `pending` → `completed`. Enforces the in-progress cap of 4. Blocks deprecated `swiz tasks` CLI in favour of native task tools. |
 | `pretooluse-no-task-delegation.ts` | Blocks delegating task management to subagents (subagent TaskCreate lands in a different session and deadlocks the parent). |
 | `pretooluse-no-phantom-task-completion.ts` | Blocks completing a task with zero substantive tool calls since it went `in_progress`. |

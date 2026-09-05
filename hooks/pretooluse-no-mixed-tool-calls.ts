@@ -30,16 +30,7 @@ import {
 } from "../src/tool-matchers.ts"
 import { escapeRegex, SHELL_STATEMENT_BOUNDARY } from "../src/utils/shell-patterns.ts"
 
-// `update_plan` is Codex's planning UI — not in TASK_TOOLS (#570) but still
-// a reserved tool name that must not appear as a shell command.
-const EXTRA_TOOL_NAMES = [
-  "AskUserQuestion",
-  "LS",
-  "MultiEdit",
-  "WebFetch",
-  "WebSearch",
-  "update_plan",
-]
+const EXTRA_TOOL_NAMES = ["AskUserQuestion", "LS", "MultiEdit", "WebFetch", "WebSearch"]
 
 const TOOL_NAMES = [
   ...new Set([

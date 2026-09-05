@@ -618,8 +618,7 @@ describe("convertSkillContent", () => {
     const claude = getAgent("claude")!
     const codex = getAgent("codex")!
     const { content: result } = convertSkillContent(content, claude, codex, AGENTS)
-    // Codex has update_plan as a broad planning surface, but no exact TaskList
-    // or TaskGet aliases, so canonical names pass through.
+    // Codex has no native task tool aliases, so canonical names pass through.
     expect(result).toContain("TaskList")
     expect(result).toContain("TaskGet")
   })
@@ -634,18 +633,17 @@ describe("convertSkillContent", () => {
     expect(result).not.toContain("TaskGet")
   })
 
-  test("translates TaskCreate and TaskUpdate to update_plan, leaving TaskList and TaskGet as canonical when converting to codex", () => {
+  test("leaves task tools as canonical when converting to codex (no native task tools)", () => {
     const content =
       '---\nallowed-tools:\n  - "TaskCreate"\n  - "TaskList"\n  - "TaskGet"\n  - "TaskUpdate"\n---\nTaskCreate TaskList TaskGet TaskUpdate\n'
     const claude = getAgent("claude")!
     const codex = getAgent("codex")!
     const { content: result } = convertSkillContent(content, claude, codex, AGENTS)
-    expect(result).toContain('"update_plan"')
-    expect(result).toContain('"TaskList"')
-    expect(result).toContain('"TaskGet"')
-    expect(result).toContain("update_plan")
+    expect(result).not.toContain("update_plan")
+    expect(result).toContain("TaskCreate")
     expect(result).toContain("TaskList")
     expect(result).toContain("TaskGet")
+    expect(result).toContain("TaskUpdate")
   })
 
   test("rewrites source-specific names back to canonical (gemini → claude)", () => {

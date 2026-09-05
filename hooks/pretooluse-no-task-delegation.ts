@@ -20,7 +20,6 @@ const delegationPatterns = [
   /\bTaskGet\b/,
   /\bTodoWrite\b/,
   /\bwrite_todos\b/,
-  /\bupdate_plan\b/,
 ]
 
 export function evaluatePretooluseNoTaskDelegation(input: unknown): SwizHookOutput {

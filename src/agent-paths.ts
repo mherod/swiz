@@ -179,7 +179,6 @@ export function detectCurrentAgentFromHookPayload(
 
 /**
  * Check whether the hook payload's originating agent has task tools.
- * Codex is modeled as task-enabled through its `update_plan` planning surface.
  */
 export function agentHasTaskToolsForHookPayload(input: object | null | undefined): boolean {
   const agent = detectCurrentAgentFromHookPayload(input)

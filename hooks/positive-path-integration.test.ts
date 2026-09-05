@@ -462,8 +462,7 @@ describe("posttooluse-task-advisor: positive paths", () => {
     expect(ctx).toContain("blocked")
   })
 
-  test("uses translated task tool name when current agent is Codex", async () => {
-    // Codex uses update_plan for task planning in this workflow.
+  test("stands down for agents without task tools like Codex", async () => {
     const tmp = await createTempDir()
     const transcript = await createTranscript(tmp, [
       "Read",
@@ -477,12 +476,11 @@ describe("posttooluse-task-advisor: positive paths", () => {
     ])
     const r = await runHook(
       HOOK,
-      { transcript_path: transcript },
+      { transcript_path: transcript, _agent: "codex" },
       { CODEX_THREAD_ID: "test-codex" }
     )
     expect(r.exitCode).toBe(0)
-    const sysMsg = (r.json?.systemMessage as string) ?? ""
-    expect(sysMsg).toContain("update_plan required")
+    expect(r.stdout).toBe("")
   })
 
   test("no output for small transcript (below threshold)", async () => {
@@ -527,19 +525,15 @@ describe("posttooluse-task-advisor: positive paths", () => {
     expect(ctx).toContain("TaskList")
   })
 
-  test("does not treat codex update_plan as a task tool (#570)", async () => {
-    // update_plan is Codex planning UI, not a task-governance tool.
+  test("does not treat retired update_plan as a task tool (#570)", async () => {
+    // update_plan is not a task-governance tool.
     // The advisor should treat all 9 calls as non-task — emitting a
     // creation countdown for the canonical TaskCreate, not a staleness
     // warning rooted in update_plan.
     const tmp = await createTempDir()
     const tools = ["update_plan", "Read", "Glob", "Read", "Edit", "Bash", "Read", "Glob", "Read"]
     const transcript = await createTranscript(tmp, tools)
-    const r = await runHook(
-      HOOK,
-      { transcript_path: transcript },
-      { CODEX_THREAD_ID: "test-codex" }
-    )
+    const r = await runHook(HOOK, { transcript_path: transcript })
     expect(r.exitCode).toBe(0)
     const sysMsg = (r.json?.systemMessage as string) ?? ""
     expect(sysMsg).not.toContain("Task update required")

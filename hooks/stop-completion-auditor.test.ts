@@ -96,11 +96,10 @@ describe("formatActionPlan", () => {
     const originalEnv = { ...process.env }
     process.env = {
       ...process.env,
-      CODEX_THREAD_ID: "test-thread",
+      GEMINI_CLI: "1",
     }
     delete process.env.CLAUDECODE
-    delete process.env.CURSOR_TRACE_ID
-    delete process.env.GEMINI_CLI
+    delete process.env.CODEX_THREAD_ID
 
     try {
       expect(
@@ -108,14 +107,14 @@ describe("formatActionPlan", () => {
           translateToolNames: true,
         })
       ).toBe(
-        "Action plan:\n  1. Use update_plan to create tasks\n  2. Use update_plan to complete them\n"
+        "Action plan:\n  1. Use write_todos to create tasks\n  2. Use write_todos to complete them\n"
       )
     } finally {
       process.env = originalEnv
     }
   })
 
-  it("can infer Codex from observed tool names when env detection is unavailable", () => {
+  it("can infer Cursor from observed tool names when env detection is unavailable", () => {
     const originalEnv = { ...process.env }
     delete process.env.CLAUDECODE
     delete process.env.CURSOR_TRACE_ID
@@ -128,10 +127,10 @@ describe("formatActionPlan", () => {
       expect(
         formatActionPlan(["Use TaskCreate to create tasks", "Use TaskUpdate to complete them"], {
           translateToolNames: true,
-          observedToolNames: ["shell_command", "apply_patch", "read_file"],
+          observedToolNames: ["StrReplace", "EditNotebook"],
         })
       ).toBe(
-        "Action plan:\n  1. Use update_plan to create tasks\n  2. Use update_plan to complete them\n"
+        "Action plan:\n  1. Use TodoWrite to create tasks\n  2. Use TodoWrite to complete them\n"
       )
     } finally {
       process.env = originalEnv
@@ -265,7 +264,7 @@ describe("stop-completion-auditor — audit log / Array.from(latestStatus.values
     const result = await runAuditor(home, transcriptPath, {
       CODEX_THREAD_ID: "test-thread",
     })
-    // Codex now has task tools enabled through update_plan; no agent-level bypass.
+    // Codex has tasksEnabled: false; task audit stands down.
     expect(result.blocked).toBe(false)
   })
 
@@ -333,19 +332,9 @@ describe("stop-completion-auditor — audit log / Array.from(latestStatus.values
     expect(result.blocked).toBe(false)
   })
 
-  it("blocks stop for Codex when many non-task tool calls were made", async () => {
+  it("allows stop for Codex when many tool calls were made (tasks not enabled)", async () => {
     const { home, transcriptPath } = await createFixtureWithTools(
       Array.from({ length: 12 }, () => "shell_command")
-    )
-    const result = await runAuditor(home, transcriptPath, {
-      CODEX_THREAD_ID: "test-codex-thread",
-    })
-    expect(result.blocked).toBe(true)
-  })
-
-  it("recognises update_plan as task activity and does not block when tasks were used", async () => {
-    const { home, transcriptPath } = await createFixtureWithTools(
-      Array.from({ length: 12 }, () => "update_plan")
     )
     const result = await runAuditor(home, transcriptPath, {
       CODEX_THREAD_ID: "test-codex-thread",
