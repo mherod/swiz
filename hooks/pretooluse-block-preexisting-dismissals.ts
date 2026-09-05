@@ -31,8 +31,8 @@ import { toolHookInputSchema } from "../src/schemas.ts"
 import { isCodeChangeTool, isShellTool } from "../src/tool-matchers.ts"
 import { getTranscriptSummary } from "../src/transcript-summary.ts"
 import { extractTextFromUnknownContent } from "../src/transcript-utils.ts"
+import { streamJsonlLines } from "../src/utils/jsonl.ts"
 import { stripQuotedShellStrings } from "../src/utils/shell-patterns.ts"
-import { readAllTranscriptLines } from "../src/utils/transcript.ts"
 
 // ── Dismissal patterns ──────────────────────────────────────────────────────
 
@@ -144,7 +144,7 @@ function resetDismissal(state: ScanState): void {
 
 function processToolResult(resultText: string, state: ScanState): void {
   if (DIAGNOSTIC_OUTPUT_RE.test(resultText)) {
-    state.lastDiagnosticOutput = resultText
+    state.lastDiagnosticOutput = extractDiagnosticSnippet(resultText).slice(0, 16 * 1024)
     state.hasDiagnosticIssues = true
     resetDismissal(state)
   } else if (resultText.length > 10 && state.lastToolWasDiagnostic) {
@@ -184,14 +184,16 @@ function processEntry(entry: Record<string, any>, state: ScanState): void {
   if (text && state.hasDiagnosticIssues && !state.cleared) {
     const line = findDismissalLine(text)
     if (line) {
-      state.dismissalText = text
-      state.dismissalLine = line
+      state.dismissalText = line.slice(0, 4096)
+      state.dismissalLine = state.dismissalText
       state.cleared = false
     }
   }
 }
 
-function scanTranscript(lines: string[]): ScanState {
+type TranscriptLines = Iterable<string> | AsyncIterable<string>
+
+async function scanTranscript(lines: TranscriptLines): Promise<ScanState | null> {
   const state: ScanState = {
     lastDiagnosticOutput: "",
     hasDiagnosticIssues: false,
@@ -201,8 +203,11 @@ function scanTranscript(lines: string[]): ScanState {
     lastToolWasDiagnostic: false,
   }
 
-  for (const line of lines) {
+  let hasLines = false
+  for await (const line of lines) {
     if (!line.trim()) continue
+    hasLines = true
+    if (!line.includes('"assistant"') && !line.includes('"tool_result"')) continue
     let entry: Record<string, any>
     try {
       entry = JSON.parse(line)
@@ -212,7 +217,7 @@ function scanTranscript(lines: string[]): ScanState {
     processEntry(entry, state)
   }
 
-  return state
+  return hasLines ? state : null
 }
 
 // ── Main ────────────────────────────────────────────────────────────────────
@@ -233,20 +238,20 @@ function shouldSkipTool(toolName: string, toolInput: Record<string, any>): boole
   return isShellTool(toolName) && isExemptShellCommand(String(toolInput?.command ?? ""))
 }
 
-async function getAllTranscriptLines(
+function getAllTranscriptLines(
   raw: Record<string, any>,
   transcriptPath: string
-): Promise<string[]> {
+): Promise<TranscriptLines> {
   // Read full transcript (not just session lines) so cross-session dismissals are detected.
   // Fall back to session lines from the summary if transcript_path is unavailable.
-  if (transcriptPath) return await readAllTranscriptLines(transcriptPath)
+  if (transcriptPath) return Promise.resolve(streamJsonlLines(transcriptPath))
   const summary = getTranscriptSummary(raw)
-  return summary?.sessionLines ?? []
+  return Promise.resolve(summary?.sessionLines ?? [])
 }
 
 export interface PreexistingDismissalRuntime {
   isGitRepo(cwd: string): Promise<boolean>
-  readTranscriptLines(raw: Record<string, any>, transcriptPath: string): Promise<string[]>
+  readTranscriptLines(raw: Record<string, any>, transcriptPath: string): Promise<TranscriptLines>
 }
 
 export interface PreexistingDismissalOptions {
@@ -289,13 +294,12 @@ async function resolveTranscriptContext(
   raw: Record<string, any>,
   input: ReturnType<typeof toolHookInputSchema.parse>,
   runtime: PreexistingDismissalRuntime
-): Promise<string[] | null> {
+): Promise<TranscriptLines | null> {
   const cwd = input.cwd ?? process.cwd()
   if (!(await isGitRepoForHookPayload(raw, cwd, runtime.isGitRepo))) return null
   const toolName = input.tool_name ?? ""
   if (shouldSkipTool(toolName, input.tool_input ?? {})) return null
-  const lines = await runtime.readTranscriptLines(raw, input.transcript_path ?? "")
-  return lines.length > 0 ? lines : null
+  return await runtime.readTranscriptLines(raw, input.transcript_path ?? "")
 }
 
 export async function evaluatePretooluseBlockPreexistingDismissals(
@@ -309,7 +313,13 @@ export async function evaluatePretooluseBlockPreexistingDismissals(
   const lines = await resolveTranscriptContext(raw, parsed, runtime)
   if (!lines) return {}
 
-  const state = scanTranscript(lines)
+  let state: ScanState | null
+  try {
+    state = await scanTranscript(lines)
+  } catch {
+    return {}
+  }
+  if (!state) return {}
   const allowReason = resolveAllowReason(state)
   if (allowReason) return preToolUseAllow(allowReason)
 

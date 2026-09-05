@@ -16,6 +16,7 @@ type JsonlBuffer = Uint8Array<ArrayBufferLike>
 const JSONL_TMP_SUFFIX = ".swiz-jsonl.tmp"
 const DEFAULT_JSONL_TAIL_INITIAL_BYTES = 256 * 1024
 const MAX_JSONL_APPEND_REMAINDER_BYTES = 1024 * 1024
+const MAX_JSONL_APPEND_READ_BYTES = 8 * 1024 * 1024
 
 /** Metadata needed to safely continue a JSONL append scan. */
 export interface JsonlAppendMetadata {
@@ -101,6 +102,7 @@ export class JsonlAppendCursor {
     const previous = this.metadata
     if (!previous) return true
     if (next.size < this.offset) return true
+    if (next.size - this.offset > MAX_JSONL_APPEND_READ_BYTES) return true
     const previousIdentity = identityOf(previous)
     const nextIdentity = identityOf(next)
     if (previousIdentity && nextIdentity && previousIdentity !== nextIdentity) return true
@@ -184,7 +186,8 @@ async function closeStreamReader(
 export async function* streamJsonlEntriesFromFile(
   file: Bun.BunFile
 ): AsyncIterableIterator<unknown> {
-  if (!(await file.exists())) return
+  /** Bun can report exists=false for a nonempty slice until its size is resolved. */
+  if (file.size === 0 && !(await file.exists())) return
 
   let buffer: JsonlBuffer = new Uint8Array(0)
   const reader = file.stream().getReader()
@@ -219,11 +222,11 @@ export async function* streamJsonlEntries(path: string): AsyncIterableIterator<u
 }
 
 export async function* streamJsonlLinesFromFile(file: Bun.BunFile): AsyncIterableIterator<string> {
-  if (!(await file.exists())) return
+  if (file.size === 0 && !(await file.exists())) return
 
   const reader = file.stream().getReader()
   const decoder = new TextDecoder()
-  let remaining = ""
+  let fragments: string[] = []
   let reachedEnd = false
 
   try {
@@ -235,14 +238,20 @@ export async function* streamJsonlLinesFromFile(file: Bun.BunFile): AsyncIterabl
       }
 
       const chunk = decoder.decode(value, { stream: true })
-      const { lines, remainder } = splitJsonlChunk(remaining + chunk)
-      remaining = remainder
-      for (const line of lines) {
-        yield line
+      const { lines, remainder } = splitJsonlChunk(chunk)
+      if (lines.length === 0) {
+        fragments.push(remainder)
+        continue
       }
+      /** Join a spanning record once, not once per chunk (quadratic copying). */
+      fragments.push(lines[0]!)
+      yield fragments.join("")
+      for (let i = 1; i < lines.length; i++) yield lines[i]!
+      fragments = remainder ? [remainder] : []
     }
 
-    const final = remaining + decoder.decode()
+    fragments.push(decoder.decode())
+    const final = fragments.join("")
     if (final) yield final
   } finally {
     await closeStreamReader(reader, reachedEnd)

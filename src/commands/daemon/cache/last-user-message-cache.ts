@@ -1,8 +1,4 @@
-import {
-  readJsonlTailTextFromFile,
-  splitJsonlLines,
-  tryParseJsonLine,
-} from "../../../utils/jsonl.ts"
+import { readLastTranscriptUserMessage } from "../../../utils/transcript-user-message.ts"
 import { CappedMap } from "./capped-map.ts"
 
 /** Where the daemon learned a session's last user-message time. */
@@ -15,64 +11,15 @@ export interface LastUserMessage {
   source: LastUserMessageSource
 }
 
-interface TranscriptUserEntry {
-  type?: string
-  timestamp?: string
-  message?: { content?: unknown }
-}
-
-/**
- * A transcript `type: "user"` entry counts as a genuine user message only when it
- * carries typed text — a plain string, or a content array with a `text` block and
- * no `tool_result` block. Tool-result entries reuse the `user` type but are not
- * messages the human typed, so they must not advance the last-user-message time.
- */
-function isGenuineUserPrompt(entry: TranscriptUserEntry): boolean {
-  const content = entry.message?.content
-  if (typeof content === "string") return content.trim().length > 0
-  if (!Array.isArray(content)) return false
-  let hasText = false
-  for (const block of content) {
-    const blockType = (block as { type?: string } | null)?.type
-    if (blockType === "tool_result") return false
-    if (blockType === "text") hasText = true
-  }
-  return hasText
-}
-
-/** Scan tail text for the latest genuine user-message timestamp (epoch ms), or null. */
-function extractLastUserMessageMs(text: string): number | null {
-  const lines = splitJsonlLines(text)
-  for (let i = lines.length - 1; i >= 0; i--) {
-    const entry = tryParseJsonLine(lines[i]!) as TranscriptUserEntry | undefined
-    if (!entry) continue
-    if (entry.type !== "user" && entry.type !== "human") continue
-    if (!isGenuineUserPrompt(entry)) continue
-    if (typeof entry.timestamp !== "string") continue
-    const ms = Date.parse(entry.timestamp)
-    if (Number.isFinite(ms)) return ms
-  }
-  return null
-}
-
 /**
  * Read a transcript file's tail and return the latest user-message time (epoch ms).
- * Expands the read window backwards until a user message is found or the file start
- * is reached. Returns null when the file is missing/unreadable or has no user message.
+ * Scans backwards in fixed chunks, including for Codex messages. Returns null
+ * when the file is missing/unreadable or has no readable user message.
  */
 export async function findLastUserMessageMsFromTranscript(
   transcriptPath: string
 ): Promise<number | null> {
-  try {
-    const file = Bun.file(transcriptPath)
-    const stat = await file.stat()
-    const result = await readJsonlTailTextFromFile(file, stat.size ?? 0, {
-      isEnough: (text) => extractLastUserMessageMs(text) !== null,
-    })
-    return extractLastUserMessageMs(result.text)
-  } catch {
-    return null
-  }
+  return (await readLastTranscriptUserMessage(transcriptPath, true))?.at ?? null
 }
 
 /**

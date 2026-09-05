@@ -11,47 +11,22 @@ import {
 } from "../src/SwizHook.ts"
 import { type UserPromptSubmitHookInput, userPromptSubmitHookInputSchema } from "../src/schemas.ts"
 import { createTasksFromSkillSteps, formatSkillStepsSummary } from "../src/utils/skill-steps.ts"
+import { readLastTranscriptUserMessage } from "../src/utils/transcript-user-message.ts"
 
 const SKILL_INVOCATION_RE = /^\s*\/([a-z][a-z0-9-]*)/i
 
-function extractTextFromContent(content: unknown): string {
-  if (typeof content === "string") return content
-  if (Array.isArray(content)) {
-    const textBlock = content.find((b: { type?: string }) => b.type === "text") as
-      | { text?: string }
-      | undefined
-    return textBlock?.text ?? ""
-  }
-  return ""
-}
-
-function extractLastUserMessage(lines: string[]): string {
-  for (let i = lines.length - 1; i >= 0; i--) {
-    try {
-      const entry = JSON.parse(lines[i]!)
-      if (entry?.type !== "user") continue
-      const text = extractTextFromContent(entry?.message?.content)
-      if (text) return text
-    } catch {}
-  }
-  return ""
+export async function readSubmittedUserMessage(input: UserPromptSubmitHookInput): Promise<string> {
+  if (typeof input.prompt === "string") return input.prompt
+  if (!input.transcript_path) return ""
+  return (await readLastTranscriptUserMessage(input.transcript_path))?.text ?? ""
 }
 
 export async function evaluateUserpromptsubmitSkillSteps(input: unknown): Promise<SwizHookOutput> {
   const hookInput: UserPromptSubmitHookInput = userPromptSubmitHookInputSchema.parse(input)
   const sessionId = hookInput.session_id ?? ""
   const cwd = hookInput.cwd ?? process.cwd()
-  const transcriptPath = hookInput.transcript_path
-
-  if (!sessionId || !transcriptPath) return {}
-
-  let userMessage = ""
-  try {
-    const text = await Bun.file(transcriptPath).text()
-    userMessage = extractLastUserMessage(text.split("\n").filter(Boolean))
-  } catch {
-    return {}
-  }
+  if (!sessionId) return {}
+  const userMessage = await readSubmittedUserMessage(hookInput)
 
   if (!userMessage) return {}
 

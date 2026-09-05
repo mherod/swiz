@@ -66,6 +66,27 @@ Run `bun scripts/debug-session-preview-memory.ts 32` to compare three cold
 preview reads of a synthetic 32 MiB history. It prints memory counters and
 checks that the latest message survives; it does not read user transcripts.
 
+## Hook transcript reads
+
+User-message lookups scan backwards in fixed 256 KiB chunks and understand both
+Claude and Codex records. They skip individual records larger than 8 MiB, including
+oversized tool output. A lookup with no matching message can scan the whole file,
+but never holds the whole history in memory. Prompt-submission hooks use the
+submitted `prompt` directly when available.
+
+Native task-tool evidence and diagnostic ownership checks stream full history so
+evidence before compaction is preserved. Diagnostic state retains only a small
+snippet. Append cursors request a cold rebuild for deltas over 8 MiB before
+allocating them; streaming consumers rebuild with bounded read buffers.
+Concurrent native task checks share one scan. The line reader collects fragments
+of a spanning record and joins them once, avoiding repeated copies of large tool
+results. These full-history scans still need memory proportional to the largest
+individual record and must read the full file on a cold cache miss.
+
+Run `bun scripts/debug-hook-transcript-memory.ts <mode> 32` for synthetic probes;
+modes are `activity`, `activity-miss`, `prompt`, `availability`, and `diagnostics`.
+Counters reflect process RSS and JS memory, not a hard allocator-memory ceiling.
+
 This is bounded degradation, not a hard process-memory cap or a fix for an
 unprofiled native leak. It does not force GC or terminate admitted work. If RSS
 stays high, inspect `/memory`, drain active work, and use `swiz daemon --restart`

@@ -12,7 +12,7 @@
 
 import { LRUCache } from "lru-cache"
 import type { PostToolHookInput, ToolHookInput } from "../schemas.ts"
-import { JsonlAppendCursor, type JsonlAppendMetadata } from "./jsonl.ts"
+import { JsonlAppendCursor, type JsonlAppendMetadata, streamJsonlLinesFromFile } from "./jsonl.ts"
 import { shellTokenCommandRe } from "./shell-patterns.ts"
 
 // ─── Issue guidance ──────────────────────────────────────────────────────────
@@ -259,18 +259,31 @@ export async function readNativeTaskToolAvailabilityFromTranscript(
   transcriptPath: string | undefined | null
 ): Promise<NativeTaskToolAvailability> {
   if (!transcriptPath) return "unknown"
+  return shareAvailabilityRead(`transcript:${transcriptPath}`, () =>
+    readTranscriptAvailability(transcriptPath)
+  )
+}
+
+async function readTranscriptAvailability(
+  transcriptPath: string
+): Promise<NativeTaskToolAvailability> {
   try {
     const state = transcriptAvailabilityByPath.get(transcriptPath) ?? createAvailabilityState()
     const metadata = await readAppendMetadata(transcriptPath)
     if (!metadata) return "unknown"
     const update = await state.cursor.read(transcriptPath, metadata)
-    const lines =
-      update.kind === "cold" ? (await Bun.file(transcriptPath).text()).split("\n") : update.lines
     if (update.kind === "cold") {
       state.verdict = "unknown"
+      for await (const line of streamJsonlLinesFromFile(
+        Bun.file(transcriptPath).slice(0, metadata.size)
+      )) {
+        state.verdict = applyTranscriptEvidence(state.verdict, [line])
+        if (state.verdict === "present") break
+      }
       state.cursor.reset(metadata)
+    } else {
+      state.verdict = applyTranscriptEvidence(state.verdict, update.lines)
     }
-    state.verdict = applyTranscriptEvidence(state.verdict, lines)
     transcriptAvailabilityByPath.set(transcriptPath, state)
     return state.verdict
   } catch {
@@ -283,14 +296,30 @@ async function readToolSearchEvidenceFile(
   path: string,
   sessionId: string
 ): Promise<NativeTaskToolAvailability> {
+  return shareAvailabilityRead(`capture:${path}\0${sessionId}`, () =>
+    readCaptureAvailability(path, sessionId)
+  )
+}
+
+async function readCaptureAvailability(
+  path: string,
+  sessionId: string
+): Promise<NativeTaskToolAvailability> {
   const file = Bun.file(path)
   if (!(await file.exists())) return "unknown"
   const metadata = await readAppendMetadata(path)
   if (!metadata) return "unknown"
   const state = captureAvailabilityByPath.get(path) ?? createCaptureAvailabilityState()
   const update = await state.cursor.read(path, metadata)
-  const lines = await readCaptureCursorLines(file, state, update.kind, update.lines, metadata)
-  for (const line of lines) applyToolSearchCaptureLine(line, state)
+  for await (const line of readCaptureCursorLines(
+    file,
+    state,
+    update.kind,
+    update.lines,
+    metadata
+  )) {
+    applyToolSearchCaptureLine(line, state)
+  }
   captureAvailabilityByPath.set(path, state)
   return state.verdicts.get(sessionId) ?? "unknown"
 }
@@ -307,6 +336,22 @@ async function readToolSearchEvidenceFile(
 const nativeTaskToolAvailabilityBySession = new LRUCache<string, NativeTaskToolAvailability>({
   max: NATIVE_TASK_AVAILABILITY_CACHE_SIZE,
 })
+
+const availabilityReads = new Map<string, Promise<NativeTaskToolAvailability>>()
+
+/** Concurrent inline hooks must share their cold transcript scan. */
+function shareAvailabilityRead(
+  key: string,
+  read: () => Promise<NativeTaskToolAvailability>
+): Promise<NativeTaskToolAvailability> {
+  const existing = availabilityReads.get(key)
+  if (existing) return existing
+  const pending = read().finally(() => {
+    if (availabilityReads.get(key) === pending) availabilityReads.delete(key)
+  })
+  availabilityReads.set(key, pending)
+  return pending
+}
 
 interface AvailabilityState {
   cursor: JsonlAppendCursor
@@ -336,17 +381,20 @@ function createCaptureAvailabilityState(): CaptureAvailabilityState {
   }
 }
 
-async function readCaptureCursorLines(
+async function* readCaptureCursorLines(
   file: Bun.BunFile,
   state: CaptureAvailabilityState,
   kind: "hit" | "append" | "cold",
   appendedLines: string[],
   metadata: JsonlAppendMetadata
-): Promise<string[]> {
-  if (kind !== "cold") return appendedLines
+): AsyncIterableIterator<string> {
+  if (kind !== "cold") {
+    yield* appendedLines
+    return
+  }
   state.verdicts.clear()
+  yield* streamJsonlLinesFromFile(file.slice(0, metadata.size))
   state.cursor.reset(metadata)
-  return (await file.text()).split("\n")
 }
 
 function applyToolSearchCaptureLine(line: string, state: CaptureAvailabilityState): void {
@@ -397,6 +445,7 @@ function currentEvidence(verdict: NativeTaskToolAvailability): ToolSearchEvidenc
 
 /** Test seam: drop memoized verdicts. */
 export function resetNativeTaskToolAvailabilityCache(): void {
+  availabilityReads.clear()
   nativeTaskToolAvailabilityBySession.clear()
   transcriptAvailabilityByPath.clear()
   captureAvailabilityByPath.clear()
