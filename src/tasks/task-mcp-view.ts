@@ -51,6 +51,15 @@ export const MAX_CYCLE_IDS = 4
 /** In-progress work older than this is called out as possibly abandoned. */
 export const STALE_IN_PROGRESS_MS = 2 * 60 * 60 * 1000
 
+/** Advisory reminders shared by MCP clients, including agents without task hooks. */
+const TASK_GOVERNANCE_HINTS = [
+  "Task governance:",
+  "- Plan real work with TaskCreate: one action per subject; update an existing task instead of duplicating it.",
+  "- Use TaskUpdate to mark work in_progress before implementation; keep status, description and blockers current.",
+  "- Complete only when requirements are met, with concrete evidence in description (file:, test:, commit:, pr: or note:); cancel obsolete work.",
+  "- Keep task management in the parent session using task tools; refresh TaskList after compaction. Create follow-on tasks only for remaining work.",
+].join("\n")
+
 export interface TaskListSummary {
   total: number
   pending: number
@@ -175,9 +184,8 @@ export function renderUnblockedLine(unblocked: readonly Task[]): string | null {
  * The single most useful next instruction for the current topology, or null when the queue is
  * healthy and moving.
  *
- * The task gates block tool use at zero open tasks and at zero in-progress work, and a queue whose
- * every pending task is blocked cannot be started at all — each of those is a state the caller is
- * about to walk into, so it is named here with the move that resolves it.
+ * Name the next move when work remains. An empty queue can also mean the work is finished;
+ * completing the final task must not imply that the caller needs to invent a successor.
  */
 export function taskQueueHint(tasks: readonly Task[]): string | null {
   const byId = indexTasksById(tasks)
@@ -192,7 +200,7 @@ export function taskQueueHint(tasks: readonly Task[]): string | null {
     return `Dependency cycle: ${loop} — nothing in this chain can start; drop one blockedBy edge.`
   }
   if (inProgress.length + pending.length === 0) {
-    return "No open tasks — create the next step with TaskCreate before more work."
+    return "No open tasks — if work remains, create the next step with TaskCreate; otherwise the queue is complete."
   }
   const next = inProgress.length === 0 ? pickCriticalPathTask(ready, tasks) : null
   if (next) {
@@ -201,7 +209,7 @@ export function taskQueueHint(tasks: readonly Task[]): string | null {
   // With no in-progress work and no ready task, every pending task waits on another pending task,
   // which can only happen inside a cycle — already reported above.
   if (pending.length === 0) {
-    return "No pending task queued — add the follow-on step before completing the last one."
+    return "No pending task queued — add a follow-on step only if work remains; otherwise finish the active work with evidence."
   }
   if (ready.length === 0) {
     return `Every pending task is blocked — finishing #${inProgress[0]!.id} is what moves the queue.`
@@ -226,13 +234,13 @@ export function renderTaskBoard(tasks: readonly Task[], highlightId?: string): s
   return lines.join("\n")
 }
 
-/** A tool response: a headline confirming what changed, then the board. */
+/** A tool response: confirmation, the board, and concise task governance reminders. */
 export function renderTaskToolResult(
   headline: string,
   tasks: readonly Task[],
   highlightId?: string
 ): string {
-  return `${headline}\n\n${renderTaskBoard(tasks, highlightId)}`
+  return `${headline}\n\n${renderTaskBoard(tasks, highlightId)}\n\n${TASK_GOVERNANCE_HINTS}`
 }
 
 /** Human-readable list of the fields a TaskUpdate actually changed. */

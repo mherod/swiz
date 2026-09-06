@@ -6,6 +6,10 @@ const tmp = useTempDir("swiz-mcp-tool-core-")
 
 interface DriverResult {
   createdId: string
+  createdText: string
+  updatedText: string
+  listedText: string
+  emptyListedText: string
   prefixedUpdateOk: boolean
   prefixedHeadline: string
   bareUpdateOk: boolean
@@ -24,12 +28,15 @@ async function runDriver(): Promise<DriverResult> {
   const home = await tmp.create()
   const cwd = join(home, "project")
   const corePath = join(process.cwd(), "src", "mcp-tool-core.ts")
+  const taskRootsPath = join(process.cwd(), "src", "task-roots.ts")
   const script = `
     import { mkdir } from "node:fs/promises"
     import { runMcpTool } from ${JSON.stringify(corePath)}
+    import { createDefaultTaskStore } from ${JSON.stringify(taskRootsPath)}
     const cwd = ${JSON.stringify(cwd)}
     await mkdir(cwd, { recursive: true })
     const textOf = (result) => result.content.map((part) => part.text ?? "").join("\\n")
+    const emptyListed = await runMcpTool("TaskList", {}, cwd)
     const created = await runMcpTool(
       "TaskCreate",
       { subject: "Probe the id prefix path", description: "note: issue #846 regression probe" },
@@ -47,6 +54,7 @@ async function runDriver(): Promise<DriverResult> {
       { taskId: createdId, description: "note: bare form still works" },
       cwd
     )
+    const listed = await runMcpTool("TaskList", {}, cwd)
     const unknownBare = await runMcpTool("TaskUpdate", { taskId: "zzzz-99", status: "pending" }, cwd)
     const unknownPrefixed = await runMcpTool(
       "TaskUpdate",
@@ -61,7 +69,7 @@ async function runDriver(): Promise<DriverResult> {
     const edgeId = /Created #(\\S+)/.exec(textOf(edgeFixture))?.[1] ?? ""
     await runMcpTool("TaskUpdate", { taskId: createdId, addBlocks: ["#" + edgeId] }, cwd)
     const { readdir } = await import("node:fs/promises")
-    const tasksRoot = process.env.HOME + "/.claude/tasks"
+    const tasksRoot = createDefaultTaskStore().tasksDir
     const readBlocks = async () => {
       for (const projectDir of await readdir(tasksRoot)) {
         for (const file of await readdir(tasksRoot + "/" + projectDir)) {
@@ -78,6 +86,10 @@ async function runDriver(): Promise<DriverResult> {
     console.log(
       JSON.stringify({
         createdId,
+        createdText,
+        updatedText: textOf(prefixed),
+        listedText: textOf(listed),
+        emptyListedText: textOf(emptyListed),
         prefixedUpdateOk: !prefixed.isError,
         prefixedHeadline: textOf(prefixed).split("\\n")[0] ?? "",
         bareUpdateOk: !bare.isError,
@@ -90,7 +102,7 @@ async function runDriver(): Promise<DriverResult> {
     )
   `
   const proc = Bun.spawn(["bun", "-e", script], {
-    cwd: process.cwd(),
+    cwd: home,
     env: { ...process.env, HOME: home, AI_TEST_NO_BACKEND: "1", SWIZ_NO_DAEMON: "1" },
     stdout: "pipe",
     stderr: "pipe",
@@ -100,6 +112,7 @@ async function runDriver(): Promise<DriverResult> {
     new Response(proc.stderr).text(),
   ])
   await proc.exited
+  expect(proc.exitCode).toBe(0)
   expect(stderr.includes("error")).toBe(false)
   const lastLine = stdout.trim().split("\n").at(-1) ?? "{}"
   return JSON.parse(lastLine) as DriverResult
@@ -120,5 +133,35 @@ describe("runTaskUpdateTool id normalization (issue #846)", () => {
     expect(result.edgeId).not.toBe("")
     expect(result.storedBlocks).toEqual([result.edgeId])
     expect(result.blocksAfterRemove).toEqual([])
+  }, 30000)
+})
+
+describe("MCP task governance hints", () => {
+  test("appends one governance footer to create, update, populated list and empty list results", async () => {
+    const result = await runDriver()
+
+    for (const output of [
+      result.createdText,
+      result.updatedText,
+      result.listedText,
+      result.emptyListedText,
+    ]) {
+      expect(output.match(/^Task governance:/gm)).toHaveLength(1)
+      const footer = output.slice(output.indexOf("Task governance:"))
+      expect(footer).toContain("one action per subject")
+      expect(footer).toContain("in_progress")
+      expect(footer).toMatch(/evidence in description/)
+      expect(footer).toContain("parent session")
+    }
+
+    expect(result.createdText).toStartWith(`Created #${result.createdId}`)
+    expect(result.createdText).toContain("READY (1)")
+    expect(result.updatedText).toStartWith(`Updated #${result.createdId}`)
+    expect(result.updatedText).toContain("pending → in_progress")
+    expect(result.listedText).toStartWith("Task queue for this project.")
+    expect(result.listedText).toContain(`#${result.createdId}`)
+    expect(result.listedText).toContain("1 in progress")
+    expect(result.emptyListedText).toStartWith("No tasks in this project yet.")
+    expect(result.emptyListedText).toContain("Totals: 0 task(s)")
   }, 30000)
 })

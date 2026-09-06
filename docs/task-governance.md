@@ -5,6 +5,13 @@ references point at the authoritative definition. Update this doc when those fil
 
 ## Task lifecycle
 
+Successful swiz MCP `TaskCreate`, `TaskUpdate`, and `TaskList` responses include a
+`Task governance:` footer after the queue. It reminds callers to plan real work with
+one action per subject, keep status and blockers current, record completion evidence
+in `description`, and manage tasks in the parent session. These are advisory hints,
+including for agents without task hooks; they do not add enforcement gates. Empty
+queues and the final active task only suggest follow-on tasks when work remains.
+
 State machine: `pending` → `in_progress` → `completed`, or `deleted` from either open state.
 
 - **No shortcut completion**: `pending` → `completed` is blocked; tasks must pass through

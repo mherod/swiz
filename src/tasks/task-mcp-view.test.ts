@@ -251,8 +251,11 @@ describe("renderTaskBoard", () => {
 })
 
 describe("taskQueueHint", () => {
-  it("flags an empty queue that will block the next tool call", () => {
-    expect(taskQueueHint([])).toContain("TaskCreate")
+  it("allows an empty queue when no work remains", () => {
+    const hint = taskQueueHint([])
+    expect(hint).toContain("if work remains")
+    expect(hint).toContain("TaskCreate")
+    expect(hint).toContain("otherwise the queue is complete")
   })
 
   it("names the task to start when nothing is in progress", () => {
@@ -276,8 +279,11 @@ describe("taskQueueHint", () => {
     expect(hint).toBe("Every pending task is blocked — finishing #a1 is what moves the queue.")
   })
 
-  it("asks for a follow-on step when only in-progress work remains", () => {
-    expect(taskQueueHint([task("a1", "in_progress")])).toContain("No pending task queued")
+  it("allows finishing the final active task without inventing a successor", () => {
+    const hint = taskQueueHint([task("a1", "in_progress")])
+    expect(hint).toContain("No pending task queued")
+    expect(hint).toContain("only if work remains")
+    expect(hint).toContain("otherwise finish the active work with evidence")
   })
 
   it("reports a dependency cycle ahead of any other advice", () => {
@@ -299,5 +305,27 @@ describe("renderTaskToolResult", () => {
     expect(headline).toBe("Created #7 — Fix login")
     expect(blank).toBe("")
     expect(text).toContain("READY (1)")
+  })
+
+  it("includes governance even when the queue is healthy", () => {
+    const tasks = [task("a1", "in_progress"), task("a2", "pending")]
+    const text = renderTaskToolResult("Task queue for this project.", tasks)
+
+    expect(taskQueueHint(tasks)).toBeNull()
+    expect(text).toContain("\n\nTask governance:\n")
+    expect(text).toContain("one action per subject")
+    expect(text).toContain("mark work in_progress before implementation")
+    expect(text).toContain("concrete evidence in description")
+    expect(text).toContain("parent session using task tools")
+    expect(text).toContain("refresh TaskList after compaction")
+    expect(text.indexOf("Task governance:")).toBeGreaterThan(text.indexOf("Totals:"))
+  })
+
+  it("keeps governance bounded for large task queues", () => {
+    const tasks = Array.from({ length: 500 }, (_, i) => task(`t${i}`, "pending"))
+    const text = renderTaskToolResult("Task queue for this project.", tasks)
+
+    expect(text.match(/Task governance:/g)).toHaveLength(1)
+    expect(text.split("\n").length).toBeLessThan(30)
   })
 })
