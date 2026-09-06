@@ -378,6 +378,63 @@ describe("TranscriptIndexCache", () => {
     void rm(path, { force: true }).catch(() => {})
   })
 
+  test.each([
+    ["é", 1],
+    ["€", 1],
+    ["€", 2],
+    ["🌍", 1],
+    ["🌍", 2],
+    ["🌍", 3],
+  ] as const)("cold-seeded %s split after byte %i matches a full parse", async (character, prefixBytes) => {
+    const path = testTranscript("cold-byte-split")
+    const encoder = new TextEncoder()
+    const first = JSON.stringify({ type: "user", message: { content: "Start" } })
+    const record = JSON.stringify({
+      type: "assistant",
+      message: {
+        content: [{ type: "tool_use", name: "Read", input: { file_path: `${character}.ts` } }],
+      },
+    })
+    const blocked = JSON.stringify({
+      type: "user",
+      message: {
+        content: [{ type: "tool_result", tool_use_id: character, content: "Resolve this block" }],
+      },
+    })
+    const encoded = encoder.encode(record)
+    const splitAt = encoded.indexOf(encoder.encode(character)[0]!) + prefixBytes
+    try {
+      await Bun.write(path, `${first}\n`)
+      await appendFile(path, encoded.slice(0, splitAt))
+      const cache = new TranscriptIndexCache()
+      expect((await cache.getSummary(path))?.sessionLines).toEqual([first])
+
+      await appendFile(path, encoded.slice(splitAt))
+      const provisional = await cache.getSummary(path)
+      expect(provisional?.sessionLines).toEqual([first, record])
+      expect(provisional?.readFiles).toEqual([`${character}.ts`])
+
+      await appendFile(path, `\n${blocked}\n`)
+      const incremental = await cache.getSummary(path)
+      const incrementalIndex = await cache.get(path)
+      const coldCache = new TranscriptIndexCache()
+      expect(incremental).toEqual(await coldCache.getSummary(path))
+      expect(incremental?.sessionLines).toEqual([first, record, blocked])
+      expect(incremental?.toolCallCount).toBe(1)
+      expect(incrementalIndex?.blockedToolUseIds).toEqual([character])
+      expect(incrementalIndex?.blockedToolUseIds).toEqual(
+        (await coldCache.get(path))?.blockedToolUseIds
+      )
+      expect(await cache.getSummary(path)).toEqual(incremental)
+      expect(cache.coldRebuilds).toBe(1)
+      expect(cache.appendedBytes).toBe(
+        encoded.length - splitAt + encoder.encode(`\n${blocked}\n`).length
+      )
+    } finally {
+      await rm(path, { force: true })
+    }
+  })
+
   test("does not retain a full summary larger than the character budget", async () => {
     const oversizedLine = "x".repeat(17 * 1024 * 1024)
     let buildCalls = 0

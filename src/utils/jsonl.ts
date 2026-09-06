@@ -53,6 +53,8 @@ export class JsonlAppendCursor {
   /**
    * Adopt an existing cold read: every byte up to `metadata.size` is accounted for, but
    * `pendingTail` had no terminating newline and is still owed to a later record.
+   * Keep these bytes undecoded: a cold EOF can fall inside a UTF-8 character,
+   * and encoding a decoded replacement character cannot recover the original bytes.
    *
    * `reset` is the wrong tool for a cold seed. It marks the same bytes consumed while
    * dropping the partial ones, so the completing suffix later arrives alone — `,"b":2}`
@@ -60,10 +62,11 @@ export class JsonlAppendCursor {
    * truncated prefix stays counted (#819). Carrying the tail forward means the whole
    * record lands exactly once, when its newline does.
    */
-  seed(metadata: JsonlAppendMetadata, pendingTail: string): void {
+  seed(metadata: JsonlAppendMetadata, pendingTail: JsonlBuffer): void {
     this.offset = metadata.size
     this.metadata = { ...metadata }
-    this.remainder = pendingTail ? new TextEncoder().encode(pendingTail) : new Uint8Array(0)
+    /** Own only the pending bytes, not a view retaining the entire cold read. */
+    this.remainder = pendingTail.slice()
   }
 
   clear(): void {
@@ -468,34 +471,41 @@ interface JsonlTailTextMeta {
 
 interface JsonlTailTextResult extends JsonlTailTextMeta {
   text: string
+  pendingTail: JsonlBuffer
 }
 
 interface JsonlTailTextOptions {
   initialBytes?: number
   maxBytes?: number
+  /** Set false when unfinished records must remain raw bytes for an append cursor. */
+  includeUnterminated?: boolean
   isEnough?: (text: string, meta: JsonlTailTextMeta) => boolean
 }
 
-function completeJsonlTailText(raw: string, reachedStart: boolean): string {
+function completeJsonlTailBytes(raw: JsonlBuffer, reachedStart: boolean): JsonlBuffer {
   if (reachedStart) return raw
-  if (raw.charCodeAt(0) === NEWLINE_BYTE) return raw.slice(1)
-  const firstNewline = raw.indexOf("\n")
-  return firstNewline === -1 ? "" : raw.slice(firstNewline + 1)
+  const firstNewline = raw.indexOf(NEWLINE_BYTE)
+  return firstNewline === -1 ? new Uint8Array(0) : raw.subarray(firstNewline + 1)
 }
 
 async function readTailSlice(
   file: Bun.BunFile,
   fileSize: number,
-  byteLimit: number
-): Promise<{ text: string; meta: JsonlTailTextMeta }> {
+  byteLimit: number,
+  includeUnterminated: boolean
+): Promise<JsonlTailTextResult> {
   const rawStart = Math.max(0, fileSize - byteLimit)
   const readStart = rawStart > 0 ? rawStart - 1 : 0
-  const raw = await file.slice(readStart, fileSize).text()
+  const raw = new Uint8Array(await file.slice(readStart, fileSize).arrayBuffer())
   const reachedStart = rawStart === 0
   const bytesRead = fileSize - readStart
-  const text = completeJsonlTailText(raw, reachedStart)
-  const meta: JsonlTailTextMeta = { reachedStart, bytesRead, fileSize }
-  return { text, meta }
+  const records = completeJsonlTailBytes(raw, reachedStart)
+  const pendingStart = records.lastIndexOf(NEWLINE_BYTE) + 1
+  const pendingTail = records.subarray(pendingStart)
+  const text = new TextDecoder().decode(
+    includeUnterminated ? records : records.subarray(0, pendingStart)
+  )
+  return { text, pendingTail, reachedStart, bytesRead, fileSize }
 }
 
 function isTailReadSufficient(
@@ -519,14 +529,19 @@ export async function readJsonlTailTextFromFile(
   let byteLimit = Math.min(maxBytes, initialBytes)
 
   while (true) {
-    const { text, meta } = await readTailSlice(file, fileSize, byteLimit)
+    const result = await readTailSlice(
+      file,
+      fileSize,
+      byteLimit,
+      options.includeUnterminated !== false
+    )
 
-    if (isTailReadSufficient(text, meta, byteLimit, maxBytes, options)) {
-      return { ...meta, text }
+    if (isTailReadSufficient(result.text, result, byteLimit, maxBytes, options)) {
+      return { ...result, pendingTail: result.pendingTail.slice() }
     }
 
     const nextByteLimit = Math.min(maxBytes, byteLimit * 2)
-    if (nextByteLimit === byteLimit) return { ...meta, text }
+    if (nextByteLimit === byteLimit) return { ...result, pendingTail: result.pendingTail.slice() }
     byteLimit = nextByteLimit
   }
 }

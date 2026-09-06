@@ -303,33 +303,24 @@ export class TranscriptIndexCache {
     cursor.seed(metadata, pendingTail)
     this.incrementalEntries.set(transcriptPath, { index: built, accumulator, cursor })
     // Cold and hot must return the same shape, so the tail shows provisionally here too.
-    return withProvisionalTail(built, pendingTail)
+    return withProvisionalTail(built, cursor.tailText)
   }
 
   private async buildIndex(
     transcriptFile: Bun.BunFile,
     fileSize: number,
     mtimeMs: number
-  ): Promise<{ index: TranscriptIndex; pendingTail: string } | null> {
+  ): Promise<{ index: TranscriptIndex; pendingTail: Uint8Array<ArrayBufferLike> } | null> {
     try {
       let sessionLines: string[] = []
-      let endsWithNewline = true
-      await readJsonlTailTextFromFile(transcriptFile, fileSize, {
+      const { pendingTail } = await readJsonlTailTextFromFile(transcriptFile, fileSize, {
+        includeUnterminated: false,
         isEnough: (text, meta) => {
           const result = splitSessionLinesAfterLatestSystem(text)
           sessionLines = result.sessionLines
-          endsWithNewline = text === "" || text.endsWith("\n")
           return result.sawSystem || meta.reachedStart
         },
       })
-
-      // A trailing record with no newline is still being written. Splitting it off keeps
-      // durable state to whole records only, matching what the append cursor can reduce.
-      let pendingTail = ""
-      if (!endsWithNewline && sessionLines.length > 0) {
-        pendingTail = sessionLines[sessionLines.length - 1] ?? ""
-        sessionLines = sessionLines.slice(0, -1)
-      }
 
       const summary = computeSummaryFromSessionLines(sessionLines)
       const blockedIds = extractBlockedToolUseIds(sessionLines)

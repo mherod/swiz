@@ -50,7 +50,7 @@ test("a multi-gigabyte preview reads one bounded suffix and drops the partial fi
     },
     slice: (start: number, end: number) => {
       slices.push([start, end])
-      return { text: async () => `partial record\n${line}\n` }
+      return new Blob([`partial record\n${line}\n`])
     },
   } as unknown as Bun.BunFile
   expect(await readSessionPreview(file, size, "codex-jsonl")).toBe(`${line}\n`)

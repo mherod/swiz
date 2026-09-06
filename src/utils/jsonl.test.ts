@@ -7,6 +7,7 @@ import {
   parseJsonlUntyped,
   readJsonlFileTailUntyped,
   readJsonlTailText,
+  readJsonlTailTextFromFile,
   splitJsonlLines,
   streamJsonlEntries,
   streamJsonlEntriesFromFile,
@@ -209,7 +210,7 @@ describe("jsonl utilities", () => {
     }
 
     const cursor = new JsonlAppendCursor()
-    cursor.seed(metadata, '{"id":2')
+    cursor.seed(metadata, new TextEncoder().encode('{"id":2'))
     expect(cursor.tailText).toBe('{"id":2')
 
     await appendFile(path, "}\n")
@@ -290,31 +291,63 @@ describe("jsonl utilities", () => {
     expect(nextRead.lines).toEqual(['{"id":3}'])
   })
 
-  it("seed survives a tail split mid UTF-8 sequence", async () => {
+  it.each([
+    ["é", 1],
+    ["€", 1],
+    ["€", 2],
+    ["🌍", 1],
+    ["🌍", 2],
+    ["🌍", 3],
+  ] as const)("seed preserves %s split after byte %i", async (character, prefixBytes) => {
     await resetTestDir()
     const path = join(TEST_DIR, "seed-utf8.jsonl")
-    const record = '{"value":"café"}'
-    await Bun.write(path, record.slice(0, -3))
+    const encoder = new TextEncoder()
+    const record = JSON.stringify({ value: character })
+    const encoded = encoder.encode(record)
+    const splitAt = encoded.indexOf(encoder.encode(character)[0]!) + prefixBytes
+    const prefix = encoded.slice(0, splitAt)
+    await Bun.write(path, prefix)
     const stat = await Bun.file(path).stat()
     const cursor = new JsonlAppendCursor()
-    cursor.seed(
-      {
-        size: stat.size,
-        mtimeMs: stat.mtimeMs,
-        dev: (stat as { dev?: number }).dev,
-        ino: (stat as { ino?: number }).ino,
-      },
-      record.slice(0, -3)
-    )
+    cursor.seed(stat, new Uint8Array(await Bun.file(path).arrayBuffer()))
 
-    await appendFile(path, `${record.slice(-3)}\n`)
+    await appendFile(path, encoded.slice(splitAt))
+    const provisional = await cursor.read(path, await Bun.file(path).stat())
+    expect(provisional).toMatchObject({ kind: "append", lines: [] })
+    expect(cursor.tailText).toBe(record)
+
+    await appendFile(path, "\n")
     const done = await Bun.file(path).stat()
-    const update = await cursor.read(path, {
-      size: done.size,
-      mtimeMs: done.mtimeMs,
-      dev: (done as { dev?: number }).dev,
-      ino: (done as { ino?: number }).ino,
-    })
+    const update = await cursor.read(path, done)
     expect(update.lines).toEqual([record])
+    expect(await cursor.read(path, done)).toMatchObject({ kind: "hit", lines: [] })
+  })
+
+  it("seeds pending bytes from the same bounded cold tail that supplied complete records", async () => {
+    await resetTestDir()
+    const path = join(TEST_DIR, "cold-observed-eof.jsonl")
+    const encoder = new TextEncoder()
+    const first = '{"id":1}\n'
+    const pending = encoder.encode('{"value":"café"}\n')
+    const splitAt = pending.indexOf(0xc3) + 1
+    await Bun.write(path, encoder.encode(first))
+    await appendFile(path, pending.slice(0, splitAt))
+    const observed = await Bun.file(path).stat()
+    await appendFile(path, pending.slice(splitAt))
+
+    const cold = await readJsonlTailTextFromFile(Bun.file(path), observed.size, {
+      initialBytes: 2,
+      includeUnterminated: false,
+      isEnough: (text) => splitJsonlLines(text).length > 0,
+    })
+    expect(cold.text).toBe(first)
+    expect(cold.pendingTail).toEqual(pending.slice(0, splitAt))
+    expect(cold.pendingTail.buffer.byteLength).toBe(cold.pendingTail.byteLength)
+    expect(cold.fileSize).toBe(observed.size)
+    const cursor = new JsonlAppendCursor()
+    cursor.seed(observed, cold.pendingTail)
+    const latest = await Bun.file(path).stat()
+    expect((await cursor.read(path, latest)).lines).toEqual(['{"value":"café"}'])
+    expect((await cursor.read(path, latest)).lines).toEqual([])
   })
 })
