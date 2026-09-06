@@ -5,9 +5,12 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { projectKeyFromCwd } from "../project-key.ts"
 import { DEFAULT_SETTINGS } from "../settings.ts"
+import { findTaskStoreForSession } from "../task-roots.ts"
 import {
   buildSettingsFlags,
   buildTaskCountsFromTasks,
+  computeSessionStatusSnapshot,
+  computeWantedLevel,
   computeWarmStatusLineSnapshot,
   formatActiveSkillsSegment,
   formatCountSegment,
@@ -23,6 +26,49 @@ import {
   summarizeGitHubCiRuns,
   updateContextStats,
 } from "./status-line.ts"
+
+describe("warm session status snapshots", () => {
+  it("resolves the provider once and captures skills and infractions together", async () => {
+    const calls = { find: 0, lines: 0, skills: 0 }
+    const snapshot = await computeSessionStatusSnapshot("/project", "session-1", {
+      findSessions: async () => {
+        calls.find++
+        return [{ id: "session-1", path: "/transcript.jsonl", provider: "codex", mtime: 1 }]
+      },
+      readLines: async () => {
+        calls.lines++
+        return []
+      },
+      readSkills: async () => {
+        calls.skills++
+        return ["morning-standup"]
+      },
+    })
+
+    expect(snapshot).toEqual({
+      sessionPath: "/transcript.jsonl",
+      activeSkills: ["morning-standup"],
+      infractionWantedLevel: 0,
+    })
+    expect(calls).toEqual({ find: 1, lines: 1, skills: 1 })
+  })
+
+  it("uses a cached infraction level without rereading the transcript", async () => {
+    let reads = 0
+    const wantedLevel = await computeWantedLevel(
+      { wantedLevel: 1, infractionWantedLevel: 2 } as never,
+      null,
+      "/transcript.jsonl",
+      async () => {
+        reads++
+        return []
+      }
+    )
+
+    expect(wantedLevel).toBe(2)
+    expect(reads).toBe(0)
+  })
+})
 
 function makeTempProject(): string {
   return mkdtempSync(join(tmpdir(), "swiz-ctx-stats-test-"))
@@ -926,12 +972,12 @@ describe("computeWarmStatusLineSnapshot task stores", () => {
   }
 
   async function writeStoreTask(
-    home: string,
+    tasksDir: string,
     storeKey: string,
     id: string,
     status: string
   ): Promise<void> {
-    const dir = join(home, ".claude", "tasks", storeKey)
+    const dir = join(tasksDir, storeKey)
     await mkdir(dir, { recursive: true })
     await Bun.write(
       join(dir, `${id}.json`),
@@ -947,9 +993,14 @@ describe("computeWarmStatusLineSnapshot task stores", () => {
   }
 
   it("counts session-store tasks (control)", async () => {
-    const { home, cwd, restore } = setup()
+    const { cwd, restore } = setup()
     const sessionId = "00000000-0000-0000-0000-0000000000cc"
-    await writeStoreTask(home, sessionId, "cccc-1", "in_progress")
+    await writeStoreTask(
+      findTaskStoreForSession(sessionId).tasksDir,
+      sessionId,
+      "cccc-1",
+      "in_progress"
+    )
 
     try {
       // Without this control the union cases below could pass for the wrong reason.
@@ -961,10 +1012,11 @@ describe("computeWarmStatusLineSnapshot task stores", () => {
   })
 
   it("counts project-keyed MCP tasks alongside session tasks", async () => {
-    const { home, cwd, restore } = setup()
+    const { cwd, restore } = setup()
     const sessionId = "00000000-0000-0000-0000-0000000000dd"
-    await writeStoreTask(home, sessionId, "dddd-1", "in_progress")
-    await writeStoreTask(home, projectKeyFromCwd(cwd), "349d-1", "pending")
+    const tasksDir = findTaskStoreForSession(sessionId).tasksDir
+    await writeStoreTask(tasksDir, sessionId, "dddd-1", "in_progress")
+    await writeStoreTask(tasksDir, projectKeyFromCwd(cwd), "349d-1", "pending")
 
     try {
       const snapshot = await computeWarmStatusLineSnapshot(cwd, sessionId)
@@ -980,9 +1032,14 @@ describe("computeWarmStatusLineSnapshot task stores", () => {
   })
 
   it("counts project-keyed tasks when the session store is empty", async () => {
-    const { home, cwd, restore } = setup()
+    const { cwd, restore } = setup()
     const sessionId = "00000000-0000-0000-0000-0000000000ee"
-    await writeStoreTask(home, projectKeyFromCwd(cwd), "349d-2", "pending")
+    await writeStoreTask(
+      findTaskStoreForSession(sessionId).tasksDir,
+      projectKeyFromCwd(cwd),
+      "349d-2",
+      "pending"
+    )
 
     try {
       const snapshot = await computeWarmStatusLineSnapshot(cwd, sessionId)

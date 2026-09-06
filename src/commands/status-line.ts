@@ -76,6 +76,10 @@ export interface WarmStatusLineSnapshot {
   complianceDurationSeconds?: number | null
   /** Compliance-derived baseline of the GTA wanted level, computed daemon-side. Infractions are layered on top locally. */
   wantedLevel?: number | null
+  /** Provider session path resolved while the snapshot was computed. */
+  sessionPath?: string | null
+  /** Transcript-derived wanted level captured with the warm snapshot. */
+  infractionWantedLevel?: number | null
   activeSkills?: string[] | null
   /** True when the daemon's upstream sync hasn't succeeded for this project in over 10 minutes. Null/undefined when unknown (non-daemon path). */
   issueSyncStale?: boolean | null
@@ -83,6 +87,49 @@ export interface WarmStatusLineSnapshot {
   execStats?: ProjectExecutionStats | null
   /** Pending auto-steer messages queued for this session, by trigger. Null when none or unknown. */
   queuedSteers?: QueuedSteerCounts | null
+}
+
+interface SessionStatusSnapshotDependencies {
+  findSessions: typeof findAllProviderSessions
+  readLines: typeof readSessionLines
+  readSkills: typeof getRecentlyInvokedSkillsForCurrentSession
+}
+
+const DEFAULT_SESSION_STATUS_DEPENDENCIES: SessionStatusSnapshotDependencies = {
+  findSessions: findAllProviderSessions,
+  readLines: readSessionLines,
+  readSkills: getRecentlyInvokedSkillsForCurrentSession,
+}
+
+export async function computeSessionStatusSnapshot(
+  cwd: string,
+  sessionId: string | null | undefined,
+  dependencies: SessionStatusSnapshotDependencies = DEFAULT_SESSION_STATUS_DEPENDENCIES
+): Promise<{
+  sessionPath: string | null
+  activeSkills: string[] | null
+  infractionWantedLevel: number | null
+}> {
+  try {
+    const sessions = await dependencies.findSessions(cwd)
+    const session = sessionId
+      ? sessions.find((candidate) => candidate.id === sessionId)
+      : sessions[0]
+    if (!session?.path) {
+      return { sessionPath: null, activeSkills: null, infractionWantedLevel: null }
+    }
+    const [activeSkills, lines] = await Promise.all([
+      dependencies.readSkills(session.path).catch(() => null),
+      dependencies.readLines(session.path).catch(() => null),
+    ])
+    return {
+      sessionPath: session.path,
+      activeSkills,
+      infractionWantedLevel: lines ? standingWantedLevel(lines).wantedLevel : null,
+    }
+  } catch {
+    return { sessionPath: null, activeSkills: null, infractionWantedLevel: null }
+  }
 }
 
 type GitHubCiState = "success" | "pending" | "failure" | "neutral" | "none"
@@ -817,7 +864,7 @@ export async function computeWarmStatusLineSnapshot(
     projectSettings,
     ciProviders,
     sessionTasks,
-    activeSkills,
+    sessionStatus,
     execStats,
     queuedSteers,
   ] = await Promise.all([
@@ -826,18 +873,7 @@ export async function computeWarmStatusLineSnapshot(
     readProjectSettings(cwd).catch(() => null),
     detectCiProviders(cwd).catch(() => new Set()),
     sessionId ? readStatusLineSessionTasks(sessionId, cwd) : Promise.resolve([]),
-    (async () => {
-      try {
-        const sessions = await findAllProviderSessions(cwd)
-        const session = sessionId ? sessions.find((s) => s.id === sessionId) : sessions[0]
-        if (session?.path) {
-          return await getRecentlyInvokedSkillsForCurrentSession(session.path)
-        }
-      } catch {
-        // Fall back to null
-      }
-      return null
-    })(),
+    computeSessionStatusSnapshot(cwd, sessionId),
     readExecStatsForCwd(cwd),
     readQueuedSteerCounts(sessionId),
   ])
@@ -851,17 +887,21 @@ export async function computeWarmStatusLineSnapshot(
   if (effective?.ignoreCi) needs.ci = false
   const gh = await fetchGhData(cwd, gitResult.branch, needs)
   const taskCounts = sessionTasks.length > 0 ? buildTaskCountsFromTasks(sessionTasks) : null
-  return assembleSnapshot({
-    shortCwd,
-    gitResult,
-    activeSegments,
-    gh,
-    effective,
-    taskCounts,
-    activeSkills,
-    execStats,
-    queuedSteers,
-  })
+  return {
+    ...assembleSnapshot({
+      shortCwd,
+      gitResult,
+      activeSegments,
+      gh,
+      effective,
+      taskCounts,
+      activeSkills: sessionStatus.activeSkills,
+      execStats,
+      queuedSteers,
+    }),
+    sessionPath: sessionStatus.sessionPath,
+    infractionWantedLevel: sessionStatus.infractionWantedLevel,
+  }
 }
 
 async function readWarmSnapshotFromDaemon(
@@ -1292,15 +1332,19 @@ async function applySnapshotFallbacks(
   return activeSkills
 }
 
-async function computeWantedLevel(
+export async function computeWantedLevel(
   snapshot: WarmStatusLineSnapshot,
   taskCounts: TaskCounts | null,
-  sessionPath: string | null
+  sessionPath: string | null,
+  readLines: typeof readSessionLines = readSessionLines
 ): Promise<number> {
   let wantedLevel = Math.max(snapshot.wantedLevel ?? 0, complianceBaselineWantedLevel(taskCounts))
+  if (snapshot.infractionWantedLevel !== undefined) {
+    return Math.max(wantedLevel, snapshot.infractionWantedLevel ?? 0)
+  }
   if (!sessionPath) return wantedLevel
   try {
-    const lines = await readSessionLines(sessionPath)
+    const lines = await readLines(sessionPath)
     wantedLevel = Math.max(wantedLevel, standingWantedLevel(lines).wantedLevel)
   } catch {
     // Leave the compliance-derived baseline in place
@@ -1346,7 +1390,10 @@ async function runStatusLine(input: StatusLineInput): Promise<void> {
     renderSettings
   )
   const taskCounts = resolveStatusTaskCounts(snapshot, sessionTasks)
-  const sessionPath = await resolveStatusSessionPath(cwd, sessionId)
+  const sessionPath =
+    snapshot.sessionPath === undefined
+      ? await resolveStatusSessionPath(cwd, sessionId)
+      : snapshot.sessionPath
   const activeSkills = await applySnapshotFallbacks(snapshot, cwd, sessionId, sessionPath)
   const wantedLevel = await computeWantedLevel(snapshot, taskCounts, sessionPath)
   console.log(
