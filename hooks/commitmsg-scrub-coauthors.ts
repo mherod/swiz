@@ -48,12 +48,15 @@ export async function evaluateCommitMsgScrubCoauthors(
     if (!(await messageFile.exists())) return {}
 
     const content = await messageFile.text()
-    const lines = content.split(/\r?\n/)
-    const scrubbedLines = lines.filter((line) => !isProhibitedAttributionLine(line))
-    if (scrubbedLines.length === lines.length) return {}
+    const cutoff = /^# -+ >8 -+\r?$/m.exec(content)?.index ?? content.length
+    const message = content.slice(0, cutoff)
+    const scrubbedMessage = message.replace(/[^\n]*(?:\n|$)/g, (line) =>
+      isProhibitedAttributionLine(line.replace(/\r?\n$/, "")) ? "" : line
+    )
+    if (scrubbedMessage === message) return {}
 
-    const scrubbed = scrubbedLines.join("\n").trim()
-    await Bun.write(msgFile, `${scrubbed}\n`)
+    /** Keep retained lines and the entire scissors suffix exactly as Git supplied them. */
+    await Bun.write(msgFile, scrubbedMessage + content.slice(cutoff))
     return {
       systemMessage: "Scrubbed prohibited commit attribution.",
     }
