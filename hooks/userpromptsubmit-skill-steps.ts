@@ -23,6 +23,17 @@ export async function readSubmittedUserMessage(input: UserPromptSubmitHookInput)
 
 export async function evaluateUserpromptsubmitSkillSteps(input: unknown): Promise<SwizHookOutput> {
   const hookInput: UserPromptSubmitHookInput = userPromptSubmitHookInputSchema.parse(input)
+
+  // `actionPlanMerge` is opt-in and gates every automatic task-creation path. The sibling
+  // `posttooluse-skill-steps` honoured it while this hook did not, so typing `/some-skill`
+  // scraped that SKILL.md's step bullets into tasks even with the setting off — 16 of them
+  // in one case, each with the subject byte-identical to the description, blocking the stop
+  // gate with entries no action could complete (#872).
+  const settings = (input as Record<string, unknown>)._effectiveSettings as
+    | Record<string, unknown>
+    | undefined
+  if (!settings?.actionPlanMerge) return {}
+
   const sessionId = hookInput.session_id ?? ""
   const cwd = hookInput.cwd ?? process.cwd()
   if (!sessionId) return {}
