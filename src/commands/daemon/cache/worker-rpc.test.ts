@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
-import { PendingRequestRegistry } from "./worker-rpc.ts"
+import { workerClock } from "./test-utils/rpc.ts"
+import { PendingRequestRegistry, RpcFailure } from "./worker-rpc.ts"
 
 describe("PendingRequestRegistry", () => {
   test("settles a request when its reply arrives and releases the entry", async () => {
@@ -172,4 +173,88 @@ describe("PendingRequestRegistry", () => {
     registry.rejectAll("shutdown")
     expect(registry.getMetrics().pending).toBe(0)
   })
+})
+
+test("RPC settlement clears deadlines and abort listeners on every outcome", async () => {
+  const clock = workerClock()
+  const rpc = new PendingRequestRegistry({
+    defaultTimeoutMs: 100,
+    maxPending: 2,
+    schedule: clock.schedule,
+  })
+  let id = ""
+  const signal = new AbortController()
+  const ok = rpc.request<number>(
+    (value) => {
+      id = value
+    },
+    { signal: signal.signal }
+  )
+  rpc.resolve(id, 7)
+  expect(await ok).toBe(7)
+  signal.abort()
+  expect(rpc.getMetrics().failures).toBe(0)
+  const failed = rpc.request(() => {}).catch((error) => error)
+  clock.advance(100)
+  expect(await failed).toMatchObject({ code: "TIMEOUT" })
+  const controller = new AbortController()
+  const aborted = rpc.request(() => {}, { signal: controller.signal }).catch((error) => error)
+  controller.abort()
+  expect(await aborted).toMatchObject({ code: "ABORTED" })
+  const closed = rpc.request(() => {}).catch((error) => error)
+  rpc.close()
+  expect(await closed).toMatchObject({ code: "CLOSED" })
+  expect(rpc.getMetrics().pending).toBe(0)
+  expect(clock.callbacks.size).toBe(0)
+  await expect(rpc.request(() => {})).rejects.toThrow("CLOSED")
+})
+
+test("RPC capacity and transport failures settle without orphaning requests", async () => {
+  const clock = workerClock()
+  const rpc = new PendingRequestRegistry({
+    defaultTimeoutMs: 100,
+    maxPending: 1,
+    schedule: clock.schedule,
+  })
+  const pending = rpc.request(() => {}).catch((error) => error)
+  await expect(rpc.request(() => {})).rejects.toThrow("CAPACITY")
+  rpc.rejectAll(new RpcFailure("WORKER_EXIT"))
+  expect(await pending).toMatchObject({ code: "WORKER_EXIT" })
+  await expect(
+    rpc.request(() => {
+      throw new Error("private path")
+    })
+  ).rejects.toThrow("REMOTE")
+  expect(rpc.getMetrics().pending).toBe(0)
+  expect(clock.callbacks.size).toBe(0)
+})
+
+test("timed-out non-cooperative services remain bounded across later attempts", async () => {
+  const clock = workerClock()
+  const rpc = new PendingRequestRegistry({
+    defaultTimeoutMs: 100,
+    maxPending: 1,
+    schedule: clock.schedule,
+  })
+  let finish!: (value: number) => void
+  const service = rpc
+    .serve(
+      () =>
+        new Promise<number>((resolve) => {
+          finish = resolve
+        })
+    )
+    .catch((error) => error)
+  await Promise.resolve()
+  clock.advance(100)
+  expect((await service).code).toBe("TIMEOUT")
+  await expect(rpc.serve(() => 2)).rejects.toThrow("CAPACITY")
+  expect(rpc.pendingCount).toBe(0)
+  expect(rpc.servingCount).toBe(1)
+  finish(1)
+  await Promise.resolve()
+  await Promise.resolve()
+  expect(await rpc.serve(() => 3)).toBe(3)
+  expect(rpc.pendingCount).toBe(0)
+  expect(rpc.servingCount).toBe(0)
 })

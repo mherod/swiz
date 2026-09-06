@@ -1,6 +1,7 @@
 import type { HookGroup } from "../../hook-types.ts"
 import type { ProjectSwizSettings } from "../../settings/types.ts"
 import type { WatchRegistrationOptions } from "./cache/file-watcher-registry.ts"
+import type { RpcFailureCode } from "./cache/worker-rpc.ts"
 import type { WorkerMemorySnapshot } from "./memory-pressure.ts"
 
 export interface FileWatcherStatus {
@@ -32,23 +33,19 @@ export type FileWatcherParentMessage =
   | { type: "started" }
 
 export type TranscriptMonitorWorkerMessage =
-  | { type: "init" }
+  | { type: "init"; id: string; rpcTimeoutMs: number; maxPending: number }
   | { type: "memoryPressure"; degraded: boolean }
   | { type: "checkProject"; id: string; cwd: string }
   | { type: "pruneOldSessions"; activeSessions: string[] }
   | { type: "getDispatchConcurrencyMetrics"; requestId: string }
-  | { type: "manifestResponse"; id: string; manifest: HookGroup[]; error?: string }
-  | {
-      type: "settingsResponse"
-      id: string
-      settings: ProjectSwizSettings | null
-      error?: string
-    }
-  | { type: "cooldownCheckResponse"; requestId: string; withinCooldown: boolean; error?: string }
+  | { type: "manifestResponse"; id: string; manifest: HookGroup[] }
+  | { type: "settingsResponse"; id: string; settings: ProjectSwizSettings | null }
+  | { type: "cooldownCheckResponse"; requestId: string; withinCooldown: boolean }
+  | { type: "rpcError"; id: string; code: RpcFailureCode }
 
 export type TranscriptMonitorParentMessage =
-  /** `error` set means the worker could not construct its monitor and will serve nothing. */
-  | { type: "initialized"; error?: string }
+  | { type: "initialized"; id: string }
+  | { type: "rpcError"; id: string; code: RpcFailureCode }
   | { type: "memorySnapshot"; snapshot: WorkerMemorySnapshot }
   | { type: "getManifest"; id: string; cwd: string }
   | { type: "getSettings"; id: string; cwd: string }
@@ -63,8 +60,6 @@ export type TranscriptMonitorParentMessage =
       type: "dispatchConcurrencyMetricsResponse"
       requestId: string
       metrics: { active: number; queued: number; maxConcurrent: number }
-      /** Set when the worker had no monitor to read; metrics carry zeros. */
-      error?: string
     }
   | {
       type: "checkProjectResponse"

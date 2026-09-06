@@ -18,12 +18,12 @@ import { invalidateTurnsCache } from "../transcript-turns.ts"
 import { findAllProviderSessions, type Session } from "../transcript-utils.ts"
 import type { Command } from "../types.ts"
 import { clearFileCache, getFileCacheMemoryStats } from "../utils/file-cache.ts"
-import {
-  recordTranscriptMonitorCheck,
-  type TranscriptMonitorRpcMetrics,
-} from "./daemon/cache/metrics.ts"
+import { recordTranscriptMonitorCheck } from "./daemon/cache/metrics.ts"
 import type { TranscriptMonitor } from "./daemon/cache/transcript-monitor.ts"
-import { WorkerTranscriptMonitor } from "./daemon/cache/worker-transcript-monitor.ts"
+import {
+  transcriptWorkerOptions,
+  WorkerTranscriptMonitor,
+} from "./daemon/cache/worker-transcript-monitor.ts"
 import { CiWatchRegistry, notifyCiCompletion } from "./daemon/ci-watch-registry.ts"
 import { DAEMON_PORT, fetchDaemonStatus } from "./daemon/daemon-admin.ts"
 import { logPseudoHook } from "./daemon/daemon-logging.ts"
@@ -54,6 +54,7 @@ import {
   hasSnapshotInvalidated,
   type SnapshotFingerprint,
 } from "./daemon/snapshot.ts"
+import { startTranscriptMonitoring } from "./daemon/transcript-monitor-loop.ts"
 import type { ActiveHookDispatch } from "./daemon/types.ts"
 import { UpstreamSyncRegistry } from "./daemon/upstream-sync.ts"
 import {
@@ -670,6 +671,7 @@ async function startDaemonProcess(_args: string[], port: number): Promise<void> 
   const caches = createDaemonCaches()
   setGlobalTaskStateCache(caches.taskStateCache)
   const workerTranscriptMonitor = new WorkerTranscriptMonitor(caches, {
+    ...transcriptWorkerOptions(),
     onCheckCompleted: (cwd, durationMs, outcome) => {
       const coordinatorMetrics = workerTranscriptMonitor.getCoordinatorMetrics()
       recordTranscriptMonitorCheck(state.globalMetrics, durationMs, outcome, coordinatorMetrics)
@@ -682,6 +684,9 @@ async function startDaemonProcess(_args: string[], port: number): Promise<void> 
     },
   })
   const transcriptMonitor = workerTranscriptMonitor as unknown as TranscriptMonitor
+  Object.defineProperty(state.globalMetrics, "transcriptMonitorRpc", {
+    get: () => workerTranscriptMonitor.getRpcMetrics(),
+  })
   const { registeredProjects, registerProjectWatchers, evictProject } = setupWatchers(
     caches,
     transcriptMonitor,
@@ -730,9 +735,11 @@ async function startDaemonProcess(_args: string[], port: number): Promise<void> 
   const stopHookLogMaintenance = startHookLogMaintenance()
 
   let isClosing = false
+  let stopTranscriptMonitoring = () => {}
   const cleanup = async (reason: string) => {
     if (isClosing) return
     isClosing = true
+    stopTranscriptMonitoring()
     memoryMonitoring.stop()
     process.stderr.write(`\nClosing daemon components (${reason})... `)
     if (reason !== "exit") {
@@ -838,52 +845,18 @@ async function startDaemonProcess(_args: string[], port: number): Promise<void> 
   // Register initial project for periodic upstream sync
   void caches.upstreamSyncRegistry.register(projectRoot)
 
-  startTranscriptMonitoring(registeredProjects, transcriptMonitor, state.globalMetrics, () =>
-    workerTranscriptMonitor.getRpcMetrics()
-  )
+  void logPseudoHook("Transcript monitor starting")
+  stopTranscriptMonitoring = startTranscriptMonitoring(
+    registeredProjects,
+    transcriptMonitor,
+    state.globalMetrics,
+    (error) => {
+      stderrLog("monitoring loop exception", `Transcript monitor error: ${error}`)
+      void logPseudoHook(`Error in monitor loop: ${error}`)
+    }
+  ).stop
 
   console.log(`Daemon listening on ${server.url}`)
-}
-
-function startTranscriptMonitoring(
-  registeredProjects: Set<string>,
-  transcriptMonitor: TranscriptMonitor,
-  globalMetrics: DaemonMetrics,
-  getRpcMetrics?: () => TranscriptMonitorRpcMetrics
-) {
-  // Start periodic transcript monitoring for all registered projects
-  void logPseudoHook("Transcript monitor starting")
-  let isMonitoring = false
-  const monitoringInterval = setInterval(() => {
-    if (isMonitoring) return
-    isMonitoring = true
-    void (async () => {
-      try {
-        await Promise.allSettled(
-          [...registeredProjects].map(async (cwd) => {
-            await transcriptMonitor.checkProject(cwd)
-          })
-        )
-        // Update global metrics with current transcript dispatch concurrency state.
-        // This request is deadline-bounded; a stalled worker rejects rather than pinning
-        // isMonitoring true and suppressing every later tick.
-        const metricsPromise = transcriptMonitor.getDispatchConcurrencyMetrics()
-        const metrics = await Promise.resolve(metricsPromise)
-        globalMetrics.transcriptDispatch = metrics
-      } catch (err) {
-        stderrLog("monitoring loop exception", `[daemon] Transcript monitor error: ${err}`)
-        void logPseudoHook(`Error in monitor loop: ${err}`)
-      } finally {
-        if (getRpcMetrics) globalMetrics.transcriptMonitorRpc = getRpcMetrics()
-        isMonitoring = false
-      }
-    })()
-  }, 10000)
-
-  // Ensure monitoring loop stops on graceful shutdown
-  process.on("exit", () => {
-    clearInterval(monitoringInterval)
-  })
 }
 
 export const daemonCommand: Command = {

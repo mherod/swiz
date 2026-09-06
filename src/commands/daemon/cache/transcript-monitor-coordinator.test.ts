@@ -237,8 +237,10 @@ describe("TranscriptMonitorCoordinator", () => {
 
   test("recovers from worker errors and continues draining the queue", async () => {
     let callCount = 0
+    const recordedDurations: number[] = []
     const coordinator = new TranscriptMonitorCoordinator({
       maxConcurrentChecks: 1,
+      onCheckCompleted: (_cwd, durationMs) => recordedDurations.push(durationMs),
       executeCheck: async (cwd) => {
         callCount++
         if (cwd === "/failing-project") {
@@ -255,6 +257,7 @@ describe("TranscriptMonitorCoordinator", () => {
     await expect(pSuccess).resolves.toBeUndefined()
     expect(callCount).toBe(2)
     expect(coordinator.getMetrics().activeChecks).toBe(0)
+    expect(recordedDurations).toEqual([10])
   })
 
   test("rejects new and in-flight checks on coordinator close", async () => {

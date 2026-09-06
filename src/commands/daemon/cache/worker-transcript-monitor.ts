@@ -1,6 +1,4 @@
-import { dirname, join } from "node:path"
 import { Worker } from "node:worker_threads"
-import { stderrLog } from "../../../debug.ts"
 import type { WorkerMemorySnapshot } from "../memory-pressure.ts"
 import type {
   TranscriptMonitorParentMessage,
@@ -12,56 +10,338 @@ import {
   type TranscriptMonitorCoordinatorMetrics,
   type TranscriptMonitorCoordinatorOptions,
 } from "./transcript-monitor-coordinator.ts"
-import { PendingRequestRegistry } from "./worker-rpc.ts"
+import {
+  PendingRequestRegistry,
+  RpcFailure,
+  type RpcMetrics,
+  type RpcScheduler,
+  scheduleRpcTimeout,
+  validateRpcLimit,
+} from "./worker-rpc.ts"
+
+export type TranscriptWorker = Pick<Worker, "on" | "off" | "postMessage" | "terminate" | "unref">
 
 export interface WorkerTranscriptMonitorOptions {
   maxConcurrentChecks?: number
   maxQueueDepth?: number
   onCheckCompleted?: TranscriptMonitorCoordinatorOptions["onCheckCompleted"]
-  /** Deadline for the worker's `init` handshake. */
   initTimeoutMs?: number
-  /** Deadline for a single project check round-trip. */
-  checkTimeoutMs?: number
-  /** Deadline for the dispatch-concurrency metrics request. */
   metricsTimeoutMs?: number
-  /** How many times a crashed or stalled worker is replaced before giving up. */
   maxRestarts?: number
+  startupTimeoutMs?: number
+  rpcTimeoutMs?: number
+  checkTimeoutMs?: number
+  maxPending?: number
+  restartDelayMs?: number
+  workerFactory?: () => TranscriptWorker
+  schedule?: RpcScheduler
 }
 
-export interface WorkerRpcMetrics {
-  pending: number
-  timeouts: number
-  failures: number
+export interface WorkerRpcMetrics extends RpcMetrics {
   restarts: number
-  /** True once restarts are exhausted; the monitor serves nothing further. */
   unavailable: boolean
 }
 
-const DEFAULT_INIT_TIMEOUT_MS = 15_000
-const DEFAULT_CHECK_TIMEOUT_MS = 60_000
-const DEFAULT_METRICS_TIMEOUT_MS = 5_000
-const DEFAULT_MAX_RESTARTS = 3
+export function transcriptWorkerOptions(
+  env: NodeJS.ProcessEnv = process.env
+): WorkerTranscriptMonitorOptions {
+  const read = (key: string, fallback: number) => validateRpcLimit(Number(env[key] ?? fallback))
+  return {
+    startupTimeoutMs: read("SWIZ_TRANSCRIPT_WORKER_STARTUP_TIMEOUT_MS", 15_000),
+    rpcTimeoutMs: read("SWIZ_TRANSCRIPT_WORKER_RPC_TIMEOUT_MS", 5_000),
+    checkTimeoutMs: read("SWIZ_TRANSCRIPT_WORKER_CHECK_TIMEOUT_MS", 60_000),
+    maxPending: read("SWIZ_TRANSCRIPT_WORKER_MAX_PENDING", 128),
+    restartDelayMs: read("SWIZ_TRANSCRIPT_WORKER_RESTART_DELAY_MS", 250),
+  }
+}
 
-/**
- * A proxy for TranscriptMonitor that runs its operations in a background worker.
- *
- * Every request to the worker settles: on a reply, on an explicit error, or on a deadline. A
- * worker that crashes or stalls is replaced (up to `maxRestarts`) so later monitor triggers keep
- * working instead of being lost behind a promise that never resolves.
- */
+type CheckResult = { durationMs: number; error?: string; skipped?: boolean }
+type DispatchMetrics = { active: number; queued: number; maxConcurrent: number }
+
+/** Restart lazily on the next trigger; a failed attempt never recursively retries itself. */
 export class WorkerTranscriptMonitor
   implements Pick<TranscriptMonitor, "checkProject" | "pruneOldSessions" | "terminate">
 {
-  private worker: Worker
-  private initialized: Promise<void>
-  private degraded = false
-  private memorySnapshot: WorkerMemorySnapshot | null = null
-  private coordinator: TranscriptMonitorCoordinator
-  private readonly requests = new PendingRequestRegistry()
-  private readonly options: WorkerTranscriptMonitorOptions
-  private restarts = 0
-  private shuttingDown = false
+  private worker: TranscriptWorker | null = null
+  private ready: Promise<TranscriptWorker> | null = null
+  private generation = 0
+  private stopped = false
   private unavailable = false
+  private degraded = false
+  private restarts = 0
+  private attempts = 0
+  private workerTimeouts = 0
+  private workerFailures = 0
+  private memorySnapshot: WorkerMemorySnapshot | null = null
+  private disposeWorker = () => {}
+  private cancelLaunch = () => {}
+  private rpc: PendingRequestRegistry
+  private coordinator: TranscriptMonitorCoordinator
+  private schedule: RpcScheduler
+
+  constructor(
+    private caches: ConstructorParameters<typeof TranscriptMonitor>[0],
+    private options: WorkerTranscriptMonitorOptions = {}
+  ) {
+    for (const limit of [
+      options.startupTimeoutMs,
+      options.initTimeoutMs,
+      options.metricsTimeoutMs,
+      options.checkTimeoutMs,
+      options.restartDelayMs,
+    ]) {
+      if (limit !== undefined) validateRpcLimit(limit)
+    }
+    if (
+      options.maxRestarts !== undefined &&
+      (!Number.isSafeInteger(options.maxRestarts) || options.maxRestarts < 0)
+    ) {
+      throw new Error("Invalid transcript worker restart limit")
+    }
+    this.schedule = options.schedule ?? scheduleRpcTimeout
+    this.rpc = new PendingRequestRegistry({
+      defaultTimeoutMs: options.rpcTimeoutMs,
+      maxPending: options.maxPending,
+      schedule: this.schedule,
+    })
+    this.coordinator = new TranscriptMonitorCoordinator({
+      ...options,
+      executeCheck: (cwd) => this.executeWorkerCheck(cwd),
+    })
+    void this.ensureWorker().catch(() => {})
+  }
+
+  private ensureWorker(): Promise<TranscriptWorker> {
+    if (this.stopped) return Promise.reject(new RpcFailure("CLOSED"))
+    if (this.unavailable) return Promise.reject(new RpcFailure("UNAVAILABLE"))
+    if (this.ready) return this.ready
+    const generation = ++this.generation
+    const restarting = this.attempts++ > 0
+    const ready = this.rpc
+      .request<void>(
+        (id) => {
+          const launch = () => this.launchWorker(generation, id, restarting)
+          if (restarting)
+            this.cancelLaunch = this.schedule(launch, this.options.restartDelayMs ?? 250)
+          else launch()
+        },
+        {
+          timeoutMs:
+            (this.options.startupTimeoutMs ?? this.options.initTimeoutMs ?? 15_000) +
+            (restarting ? (this.options.restartDelayMs ?? 250) : 0),
+        }
+      )
+      .then(() => {
+        if (!this.worker || generation !== this.generation) throw new RpcFailure("WORKER_EXIT")
+        return this.worker
+      })
+    this.ready = ready
+    void ready.catch(() => {
+      if (this.ready === ready) this.ready = null
+      this.failWorker(generation)
+    })
+    return ready
+  }
+
+  private launchWorker(generation: number, id: string, restarting: boolean): void {
+    if (!this.rpc.has(id) || this.stopped) return
+    if (restarting) this.restarts++
+    try {
+      const worker =
+        this.options.workerFactory?.() ??
+        new Worker(new URL("./transcript-monitor-worker.ts", import.meta.url))
+      this.worker = worker
+      const message = (msg: TranscriptMonitorParentMessage) => {
+        if (generation === this.generation) this.handleMessage(worker, msg)
+      }
+      const fail = () => this.failWorker(generation)
+      worker.on("message", message)
+      worker.on("error", fail)
+      worker.on("exit", fail)
+      this.disposeWorker = () => {
+        worker.off("message", message)
+        worker.off("error", fail)
+        worker.off("exit", fail)
+        void worker.terminate().catch(() => {})
+      }
+      worker.unref()
+      worker.postMessage({
+        type: "init",
+        id,
+        rpcTimeoutMs: this.rpc.timeoutMs,
+        maxPending: this.rpc.maxPending,
+      } satisfies TranscriptMonitorWorkerMessage)
+      worker.postMessage({
+        type: "memoryPressure",
+        degraded: this.degraded,
+      } satisfies TranscriptMonitorWorkerMessage)
+    } catch {
+      this.rpc.reject(id, new RpcFailure("REMOTE"))
+      this.failWorker(generation)
+    }
+  }
+
+  private failWorker(generation: number): void {
+    if (generation !== this.generation) return
+    this.generation++
+    if (!this.stopped) {
+      this.workerFailures++
+      this.unavailable = this.restarts >= (this.options.maxRestarts ?? 3)
+    }
+    this.workerTimeouts += this.memorySnapshot?.rpcTimeouts ?? 0
+    this.workerFailures += this.memorySnapshot?.rpcFailures ?? 0
+    this.memorySnapshot = null
+    this.worker = null
+    this.ready = null
+    this.cancelLaunch()
+    this.disposeWorker()
+    this.disposeWorker = () => {}
+    this.rpc.rejectAll(new RpcFailure("WORKER_EXIT"))
+  }
+
+  private handleMessage(worker: TranscriptWorker, msg: TranscriptMonitorParentMessage): void {
+    switch (msg.type) {
+      case "initialized":
+        this.rpc.resolve(msg.id, undefined)
+        break
+      case "rpcError":
+        this.rpc.reject(msg.id, new RpcFailure(msg.code))
+        break
+      case "memorySnapshot":
+        this.memorySnapshot = msg.snapshot
+        break
+      case "checkProjectResponse":
+        this.rpc.resolve(msg.id, {
+          durationMs: msg.durationMs,
+          error: msg.error,
+          skipped: msg.skipped,
+        })
+        break
+      case "dispatchConcurrencyMetricsResponse":
+        this.rpc.resolve(msg.requestId, msg.metrics)
+        break
+      default:
+        void this.serveWorker(worker, msg)
+    }
+  }
+
+  private async serveWorker(
+    worker: TranscriptWorker,
+    msg: Extract<
+      TranscriptMonitorParentMessage,
+      { type: "getManifest" | "getSettings" | "checkAndMarkCooldown" }
+    >
+  ): Promise<void> {
+    const id = "id" in msg ? msg.id : msg.requestId
+    try {
+      const response = await this.rpc.serve<TranscriptMonitorWorkerMessage>(async () => {
+        switch (msg.type) {
+          case "getManifest":
+            return {
+              type: "manifestResponse",
+              id,
+              manifest: await this.caches.manifestCache.get(msg.cwd),
+            }
+          case "getSettings":
+            return {
+              type: "settingsResponse",
+              id,
+              settings: (await this.caches.projectSettingsCache.get(msg.cwd)).settings,
+            }
+          case "checkAndMarkCooldown":
+            return {
+              type: "cooldownCheckResponse",
+              requestId: id,
+              withinCooldown: await this.caches.cooldownRegistry.checkAndMark(
+                msg.hookId,
+                msg.cooldown,
+                msg.cwd
+              ),
+            }
+        }
+      })
+      if (this.worker === worker) worker.postMessage(response)
+    } catch (error) {
+      if (this.worker !== worker) return
+      try {
+        worker.postMessage({
+          type: "rpcError",
+          id,
+          code: error instanceof RpcFailure ? error.code : "REMOTE",
+        } satisfies TranscriptMonitorWorkerMessage)
+      } catch {
+        this.failWorker(this.generation)
+      }
+    }
+  }
+
+  private request<T>(
+    message: (id: string) => TranscriptMonitorWorkerMessage,
+    timeoutMs?: number,
+    signal?: AbortSignal
+  ): Promise<T> {
+    if (this.stopped) return Promise.reject(new RpcFailure("CLOSED"))
+    if (signal?.aborted) return Promise.reject(new RpcFailure("ABORTED"))
+    if (this.unavailable) return Promise.reject(new RpcFailure("UNAVAILABLE"))
+    const ready = this.ensureWorker()
+    const generation = this.generation
+    const result = this.rpc.request<T>(
+      (id) => {
+        void ready
+          .then((worker) => {
+            if (this.rpc.has(id)) worker.postMessage(message(id))
+          })
+          .catch(() => {
+            this.rpc.reject(id, new RpcFailure("WORKER_EXIT"))
+            this.failWorker(generation)
+          })
+      },
+      { timeoutMs, signal }
+    )
+    return result.catch((error: unknown) => {
+      if (error instanceof RpcFailure && error.code === "TIMEOUT") this.failWorker(generation)
+      throw error
+    })
+  }
+
+  private executeWorkerCheck(cwd: string): Promise<CheckResult> {
+    if (this.degraded) return Promise.resolve({ durationMs: 0, skipped: true })
+    return this.request(
+      (id) => ({ type: "checkProject", id, cwd }),
+      this.options.checkTimeoutMs ?? 60_000
+    )
+  }
+
+  async checkProject(cwd: string): Promise<void> {
+    if (this.stopped) throw new RpcFailure("CLOSED")
+    if (this.unavailable) throw new RpcFailure("UNAVAILABLE")
+    if (!this.degraded) await this.coordinator.checkProject(cwd)
+  }
+
+  getCoordinatorMetrics(): TranscriptMonitorCoordinatorMetrics {
+    return this.coordinator.getMetrics()
+  }
+
+  getRpcMetrics(): WorkerRpcMetrics {
+    const metrics = this.rpc.getMetrics()
+    return {
+      ...metrics,
+      serving: this.rpc.servingCount,
+      unavailable: this.unavailable,
+      pending: metrics.pending + (this.memorySnapshot?.pendingRequests ?? 0),
+      timeouts: metrics.timeouts + this.workerTimeouts + (this.memorySnapshot?.rpcTimeouts ?? 0),
+      failures: metrics.failures + this.workerFailures + (this.memorySnapshot?.rpcFailures ?? 0),
+      restarts: this.restarts,
+    }
+  }
+
+  getDispatchConcurrencyMetrics(signal?: AbortSignal): Promise<DispatchMetrics> {
+    return this.request<DispatchMetrics>(
+      (requestId) => ({ type: "getDispatchConcurrencyMetrics", requestId }),
+      this.options.metricsTimeoutMs ?? 5_000,
+      signal
+    )
+  }
 
   getMemorySnapshot(now = Date.now()): WorkerMemorySnapshot | null {
     return this.memorySnapshot && now - this.memorySnapshot.sampledAt <= 90_000
@@ -70,293 +350,27 @@ export class WorkerTranscriptMonitor
   }
 
   setMemoryPressure(degraded: boolean): void {
-    if (degraded) this.degraded = true
-    this.worker.postMessage({
-      type: "memoryPressure",
-      degraded,
-    } satisfies TranscriptMonitorWorkerMessage)
     this.degraded = degraded
-  }
-
-  constructor(
-    private caches: ConstructorParameters<typeof TranscriptMonitor>[0],
-    options?: WorkerTranscriptMonitorOptions
-  ) {
-    this.options = options ?? {}
-    this.coordinator = this.createCoordinator()
-    this.worker = this.spawnWorker()
-    this.initialized = this.handshake()
-  }
-
-  private createCoordinator(): TranscriptMonitorCoordinator {
-    return new TranscriptMonitorCoordinator({
-      maxConcurrentChecks: this.options.maxConcurrentChecks,
-      maxQueueDepth: this.options.maxQueueDepth,
-      executeCheck: (cwd) => this.executeWorkerCheck(cwd),
-      onCheckCompleted: this.options.onCheckCompleted,
-    })
-  }
-
-  private spawnWorker(): Worker {
-    const workerPath = join(
-      dirname(new URL(import.meta.url).pathname),
-      "transcript-monitor-worker.ts"
-    )
-    const worker = new Worker(workerPath)
-
-    worker.on("message", (msg: TranscriptMonitorParentMessage): void => {
-      void this.handleWorkerMessage(worker, msg)
-    })
-
-    worker.on("error", (err) => {
-      stderrLog("worker-transcript-monitor", `Worker error: ${err}`)
-      this.handleWorkerLoss(worker, `Worker error: ${err instanceof Error ? err.message : err}`)
-    })
-
-    worker.on("exit", (code) => {
-      if (code !== 0) {
-        stderrLog("worker-transcript-monitor", `Worker stopped with exit code ${code}`)
-      }
-      this.handleWorkerLoss(worker, `Worker exited with code ${code}`)
-    })
-
-    worker.unref()
-    return worker
-  }
-
-  /** Ask the worker to build its monitor, under a bounded deadline. */
-  private handshake(): Promise<void> {
-    const id = "init"
-    const promise = this.requests
-      .register<void>(id, {
-        timeoutMs: this.options.initTimeoutMs ?? DEFAULT_INIT_TIMEOUT_MS,
-        label: "init",
-      })
-      .then(() => undefined)
-    this.worker.postMessage({ type: "init" } satisfies TranscriptMonitorWorkerMessage)
-    // Mark handled so a rejected handshake nobody has awaited yet is not an unhandled rejection.
-    // Awaiters still observe the rejection.
-    promise.catch(() => {})
-    return promise
-  }
-
-  /**
-   * Settle everything waiting on a dead worker, then replace it so later triggers still run.
-   * Ignores losses reported by a worker that has already been superseded.
-   */
-  private handleWorkerLoss(worker: Worker, reason: string): void {
-    if (worker !== this.worker || this.shuttingDown || this.unavailable) return
-
-    this.memorySnapshot = null
-    this.requests.rejectAll(reason)
-    this.coordinator.close(reason)
-
-    if (this.restarts >= (this.options.maxRestarts ?? DEFAULT_MAX_RESTARTS)) {
-      this.unavailable = true
-      stderrLog(
-        "worker-transcript-monitor",
-        `Giving up after ${this.restarts} restart(s); transcript monitoring is unavailable.`
-      )
-      return
-    }
-
-    this.restarts++
-    stderrLog(
-      "worker-transcript-monitor",
-      `Restarting worker (attempt ${this.restarts}): ${reason}`
-    )
-    // A closed coordinator rejects every future check, so replace it alongside the worker.
-    this.coordinator = this.createCoordinator()
-    this.worker = this.spawnWorker()
-    this.initialized = this.handshake()
-  }
-
-  private async handleWorkerMessage(
-    worker: Worker,
-    msg: TranscriptMonitorParentMessage
-  ): Promise<void> {
-    // A late message from a replaced worker must not settle the current worker's requests.
-    if (worker !== this.worker) return
-    try {
-      if (await this.handleServiceRequest(worker, msg)) return
-      switch (msg.type) {
-        case "initialized":
-          if (msg.error) {
-            this.requests.reject("init", new Error(msg.error))
-          } else {
-            this.requests.resolve("init", undefined)
-          }
-          break
-        case "memorySnapshot":
-          this.memorySnapshot = msg.snapshot
-          break
-        case "dispatchConcurrencyMetricsResponse": {
-          if (msg.error) {
-            this.requests.reject(msg.requestId, new Error(msg.error))
-          } else {
-            this.requests.resolve(msg.requestId, msg.metrics)
-          }
-          break
-        }
-        case "checkProjectResponse": {
-          this.requests.resolve(msg.id, {
-            durationMs: msg.durationMs,
-            error: msg.error,
-            skipped: msg.skipped,
-          })
-          break
-        }
-      }
-    } catch (err) {
-      stderrLog("worker-transcript-monitor-proxy", `Error handling worker message: ${err}`)
-    }
-  }
-
-  /**
-   * Serve the worker's parent-side lookups. Returns true when `msg` was such a request.
-   */
-  private async handleServiceRequest(
-    worker: Worker,
-    msg: TranscriptMonitorParentMessage
-  ): Promise<boolean> {
-    switch (msg.type) {
-      case "getManifest":
-        await this.replyOrError(worker, msg.id, "manifestResponse", async () => ({
-          manifest: await this.caches.manifestCache.get(msg.cwd),
-        }))
-        return true
-      case "getSettings":
-        await this.replyOrError(worker, msg.id, "settingsResponse", async () => ({
-          settings: (await this.caches.projectSettingsCache.get(msg.cwd)).settings,
-        }))
-        return true
-      case "checkAndMarkCooldown":
-        await this.replyOrError(
-          worker,
-          msg.requestId,
-          "cooldownCheckResponse",
-          async () => ({
-            withinCooldown: await Promise.resolve(
-              this.caches.cooldownRegistry.checkAndMark(msg.hookId, msg.cooldown, msg.cwd)
-            ),
-          }),
-          "requestId"
-        )
-        return true
-      default:
-        return false
-    }
-  }
-
-  /**
-   * Run a parent-side lookup and reply. A thrown lookup sends a structured error reply rather
-   * than leaving the worker waiting for its deadline.
-   */
-  private async replyOrError(
-    worker: Worker,
-    id: string,
-    type: "manifestResponse" | "settingsResponse" | "cooldownCheckResponse",
-    produce: () => Promise<Record<string, unknown>>,
-    idField: "id" | "requestId" = "id"
-  ): Promise<void> {
-    let payload: Record<string, unknown>
-    try {
-      payload = await produce()
-    } catch (err) {
-      payload = {
-        error: err instanceof Error ? err.message : String(err),
-        // Type-satisfying defaults; the worker rejects on `error` and ignores these.
-        ...(type === "manifestResponse" ? { manifest: [] } : {}),
-        ...(type === "settingsResponse" ? { settings: null } : {}),
-        ...(type === "cooldownCheckResponse" ? { withinCooldown: false } : {}),
-      }
-    }
-    if (worker !== this.worker) return
-    worker.postMessage({ type, [idField]: id, ...payload } as TranscriptMonitorWorkerMessage)
-  }
-
-  private executeWorkerCheck(cwd: string): Promise<{
-    durationMs: number
-    error?: string
-    skipped?: boolean
-  }> {
-    if (this.degraded || this.unavailable) {
-      return Promise.resolve({ durationMs: 0, skipped: true })
-    }
-    // Monotonic ids: a collision would silently orphan an earlier resolver and hang its check.
-    const id = this.requests.nextId("check")
-    const promise = this.requests.register<{
-      durationMs: number
-      error?: string
-      skipped?: boolean
-    }>(id, {
-      timeoutMs: this.options.checkTimeoutMs ?? DEFAULT_CHECK_TIMEOUT_MS,
-      label: "checkProject",
-    })
-    this.worker.postMessage({
-      type: "checkProject",
-      id,
-      cwd,
-    } satisfies TranscriptMonitorWorkerMessage)
-    return promise
-  }
-
-  async checkProject(cwd: string): Promise<void> {
-    if (this.degraded || this.unavailable) return
-    await this.initialized
-    if (this.degraded || this.unavailable) return
-    await this.coordinator.checkProject(cwd)
-  }
-
-  getCoordinatorMetrics(): TranscriptMonitorCoordinatorMetrics {
-    return this.coordinator.getMetrics()
-  }
-
-  /** Aggregate RPC health only — no session content, file paths, or secrets. */
-  getRpcMetrics(): WorkerRpcMetrics {
-    return {
-      ...this.requests.getMetrics(),
-      restarts: this.restarts,
-      unavailable: this.unavailable,
-    }
+    this.post({ type: "memoryPressure", degraded })
   }
 
   pruneOldSessions(activeSessions: Set<string>): void {
-    // Note: pruneOldSessions is async-ish in the worker but we don't necessarily need to wait
-    this.worker.postMessage({
-      type: "pruneOldSessions",
-      activeSessions: Array.from(activeSessions),
-    } satisfies TranscriptMonitorWorkerMessage)
+    this.post({ type: "pruneOldSessions", activeSessions: Array.from(activeSessions) })
   }
 
-  getDispatchConcurrencyMetrics(): Promise<{
-    active: number
-    queued: number
-    maxConcurrent: number
-  }> {
-    if (this.unavailable) {
-      return Promise.reject(new Error("Transcript monitor worker is unavailable"))
+  private post(message: TranscriptMonitorWorkerMessage): void {
+    try {
+      this.worker?.postMessage(message)
+    } catch {
+      this.failWorker(this.generation)
     }
-    const requestId = this.requests.nextId("metrics")
-    const promise = this.requests.register<{
-      active: number
-      queued: number
-      maxConcurrent: number
-    }>(requestId, {
-      timeoutMs: this.options.metricsTimeoutMs ?? DEFAULT_METRICS_TIMEOUT_MS,
-      label: "dispatchConcurrencyMetrics",
-    })
-    this.worker.postMessage({
-      type: "getDispatchConcurrencyMetrics",
-      requestId,
-    } satisfies TranscriptMonitorWorkerMessage)
-    return promise
   }
 
   terminate(): void {
-    this.shuttingDown = true
-    this.requests.rejectAll("Worker terminated")
+    if (this.stopped) return
+    this.stopped = true
     this.coordinator.close("Worker terminated")
-    void this.worker.terminate()
+    this.rpc.close()
+    this.failWorker(this.generation)
   }
 }

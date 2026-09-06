@@ -191,6 +191,8 @@ export class TranscriptMonitorCoordinator {
       skipped = result.skipped === true
     } catch (err) {
       error = err instanceof Error ? err.message : String(err)
+      // No worker completion arrived, so there is no execution duration to record.
+      skipped = true
     } finally {
       if (this.closed) {
         state.active = false

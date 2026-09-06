@@ -17,6 +17,8 @@ export interface WorkerMemorySnapshot {
   arrayBuffers: number
   activeChecks: number
   pendingRequests: number
+  rpcTimeouts?: number
+  rpcFailures?: number
   activeDispatches: number
   queuedDispatches: number
   fileCacheEntries: number
