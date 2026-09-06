@@ -286,7 +286,13 @@ function parseGitProcessLine(line: string): GitProcessRow | null {
 function isGitExecutable(command: string): boolean {
   const executable = command.split(/\s+/, 1)[0] ?? ""
   const base = executable.slice(executable.lastIndexOf("/") + 1)
-  return base === "git" || base.startsWith("git-")
+  if (base === "git" || base.startsWith("git-")) return true
+
+  // `ps` command text is not a recoverable argv array.  A path such as
+  // `/Applications/Git Tools/bin/git commit` is split before the executable
+  // basename. Keep this narrow, ambiguous shape as a candidate so the
+  // repo-scoped lsof probe decides whether it can hold this lock.
+  return command.startsWith("/") && /\/(?:git|git-[^/\s]+)(?:\s|$)/.test(command)
 }
 
 /**

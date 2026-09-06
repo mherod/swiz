@@ -239,6 +239,29 @@ describe("pretooluse-git-index-lock", () => {
       expect(harness.processCalls.map((cmd) => cmd[0])).toEqual(["ps", "lsof"])
     })
 
+    test("keeps a spaced Git executable as a repo-scoped candidate", async () => {
+      const calls: string[][] = []
+      const active = await inspectGitProcessesForRepo(REPO_ROOT, 1_100, {
+        now: () => 1_000,
+        pid: () => 100,
+        ppid: () => 50,
+        spawn: (cmd) => {
+          calls.push(cmd)
+          if (cmd[0] === "ps") {
+            return Promise.resolve(
+              processResult(
+                "PID PPID COMMAND\n100 50 bun hook\n50 1 zsh\n200 1 /Applications/Git Tools/bin/git commit"
+              )
+            )
+          }
+          return Promise.resolve(processResult(`p200\nn${REPO_ROOT}`))
+        },
+      })
+
+      expect(active).toBe(true)
+      expect(calls.map((cmd) => cmd[0])).toEqual(["ps", "lsof"])
+    })
+
     test("fails safe when process inspection exceeds the deadline", async () => {
       const harness = createHarness({ processInspectionTimesOut: true })
       const active = await inspectGitProcessesForRepo(REPO_ROOT, 1_100, harness.runtime)
