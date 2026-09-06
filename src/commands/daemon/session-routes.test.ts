@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test"
+import { describe, expect, mock, test } from "bun:test"
 import type { SessionPreview } from "./session-data.ts"
 import {
   type AgentProcessSnapshot,
@@ -190,6 +190,66 @@ describe("handleSessionTasks unknown session", () => {
     const body = await res!.json()
     expect(body.tasks).toEqual([])
   })
+})
+
+describe("session ID request validation", () => {
+  function context(): SessionRoutesContext {
+    return {
+      touchProject: mock(() => {}),
+      registerProjectWatchers: mock(() => {}),
+      getKnownProjects: () => [],
+      getProjectLastSeen: () => 0,
+      getProjectStatusLine: async () => "",
+      listProjectSessions: async () => ({ sessionCount: 0, sessions: [] }),
+      getSessionData: mock(async () => ({ messages: [], toolStats: [] })),
+      getSessionTasks: mock(async () => ({
+        tasks: [],
+        summary: { total: 0, open: 0, completed: 0, cancelled: 0 },
+      })),
+      getProjectTasks: async () => ({
+        tasks: [],
+        summary: { total: 0, open: 0, completed: 0, cancelled: 0 },
+      }),
+      getAgentProcessSnapshot: async () => ({ providers: {}, pidCwds: {} }),
+    }
+  }
+
+  for (const endpoint of ["messages", "tasks"]) {
+    for (const sessionId of ["", " ", "\t\n", "\u00a0\u2003", undefined, null, 123]) {
+      test(`${endpoint} rejects invalid ID ${JSON.stringify(sessionId)} without touching project data`, async () => {
+        const ctx = context()
+        const req = new Request(`http://localhost/sessions/${endpoint}`, {
+          method: "POST",
+          body: JSON.stringify({ cwd: process.cwd(), sessionId }),
+        })
+        const response = await handleSessionRoutes(req, new URL(req.url), ctx)
+        expect(response?.status).toBe(400)
+        expect(await response?.json()).toEqual({
+          error: "Missing required fields: cwd (string), sessionId (string)",
+        })
+        expect(ctx.touchProject).not.toHaveBeenCalled()
+        expect(ctx.registerProjectWatchers).not.toHaveBeenCalled()
+        expect(ctx.getSessionData).not.toHaveBeenCalled()
+        expect(ctx.getSessionTasks).not.toHaveBeenCalled()
+      })
+    }
+    for (const sessionId of ["beta-session", "beta", "b"]) {
+      test(`${endpoint} forwards valid ID ${sessionId} unchanged`, async () => {
+        const ctx = context()
+        const req = new Request(`http://localhost/sessions/${endpoint}`, {
+          method: "POST",
+          body: JSON.stringify({ cwd: process.cwd(), sessionId, limit: 7 }),
+        })
+        const response = await handleSessionRoutes(req, new URL(req.url), ctx)
+        expect(response?.status).toBe(200)
+        if (endpoint === "messages") {
+          expect(ctx.getSessionData).toHaveBeenCalledWith(process.cwd(), sessionId, 7)
+        } else {
+          expect(ctx.getSessionTasks).toHaveBeenCalledWith(sessionId, 7)
+        }
+      })
+    }
+  }
 })
 
 describe("handleProjectsList compat shim", () => {

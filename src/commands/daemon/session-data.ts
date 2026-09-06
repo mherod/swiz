@@ -651,7 +651,11 @@ export async function listProjectSessions(
   }
 }
 
-async function resolveSession(cwd: string, sessionId: string) {
+export async function resolveSession(
+  cwd: string,
+  sessionId: string
+): Promise<{ session: Session; cached: CachedSessionData } | null> {
+  if (sessionId.trim().length === 0) return null
   const sessions = await findAllProviderSessions(cwd)
   const session = sessions.find(
     (candidate) => candidate.id === sessionId || candidate.id.startsWith(sessionId)

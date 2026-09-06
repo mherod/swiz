@@ -196,7 +196,12 @@ async function handleSessionMessages(req: Request, ctx: SessionRoutesContext): P
   } | null
   const cwd = body?.cwd
   const sessionId = body?.sessionId
-  if (typeof cwd !== "string" || cwd.length === 0 || typeof sessionId !== "string") {
+  if (
+    typeof cwd !== "string" ||
+    cwd.length === 0 ||
+    typeof sessionId !== "string" ||
+    sessionId.trim().length === 0
+  ) {
     return Response.json(
       { error: "Missing required fields: cwd (string), sessionId (string)" },
       { status: 400 }
@@ -221,7 +226,12 @@ async function handleSessionTasks(req: Request, ctx: SessionRoutesContext): Prom
   } | null
   const cwd = body?.cwd
   const sessionId = body?.sessionId
-  if (typeof cwd !== "string" || cwd.length === 0 || typeof sessionId !== "string") {
+  if (
+    typeof cwd !== "string" ||
+    cwd.length === 0 ||
+    typeof sessionId !== "string" ||
+    sessionId.trim().length === 0
+  ) {
     return Response.json(
       { error: "Missing required fields: cwd (string), sessionId (string)" },
       { status: 400 }
