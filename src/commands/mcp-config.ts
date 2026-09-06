@@ -5,9 +5,12 @@ import { stripTomlRoot } from "../utils/toml.ts"
 import { writeWithBackup } from "./install/file-helpers.ts"
 
 export interface McpServerDef {
-  command: string
+  command?: string
+  url?: string
+  serverUrl?: string
   args?: string[]
   env?: Record<string, string>
+  headers?: Record<string, string>
   [key: string]: unknown
 }
 
@@ -96,7 +99,15 @@ export async function writeMcpFile(path: string, value: McpFileData): Promise<vo
 
 export function assertPortableServers(servers: Record<string, McpServerDef>): void {
   for (const [name, server] of Object.entries(servers)) {
-    if (!isRecord(server) || typeof server.command !== "string" || !server.command.trim()) {
+    if (!isRecord(server)) {
+      throw new Error(`Server "${name}" is not an object`)
+    }
+    const isRemote = server.url !== undefined || server.serverUrl !== undefined
+    if (isRemote) {
+      assertPortableRemoteServer(name, server)
+      continue
+    }
+    if (typeof server.command !== "string" || !server.command.trim()) {
       throw new Error(
         `Server "${name}" is not a portable stdio definition; configure its transport separately`
       )
@@ -112,6 +123,34 @@ export function assertPortableServers(servers: Record<string, McpServerDef>): vo
     }
     assertPortableOptions(name, server)
   }
+}
+
+function assertPortableHeaders(name: string, headers: unknown): void {
+  if (headers === undefined) return
+  if (!isRecord(headers) || Object.values(headers).some((v) => typeof v !== "string")) {
+    throw new Error(`Server "${name}" has invalid headers`)
+  }
+}
+
+function assertPortableRemoteServer(name: string, server: McpServerDef): void {
+  if (
+    server.command !== undefined ||
+    (server.url !== undefined && server.serverUrl !== undefined)
+  ) {
+    throw new Error(`Server "${name}" must select one transport`)
+  }
+  const key = server.serverUrl !== undefined ? "serverUrl" : "url"
+  const urlVal = server[key]
+  if (typeof urlVal !== "string" || !URL.canParse(urlVal)) {
+    throw new Error(`Server "${name}" has an invalid ${key}`)
+  }
+  const allowed = new Set(["url", "serverUrl", "headers"])
+  if (Object.keys(server).some((k) => !allowed.has(k))) {
+    throw new Error(
+      `Server "${name}" has agent-specific fields; configure it separately before syncing`
+    )
+  }
+  assertPortableHeaders(name, server.headers)
 }
 
 function assertPortableOptions(name: string, server: McpServerDef): void {
@@ -135,6 +174,10 @@ export function portableServers(
   assertPortableServers(servers)
   return Object.fromEntries(
     Object.entries(servers).map(([name, server]) => {
+      if (server.url !== undefined || server.serverUrl !== undefined) {
+        const { url, serverUrl, ...rest } = server
+        return [name, { url: (url ?? serverUrl) as string, ...rest }]
+      }
       const { type: _type, ...portable } = server
       return [name, portable]
     })

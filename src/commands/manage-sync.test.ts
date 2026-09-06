@@ -6,7 +6,9 @@ import { installCommand } from "./install.ts"
 import {
   installSwizAsMcpServer,
   manageCommand,
+  mcpServersEqual,
   parseManageArgs,
+  translateServerForAgent,
   uninstallSwizAsMcpServer,
 } from "./manage.ts"
 import { readMcpFile, writeMcpFile } from "./mcp-config.ts"
@@ -224,5 +226,112 @@ describe("cross-agent synchronization", () => {
     expect(manageCommand.usage).toContain("sync")
     expect(manageCommand.options?.some((option) => option.flags.includes("--agy"))).toBe(true)
     expect(() => parseManageArgs(["mcp", "sync", "--from", "all"])).toThrow("merge")
+  })
+})
+
+describe("remote server translation", () => {
+  test("merging remote URL server from Cursor to Antigravity produces serverUrl in mcp_config.json", async () => {
+    const home = await create()
+    const cursor = join(home, ".cursor", "mcp.json")
+    const agy = join(home, ".gemini", "config", "mcp_config.json")
+    await write(cursor, {
+      mcpServers: {
+        remote: {
+          url: "https://example.com/mcp",
+          headers: { Authorization: "Bearer test-token" },
+        },
+      },
+    })
+    const result = await run(["merge", "--from", "cursor", "--agy"], home)
+    expect(result.exitCode).toBe(0)
+    const agyConfig = await Bun.file(agy).json()
+    expect(agyConfig.mcpServers.remote).toEqual({
+      serverUrl: "https://example.com/mcp",
+      headers: { Authorization: "Bearer test-token" },
+    })
+  })
+
+  test("merging remote URL server from Antigravity to Cursor produces url in mcp.json", async () => {
+    const home = await create()
+    const cursor = join(home, ".cursor", "mcp.json")
+    const agy = join(home, ".gemini", "config", "mcp_config.json")
+    await write(agy, {
+      mcpServers: {
+        remote: {
+          serverUrl: "https://example.com/mcp",
+          headers: { Authorization: "Bearer test-token" },
+        },
+      },
+    })
+    const result = await run(["merge", "--from", "agy", "--cursor"], home)
+    expect(result.exitCode).toBe(0)
+    const cursorConfig = await Bun.file(cursor).json()
+    expect(cursorConfig.mcpServers.remote).toEqual({
+      url: "https://example.com/mcp",
+      headers: { Authorization: "Bearer test-token" },
+    })
+  })
+
+  test("invalid URL formats are caught during validation before writes", async () => {
+    const home = await create()
+    const cursor = join(home, ".cursor", "mcp.json")
+    const agy = join(home, ".gemini", "config", "mcp_config.json")
+    await write(cursor, {
+      mcpServers: {
+        bad: { url: "not-a-valid-url" },
+      },
+    })
+    const result = await run(["merge", "--from", "cursor", "--agy"], home)
+    expect(result.exitCode).toBe(1)
+    expect(result.stderr).toContain('Server "bad" has an invalid url')
+    expect(await Bun.file(agy).exists()).toBe(false)
+  })
+
+  test("syncing between Cursor and Antigravity converges and translates url and serverUrl", async () => {
+    const home = await create()
+    const cursor = join(home, ".cursor", "mcp.json")
+    const agy = join(home, ".gemini", "config", "mcp_config.json")
+    await write(cursor, {
+      mcpServers: {
+        fromCursor: { url: "https://example.com/cursor" },
+      },
+    })
+    await write(agy, {
+      mcpServers: {
+        fromAgy: { serverUrl: "https://example.com/agy" },
+      },
+    })
+    const result = await run(["sync", "--cursor", "--agy"], home)
+    expect(result.exitCode).toBe(0)
+    const cursorConfig = await Bun.file(cursor).json()
+    const agyConfig = await Bun.file(agy).json()
+    expect(cursorConfig.mcpServers).toEqual({
+      fromCursor: { url: "https://example.com/cursor" },
+      fromAgy: { url: "https://example.com/agy" },
+    })
+    expect(agyConfig.mcpServers).toEqual({
+      fromCursor: { serverUrl: "https://example.com/cursor" },
+      fromAgy: { serverUrl: "https://example.com/agy" },
+    })
+  })
+
+  test("translateServerForAgent maps url and serverUrl correctly", () => {
+    const cursorServer = { url: "https://example.com/mcp", headers: { token: "secret" } }
+    const agyServer = { serverUrl: "https://example.com/mcp", headers: { token: "secret" } }
+    const stdioServer = { command: "bun", args: ["run"] }
+
+    expect(translateServerForAgent(cursorServer, "antigravity")).toEqual(agyServer)
+    expect(translateServerForAgent(agyServer, "cursor")).toEqual(cursorServer)
+    expect(translateServerForAgent(cursorServer, "cursor")).toEqual(cursorServer)
+    expect(translateServerForAgent(stdioServer, "antigravity")).toEqual(stdioServer)
+  })
+
+  test("mcpServersEqual equates equivalent url and serverUrl definitions", () => {
+    const cursorServer = { url: "https://example.com/mcp", headers: { token: "secret" } }
+    const agyServer = { serverUrl: "https://example.com/mcp", headers: { token: "secret" } }
+    const differentServer = { url: "https://other.com/mcp", headers: { token: "secret" } }
+
+    expect(mcpServersEqual(cursorServer, agyServer)).toBe(true)
+    expect(mcpServersEqual(cursorServer, differentServer)).toBe(false)
   })
 })

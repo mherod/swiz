@@ -550,21 +550,77 @@ async function validateMcpServers(
   throw new Error(`MCP validation failed with ${issues.length} issue(s)`)
 }
 
+function validateServerHeaders(name: string, headers: unknown, issues: string[]): void {
+  if (!headers || typeof headers !== "object" || Array.isArray(headers)) {
+    issues.push(`Server "${name}" has invalid headers (must be object of strings)`)
+    return
+  }
+  for (const [headerKey, headerVal] of Object.entries(headers as Record<string, any>)) {
+    if (typeof headerVal !== "string") {
+      issues.push(`Server "${name}" header "${headerKey}" must be a string`)
+    }
+  }
+}
+
+function validateAgentRemoteServer(
+  remoteKey: string,
+  name: string,
+  server: McpServerDef,
+  issues: string[]
+): void {
+  const urlVal = server[remoteKey]
+  if (typeof urlVal !== "string" || !URL.canParse(urlVal)) {
+    issues.push(`Server "${name}" has an invalid ${remoteKey}`)
+  }
+  if (server.command !== undefined) {
+    issues.push(`Server "${name}" must select one transport`)
+  }
+  if (server.headers !== undefined) {
+    validateServerHeaders(name, server.headers, issues)
+  }
+}
+
 function validateAgentServer(
   agentId: AgentId,
   name: string,
   server: McpServerDef,
   issues: string[]
 ): void {
+  if (!server || typeof server !== "object") {
+    validateServerShape(name, server, issues)
+    return
+  }
   const remoteKey = agentId === "antigravity" ? "serverUrl" : "url"
-  if (server && typeof server === "object" && Object.hasOwn(server, remoteKey)) {
-    if (typeof server[remoteKey] !== "string" || !URL.canParse(server[remoteKey] as string)) {
-      issues.push(`Server "${name}" has an invalid ${remoteKey}`)
-    }
-    if (server.command !== undefined) issues.push(`Server "${name}" must select one transport`)
+  if (Object.hasOwn(server, remoteKey)) {
+    validateAgentRemoteServer(remoteKey, name, server, issues)
+    return
+  }
+  const otherRemoteKey = agentId === "antigravity" ? "url" : "serverUrl"
+  if (Object.hasOwn(server, otherRemoteKey)) {
+    issues.push(`Server "${name}" has an invalid ${remoteKey}`)
     return
   }
   validateServerShape(name, server, issues)
+}
+
+export function translateServerForAgent(
+  server: McpServerDef,
+  targetAgentId: AgentId
+): McpServerDef {
+  const targetRemoteKey = targetAgentId === "antigravity" ? "serverUrl" : "url"
+  if (
+    server &&
+    typeof server === "object" &&
+    (Object.hasOwn(server, "url") || Object.hasOwn(server, "serverUrl"))
+  ) {
+    const endpointUrl = (server.serverUrl ?? server.url) as string
+    const { url: _u, serverUrl: _su, ...rest } = server
+    return {
+      [targetRemoteKey]: endpointUrl,
+      ...rest,
+    } as McpServerDef
+  }
+  return server
 }
 
 async function readMergeSources(
@@ -577,8 +633,17 @@ async function readMergeSources(
     [...sourceIds, ...parsed.targetAgents].some((id) => id === "codex" || id === "antigravity")
   const sourceServers: Record<string, McpServerDef> = Object.create(null)
   for (const id of sourceIds) {
-    const data = await readMcpFile(getAgentConfig(id, parsed.project).resolvePath(base))
-    const servers = convert ? portableServers(data.mcpServers ?? {}) : (data.mcpServers ?? {})
+    const agent = getAgentConfig(id, parsed.project)
+    const data = await readMcpFile(agent.resolvePath(base))
+    const rawServers = data.mcpServers ?? {}
+    for (const [name, server] of Object.entries(rawServers)) {
+      const issues: string[] = []
+      validateAgentServer(id, name, server, issues)
+      if (issues.length > 0) {
+        throw new Error(`${agent.displayName} (${agent.resolvePath(base)}): ${issues.join("; ")}`)
+      }
+    }
+    const servers = convert ? portableServers(rawServers) : rawServers
     mergeSourceDefinitions(sourceServers, servers, parsed.action === "sync")
   }
   return sourceServers
@@ -618,15 +683,23 @@ async function planAgentMerge(
   let addedCount = 0
   let updatedCount = 0
   for (const [name, server] of Object.entries(sourceServers)) {
-    if (Object.hasOwn(servers, name) && mcpServersEqual(servers[name]!, server)) continue
+    const translated = translateServerForAgent(server, id)
+    if (Object.hasOwn(servers, name) && mcpServersEqual(servers[name]!, translated)) continue
     if (Object.hasOwn(servers, name)) updatedCount++
     else addedCount++
     Object.defineProperty(servers, name, {
-      value: server,
+      value: translated,
       enumerable: true,
       configurable: true,
       writable: true,
     })
+  }
+  for (const [name, server] of Object.entries(servers)) {
+    const issues: string[] = []
+    validateAgentServer(id, name, server, issues)
+    if (issues.length > 0) {
+      throw new Error(`MCP validation failed for ${agent.displayName}: ${issues.join("; ")}`)
+    }
   }
   const next = { ...data, mcpServers: servers }
   if (addedCount + updatedCount) renderMcpFile(path, next)
@@ -667,8 +740,26 @@ async function resolveSyncTargets(
 const SWIZ_MCP_SERVER_NAME = "swiz"
 const SWIZ_MCP_SERVER_DEF: McpServerDef = { command: "swiz", args: ["mcp"] }
 
-function mcpServersEqual(a: McpServerDef, b: McpServerDef): boolean {
-  return isDeepStrictEqual(a, b)
+export function canonicalizeMcpServer(server: McpServerDef): McpServerDef {
+  if (
+    server &&
+    typeof server === "object" &&
+    (Object.hasOwn(server, "url") || Object.hasOwn(server, "serverUrl"))
+  ) {
+    const endpointUrl = (server.serverUrl ?? server.url) as string
+    const { url: _u, serverUrl: _su, ...rest } = server
+    return { url: endpointUrl, ...rest } as McpServerDef
+  }
+  if (server && typeof server === "object" && server.type === "stdio") {
+    const { type: _type, ...rest } = server
+    return rest as McpServerDef
+  }
+  return server
+}
+
+export function mcpServersEqual(a: McpServerDef, b: McpServerDef): boolean {
+  if (isDeepStrictEqual(a, b)) return true
+  return isDeepStrictEqual(canonicalizeMcpServer(a), canonicalizeMcpServer(b))
 }
 
 /**
