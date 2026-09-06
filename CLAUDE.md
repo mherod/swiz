@@ -137,9 +137,9 @@ alwaysApply: false
   4. `TaskUpdate` -> `completed`.
   5. `SHA=$(git rev-parse HEAD)`.
   6. `git log origin/main..HEAD --oneline`.
-  7. Run `/push`, then `swiz push-wait origin <permitted-branch>` on the branch the live collaboration guard selected.
-  8. `swiz ci-wait $SHA --timeout 300`.
-  9. Confirm CI success; if failed, fix and re-push.
+  7. Run `/push`, then `swiz push-wait origin <permitted-branch>`; project trunk policy selects main.
+  8. `swiz ci-wait $SHA --timeout 300`: 0=verified, 1=failure/timeout, 2=error, 3=skipped (`ignoreCi`).
+  9. `gh run view <run-id> --json conclusion,status,jobs` confirms completion/jobs; required after skips. Fix failures.
   10. Announce result.
 - Keep `Push and verify CI` task `in_progress` until `gh run view --json` confirms success.
 - Use `swiz push-wait` for pushes and cooldowns (no fixed sleeps or `--force-with-lease`) and `swiz ci-wait` for CI; no manual watch/view loops.

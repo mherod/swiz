@@ -1,4 +1,7 @@
+import { mkdir } from "node:fs/promises"
+import { dirname, join } from "node:path"
 import { describe, expect, it } from "vitest"
+import { useTempDir } from "../utils/test-utils.ts"
 import {
   discoverRunId,
   evaluateCiRun,
@@ -8,6 +11,115 @@ import {
   selectCiRun,
   waitForCiCompletion,
 } from "./ci-wait.ts"
+
+/** PROCESS_CONTRACT_TEST: verifies real CLI exit codes, evidence output and gh calls. */
+const INDEX_PATH = join(import.meta.dir, "../../index.ts")
+const temp = useTempDir("swiz-ci-wait-exit-")
+const FIXTURE_SHA = "a".repeat(40)
+
+async function runCiWaitFixture(
+  conclusion: "success" | "failure",
+  globalIgnoreCi: boolean,
+  projectIgnoreCi?: boolean
+) {
+  const home = await temp.create()
+  const cwd = join(home, "project")
+  const bin = join(home, "bin")
+  const callsPath = join(home, "gh-calls.jsonl")
+  await Promise.all([
+    mkdir(join(home, ".swiz")),
+    mkdir(join(cwd, ".swiz"), { recursive: true }),
+    mkdir(bin),
+  ])
+  await Bun.write(join(home, ".swiz/settings.json"), JSON.stringify({ ignoreCi: globalIgnoreCi }))
+  if (projectIgnoreCi !== undefined) {
+    await Bun.write(join(cwd, ".swiz/config.json"), JSON.stringify({ ignoreCi: projectIgnoreCi }))
+  }
+  await Bun.write(callsPath, "")
+  const ghPath = join(bin, "gh")
+  await Bun.write(
+    ghPath,
+    `#!${process.execPath}
+const args = process.argv.slice(2)
+const path = ${JSON.stringify(callsPath)}
+await Bun.write(path, await Bun.file(path).text() + JSON.stringify(args) + "\\n")
+const conclusion = ${JSON.stringify(conclusion)}
+if (args[0] === "api") {
+  console.log("{}")
+} else if (args[0] === "run" && args[1] === "list") {
+  console.log(JSON.stringify([{ databaseId: 42, workflowName: "CI", event: "push",
+    headSha: ${JSON.stringify(FIXTURE_SHA)}, status: "completed", conclusion,
+    url: "https://example.test/runs/42" }]))
+} else if (args[0] === "run" && args[1] === "watch") {
+  process.exitCode = conclusion === "success" ? 0 : 1
+} else if (args[0] === "run" && args[1] === "view") {
+  console.log(JSON.stringify({ status: "completed", conclusion,
+    jobs: [{ name: "test", status: "completed", conclusion }] }))
+} else {
+  process.exitCode = 1
+}
+`
+  )
+  const chmod = Bun.spawn(["chmod", "+x", ghPath], { stdout: "ignore", stderr: "pipe" })
+  const chmodError = await new Response(chmod.stderr).text()
+  if (await chmod.exited) throw new Error(chmodError)
+  const proc = Bun.spawn([process.execPath, INDEX_PATH, "ci-wait", FIXTURE_SHA, "--timeout", "2"], {
+    cwd,
+    stdin: "ignore",
+    stdout: "pipe",
+    stderr: "pipe",
+    env: {
+      ...process.env,
+      HOME: home,
+      PATH: `${bin}:${dirname(process.execPath)}:/usr/bin:/bin`,
+      SWIZ_DIRECT: "1",
+      SWIZ_TIMEOUT: "4",
+      AI_TEST_NO_BACKEND: "1",
+    },
+  })
+  const [stdout, stderr] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+  ])
+  const exitCode = await proc.exited
+  const calls = (await Bun.file(callsPath).text())
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => JSON.parse(line) as string[])
+  return { exitCode, stdout, stderr, calls }
+}
+
+describe("ci-wait CLI verification contract", () => {
+  it.each([
+    "global",
+    "project",
+  ] as const)("reports a %s skip without claiming a failing run passed", async (scope) => {
+    const result = await runCiWaitFixture(
+      "failure",
+      scope === "global",
+      scope === "project" ? true : undefined
+    )
+    expect(result.exitCode).toBe(3)
+    expect(result.stderr).toContain("CI was not checked")
+    expect(result.stdout).not.toContain("ci_green:")
+    expect(result.calls.filter((args) => args[0] === "run")).toEqual([])
+  })
+
+  it("verifies green CI when project settings override a global skip", async () => {
+    const result = await runCiWaitFixture("success", true, false)
+    expect(result.exitCode).toBe(0)
+    expect(result.stdout).toContain(`evidence: ci_green:42 -- commit:${FIXTURE_SHA}`)
+    expect(result.calls.some((args) => args[0] === "run" && args[1] === "view")).toBe(true)
+  })
+
+  it("reports a checked failing run as failure rather than skipped", async () => {
+    const result = await runCiWaitFixture("failure", false)
+    expect(result.exitCode).toBe(1)
+    expect(result.stderr).toContain("failure")
+    expect(result.stdout).not.toContain("ci_green:")
+    expect(result.calls.some((args) => args[0] === "run" && args[1] === "view")).toBe(true)
+  })
+})
 
 // ─── expandSha ────────────────────────────────────────────────────────────
 
