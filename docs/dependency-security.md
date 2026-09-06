@@ -1,9 +1,12 @@
 # Dependency security
 
 Swiz runs and installs with Bun. `package.json#packageManager` and `bun.lock`
-define the installed dependency graph. The retained `pnpm-lock.yaml` is an older,
-different graph; its GitHub alerts do not measure the current Bun installation.
-Reconciliation of that obsolete file remains tracked in [#874](https://github.com/mherod/swiz/issues/874).
+define the installed dependency graph. The obsolete root `pnpm-lock.yaml` has
+been removed: it described a different graph, was unused by installation and CI,
+and caused GitHub to report alerts and attempt npm security updates against
+dependencies outside the installed graph. Changes in those GitHub alert counts
+must be distinguished from fixes to the Bun graph tracked in
+[#874](https://github.com/mherod/swiz/issues/874).
 
 ## Update automation
 
@@ -11,6 +14,11 @@ Reconciliation of that obsolete file remains tracked in [#874](https://github.co
 [GitHub supports Bun version updates but not Bun security updates](https://docs.github.com/en/code-security/reference/supply-chain-security/supported-ecosystems-and-repositories).
 A successful version-update job is therefore not evidence of a successful
 security-update job. Check the installed graph with `bun audit --json`.
+
+[Bun version-update run 34057863241](https://github.com/mherod/swiz/actions/runs/34057863241)
+completed successfully at `431bff20` and opened five dependency update PRs.
+The separate [qs security-update run 34057873043](https://github.com/mherod/swiz/actions/runs/34057873043)
+still failed with `security_update_dependency_not_found` against the old graph.
 
 The two failed jobs cited in #874 selected npm and reported
 `security_update_dependency_not_found` in **Run Dependabot**:
@@ -36,37 +44,48 @@ version on every dependency path and a fresh audit confirms the result.
 | Serialization and command handling | protobufjs 7.6.5; @grpc/grpc-js 1.14.4; shell-quote 1.9.0; simple-git 3.36.0; js-yaml 4.3.1; fast-xml-parser 5.7.0; fast-xml-builder 1.1.7 |
 | Supporting libraries and build tools | @humanfs/node 0.16.8; @tootallnate/once 2.0.1; fflate 0.8.3; flatted 3.4.2; form-data 2.5.6; postcss 8.5.23 |
 
-The 2026-09-06 local audit changed from 121 advisory entries across 34 packages
-to 22 entries across 10 packages. Critical entries fell from two to zero and
-high-severity entries from 48 to 13. These are Bun audit counts, not GitHub alert
-counts, and they do not establish that every vulnerable path was exploitable.
+## Transitive refresh
+
+A fresh Bun resolution within the published parent dependency ranges preserves
+all direct runtime SDK versions and patches the remaining compatible transitive
+paths. Both installed brace-expansion lines are fixed (2.1.4 and 5.0.9), both
+picomatch lines are fixed (2.3.2 and 4.0.7), and Vitest shares the root Vite 7.3.6
+installation instead of retaining a vulnerable Vite 8.0.10 copy.
+
+The Bun executable and its types are pinned to the declared 1.3.14 runtime.
+Vitest UI and coverage packages match the installed runner at 4.1.8; update these
+companions together with the runner to retain their exact peer contract.
+
+| 2026-09-06 Bun audit | Original | Security overrides | Transitive refresh |
+|---|---:|---:|---:|
+| Advisory entries | 121 | 22 | 7 |
+| Affected packages | 34 | 10 | 7 |
+| Critical | 2 | 0 | 0 |
+| High | 48 | 13 | 4 |
+| Moderate | 64 | 8 | 2 |
+| Low | 7 | 1 | 1 |
+
+These are Bun audit counts, not GitHub alert counts, and they do not establish
+that every vulnerable path was exploitable. A lower GitHub count after removing
+the unused pnpm graph does not mean the seven remaining Bun advisories are fixed.
 
 ## Remaining work
 
 | Package | Audited installed line | Required floor or constraint | Owning dependency path |
 |---|---|---|---|
-| @opentelemetry/core | 2.0.1 and 2.6.0 | 2.8.0 | Gemini telemetry and Google resource detector |
+| @opentelemetry/core | 2.0.1 | 2.8.0 | Gemini telemetry and Google resource detector |
 | @opentelemetry/propagator-jaeger | 2.0.1 | 2.9.0 | Gemini → sdk-node |
 | @opentelemetry/sdk-node, exporter-prometheus | 0.203.0 | 0.217.0 | Gemini telemetry family |
-| brace-expansion | 2.0.2 and 5.0.4 | 2.1.4 and 5.0.9 respectively | rimraf → glob → minimatch; minimatch 10 |
-| picomatch | 2.3.1 and 4.0.3 | 2.3.2 and 4.0.4 respectively | micromatch; Gemini/tinyglobby |
 | diff | 7.0.0 | 8.0.3 | Gemini core |
-| uuid | 8.3.2 and 9.0.1 | 11.1.1 | Google logging/auth dependency tree |
+| uuid | 9.0.1 | 11.1.1 | Google auth dependency tree |
 | extract-zip | 2.0.1 | No published fixed version | Gemini → get-ripgrep |
-| vite | Nested 8.0.10 | Above 8.0.15 | Vitest; root Vite remains 7.3.6 |
 
 - OpenTelemetry: migrate the Gemini provider's experimental 0.203.x telemetry
   family coherently; do not force only one experimental package to 0.217.x.
-- `brace-expansion` and `picomatch`: update each installed major through its
-  owning parent. A single global override must not replace both major lines.
 - `diff` and `uuid`: assess the required major upgrades in the pinned Gemini
   provider tree.
 - `extract-zip`: the audited 2.0.1 line has no published fix; migrate the owning
   ripgrep downloader/provider path.
-- Vite: update Vitest's nested vulnerable 8.x installation while preserving the
-  root 7.x contract, or migrate the toolchain together.
 
-Keep #874 open until the remaining graph, obsolete-lockfile reconciliation,
-validation failures and unsupported security-update acceptance criterion have
-an explicit resolution. Do not interpret a lower alert count from removing an
-obsolete lockfile as proof that the Bun graph is vulnerability-free.
+Keep #874 open until the remaining graph, validation failures and unsupported
+security-update acceptance criterion have an explicit resolution.
