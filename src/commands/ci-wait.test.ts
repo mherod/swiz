@@ -1,3 +1,6 @@
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
+import os from "node:os"
+import { join } from "node:path"
 import { describe, expect, it } from "vitest"
 import {
   discoverRunId,
@@ -285,4 +288,34 @@ describe("waitForCiCompletion", () => {
     expect(result.conclusion).toBe("success")
     expect(logs.some((message) => message.includes("Could not read CI status"))).toBe(true)
   })
+})
+
+// ─── ignoreCi exit contract ───────────────────────────────────────────────
+
+describe("ci-wait ignoreCi exit contract", () => {
+  it("exits 3 with an explicit not-verified message when ignore-ci is enabled", async () => {
+    const tmp = await mkdtemp(join(os.tmpdir(), "swiz-ci-wait-"))
+    try {
+      await mkdir(join(tmp, ".swiz"), { recursive: true })
+      await writeFile(join(tmp, ".swiz", "config.json"), JSON.stringify({ ignoreCi: true }))
+      const proc = Bun.spawn(
+        ["bun", "run", "./index.ts", "ci-wait", "deadbeefcafe000000", "--cwd", tmp],
+        {
+          stdout: "pipe",
+          stderr: "pipe",
+          stdin: "ignore",
+          env: { ...process.env, SWIZ_DIRECT: "1" },
+        }
+      )
+      const [stdout, stderr, exitCode] = await Promise.all([
+        new Response(proc.stdout).text(),
+        new Response(proc.stderr).text(),
+        proc.exited,
+      ])
+      expect(exitCode).toBe(3)
+      expect(`${stdout}${stderr}`).toContain("NOT checked")
+    } finally {
+      await rm(tmp, { recursive: true, force: true })
+    }
+  }, 20000)
 })

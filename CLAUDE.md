@@ -139,7 +139,7 @@ alwaysApply: false
   6. `git log origin/main..HEAD --oneline`.
   7. Run `/push`, then `swiz push-wait origin <permitted-branch>` on the branch the live collaboration guard selected.
   8. `swiz ci-wait $SHA --timeout 300`.
-  9. Confirm CI success; if failed, fix and re-push.
+  9. Confirm CI success; if failed, fix and re-push. Exit `3` means ignore-ci skipped the check — CI was NOT verified; confirm via `gh run view <run-id> --json conclusion,status,jobs`.
   10. Announce result.
 - Keep `Push and verify CI` task `in_progress` until `gh run view --json` confirms success.
 - Use `swiz push-wait` for pushes and cooldowns (no fixed sleeps or `--force-with-lease`) and `swiz ci-wait` for CI; no manual watch/view loops.

@@ -486,7 +486,11 @@ export const ciWaitCommand: Command = {
     ])
     const effective = getEffectiveSwizSettings(globalSettings, undefined, projectSettings)
     if (effective.ignoreCi) {
-      stderrLog("ignore-ci", "ignore-ci is enabled — skipping CI wait.")
+      stderrLog(
+        "ignore-ci",
+        "ignore-ci is enabled — CI was NOT checked; exit 3 means the run was not verified, not that it passed. Confirm state with `gh run view <run-id> --json conclusion,status,jobs`."
+      )
+      process.exitCode = 3
       return
     }
 

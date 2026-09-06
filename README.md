@@ -434,7 +434,7 @@ Writes create a backup first. Use the CLI rather than editing JSON directly so s
 | `gitStatusGate` / `git-status-gate` | `true` | No | global | Block stop while the worktree is dirty | `true` |
 | `nonDefaultBranchGate` / `non-default-branch-gate` | `true` | No | global | Block stop with unmerged work on a non-default branch | `true` |
 | `githubCiGate` / `github-ci-gate` | `true` | No | global, project | Block stop when current GitHub Actions CI is failing | `true` |
-| `ignoreCi` / `ignore-ci` | `false` | No | global, project | Suppress all GitHub Actions integration | `true` |
+| `ignoreCi` / `ignore-ci` | `false` | No | global, project | Suppress CI waiting; `swiz ci-wait` exits `3` without checking (not treated as success) | `true` |
 | `changesRequestedGate` / `changes-requested-gate` | `true` | No | global | Block stop with unresolved changes-requested reviews | `true` |
 | `personalRepoIssuesGate` / `personal-repo-issues-gate` | `true` | No | global | Block stop on actionable issues in personal repositories | `true` |
 | `issueCloseGate` / `issue-close-gate` | `false` | No | global | Require confirmation before closing issues | `true` |
