@@ -254,9 +254,95 @@ describe("readNativeTaskToolAvailability", () => {
     expect(await readNativeTaskToolAvailabilityFromTranscript(transcript)).toBe("unknown")
     await appendFile(
       transcript,
-      '{"type":"assistant","message":"No such tool available: TaskList"}\n'
+      '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"TaskCreate"}]}}\n'
     )
-    expect(await readNativeTaskToolAvailabilityFromTranscript(transcript)).toBe("absent")
+    expect(await readNativeTaskToolAvailabilityFromTranscript(transcript)).toBe("present")
+  })
+
+  test("transcript prose naming a missing task tool never proves absence", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "swiz-task-transcript-prose-"))
+    const transcript = join(dir, "session.jsonl")
+    // The phrase reads identically whether the harness emitted it or a person typed it, so text
+    // alone must never stand governance down (#820).
+    const prose = [
+      {
+        type: "user",
+        message: { role: "user", content: "No such tool available: TaskList — why?" },
+      },
+      {
+        type: "assistant",
+        message: {
+          content: [{ type: "text", text: "No such tool available: TaskCreate means..." }],
+        },
+      },
+      // The issue's own body arriving as tool output is the same text by another route.
+      {
+        type: "user",
+        message: {
+          content: [{ type: "tool_result", content: "prose with No such tool available: TaskGet" }],
+        },
+      },
+    ]
+    await Bun.write(transcript, `${prose.map((entry) => JSON.stringify(entry)).join("\n")}\n`)
+    expect(await readNativeTaskToolAvailabilityFromTranscript(transcript)).toBe("unknown")
+
+    // Control: the same reader still settles on structured evidence, proving the assertion above
+    // fails open on merit rather than because nothing was scanned.
+    await appendFile(
+      transcript,
+      '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"TaskList"}]}}\n'
+    )
+    expect(await readNativeTaskToolAvailabilityFromTranscript(transcript)).toBe("present")
+  })
+
+  test("prose in the transcript does not pre-empt structured ToolSearch evidence", async () => {
+    // Both `pretooluse-task-governance` and `pretooluse-skill-invocation-gate` stand down on this
+    // one call, and a transcript verdict short-circuits before the captures are read — so a false
+    // transcript `absent` used to outrank the only trustworthy evidence there is (#820).
+    const captureDir = await writeCaptures([
+      {
+        session_id: "session-prose",
+        tool_name: "ToolSearch",
+        _toolSearch: { query: "select:TaskCreate", matches: ["TaskCreate"] },
+      },
+    ])
+    const transcript = join(captureDir, "session-prose.jsonl")
+    await Bun.write(
+      transcript,
+      `${JSON.stringify({
+        type: "user",
+        message: { role: "user", content: "No such tool available: TaskList" },
+      })}\n`
+    )
+
+    // The captures prove the native tools are present; prose must not overturn that.
+    expect(await readNativeTaskToolAvailability("session-prose", captureDir, transcript)).toBe(
+      "present"
+    )
+  })
+
+  test("prose leaves the verdict to the captures, which may still prove absence", async () => {
+    const captureDir = await writeCaptures([
+      {
+        session_id: "session-mcp-only",
+        tool_name: "ToolSearch",
+        _toolSearch: {
+          query: "select:mcp__swiz__TaskCreate,mcp__swiz__TaskUpdate",
+          matches: ["mcp__swiz__TaskCreate", "mcp__swiz__TaskUpdate"],
+        },
+      },
+    ])
+    const transcript = join(captureDir, "session-mcp-only.jsonl")
+    await Bun.write(
+      transcript,
+      `${JSON.stringify({ type: "user", message: { content: "hello" } })}\n`
+    )
+
+    // Removing the transcript route to `absent` must not strand MCP-only sessions on `unknown`:
+    // the structured ToolSearch path still reaches `absent` for them (#825).
+    expect(await readNativeTaskToolAvailability("session-mcp-only", captureDir, transcript)).toBe(
+      "absent"
+    )
   })
 
   test("keeps an unknown capture verdict incremental until a targeted search settles it", async () => {

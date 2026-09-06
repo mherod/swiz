@@ -235,6 +235,34 @@ describe("pretooluse-require-tasks", () => {
     expect(result.reason).toContain("needs tasks in place first")
   })
 
+  test("still denies Bash when the transcript only mentions a missing task tool in prose", async () => {
+    // #820: the tool-missing phrase was matched as raw text, so a user asking about the error —
+    // or a tool result quoting it — cached "absent" and stood governance down for the session.
+    const homeDir = await createTempHome()
+    const sessionId = `session-prose-absence-${Date.now()}`
+    const lines = [
+      JSON.stringify({
+        type: "user",
+        message: {
+          role: "user",
+          content: "No such tool available: TaskList — what does that mean?",
+        },
+      }),
+      JSON.stringify({
+        type: "assistant",
+        message: {
+          content: [{ type: "text", text: "No such tool available: TaskCreate means..." }],
+        },
+      }),
+    ]
+    const transcriptPath = join(homeDir, "transcript-prose-absence.jsonl")
+    await writeFile(transcriptPath, `${lines.join("\n")}\n`)
+
+    const result = await runHook({ homeDir, toolName: "Bash", sessionId, transcriptPath })
+    expect(result.decision).toBe("deny")
+    expect(result.reason).toContain("needs tasks in place first")
+  })
+
   test("allows Shell when at least one pending task exists", async () => {
     const homeDir = await createTempHome()
     const sessionId = "session-pending"

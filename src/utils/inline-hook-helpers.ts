@@ -234,24 +234,18 @@ export function shouldEnforceTaskGovernance(availability: NativeTaskToolAvailabi
 }
 
 /**
- * The harness reports a call to a missing tool with this error, which is direct proof the tool is
- * not in the session registry.
- */
-const NATIVE_TASK_TOOL_MISSING_RE =
-  /No such tool available:\s*(?:TaskCreate|TaskUpdate|TaskList|TaskGet)\b/
-
-/**
  * A native task tool actually being invoked. The quoted exact name cannot match
  * `mcp__swiz__TaskCreate`, which is the distinction the whole check rests on.
  */
 const NATIVE_TASK_TOOL_USE_RE = /"name"\s*:\s*"(?:TaskCreate|TaskUpdate|TaskList|TaskGet)"/
 
 /**
- * Resolve availability from the session transcript.
+ * Resolve availability from the session transcript. Returns only `present` or `unknown` — see
+ * {@link applyTranscriptEvidence} for why absence cannot be read from transcript text.
  *
- * Preferred over capture files: `transcript_path` is on every hook payload, whereas the
- * `/tmp/swiz-incoming` JSONL stream is only written by CLI dispatch and the daemon — it goes
- * stale whenever hooks run as standalone subprocesses.
+ * Preferred over capture files for proving `present`: `transcript_path` is on every hook payload,
+ * whereas the `/tmp/swiz-incoming` JSONL stream is only written by CLI dispatch and the daemon — it
+ * goes stale whenever hooks run as standalone subprocesses.
  *
  * Line-level regexes avoid parsing a multi-megabyte transcript on every tool call.
  */
@@ -424,17 +418,30 @@ async function readAppendMetadata(path: string): Promise<JsonlAppendMetadata | n
   }
 }
 
+/**
+ * The transcript can prove `present`, never `absent`.
+ *
+ * A raw JSONL line is not a parsed event: the tool-missing phrase reads identically whether the
+ * harness emitted it or a person typed it, so matching it as text let ordinary prose — a question
+ * about the error, a quoted log, this issue's own body arriving in a tool result — cache `absent`
+ * and stand governance down for the rest of the session (#820). A transcript-derived `absent` also
+ * pre-empts the structured ToolSearch evidence below, so the false verdict won every tie.
+ *
+ * `present` stays safe because it keys on a structured `"name": "TaskCreate"` invocation and its
+ * failure mode is enforcing governance that was already going to be enforced. Absence keeps only
+ * the structured ToolSearch path, which covers MCP-only sessions since #825. Restoring a
+ * transcript route to `absent` needs a verified native-tool resolution-failure event shape with its
+ * own fixture — never a text match.
+ */
 function applyTranscriptEvidence(
   existing: NativeTaskToolAvailability,
   lines: string[]
 ): NativeTaskToolAvailability {
-  let verdict = existing
   for (const line of lines) {
     if (!line.includes("Task")) continue
     if (NATIVE_TASK_TOOL_USE_RE.test(line)) return "present"
-    if (NATIVE_TASK_TOOL_MISSING_RE.test(line)) verdict = "absent"
   }
-  return verdict
+  return existing
 }
 
 function currentEvidence(verdict: NativeTaskToolAvailability): ToolSearchEvidence | null {

@@ -25,7 +25,7 @@ async function history(first: object[], last: object[]): Promise<string> {
   return path
 }
 
-test("native task evidence survives a long history and still outweighs later absence", async () => {
+test("native task evidence survives a long history and outlasts later prose", async () => {
   const path = await history(
     [{ type: "assistant", message: { content: [{ type: "tool_use", name: "TaskCreate" }] } }],
     [{ type: "assistant", message: "No such tool available: TaskList" }]
@@ -33,12 +33,20 @@ test("native task evidence survives a long history and still outweighs later abs
   expect(await readNativeTaskToolAvailabilityFromTranscript(path)).toBe("present")
 })
 
-test("native task absence at the end of a long cold scan is retained", async () => {
+test("native task evidence at the end of a long cold scan is retained", async () => {
+  const path = await history(
+    [],
+    [{ type: "assistant", message: { content: [{ type: "tool_use", name: "TaskList" }] } }]
+  )
+  expect(await readNativeTaskToolAvailabilityFromTranscript(path)).toBe("present")
+})
+
+test("prose at the end of a long cold scan proves nothing", async () => {
   const path = await history(
     [],
     [{ type: "assistant", message: "No such tool available: TaskList" }]
   )
-  expect(await readNativeTaskToolAvailabilityFromTranscript(path)).toBe("absent")
+  expect(await readNativeTaskToolAvailabilityFromTranscript(path)).toBe("unknown")
 })
 
 test("streamed diagnostic ownership keeps evidence across compaction and large histories", async () => {
