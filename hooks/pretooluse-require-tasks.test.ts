@@ -1514,7 +1514,16 @@ describe("task-file block bypass regression tests", () => {
     // Only 1 in_progress task, 0 pending tasks
     await writeTask(homeDir, sessionId, { id: "1", subject: "Current task", status: "in_progress" })
 
-    const result = await runHook({ homeDir, toolName: "Edit", sessionId, filePath: "src/foo.ts" })
+    const result = await runHook({
+      homeDir,
+      toolName: "Edit",
+      sessionId,
+      filePath: "src/foo.ts",
+      // Pin the payload setting like the autoContinue:true case below. The temp HOME only supplies
+      // the user tier, and project settings outrank it — so this repo's own `.swiz/config.json`
+      // decided the outcome until `autoContinue` was enabled there and silently inverted the case.
+      effectiveSettings: buildEffectiveTestSettings({ autoContinue: false }),
+    })
     // Allowed because minPending is relaxed to 0 when autoContinue is false
     expect(result.decision).toBeUndefined()
   })
