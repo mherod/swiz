@@ -39,17 +39,37 @@ function publishMemorySnapshot(): void {
   } satisfies TranscriptMonitorParentMessage)
 }
 
-async function checkProject(cwd: string): Promise<void> {
-  if (!monitor || degraded) return
+async function checkProject(id: string, cwd: string): Promise<void> {
+  if (!monitor || degraded) {
+    parentPort?.postMessage({
+      type: "checkProjectResponse",
+      id,
+      cwd,
+      durationMs: 0,
+      skipped: true,
+    } satisfies TranscriptMonitorParentMessage)
+    return
+  }
   activeChecks++
+  const startedAt = performance.now()
+  let error: string | undefined
   try {
     await monitor.checkProject(cwd)
   } catch (err) {
+    error = err instanceof Error ? err.message : String(err)
     stderrLog("transcript-monitor-worker", `Error checking project: ${err}`)
   } finally {
+    const durationMs = performance.now() - startedAt
     activeChecks--
     if (degraded) releaseTranscriptHistory()
     publishMemorySnapshot()
+    parentPort?.postMessage({
+      type: "checkProjectResponse",
+      id,
+      cwd,
+      durationMs,
+      ...(error !== undefined ? { error } : {}),
+    } satisfies TranscriptMonitorParentMessage)
   }
 }
 
@@ -158,7 +178,7 @@ if (parentPort) {
       if (degraded) releaseTranscriptHistory()
       publishMemorySnapshot()
     } else if (msg.type === "checkProject") {
-      void checkProject(msg.cwd)
+      void checkProject(msg.id, msg.cwd)
     } else {
       void handleMessage(msg)
     }

@@ -7,6 +7,17 @@ import type {
   TranscriptMonitorWorkerMessage,
 } from "../worker-messages.ts"
 import type { TranscriptMonitor } from "./transcript-monitor.ts"
+import {
+  TranscriptMonitorCoordinator,
+  type TranscriptMonitorCoordinatorMetrics,
+  type TranscriptMonitorCoordinatorOptions,
+} from "./transcript-monitor-coordinator.ts"
+
+export interface WorkerTranscriptMonitorOptions {
+  maxConcurrentChecks?: number
+  maxQueueDepth?: number
+  onCheckCompleted?: TranscriptMonitorCoordinatorOptions["onCheckCompleted"]
+}
 
 /**
  * A proxy for TranscriptMonitor that runs its operations in a background worker.
@@ -18,6 +29,12 @@ export class WorkerTranscriptMonitor
   private initialized: Promise<void>
   private degraded = false
   private memorySnapshot: WorkerMemorySnapshot | null = null
+  private coordinator: TranscriptMonitorCoordinator
+  private inFlightChecks = new Map<
+    string,
+    (result: { durationMs: number; error?: string; skipped?: boolean }) => void
+  >()
+  private nextCheckId = 0
 
   getMemorySnapshot(now = Date.now()): WorkerMemorySnapshot | null {
     return this.memorySnapshot && now - this.memorySnapshot.sampledAt <= 90_000
@@ -34,12 +51,22 @@ export class WorkerTranscriptMonitor
     this.degraded = degraded
   }
 
-  constructor(private caches: ConstructorParameters<typeof TranscriptMonitor>[0]) {
+  constructor(
+    private caches: ConstructorParameters<typeof TranscriptMonitor>[0],
+    options?: WorkerTranscriptMonitorOptions
+  ) {
     const workerPath = join(
       dirname(new URL(import.meta.url).pathname),
       "transcript-monitor-worker.ts"
     )
     this.worker = new Worker(workerPath)
+
+    this.coordinator = new TranscriptMonitorCoordinator({
+      maxConcurrentChecks: options?.maxConcurrentChecks,
+      maxQueueDepth: options?.maxQueueDepth,
+      executeCheck: (cwd) => this.executeWorkerCheck(cwd),
+      onCheckCompleted: options?.onCheckCompleted,
+    })
 
     const handleWorkerMessage = async (msg: TranscriptMonitorParentMessage): Promise<void> => {
       try {
@@ -75,6 +102,14 @@ export class WorkerTranscriptMonitor
             } satisfies TranscriptMonitorWorkerMessage)
             break
           }
+          case "checkProjectResponse": {
+            const resolve = this.inFlightChecks.get(msg.id)
+            if (resolve) {
+              this.inFlightChecks.delete(msg.id)
+              resolve({ durationMs: msg.durationMs, error: msg.error, skipped: msg.skipped })
+            }
+            break
+          }
         }
       } catch (err) {
         stderrLog("worker-transcript-monitor-proxy", `Error handling worker message: ${err}`)
@@ -94,6 +129,11 @@ export class WorkerTranscriptMonitor
       if (code !== 0) {
         stderrLog("worker-transcript-monitor", `Worker stopped with exit code ${code}`)
       }
+      for (const resolve of this.inFlightChecks.values()) {
+        resolve({ durationMs: 0, error: `Worker exited with code ${code}` })
+      }
+      this.inFlightChecks.clear()
+      this.coordinator.close(`Worker exited with code ${code}`)
     })
 
     this.worker.unref()
@@ -110,11 +150,35 @@ export class WorkerTranscriptMonitor
     })
   }
 
+  private executeWorkerCheck(cwd: string): Promise<{
+    durationMs: number
+    error?: string
+    skipped?: boolean
+  }> {
+    if (this.degraded) {
+      return Promise.resolve({ durationMs: 0, skipped: true })
+    }
+    // Monotonic ids: a collision would silently orphan an earlier resolver and hang its check.
+    const id = `check-${this.nextCheckId++}`
+    return new Promise((resolve) => {
+      this.inFlightChecks.set(id, resolve)
+      this.worker.postMessage({
+        type: "checkProject",
+        id,
+        cwd,
+      } satisfies TranscriptMonitorWorkerMessage)
+    })
+  }
+
   async checkProject(cwd: string): Promise<void> {
     if (this.degraded) return
     await this.initialized
     if (this.degraded) return
-    this.worker.postMessage({ type: "checkProject", cwd } satisfies TranscriptMonitorWorkerMessage)
+    await this.coordinator.checkProject(cwd)
+  }
+
+  getCoordinatorMetrics(): TranscriptMonitorCoordinatorMetrics {
+    return this.coordinator.getMetrics()
   }
 
   pruneOldSessions(activeSessions: Set<string>): void {
@@ -147,6 +211,7 @@ export class WorkerTranscriptMonitor
   }
 
   terminate(): void {
+    this.coordinator.close("Worker terminated")
     void this.worker.terminate()
   }
 }

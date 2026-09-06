@@ -74,6 +74,23 @@ describe("daemon histogram metrics", () => {
     })
   })
 
+  test("serializes coordinator concurrency and coalescing metrics", () => {
+    const metrics = createMetrics()
+    recordTranscriptMonitorCheck(metrics, 24, "success", {
+      activeChecks: 2,
+      queuedChecks: 5,
+      coalescedTriggers: 12,
+    })
+
+    expect(serializeMetrics(metrics).transcriptMonitor).toMatchObject({
+      count: 1,
+      avgMs: 24,
+      activeChecks: 2,
+      queuedChecks: 5,
+      coalescedTriggers: 12,
+    })
+  })
+
   test("keeps instrumentation p50 below the two millisecond budget", () => {
     const metrics = createMetrics()
     const samples: number[] = []

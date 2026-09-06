@@ -33,7 +33,7 @@ export type FileWatcherParentMessage =
 export type TranscriptMonitorWorkerMessage =
   | { type: "init" }
   | { type: "memoryPressure"; degraded: boolean }
-  | { type: "checkProject"; cwd: string }
+  | { type: "checkProject"; id: string; cwd: string }
   | { type: "pruneOldSessions"; activeSessions: string[] }
   | { type: "getDispatchConcurrencyMetrics"; requestId: string }
   | { type: "manifestResponse"; id: string; manifest: HookGroup[] }
@@ -56,4 +56,13 @@ export type TranscriptMonitorParentMessage =
       type: "dispatchConcurrencyMetricsResponse"
       requestId: string
       metrics: { active: number; queued: number; maxConcurrent: number }
+    }
+  | {
+      type: "checkProjectResponse"
+      id: string
+      cwd: string
+      durationMs: number
+      error?: string
+      /** True when the worker declined the check (degraded or uninitialized) and ran no work. */
+      skipped?: boolean
     }

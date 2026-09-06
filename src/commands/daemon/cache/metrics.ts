@@ -40,19 +40,36 @@ export interface TranscriptDispatchMetrics {
   maxConcurrent: number
 }
 
+export interface TranscriptMonitorMetrics extends DistributionMetrics {
+  activeChecks?: number
+  queuedChecks?: number
+  coalescedTriggers?: number
+}
+
 export interface DaemonMetrics {
   startedAt: number
   dispatches: Map<string, EventMetrics>
   transcriptDispatch?: TranscriptDispatchMetrics
-  transcriptMonitor?: DistributionMetrics
+  transcriptMonitor?: TranscriptMonitorMetrics
   memoryUsage?: NodeJS.MemoryUsage
   memoryPressure?: MemoryPressureSnapshot
   memoryRuntime?: MemoryRuntimeSnapshot
 }
 
-export function recordTranscriptMonitorCheck(metrics: DaemonMetrics, durationMs: number): void {
-  metrics.transcriptMonitor ??= createDistribution()
-  recordDistribution(metrics.transcriptMonitor, durationMs, "success", 0)
+export function recordTranscriptMonitorCheck(
+  metrics: DaemonMetrics,
+  durationMs: number,
+  outcome: DispatchOutcome = "success",
+  extra?: { activeChecks?: number; queuedChecks?: number; coalescedTriggers?: number }
+): void {
+  metrics.transcriptMonitor ??= createDistribution() as TranscriptMonitorMetrics
+  recordDistribution(metrics.transcriptMonitor, durationMs, outcome, 0)
+  if (extra) {
+    const tm = metrics.transcriptMonitor as TranscriptMonitorMetrics
+    if (extra.activeChecks !== undefined) tm.activeChecks = extra.activeChecks
+    if (extra.queuedChecks !== undefined) tm.queuedChecks = extra.queuedChecks
+    if (extra.coalescedTriggers !== undefined) tm.coalescedTriggers = extra.coalescedTriggers
+  }
 }
 
 export interface SerializedDistributionMetrics {
@@ -67,6 +84,9 @@ export interface SerializedDistributionMetrics {
   timeoutCount: number
   avgHookCount: number
   maxHookCount: number
+  activeChecks?: number
+  queuedChecks?: number
+  coalescedTriggers?: number
 }
 
 export interface SerializedRouteMetrics extends SerializedDistributionMetrics {
@@ -203,7 +223,13 @@ function percentile(metrics: DistributionMetrics, fraction: number): number {
   return roundMetric(metrics.maxMs)
 }
 
-function serializeDistribution(metrics: DistributionMetrics): SerializedDistributionMetrics {
+function serializeDistribution(
+  metrics: DistributionMetrics & {
+    activeChecks?: number
+    queuedChecks?: number
+    coalescedTriggers?: number
+  }
+): SerializedDistributionMetrics {
   return {
     count: metrics.count,
     avgMs: metrics.count === 0 ? 0 : Math.round(metrics.totalMs / metrics.count),
@@ -216,6 +242,11 @@ function serializeDistribution(metrics: DistributionMetrics): SerializedDistribu
     timeoutCount: metrics.timeoutCount,
     avgHookCount: metrics.count === 0 ? 0 : roundMetric(metrics.totalHookCount / metrics.count),
     maxHookCount: metrics.maxHookCount,
+    ...(metrics.activeChecks !== undefined && { activeChecks: metrics.activeChecks }),
+    ...(metrics.queuedChecks !== undefined && { queuedChecks: metrics.queuedChecks }),
+    ...(metrics.coalescedTriggers !== undefined && {
+      coalescedTriggers: metrics.coalescedTriggers,
+    }),
   }
 }
 

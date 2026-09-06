@@ -425,7 +425,9 @@ export function setupWatchers(
     watchers.register(join(cwd, ".git/"), `git:${cwd}`, projectFlush)
     const transcriptWatchFlush = () => {
       projectFlush()
-      void transcriptMonitor.checkProject(cwd)
+      void transcriptMonitor.checkProject(cwd).catch((err) => {
+        stderrLog("transcript-monitor", `Failed to check project ${cwd}: ${err}`)
+      })
     }
     for (const transcriptWatch of transcriptWatchPathsForProject(cwd)) {
       // depth: 0 — only watch the parent directory for new/removed session entries.
@@ -661,7 +663,18 @@ async function startDaemonProcess(_args: string[], port: number): Promise<void> 
   const state = createDaemonState()
   const caches = createDaemonCaches()
   setGlobalTaskStateCache(caches.taskStateCache)
-  const workerTranscriptMonitor = new WorkerTranscriptMonitor(caches)
+  const workerTranscriptMonitor = new WorkerTranscriptMonitor(caches, {
+    onCheckCompleted: (cwd, durationMs, outcome) => {
+      const coordinatorMetrics = workerTranscriptMonitor.getCoordinatorMetrics()
+      recordTranscriptMonitorCheck(state.globalMetrics, durationMs, outcome, coordinatorMetrics)
+      recordTranscriptMonitorCheck(
+        state.getProjectMetrics(cwd),
+        durationMs,
+        outcome,
+        coordinatorMetrics
+      )
+    },
+  })
   const transcriptMonitor = workerTranscriptMonitor as unknown as TranscriptMonitor
   const { registeredProjects, registerProjectWatchers, evictProject } = setupWatchers(
     caches,
@@ -819,12 +832,7 @@ async function startDaemonProcess(_args: string[], port: number): Promise<void> 
   // Register initial project for periodic upstream sync
   void caches.upstreamSyncRegistry.register(projectRoot)
 
-  startTranscriptMonitoring(
-    registeredProjects,
-    transcriptMonitor,
-    state.globalMetrics,
-    state.getProjectMetrics
-  )
+  startTranscriptMonitoring(registeredProjects, transcriptMonitor, state.globalMetrics)
 
   console.log(`Daemon listening on ${server.url}`)
 }
@@ -832,8 +840,7 @@ async function startDaemonProcess(_args: string[], port: number): Promise<void> 
 function startTranscriptMonitoring(
   registeredProjects: Set<string>,
   transcriptMonitor: TranscriptMonitor,
-  globalMetrics: DaemonMetrics,
-  getProjectMetrics: (cwd: string) => DaemonMetrics
+  globalMetrics: DaemonMetrics
 ) {
   // Start periodic transcript monitoring for all registered projects
   void logPseudoHook("Transcript monitor starting")
@@ -845,11 +852,7 @@ function startTranscriptMonitoring(
       try {
         await Promise.allSettled(
           [...registeredProjects].map(async (cwd) => {
-            const startedAt = performance.now()
             await transcriptMonitor.checkProject(cwd)
-            const durationMs = performance.now() - startedAt
-            recordTranscriptMonitorCheck(globalMetrics, durationMs)
-            recordTranscriptMonitorCheck(getProjectMetrics(cwd), durationMs)
           })
         )
         // Update global metrics with current transcript dispatch concurrency state
