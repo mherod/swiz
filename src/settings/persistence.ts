@@ -360,6 +360,10 @@ function normalizeProjectSettings(value: unknown): ProjectSwizSettings | null {
     "trunkMode",
     "ignoreCi",
     "githubCiGate",
+    // Declared on ProjectSwizSettings and listed in PROJECT_OVERRIDABLE_KEYS, but missing
+    // here, so a project `actionPlanMerge` was parsed away before it could reach the
+    // resolver — the override was silently unreachable in both directions (#875).
+    "actionPlanMerge",
   ])
   applyStringArrayFields(obj, result, ["disabledHooks", "plugins", "largeFileAllowPatterns"])
   applyHooksAndCategories(obj, result)

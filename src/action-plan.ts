@@ -7,7 +7,8 @@
 import { join } from "node:path"
 import { agentDefinitelySupportsTaskList, resolveTranslationAgent } from "./agent-paths.ts"
 import { type AgentDef, agentSupportsTool, translateTaskToolName } from "./agents.ts"
-import { readSwizSettings } from "./settings/persistence.ts"
+import { readProjectSettings, readSwizSettings } from "./settings/persistence.ts"
+import { getEffectiveSwizSettings } from "./settings/resolution.ts"
 import {
   extractStepsFromSkill,
   filterQualitySteps,
@@ -254,8 +255,16 @@ export async function mergeActionPlanIntoTasks(
   cwd?: string,
   mergeOptions?: MergeIntoTasksOptions
 ): Promise<number> {
-  const settings = await readSwizSettings()
-  if (!settings.actionPlanMerge) return 0
+  // `readSwizSettings` is the global-tier reader by design, so gating on it directly
+  // discarded the project and session tiers: `actionPlanMerge` is project-overridable
+  // (settings/resolution.ts PROJECT_OVERRIDABLE_KEYS), and every caller already passes
+  // the `cwd` needed to resolve it. Enabling or disabling it for one project silently
+  // did nothing, in both directions, for a setting that controls automatic task
+  // creation (#875).
+  const globalSettings = await readSwizSettings()
+  const projectSettings = cwd ? await readProjectSettings(cwd) : null
+  const effective = getEffectiveSwizSettings(globalSettings, sessionId, projectSettings)
+  if (!effective.actionPlanMerge) return 0
   const mergeSteps: MergeStep[] = filterQualitySteps(flattenToSteps(steps))
   if (mergeSteps.length === 0) return 0
   const created = await mergeIntoTasks(sessionId, mergeSteps, cwd, mergeOptions)
