@@ -75,6 +75,106 @@ describe("findNonCanonicalGitInvocation", () => {
     expect(findNonCanonicalGitInvocation(command)?.kind).toBe("binary-path")
   })
 
+  test.each([
+    "printf \"<<'EOF'\ntext\"\n/usr/bin/git push origin main\nEOF",
+    "cat <<'EOF'\nignore \\\nEOF\n/usr/bin/git push origin main\nEOF",
+    "cat <<'EOF'\nEOF\n/usr/bin/git push origin main\nEOF",
+    "echo ignored # <<'EOF'\n/usr/bin/git push origin main\nEOF",
+    "printf '%s' \\<<'EOF'\n/usr/bin/git push origin main\nEOF",
+    "(( 1 <<'EOF' ))\n/usr/bin/git push origin main\nEOF",
+    "cat <<$'EOF'\nEOF\n/usr/bin/git push origin main\n$EOF",
+  ])("preserves executable Git after misleading heredoc text: %s", (command) => {
+    expect(findNonCanonicalGitInvocation(command)?.kind).toBe("binary-path")
+  })
+
+  test.each([
+    ["cat <<'EOF' > notes.md", "EOF"],
+    ['cat <<"END-MARK"', "END-MARK"],
+    ["cat <<\\EOF", "EOF"],
+    ['cat <<E"OF"', "EOF"],
+    ["cat <<''", ""],
+    ["cat <<'EOF' # output", "EOF"],
+    ["cat <<'EOF' ; printf done", "EOF"],
+  ])("accepts quoted delimiter syntax %s", (opener, delimiter) => {
+    const command = [opener, "env git status", "$(git push origin main)", delimiter].join("\n")
+    expect(findNonCanonicalGitInvocation(command)).toBeNull()
+  })
+
+  test.each([
+    ["cat <<'EOF'", " EOF"],
+    ["cat <<'EOF'", "\tEOF"],
+    ["cat <<-'EOF'", " EOF"],
+  ])("keeps indented non-delimiters inside %s", (opener, bodyLine) => {
+    expect(
+      findNonCanonicalGitInvocation([opener, "text", bodyLine, "env git status", "EOF"].join("\n"))
+    ).toBeNull()
+  })
+
+  test("closes tab-stripped heredocs at a tab-indented delimiter", () => {
+    const command = "cat <<-'EOF'\n\tenv git status\n\tEOF\n/usr/bin/git status"
+    expect(findNonCanonicalGitInvocation(command)?.kind).toBe("binary-path")
+  })
+
+  test("consumes multiple bodies in declaration order", () => {
+    const command = [
+      "cat <<'FIRST' <<'SECOND'",
+      "env git status",
+      "FIRST",
+      "$(git push origin main)",
+      "SECOND",
+    ].join("\n")
+    expect(findNonCanonicalGitInvocation(command)).toBeNull()
+    expect(findNonCanonicalGitInvocation(`${command}\n/usr/bin/git status`)?.kind).toBe(
+      "binary-path"
+    )
+  })
+
+  test("preserves substitutions in mixed unquoted and quoted heredocs", () => {
+    const command = [
+      "cat <<PLAIN <<'QUOTED'",
+      "$(git push origin main)",
+      "PLAIN",
+      "env git status",
+      "QUOTED",
+    ].join("\n")
+    expect(findNonCanonicalGitInvocation(command)?.kind).toBe("shell-substitution")
+  })
+
+  test("does not interpret heredoc declarations inside an unquoted body", () => {
+    const command = [
+      "cat <<PLAIN",
+      "<<'QUOTED'",
+      "$(git push origin main)",
+      "QUOTED",
+      "PLAIN",
+    ].join("\n")
+    expect(findNonCanonicalGitInvocation(command)?.kind).toBe("shell-substitution")
+  })
+
+  test("respects continued delimiter lines inside unquoted heredocs", () => {
+    const command = [
+      "cat <<PLAIN",
+      "not a delimiter \\",
+      "PLAIN",
+      "<<'QUOTED'",
+      "$(git push origin main)",
+      "QUOTED",
+      "PLAIN",
+    ].join("\n")
+    expect(findNonCanonicalGitInvocation(command)?.kind).toBe("shell-substitution")
+  })
+
+  test("ignores unterminated quoted heredoc text", () => {
+    expect(findNonCanonicalGitInvocation("cat <<'EOF'\nenv git status")).toBeNull()
+  })
+
+  test("preserves quoted Git prose in commit messages and issue bodies", () => {
+    expect(findNonCanonicalGitInvocation("git commit -m 'mention env git status'")).toBeNull()
+    expect(
+      findNonCanonicalGitInvocation('gh issue create --body "use /usr/bin/git status"')
+    ).toBeNull()
+  })
+
   test("classifies direct Git binary paths", () => {
     expect(findNonCanonicalGitInvocation("/usr/bin/git status")?.kind).toBe("binary-path")
     expect(findNonCanonicalGitInvocation("./git status")?.kind).toBe("binary-path")
