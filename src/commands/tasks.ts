@@ -9,7 +9,7 @@ import {
   isBlockedSwizTasksSubcommand,
   SWIZ_TASKS_CLI_DENY_MESSAGE,
 } from "../tasks/task-cli-governance.ts"
-import { getTaskToolName } from "../tasks/task-governance-messages.ts"
+import { getTaskToolName, TASK_RECOVERY_HINT } from "../tasks/task-governance-messages.ts"
 import { type DateFormat, listAllSessionsTasks, listTasks } from "../tasks/task-renderer.ts"
 import type { Task } from "../tasks/task-repository.ts"
 import {
@@ -775,7 +775,7 @@ async function enforceNativeTaskTools(subcommand: string | undefined, cwd: strin
     : `"swiz tasks" (list) is not available inside ${agentName}.`
 
   const guidance = hasMcpTasks
-    ? "Use the Swiz MCP tools TaskCreate, TaskList, and TaskUpdate instead of the swiz tasks CLI."
+    ? `Use the Swiz MCP tools TaskCreate, TaskList, and TaskUpdate instead of the swiz tasks CLI.\n\n${TASK_RECOVERY_HINT}`
     : SWIZ_TASKS_CLI_DENY_MESSAGE
   throw new Error(`${hint}\n${guidance}`)
 }
@@ -786,8 +786,13 @@ export const tasksCommand: Command = {
   name: "tasks",
   description: "View and manage agent tasks",
   usage:
-    "swiz tasks [create|complete|status] [--session <id>] [--all-projects] [--all-sessions] [--recovered] [--date-format <relative|absolute>] [--evidence <text>] [--verify <text>] [--state <state>]",
+    "swiz tasks [create|complete|status|recover] [--session <id>] [--all-projects] [--all-sessions] [--recovered] [--date-format <relative|absolute>] [--evidence <text>] [--verify <text>] [--state <state>]",
   options: [
+    {
+      flags: "recover [command]",
+      description:
+        "Inspect stranded session tasks; mutations require --session and existing task IDs",
+    },
     { flags: "create <subject> <desc>", description: "Create a new task in the current session" },
     {
       flags: "complete <id>",
@@ -841,21 +846,25 @@ export const tasksCommand: Command = {
  * The CLI entry point passes no cwd, preserving `process.cwd()` behavior.
  */
 export async function runTasks(args: string[], cwd: string = process.cwd()): Promise<void> {
-  const [subcommand] = args
+  const recovering = args[0] === "recover"
+  const commandArgs = recovering
+    ? await (await import("./tasks-recovery.ts")).resolveTaskRecoveryArgs(args.slice(1))
+    : args
+  const [subcommand] = commandArgs
 
-  await enforceNativeTaskTools(subcommand, cwd)
+  if (!recovering) await enforceNativeTaskTools(subcommand, cwd)
 
   if (isListInvocation(subcommand)) {
-    await runListTasks(args, cwd)
+    await runListTasks(commandArgs, cwd)
     return
   }
 
-  const rest = args.slice(1)
+  const rest = commandArgs.slice(1)
   const handler = subcommand ? SUBCOMMAND_HANDLERS[subcommand] : undefined
   if (!handler) {
     throw new Error(`Unknown subcommand: ${subcommand}\nRun "swiz help tasks" for usage.`)
   }
-  await handler(rest, resolveFilterCwd(args, cwd))
+  await handler(rest, resolveFilterCwd(commandArgs, cwd))
 }
 
 export function verifyTaskSubject(taskSubject: string, verifyText: string): string | null {

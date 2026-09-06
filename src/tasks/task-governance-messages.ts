@@ -28,6 +28,11 @@ export const TASKLIST_STABILITY_STEP = "Run TaskList now."
 
 export const TASKLIST_CONFIRM_STEP = "Run TaskList again after updating tasks."
 
+export const TASK_RECOVERY_HINT =
+  "If these tasks are absent from the task tools, inspect the native session queues with `swiz tasks recover --all-sessions`. " +
+  "For a stale or non-work task, use `swiz tasks recover status <task-id> cancelled --session <session-id> --evidence <reason>`. " +
+  "Recovery requires an explicit session for changes and cannot create tasks."
+
 function getOptionalTaskToolName(canonicalName: string): string | null {
   return taskToolNameForCurrentAgent(canonicalName)
 }
@@ -819,14 +824,15 @@ export function formatIncompleteReason(
     ? `\n\nComplete these tasks before stopping. ${buildTaskReviewInstruction(sourceCtx)} Only mark tasks completed when the work is done and the completion has evidence.`
     : `\n\nComplete these tasks before stopping. ${TASKLIST_STABILITY_STEP} Then update each task only when the work is done and the completion has evidence.`
 
-  return header + taskList + sourceNote + footer
+  return `${header}${taskList}${sourceNote}${footer}\n\n${TASK_RECOVERY_HINT}`
 }
 
 export const SWIZ_TASKS_CLI_DENY_MESSAGE =
   "Use the native task tools here instead of the swiz tasks CLI.\n\n" +
   `${TASK_APPROACH_MESSAGE}\n\n` +
-  "Avoid `swiz tasks <subcommand>` for all subcommands except `swiz tasks adopt` (including `--recovered`).\n\n" +
-  "Keep task state in the native task flow so planning stays accurate and auditable."
+  "Use task tools for routine work, including listing recovered tasks.\n\n" +
+  "Keep task state in the native task flow so planning stays accurate and auditable.\n\n" +
+  TASK_RECOVERY_HINT
 
 export function buildPendingCompletionTransitionMessage(taskId: string, subject?: string): string {
   return buildTaskGovernanceMessage({ kind: "pending-completion-shortcut", taskId, subject })

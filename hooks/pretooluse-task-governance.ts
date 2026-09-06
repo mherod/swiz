@@ -53,6 +53,7 @@ import {
   isBlockedSwizTaskFilesCommand,
   isBlockedSwizTasksCliCommand,
   isBlockedTaskFilePath,
+  isTaskRecoveryShellCommand,
   SWIZ_TASKS_CLI_DENY_MESSAGE,
 } from "../src/tasks/task-cli-governance.ts"
 import { getCurrentComplianceEntry } from "../src/tasks/task-compliance-history.ts"
@@ -393,6 +394,12 @@ async function isTaskEnforcementProject(input: Record<string, any>, cwd: string)
 
 function isBlockedTool(toolName: string): boolean {
   return isShellTool(toolName) || isEditTool(toolName) || isWriteTool(toolName)
+}
+
+function isTaskRecoveryCall(input: Record<string, any>, toolName: string): boolean {
+  if (!isShellTool(toolName)) return false
+  const command = String((input.tool_input as Record<string, any> | undefined)?.command ?? "")
+  return isTaskRecoveryShellCommand(command)
 }
 
 function isMemoryMarkdownEdit(input: Record<string, any>, toolName: string): boolean {
@@ -1065,6 +1072,8 @@ async function runRequireTasksChecks(parsed: ParsedInput): Promise<SwizHookOutpu
   // Layer 1: Edit/Write file-path guard (see task-cli-governance.ts)
   const taskFileAccess = evaluateTaskFileAccess(input, toolName, sessionId)
   if (taskFileAccess) return taskFileAccess
+  /** A broken queue must not prevent its explicit recovery command from running. */
+  if (isTaskRecoveryCall(input, toolName)) return preToolUseAllow()
 
   let thresholds: GovernanceThresholds = GOVERNANCE_THRESHOLDS.strict
   try {
@@ -1775,7 +1784,7 @@ async function dispatchTaskGovernancePath(
   return await evaluateOtherShellToolPath(input, parsed)
 }
 
-async function evaluatePretooluseTaskGovernance(rawInput: unknown): Promise<SwizHookOutput> {
+export async function evaluatePretooluseTaskGovernance(rawInput: unknown): Promise<SwizHookOutput> {
   const parsed = toolHookInputSchema.parse(rawInput)
   const input = parsed as unknown as Record<string, any>
   const toolName = String(input.tool_name ?? "")
@@ -1783,6 +1792,8 @@ async function evaluatePretooluseTaskGovernance(rawInput: unknown): Promise<Swiz
 
   const blockedTaskFiles = evaluateBlockedTaskFilesPrecheck(input, toolName, toolInput)
   if (blockedTaskFiles) return blockedTaskFiles
+  /** Preserve file integrity before bypassing task-state gates, including pending overflow. */
+  if (isTaskRecoveryCall(input, toolName)) return preToolUseAllow()
 
   // Codex has no native task planning tools; its tools do not depend on task state.
   // Keep the task-file integrity precheck above while bypassing workflow gates.

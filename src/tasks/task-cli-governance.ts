@@ -28,11 +28,12 @@
  * |-------|--------|
  * | `"cat ~/.claude/tasks/1.json"` | blocked (shell layer) |
  * | `"~/.claude/tasks/1.json"` (file_path) | blocked (path layer) |
- * | `"swiz tasks adopt"` | allowed (only `adopt` is whitelisted) |
+ * | `"swiz tasks recover --all-sessions"` | allowed (explicit recovery surface) |
+ * | `"swiz tasks adopt"` | allowed (legacy deprecation message) |
  * | `"~/.claude/settings.json"` | allowed (not inside tasks dir) |
  */
 import { expandHomeVars, getHomeDirOrNull } from "../home.ts"
-import { stripQuotedShellStrings } from "../utils/shell-patterns.ts"
+import { splitShellSegments, stripQuotedShellStrings } from "../utils/shell-patterns.ts"
 import { SWIZ_TASKS_CLI_DENY_MESSAGE } from "./task-governance-messages.ts"
 
 // Match the `tasks` CLI subcommand regardless of how it is launched: a bare or
@@ -54,7 +55,10 @@ const SWIZ_TASKS_CLI_SUBCOMMAND_RE = new RegExp(
   "i"
 )
 
-const SWIZ_TASKS_ALLOWED_SUBCOMMANDS = new Set(["adopt"])
+const SWIZ_TASKS_ALLOWED_SUBCOMMANDS = new Set(["adopt", "recover"])
+const TASK_RECOVERY_SEGMENT_RE = new RegExp(
+  String.raw`^(?:[A-Za-z_][A-Za-z0-9_]*=[^\s]+\s+)*(?:command\s+)?${TASKS_CLI_LAUNCHER}\s+tasks\s+recover(?:\s|$)`
+)
 const TASK_FILES_DIR_MARKER_RE = /(?:^|[\s"'`;|&()/\\])\.claude\/tasks(?:\/|$)/i
 
 function normalizeTaskFileText(value: string): string {
@@ -103,6 +107,13 @@ export function isBlockedSwizTasksSubcommand(subcommand: string | undefined): bo
 export function isBlockedSwizTasksCliCommand(command: string): boolean {
   if (!isSwizTasksCommand(command)) return false
   return isBlockedSwizTasksSubcommand(extractSwizTasksSubcommand(command))
+}
+
+/** Only standalone recovery commands may bypass a broken task queue's own gates. */
+export function isTaskRecoveryShellCommand(command: string): boolean {
+  if (/[<>`$(){}]/.test(command)) return false
+  const segments = splitShellSegments(command)
+  return segments.length > 0 && segments.every((segment) => TASK_RECOVERY_SEGMENT_RE.test(segment))
 }
 
 export { SWIZ_TASKS_CLI_DENY_MESSAGE }

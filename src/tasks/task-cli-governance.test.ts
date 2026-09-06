@@ -7,6 +7,7 @@ import {
   isBlockedSwizTasksSubcommand,
   isBlockedTaskFilePath,
   isSwizTasksCommand,
+  isTaskRecoveryShellCommand,
 } from "./task-cli-governance.ts"
 
 describe("isBlockedTaskFilePath", () => {
@@ -144,6 +145,11 @@ describe("isAllowedSwizTasksSubcommand", () => {
     expect(isAllowedSwizTasksSubcommand("adopt")).toBe(true)
   })
 
+  it("allows the explicit recovery surface", () => {
+    expect(isAllowedSwizTasksSubcommand("recover")).toBe(true)
+    expect(isBlockedSwizTasksSubcommand("recover")).toBe(false)
+  })
+
   it("blocks list and complete", () => {
     expect(isAllowedSwizTasksSubcommand("list")).toBe(false)
     expect(isAllowedSwizTasksSubcommand("complete")).toBe(false)
@@ -180,6 +186,22 @@ describe("isBlockedSwizTasksCliCommand", () => {
 
   it("allows swiz tasks adopt", () => {
     expect(isBlockedSwizTasksCliCommand("swiz tasks adopt")).toBe(false)
+  })
+
+  it("allows explicit session recovery through shell launch forms", () => {
+    for (const launcher of ["swiz", "/usr/local/bin/swiz", "bun run index.ts"]) {
+      expect(isBlockedSwizTasksCliCommand(`${launcher} tasks recover --all-sessions`)).toBe(false)
+      expect(
+        isBlockedSwizTasksCliCommand(
+          `${launcher} tasks recover status 6132-1 cancelled --session 6132-session`
+        )
+      ).toBe(false)
+    }
+  })
+
+  it("does not treat a recovery flag on routine task commands as an escape hatch", () => {
+    expect(isBlockedSwizTasksCliCommand("swiz tasks status 1 cancelled --recover")).toBe(true)
+    expect(isBlockedSwizTasksCliCommand("swiz tasks --recover --all-sessions")).toBe(true)
   })
 
   it("allows unrelated commands", () => {
@@ -220,5 +242,33 @@ describe("task CLI launch-form detection (hardening)", () => {
 
   it("keeps adopt allowed regardless of launcher", () => {
     expect(isBlockedSwizTasksCliCommand("bun run index.ts tasks adopt")).toBe(false)
+  })
+})
+
+describe("task recovery queue-gate exemption", () => {
+  it("recognizes dedicated recovery commands and quoted evidence", () => {
+    expect(isTaskRecoveryShellCommand("swiz tasks recover --all-sessions")).toBe(true)
+    expect(
+      isTaskRecoveryShellCommand(
+        'SWIZ_DIRECT=1 bun run index.ts tasks recover status 1 cancelled --session abc --evidence "Rule text; not work"'
+      )
+    ).toBe(true)
+  })
+
+  it("does not exempt other operations chained to recovery", () => {
+    for (const separator of [";", "&&", "||", "|", "\n"]) {
+      expect(
+        isTaskRecoveryShellCommand(`swiz tasks recover --all-sessions ${separator} bun run build`)
+      ).toBe(false)
+    }
+    expect(isTaskRecoveryShellCommand('echo "swiz tasks recover --all-sessions"')).toBe(false)
+  })
+
+  it("does not exempt redirects or executable substitutions", () => {
+    expect(isTaskRecoveryShellCommand("swiz tasks recover --all-sessions > output.txt")).toBe(false)
+    expect(isTaskRecoveryShellCommand("swiz tasks recover --session $(bun mutate.ts)")).toBe(false)
+    expect(isTaskRecoveryShellCommand('swiz tasks recover --session "$(bun mutate.ts)"')).toBe(
+      false
+    )
   })
 })

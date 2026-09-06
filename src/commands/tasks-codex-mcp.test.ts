@@ -260,6 +260,20 @@ describe("Codex tasks CLI with Swiz MCP", () => {
     expect(result.exitCode).toBe(0)
   })
 
+  test("permits scoped recovery when Codex has Swiz MCP without allowing task creation", async () => {
+    const context = await fixture(enabledSwiz)
+    const listing = await runCommandInProcess(tasksCommand, ["recover", "--all-sessions"], context)
+    expect(listing.exitCode).toBe(0)
+    expect(listing.stderr).toBe("")
+    const creation = await runCommandInProcess(
+      tasksCommand,
+      ["recover", "create", "New task", "Not a recovery operation"],
+      context
+    )
+    expect(creation.exitCode).toBe(1)
+    expect(creation.stderr).toContain("Unsupported recovery command: create")
+  })
+
   test("CLI exits nonzero before creating a task in an existing session", async () => {
     const context = await fixture()
     const codexHome = join(context.root, "custom-codex")
