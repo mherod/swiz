@@ -180,8 +180,81 @@ describe("pretooluse-banned-commands", () => {
         })
         expect(result.decision).toBe("allow")
         expect(result.reason ?? result.json?.systemMessage ?? result.stdout).toContain(
-          "trash <file>"
+          "working-tree"
         )
+      })
+
+      test.each([
+        "git restore --staged populated.txt",
+        "git restore -S populated.txt",
+        "git restore -qS populated.txt",
+        "git restore -SsHEAD populated.txt",
+        "git restore --source=HEAD --staged -- populated.txt",
+        'git restore "--staged" "file with spaces.txt"',
+        'git "restore" "-S" "file with spaces.txt"',
+        "git -C sub -c color.ui=false restore --staged populated.txt",
+        "git restore --staged .",
+        "git restore --staged -- --worktree",
+        "git status --short && git restore --staged populated.txt",
+        "git restore -S populated.txt && git restore --staged populated.txt",
+        "git restore --staged --pathspec-from-file=paths.txt",
+      ])("allows index-only restore without trashing working files: %s", async (command) => {
+        const dir = await tmp.create("index-only-")
+        await mkdir(join(dir, "sub"))
+        for (const path of [
+          "populated.txt",
+          "file with spaces.txt",
+          "--worktree",
+          "sub/populated.txt",
+        ]) {
+          await Bun.write(join(dir, path), "keep working-tree edits\n")
+        }
+        const result = await runHookInProcess(HOOK, {
+          tool_name: "Bash",
+          tool_input: { command },
+          cwd: dir,
+        })
+        expect(result.decision).toBe("allow")
+        expect(result.reason ?? result.json?.systemMessage ?? result.stdout).toContain(
+          "working-tree"
+        )
+        expect(await Bun.file(join(dir, "populated.txt")).text()).toBe("keep working-tree edits\n")
+      })
+
+      test.each([
+        "git restore --staged --worktree populated.txt",
+        "git restore -SW populated.txt",
+        "git restore -WS populated.txt",
+        "git restore -qSW populated.txt",
+        "git restore --staged --no-staged populated.txt",
+        "git restore -sSW populated.txt",
+        "git restore --source --staged populated.txt",
+        "git restore -- --staged",
+        "git restore --staged populated.txt && git restore populated.txt",
+        "git -C sub restore --staged --worktree populated.txt",
+        'git "restore" "--staged" "--worktree" "file with spaces.txt"',
+        "git restore populated.txt # --staged",
+        "git restore --staged $RESTORE_OPTIONS populated.txt",
+        "git restore --staged $(printf %s --worktree) populated.txt",
+      ])("keeps working-tree restores guarded: %s", async (command) => {
+        const dir = await tmp.create("worktree-restore-")
+        await mkdir(join(dir, "sub"))
+        for (const path of [
+          "populated.txt",
+          "file with spaces.txt",
+          "--staged",
+          "sub/populated.txt",
+        ]) {
+          await Bun.write(join(dir, path), "keep working-tree edits\n")
+        }
+        const result = await runHookInProcess(HOOK, {
+          tool_name: "Bash",
+          tool_input: { command },
+          cwd: dir,
+        })
+        expect(result.decision).toBe("deny")
+        expect(result.reason).toContain("git restore")
+        expect(await Bun.file(join(dir, "populated.txt")).text()).toBe("keep working-tree edits\n")
       })
 
       test("allows git restore with options like --source=HEAD -- targeting empty files", async () => {

@@ -33,6 +33,7 @@ import {
   hasGitStashMutation,
   hasGitTrailerFlag,
   hasUnsafeGitPushForceFlag,
+  parseGitInvocationTokens,
   SHELL_BRACE_EXPANSION_WRITE_RE,
   SHELL_HERESTRING_REDIRECT_RE,
   SHELL_PROC_SUB_WRITE_RE,
@@ -327,6 +328,7 @@ function buildGitRules(payload: Record<string, unknown>): Rule[] {
       ].join("\n"),
     },
     {
+      useRawCommand: true,
       match: isGitRestoreCommand,
       message:
         "Do not use `git restore` directly on files with existing content. It silently discards uncommitted changes without recovery.\n\nInstead:\n  • To discard changes safely, trash the file first: `trash <file>` (creates a recoverable backup), then run `git restore <file>` to restore the clean tracked revision\n  • Use the Edit tool to make targeted corrections without discarding other edits\n  • If you want to revert a commit, use `git revert <hash>` (preserves history)",
@@ -564,7 +566,10 @@ async function requirePruneBranchesForStashRetirement(
   }
 }
 
-export const isGitRestoreCommand = (c: string): boolean => /git\s+restore(\s|$)/.test(c)
+export const isGitRestoreCommand = (command: string): boolean =>
+  splitShellSegments(command).some(
+    (segment) => parseGitInvocationTokens(segment)?.subcommand === "restore"
+  ) || /git\s+restore(\s|$)/.test(stripQuotedShellStrings(command))
 
 export async function isEmptyOrNonExistentFile(filePath: string): Promise<boolean> {
   try {
@@ -585,13 +590,100 @@ const GIT_GLOBAL_VALUE_FLAGS = new Set([
   "--config-env",
 ])
 
-const RESTORE_VALUE_FLAGS = new Set(["--source", "-s", "--pathspec-from-file", "--conflict"])
+const RESTORE_VALUE_FLAGS = new Set([
+  "--source",
+  "-s",
+  "--pathspec-from-file",
+  "--conflict",
+  "--unified",
+  "--inter-hunk-context",
+])
+const RESTORE_SWITCH_FLAGS = new Set([
+  "--patch",
+  "--ours",
+  "--theirs",
+  "--merge",
+  "--quiet",
+  "--progress",
+  "--no-progress",
+  "--ignore-unmerged",
+  "--overlay",
+  "--no-overlay",
+  "--ignore-skip-worktree-bits",
+  "--pathspec-file-nul",
+  "--recurse-submodules",
+  "--no-recurse-submodules",
+])
+
+interface RestoreLocations {
+  staged: boolean
+  worktree: boolean
+}
+
+function restoreShortFlags(token: string, locations: RestoreLocations): number | null {
+  for (let index = 1; index < token.length; index++) {
+    const flag = token[index]
+    if (flag === "S") locations.staged = true
+    else if (flag === "W") locations.worktree = true
+    else if (flag === "s" || flag === "U") return index === token.length - 1 ? 1 : 0
+    else if (!"pqm".includes(flag ?? "")) return null
+  }
+  return 0
+}
+
+function applyRestoreLongFlag(arg: string, locations: RestoreLocations): "next" | "ok" | "invalid" {
+  if (arg === "--staged") {
+    locations.staged = true
+    return "ok"
+  }
+  if (arg === "--no-staged") {
+    locations.staged = false
+    return "ok"
+  }
+  if (arg === "--worktree") {
+    locations.worktree = true
+    return "ok"
+  }
+  if (arg === "--no-worktree") {
+    locations.worktree = false
+    return "ok"
+  }
+  const name = arg.split("=")[0]!
+  if (RESTORE_VALUE_FLAGS.has(name)) return arg.includes("=") ? "ok" : "next"
+  return RESTORE_SWITCH_FLAGS.has(arg) ? "ok" : "invalid"
+}
+
+function consumeRestoreFlag(
+  arg: string,
+  locations: RestoreLocations
+): { valid: boolean; consumeNext: boolean } {
+  if (arg.startsWith("--")) {
+    const outcome = applyRestoreLongFlag(arg, locations)
+    return { valid: outcome !== "invalid", consumeNext: outcome === "next" }
+  }
+  const consumed = restoreShortFlags(arg, locations)
+  return { valid: consumed !== null, consumeNext: consumed === 1 }
+}
+
+function isIndexOnlyRestore(args: string[]): boolean {
+  const locations: RestoreLocations = { staged: false, worktree: false }
+  for (let index = 0; index < args.length; index++) {
+    const arg = args[index]!
+    if (arg === "--") break
+    if (!arg.startsWith("-")) continue
+    const result = consumeRestoreFlag(arg, locations)
+    if (!result.valid) return false
+    if (result.consumeNext) index++
+  }
+  return locations.staged && !locations.worktree
+}
 
 export interface GitRestoreExtraction {
   isGitRestore: boolean
   targets: string[]
   segmentCwd: string
   hasDynamicTarget: boolean
+  indexOnly: boolean
 }
 
 function skipCommandPrefixes(tokens: string[]): number {
@@ -682,6 +774,7 @@ export function extractGitRestoreTargets(segment: string, baseCwd: string): GitR
       targets: [],
       segmentCwd: baseCwd,
       hasDynamicTarget: hasRestore,
+      indexOnly: false,
     }
   }
 
@@ -693,16 +786,19 @@ export function extractGitRestoreTargets(segment: string, baseCwd: string): GitR
       targets: [],
       segmentCwd,
       hasDynamicTarget: false,
+      indexOnly: false,
     }
   }
 
   const { targets, hasDynamicTarget } = collectRestoreTargetPaths(tokens, subcmdIndex + 1)
+  const uncertainSyntax = ["$", "`", "#", "*", "?", "["].some((char) => segment.includes(char))
 
   return {
     isGitRestore: true,
     targets,
     segmentCwd,
-    hasDynamicTarget,
+    hasDynamicTarget: hasDynamicTarget || uncertainSyntax,
+    indexOnly: !uncertainSyntax && isIndexOnlyRestore(tokens.slice(subcmdIndex + 1)),
   }
 }
 
@@ -711,7 +807,7 @@ export async function isPermittedGitRestore(command: string, cwd: string): Promi
   let foundAnyRestore = false
 
   for (const segment of segments) {
-    if (!/git\s+restore\b|\bgit\s+.*\brestore\b/.test(segment)) {
+    if (!isGitRestoreCommand(segment)) {
       continue
     }
 
@@ -722,18 +818,20 @@ export async function isPermittedGitRestore(command: string, cwd: string): Promi
 
     foundAnyRestore = true
 
-    if (extraction.hasDynamicTarget || extraction.targets.length === 0) {
-      return false
-    }
-
-    for (const target of extraction.targets) {
-      const fullPath = resolve(extraction.segmentCwd, target)
-      const allowed = await isEmptyOrNonExistentFile(fullPath)
-      if (!allowed) return false
-    }
+    if (!(await isPermittedRestoreExtraction(extraction))) return false
   }
 
   return foundAnyRestore
+}
+
+async function isPermittedRestoreExtraction(extraction: GitRestoreExtraction): Promise<boolean> {
+  if (extraction.indexOnly && (extraction.targets.length > 0 || extraction.hasDynamicTarget))
+    return true
+  if (extraction.hasDynamicTarget || extraction.targets.length === 0) return false
+  for (const target of extraction.targets) {
+    if (!(await isEmptyOrNonExistentFile(resolve(extraction.segmentCwd, target)))) return false
+  }
+  return true
 }
 
 function parseHookInput(input: Record<string, any>): {
@@ -790,7 +888,7 @@ export async function evaluatePretooluseBannedCommands(input: unknown): Promise<
 
   const isRedirectExempted = await isRedirectExempt(strippedCommand, cwd, transcriptPath)
   const isRestoreExempt =
-    isGitRestoreCommand(strippedCommand) && (await isPermittedGitRestore(command, cwd))
+    isGitRestoreCommand(command) && (await isPermittedGitRestore(command, cwd))
 
   const effectiveRules = RULES.filter((r) => {
     if (r.match === isShellFileWrite && isRedirectExempted) return false
@@ -802,6 +900,14 @@ export async function evaluatePretooluseBannedCommands(input: unknown): Promise<
   if (output) return output
 
   if (isRestoreExempt) {
+    const indexOnly = splitShellSegments(command)
+      .filter(isGitRestoreCommand)
+      .every((segment) => extractGitRestoreTargets(segment, cwd).indexOnly)
+    if (indexOnly) {
+      return preToolUseAllow(
+        "Index-only git restore updates the staging area and leaves working-tree files unchanged."
+      )
+    }
     return preToolUseAllow(
       "Target file is empty or non-existent; safe to restore.\n\n" +
         "Note: Trashing an existing file with `trash <file>` before `git restore` is the safe, recommended pattern to restore tracked files while keeping a recoverable backup."
