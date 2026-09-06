@@ -1,5 +1,29 @@
 # Changelog
 
+## 2026-09-06
+
+### Features
+
+- **Stranded task recovery** — Added `swiz tasks recover` to inspect or
+  update native tasks missing from task tools. Changes require an explicit
+  session and existing task IDs, preserving normal task safeguards.
+  (c55cc185)
+
+### Fixes
+
+- **Codex task tools** — Directed Codex sessions to configured Swiz MCP task
+  tools, avoiding separate task lists. The CLI remained available when MCP
+  task tools were not configured. (05b3ae43)
+- **Project quality checks** — Fixed checks using another project's package
+  manager when run through the daemon. Checks now use the selected project's
+  package manager. (8af12361)
+- **Bun lockfile checks** — Recognised `bun.lock` and `bun.lockb` and checked
+  the selected package manager's lockfile. Changes to the package manager
+  declaration alone no longer triggered a dependency drift warning.
+- **Unstaging files** — Allowed `git restore --staged` and `-S` without
+  requiring a trash backup. Restores that overwrite working files remained
+  guarded. (#867)
+
 ## 2026-07-04
 
 ### Features

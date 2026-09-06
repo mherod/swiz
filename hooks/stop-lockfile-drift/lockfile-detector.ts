@@ -5,27 +5,29 @@
  * and determines which packages have drifted without lockfile updates.
  */
 
-import { dirname } from "node:path"
+import { dirname, join } from "node:path"
 import { git } from "../../src/git-helpers.ts"
 import { isNodeModulesPath } from "../../src/node-modules-path.ts"
+import { detectPackageManager, type PackageManager } from "../../src/utils/package-detection.ts"
 import type { DriftedPackage, LockfileDriftContext, LockfileInfo } from "./types.ts"
 
-const LOCKFILE_MAP: Record<string, string> = {
-  "pnpm-lock.yaml": "pnpm install",
-  "shrinkwrap.yaml": "pnpm install",
-  "yarn.lock": "yarn install",
-  "package-lock.json": "npm install",
-  "npm-shrinkwrap.json": "npm install",
+const LOCKFILES_BY_MANAGER: Record<PackageManager, readonly string[]> = {
+  bun: ["bun.lock", "bun.lockb"],
+  pnpm: ["pnpm-lock.yaml", "shrinkwrap.yaml"],
+  yarn: ["yarn.lock"],
+  npm: ["package-lock.json", "npm-shrinkwrap.json"],
 }
 
 /**
  * Detect lockfile for a given package directory.
  */
 export async function detectLockfile(cwd: string, pkgDir: string): Promise<LockfileInfo | null> {
-  for (const [lf, cmd] of Object.entries(LOCKFILE_MAP)) {
+  const manager = await detectPackageManager(join(cwd, pkgDir))
+  if (!manager) return null
+  for (const lf of LOCKFILES_BY_MANAGER[manager]) {
     const lfPath = pkgDir === "." ? lf : `${pkgDir}/${lf}`
     if (await Bun.file(`${cwd}/${lfPath}`).exists()) {
-      return { lockfile: lfPath, installCmd: cmd }
+      return { lockfile: lfPath, installCmd: `${manager} install` }
     }
   }
   return null
@@ -38,12 +40,8 @@ export async function detectLockfile(cwd: string, pkgDir: string): Promise<Lockf
  * meaning it covers all nested package changes.
  */
 async function rootLockfileCovers(cwd: string, changedFiles: Set<string>): Promise<boolean> {
-  for (const rootLf of Object.keys(LOCKFILE_MAP)) {
-    if ((await Bun.file(`${cwd}/${rootLf}`).exists()) && changedFiles.has(rootLf)) {
-      return true
-    }
-  }
-  return false
+  const rootLockfile = await detectLockfile(cwd, ".")
+  return rootLockfile !== null && changedFiles.has(rootLockfile.lockfile)
 }
 
 const DEP_SECTIONS = [
@@ -92,7 +90,6 @@ export function pkgJsonDepsChanged(oldPkg: PkgJson, newPkg: PkgJson): boolean {
   for (const section of DEP_SECTIONS) {
     if (!sameDepMap(oldPkg[section], newPkg[section])) return true
   }
-  if (oldPkg.packageManager !== newPkg.packageManager) return true
   return false
 }
 
@@ -116,7 +113,7 @@ function sameDepMap(
 /**
  * Compare dependency-relevant fields in package.json before vs. after the diff
  * range. Script changes, field reorders, whitespace edits, and metadata-only
- * updates (name/version/description) do not count as drift.
+ * updates (including package-manager declarations) do not count as drift.
  */
 async function depsActuallyChangedBetween(
   ctx: LockfileDriftContext,
