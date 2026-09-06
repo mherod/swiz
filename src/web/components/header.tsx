@@ -1,10 +1,10 @@
 import { useReducedMotion } from "motion/react"
-import type { ReactElement } from "react"
+import { type ReactElement, useSyncExternalStore } from "react"
+import type { DashboardClock } from "../lib/dashboard-clock.ts"
 import type { ActiveView } from "../lib/dashboard-state.ts"
 
 interface HeaderProps {
-  lastUpdated: string
-  uptime: string
+  clock: DashboardClock
   totalDispatches: number
   projects: number
   activeWatches: number
@@ -97,8 +97,7 @@ function HeaderChips({
 }
 
 export function Header({
-  lastUpdated,
-  uptime,
+  clock,
   totalDispatches,
   projects,
   activeWatches,
@@ -106,6 +105,11 @@ export function Header({
   cacheStatus,
   activeAgentProcessProviders = {},
 }: HeaderProps): ReactElement {
+  const { uptime, lastUpdated } = useSyncExternalStore(
+    clock.subscribe,
+    clock.getSnapshot,
+    clock.getSnapshot
+  )
   const reduceMotion = useReducedMotion()
   const { totalCacheEntries, warmCaches } = buildCacheEntries(cacheStatus)
   const totalRunningAgents = Object.values(activeAgentProcessProviders).reduce(

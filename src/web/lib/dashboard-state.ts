@@ -8,6 +8,7 @@ import type {
   SessionTaskSummary,
   ToolStat,
 } from "../components/session-browser.tsx"
+import { createDashboardClock } from "./dashboard-clock.ts"
 import {
   getQueryParam,
   hasProjectMessages,
@@ -150,6 +151,9 @@ function cacheSummary(status: Record<string, number> | null): { total: number; w
 }
 
 function useSessionDataLoaders() {
+  const messageRequest = useRef(0)
+  const taskRequest = useRef(0)
+  const projectTaskRequest = useRef(0)
   const [sessionMessages, setSessionMessages] = useState<SessionMessage[]>([])
   const [sessionToolStats, setSessionToolStats] = useState<ToolStat[]>([])
   const [sessionTokenStats, setSessionTokenStats] = useState<SessionTokenStats | null>(null)
@@ -163,6 +167,7 @@ function useSessionDataLoaders() {
   const [messagesLoading, setMessagesLoading] = useState(false)
 
   const loadMessages = useCallback(async (cwd: string, sessionId: string) => {
+    const request = ++messageRequest.current
     setMessagesLoading(true)
     try {
       const result = await postJson<{
@@ -170,48 +175,59 @@ function useSessionDataLoaders() {
         toolStats?: ToolStat[]
         tokenStats?: SessionTokenStats
       }>("/sessions/messages", { cwd, sessionId, limit: SESSION_MESSAGE_LIMIT })
+      if (request !== messageRequest.current) return
       setNewMessageKeys(new Set())
       setSessionMessages(result.messages ?? [])
       setSessionToolStats(result.toolStats ?? [])
       setSessionTokenStats(result.tokenStats ?? null)
     } finally {
-      setMessagesLoading(false)
+      if (request === messageRequest.current) setMessagesLoading(false)
     }
   }, [])
 
   const loadTasks = useCallback(async (cwd: string, sessionId: string) => {
+    const request = ++taskRequest.current
     setSessionTasksLoading(true)
     try {
       const result = await postJson<{
         tasks: SessionTask[]
         summary?: SessionTaskSummary
       }>("/sessions/tasks", { cwd, sessionId, limit: 20 })
+      if (request !== taskRequest.current) return
       setSessionTasks(result.tasks ?? [])
       setSessionTaskSummary(result.summary ?? null)
     } finally {
-      setSessionTasksLoading(false)
+      if (request === taskRequest.current) setSessionTasksLoading(false)
     }
   }, [])
 
   const loadProjectTasks = useCallback(async (cwd: string) => {
+    const request = ++projectTaskRequest.current
     setProjectTasksLoading(true)
     try {
       const result = await postJson<{
         tasks: ProjectTask[]
         summary?: SessionTaskSummary
       }>("/projects/tasks", { cwd, limit: 80 })
+      if (request !== projectTaskRequest.current) return
       setProjectTasks(result.tasks ?? [])
       setProjectTaskSummary(result.summary ?? null)
     } finally {
-      setProjectTasksLoading(false)
+      if (request === projectTaskRequest.current) setProjectTasksLoading(false)
     }
   }, [])
 
   const clearSession = useCallback(() => {
+    messageRequest.current++
+    taskRequest.current++
     setSessionMessages([])
+    setSessionToolStats([])
     setSessionTokenStats(null)
+    setNewMessageKeys(new Set())
     setSessionTasks([])
     setSessionTaskSummary(null)
+    setMessagesLoading(false)
+    setSessionTasksLoading(false)
   }, [])
 
   return {
@@ -621,8 +637,9 @@ function useDerivedDashboardState(input: DerivedStateInput) {
 export type DashboardState = ReturnType<typeof useDashboardState>
 
 // Return type is `DashboardState` (alias above); an explicit annotation would be circular with `ReturnType`.
-// eslint-disable-next-line @typescript-eslint/explicit-module-boundary-types, max-lines-per-function -- circular return type and centralized dashboard wiring
+// eslint-disable-next-line @typescript-eslint/explicit-module-boundary-types -- circular return type
 export function useDashboardState() {
+  const [clock] = useState(createDashboardClock)
   const [metrics, setMetrics] = useState<MetricsResponse | null>(null)
   const { cacheStatus, onCacheStatus } = useCacheStatusWithJitterFilter()
   const [watches, setWatches] = useState<WatchesResponse | null>(null)
@@ -646,7 +663,6 @@ export function useDashboardState() {
     setQueryParams({ view })
   }, [])
   const [error, setError] = useState("")
-  const [lastUpdated, setLastUpdated] = useState("starting")
 
   const actions = useDashboardActions({
     loaders,
@@ -659,19 +675,14 @@ export function useDashboardState() {
 
   useDashboardOverviewPolling({
     onMetrics: setMetrics,
+    onUptime: clock.setUptime,
     onCacheStatus,
     onWatches: setWatches,
-    onProjects: (loaded) => {
-      os.setProjects(loaded)
-      os.addOptimisticProjects({ type: "sync", projects: loaded })
-    },
-    onAgentProcesses: (providers) => {
-      os.setAgentProcessProviders(providers)
-      os.addOptimisticAgentProcessProviders({ type: "sync", providers })
-    },
+    onProjects: os.setProjects,
+    onAgentProcesses: os.setAgentProcessProviders,
     onActiveDispatches: setActiveHookDispatches,
     onError: setError,
-    onLastUpdated: setLastUpdated,
+    onLastUpdated: clock.setLastUpdated,
     onInitialLoad: (loaded) =>
       applyInitialSelection({
         projects: loaded,
@@ -716,7 +727,7 @@ export function useDashboardState() {
 
   return {
     error,
-    lastUpdated,
+    clock,
     activeHookDispatches,
     activeView,
     setActiveView,

@@ -14,6 +14,7 @@ import { fetchJson, postJson } from "./http.ts"
 export type { ActiveHookDispatch } from "../../commands/daemon/types.ts"
 
 export interface MetricsResponse {
+  uptimeMs?: number
   uptimeHuman?: string
   totalDispatches?: number
   byEvent?: Record<
@@ -49,18 +50,32 @@ function applyFulfilled<T>(result: PromiseSettledResult<T>, apply: (value: T) =>
   if (result.status === "fulfilled") apply(result.value)
 }
 
-/**
- * True when a polled slice's serialized content differs from the last applied one,
- * recording it as applied when so.
- *
- * A 2s poll returns equal content most ticks, and handing React a fresh array each time
- * churns the root state the whole dashboard hangs off. The holder is a `useRef` box, which
- * outlives the effect — so callers must clear it on a project or session switch, or the
- * previous selection's snapshot suppresses the new one's first update whenever the two
- * serialize alike (#856).
- */
-export function snapshotChanged(next: string, holder: { current: string }): boolean {
-  if (next === holder.current) return false
+function isSnapshotObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null
+}
+
+/** Compare decoded JSON without allocating a second copy of transcript text. */
+function equalSnapshot(left: unknown, right: unknown): boolean {
+  if (Object.is(left, right)) return true
+  if (!isSnapshotObject(left) || !isSnapshotObject(right)) return false
+  if (Array.isArray(left)) {
+    return (
+      Array.isArray(right) &&
+      left.length === right.length &&
+      left.every((value, index) => equalSnapshot(value, right[index]))
+    )
+  }
+  if (Array.isArray(right)) return false
+  const keys = Object.keys(left)
+  return (
+    keys.length === Object.keys(right).length &&
+    keys.every((key) => Object.hasOwn(right, key) && equalSnapshot(left[key], right[key]))
+  )
+}
+
+/** Retain the last applied value on equal polls. Create holders per selection. */
+export function snapshotChanged<T>(next: T, holder: { current: T | undefined }): boolean {
+  if (equalSnapshot(next, holder.current)) return false
   holder.current = next
   return true
 }
@@ -114,6 +129,7 @@ export function applyInitialSelection(deps: InitialSelectionDeps): void {
 
 interface OverviewPollingDeps {
   onMetrics: (metrics: MetricsResponse) => void
+  onUptime: (uptime: string) => void
   onCacheStatus: (status: Record<string, number>) => void
   onWatches: (watches: WatchesResponse) => void
   onProjects: (projects: ProjectSessions[]) => void
@@ -125,19 +141,24 @@ interface OverviewPollingDeps {
 }
 
 export function useDashboardOverviewPolling(deps: OverviewPollingDeps): void {
-  // One ref per slice. A single snapshot over all of them meant the volatile uptime in
-  // /metrics marked every slice changed on every 2s poll (#856).
-  const prevMetricsSnapshotRef = useRef("")
-  const prevWatchesSnapshotRef = useRef("")
-  const prevProjectsSnapshotRef = useRef("")
-  const prevAgentProcessesSnapshotRef = useRef("")
-  const prevActiveDispatchesSnapshotRef = useRef("")
-  const prevCacheSnapshotRef = useRef("")
   const initialLoadDone = useRef(false)
   const depsRef = useRef(deps)
   depsRef.current = deps
 
   useEffect(() => {
+    let disposed = false
+    const snapshots = {
+      metrics: { current: undefined as MetricsResponse | undefined },
+      watches: { current: undefined as WatchesResponse | undefined },
+      projects: { current: undefined as ProjectSessions[] | undefined },
+      agents: { current: undefined as Record<string, number[]> | undefined },
+      dispatches: { current: undefined as ActiveHookDispatch[] | undefined },
+      cache: { current: undefined as Record<string, number> | undefined },
+      error: { current: "" },
+    }
+    const applyError = (message: string) => {
+      if (snapshotChanged(message, snapshots.error)) depsRef.current.onError(message)
+    }
     async function fetchAllData() {
       const project = getQueryParam("project")
       const session = getQueryParam("session")
@@ -161,46 +182,35 @@ export function useDashboardOverviewPolling(deps: OverviewPollingDeps): void {
 
     function applyUpdates(data: Awaited<ReturnType<typeof fetchAllData>>) {
       const { m, cs, w, pr, ap, ad } = data
-      const cacheSnapshot = cs.status === "fulfilled" ? JSON.stringify(cs.value) : null
-      const cacheChanged = cacheSnapshot !== prevCacheSnapshotRef.current
-      if (cacheChanged) {
-        applyFulfilled(cs, (value) => {
-          prevCacheSnapshotRef.current = JSON.stringify(value)
-          depsRef.current.onCacheStatus(value)
-        })
-      }
-
-      // Each slice is compared on its own, so metrics ticking with uptime no longer drags
-      // watches, projects, agent processes and dispatches into a state update with it.
-      // Metrics itself still updates every poll, which is correct — uptime is displayed.
       const currentDeps = depsRef.current
-      let coreChanged = false
       const applyIfChanged = <T>(
-        result: PromiseSettledResult<T>,
-        holder: { current: string },
+        value: T,
+        holder: { current: T | undefined },
         apply: (value: T) => void
       ): void => {
-        applyFulfilled(result, (value) => {
-          if (!snapshotChanged(JSON.stringify(value), holder)) return
-          coreChanged = true
-          apply(value)
-        })
+        if (snapshotChanged(value, holder)) apply(value)
       }
-
-      applyIfChanged(m, prevMetricsSnapshotRef, currentDeps.onMetrics)
-      applyIfChanged(w, prevWatchesSnapshotRef, currentDeps.onWatches)
-      applyIfChanged(pr, prevProjectsSnapshotRef, (value) =>
-        currentDeps.onProjects(value.projects ?? [])
+      applyFulfilled(m, (value) => {
+        currentDeps.onUptime(value.uptimeHuman ?? "starting")
+        const metrics = { ...value }
+        delete metrics.uptimeHuman
+        delete metrics.uptimeMs
+        applyIfChanged(metrics, snapshots.metrics, currentDeps.onMetrics)
+      })
+      applyFulfilled(cs, (value) =>
+        applyIfChanged(value, snapshots.cache, currentDeps.onCacheStatus)
       )
-      applyIfChanged(ap, prevAgentProcessesSnapshotRef, (value) =>
-        currentDeps.onAgentProcesses(value.providers ?? {})
+      applyFulfilled(w, (value) => applyIfChanged(value, snapshots.watches, currentDeps.onWatches))
+      applyFulfilled(pr, (value) =>
+        applyIfChanged(value.projects ?? [], snapshots.projects, currentDeps.onProjects)
       )
-      applyIfChanged(ad, prevActiveDispatchesSnapshotRef, (value) =>
-        currentDeps.onActiveDispatches(value.active ?? [])
+      applyFulfilled(ap, (value) =>
+        applyIfChanged(value.providers ?? {}, snapshots.agents, currentDeps.onAgentProcesses)
       )
-
-      if (!coreChanged) return
-      currentDeps.onError(settledError([m, cs, w, pr, ap, ad]))
+      applyFulfilled(ad, (value) =>
+        applyIfChanged(value.active ?? [], snapshots.dispatches, currentDeps.onActiveDispatches)
+      )
+      applyError(settledError([m, cs, w, pr, ap, ad]))
       currentDeps.onLastUpdated(new Date().toISOString())
 
       if (!initialLoadDone.current && pr.status === "fulfilled") {
@@ -212,15 +222,19 @@ export function useDashboardOverviewPolling(deps: OverviewPollingDeps): void {
     const refresh = createSingleFlight(async () => {
       try {
         const data = await fetchAllData()
+        if (disposed) return
         applyUpdates(data)
       } catch (err) {
-        depsRef.current.onError(err instanceof Error ? err.message : "Unknown fetch failure")
+        if (!disposed) applyError(err instanceof Error ? err.message : "Unknown fetch failure")
       }
     })
 
     void refresh()
     const id = setInterval(() => void refresh(), 5000)
-    return () => clearInterval(id)
+    return () => {
+      disposed = true
+      clearInterval(id)
+    }
   }, [])
 }
 
@@ -236,19 +250,31 @@ export function useProjectMetricsPolling(
       return
     }
     const cwd = selectedProjectCwd
+    let disposed = false
+    const events = {
+      current: undefined as Array<{ name: string; count: number; avgMs: number }> | undefined,
+    }
+    const monitor = { current: undefined as MetricsResponse["transcriptMonitor"] | null }
     const fetchProjectMetrics = createSingleFlight(async () => {
       try {
         const pm = await fetchJson<MetricsResponse>(`/metrics?project=${encodeURIComponent(cwd)}`)
-        setProjectEvents(toSortedEvents(pm.byEvent))
-        setProjectMonitor(pm.transcriptMonitor ?? null)
+        if (disposed) return
+        const nextEvents = toSortedEvents(pm.byEvent)
+        const nextMonitor = pm.transcriptMonitor ?? null
+        if (snapshotChanged(nextEvents, events)) setProjectEvents(nextEvents)
+        if (snapshotChanged(nextMonitor, monitor)) setProjectMonitor(nextMonitor)
       } catch {
-        setProjectEvents([])
-        setProjectMonitor(null)
+        if (disposed) return
+        if (snapshotChanged([], events)) setProjectEvents([])
+        if (snapshotChanged(null, monitor)) setProjectMonitor(null)
       }
     })
     void fetchProjectMetrics()
     const id = setInterval(() => void fetchProjectMetrics(), 5000)
-    return () => clearInterval(id)
+    return () => {
+      disposed = true
+      clearInterval(id)
+    }
   }, [selectedProjectCwd, setProjectEvents, setProjectMonitor])
 }
 
@@ -265,11 +291,16 @@ interface SessionPollingDeps {
   onNewMessageKeys: (keys: Set<string>) => void
 }
 
+function computeFreshMessageKeys(messages: SessionMessage[], knownKeys: Set<string>): Set<string> {
+  const fresh = new Set<string>()
+  for (let i = 0; i < messages.length; i++) {
+    const key = msgKey(messages[i]!, i)
+    if (!knownKeys.has(key)) fresh.add(key)
+  }
+  return fresh
+}
+
 export function useSessionPolling(deps: SessionPollingDeps): void {
-  const knownKeysRef = useRef<Set<string>>(new Set())
-  const messagesPrevSnapshotRef = useRef("")
-  const tasksPrevSnapshotRef = useRef("")
-  const projectTasksPrevSnapshotRef = useRef("")
   const depsRef = useRef(deps)
   depsRef.current = deps
   const selectedProjectCwd = deps.selectedProjectCwd
@@ -280,25 +311,14 @@ export function useSessionPolling(deps: SessionPollingDeps): void {
     const cwd = selectedProjectCwd
     const sid = selectedSessionId
 
-    // These refs outlive the effect, so a switch would otherwise carry the previous
-    // selection's snapshot into the new one and suppress its first update whenever the
-    // two serialize alike — two empty lists being the common case (#856).
-    messagesPrevSnapshotRef.current = ""
-    tasksPrevSnapshotRef.current = ""
-    projectTasksPrevSnapshotRef.current = ""
-    knownKeysRef.current = new Set()
-
-    function computeFreshMessageKeys(
-      messages: SessionMessage[],
-      knownKeys: Set<string>
-    ): Set<string> {
-      const fresh = new Set<string>()
-      for (let i = 0; i < messages.length; i++) {
-        const key = msgKey(messages[i]!, i)
-        if (!knownKeys.has(key)) fresh.add(key)
-      }
-      return fresh
-    }
+    let disposed = false
+    let knownKeys = new Set<string>()
+    let clearFreshKeys: ReturnType<typeof setTimeout> | undefined
+    const messagesSnapshot = { current: undefined as SessionMessage[] | undefined }
+    const toolsSnapshot = { current: undefined as ToolStat[] | undefined }
+    const tokensSnapshot = { current: undefined as SessionTokenStats | undefined }
+    const tasksSnapshot = { current: undefined as unknown }
+    const projectTasksSnapshot = { current: undefined as unknown }
 
     function handleMessagesUpdate(
       msgs: SessionMessage[],
@@ -310,7 +330,32 @@ export function useSessionPolling(deps: SessionPollingDeps): void {
       currentDeps.onNewMessageKeys(fresh)
       currentDeps.onMessages(msgs, toolStats ?? [], tokenStats)
       if (fresh.size > 0) {
-        setTimeout(() => depsRef.current.onNewMessageKeys(new Set()), 500)
+        if (clearFreshKeys) clearTimeout(clearFreshKeys)
+        clearFreshKeys = setTimeout(() => {
+          if (!disposed) depsRef.current.onNewMessageKeys(new Set())
+        }, 500)
+      }
+    }
+
+    function applyMessages(value: {
+      messages: SessionMessage[]
+      toolStats?: ToolStat[]
+      tokenStats?: SessionTokenStats
+    }): void {
+      const msgs = value.messages ?? []
+      const messagesChanged = snapshotChanged(msgs, messagesSnapshot)
+      const toolsChanged = snapshotChanged(value.toolStats ?? [], toolsSnapshot)
+      const tokensChanged = snapshotChanged(value.tokenStats, tokensSnapshot)
+      if (messagesChanged) {
+        const fresh = computeFreshMessageKeys(msgs, knownKeys)
+        knownKeys = new Set(msgs.map(msgKey))
+        handleMessagesUpdate(msgs, toolsSnapshot.current, fresh, tokensSnapshot.current)
+      } else if (toolsChanged || tokensChanged) {
+        depsRef.current.onMessages(
+          messagesSnapshot.current ?? [],
+          toolsSnapshot.current ?? [],
+          tokensSnapshot.current
+        )
       }
     }
 
@@ -337,19 +382,9 @@ export function useSessionPolling(deps: SessionPollingDeps): void {
           }),
         ])
 
-        if (messagesResult.status === "fulfilled") {
-          const msgs = messagesResult.value.messages ?? []
-          if (snapshotChanged(JSON.stringify(msgs), messagesPrevSnapshotRef)) {
-            const fresh = computeFreshMessageKeys(msgs, knownKeysRef.current)
-            knownKeysRef.current = new Set(msgs.map(msgKey))
-            handleMessagesUpdate(
-              msgs,
-              messagesResult.value.toolStats,
-              fresh,
-              messagesResult.value.tokenStats
-            )
-          }
-        }
+        if (disposed) return
+
+        applyFulfilled(messagesResult, applyMessages)
 
         // Messages have been snapshot-guarded for a while; tasks were not, so every 2s
         // tick handed React new array identities for unchanged content and churned the
@@ -358,14 +393,13 @@ export function useSessionPolling(deps: SessionPollingDeps): void {
         applyFulfilled(tasksResult, (value) => {
           const tasks = value.tasks ?? []
           const summary = value.summary ?? null
-          if (!snapshotChanged(JSON.stringify([tasks, summary]), tasksPrevSnapshotRef)) return
+          if (!snapshotChanged([tasks, summary], tasksSnapshot)) return
           currentDeps.onTasks(tasks, summary)
         })
         applyFulfilled(projectTasksResult, (value) => {
           const tasks = value.tasks ?? []
           const summary = value.summary ?? null
-          if (!snapshotChanged(JSON.stringify([tasks, summary]), projectTasksPrevSnapshotRef))
-            return
+          if (!snapshotChanged([tasks, summary], projectTasksSnapshot)) return
           currentDeps.onProjectTasks(tasks, summary)
         })
       } catch {
@@ -375,6 +409,10 @@ export function useSessionPolling(deps: SessionPollingDeps): void {
 
     void pollSessionData()
     const id = setInterval(() => void pollSessionData(), 2000)
-    return () => clearInterval(id)
+    return () => {
+      disposed = true
+      clearInterval(id)
+      if (clearFreshKeys) clearTimeout(clearFreshKeys)
+    }
   }, [selectedProjectCwd, selectedSessionId])
 }

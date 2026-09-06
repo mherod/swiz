@@ -184,8 +184,7 @@ export function DashboardApp(): ReactElement {
   return (
     <div className={`bento ${state.activeView === "settings" ? "bento-view-settings" : ""}`}>
       <Header
-        lastUpdated={state.lastUpdated}
-        uptime={state.m.uptimeHuman ?? "starting"}
+        clock={state.clock}
         totalDispatches={state.m.totalDispatches ?? 0}
         projects={state.projectCount}
         activeWatches={state.watchCount}
