@@ -1521,6 +1521,7 @@ function createNoOpStore(): IssueStore {
   let warnedOnce = false
   let suppressedOps = 0
   const READ_LIST_METHODS = new Set(["listIssues", "listPullRequests", "listCiStatuses"])
+  const READ_SNAPSHOT_METHODS = new Set(["getIssueSnapshot", "getPullRequestSnapshot"])
   const READ_GET_METHODS = new Set([
     "getIssue",
     "getPullRequest",
@@ -1553,6 +1554,13 @@ function createNoOpStore(): IssueStore {
     get(_target, prop) {
       if (prop === "isNoOp") return true
       if (prop === "close") return () => {}
+      if (READ_SNAPSHOT_METHODS.has(prop as string)) {
+        return (): ReturnType<IssueStore["getIssueSnapshot"]> => {
+          suppressedOps++
+          warnOnFirstRead(prop)
+          return { count: 0, maxUpdatedAt: null }
+        }
+      }
       // When SQLite is unavailable, callers may still go through the reader
       // abstraction (`getIssueStoreReader()` → `store.asReader()`).
       // Ensure `asReader()` returns an `IssueStoreReader` with empty responses.

@@ -5,8 +5,11 @@
  * command behavior is covered without starting a process or hitting GitHub.
  */
 
-import { describe, expect, test } from "bun:test"
-import { runCommandInProcess } from "../utils/test-utils.ts"
+import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from "bun:test"
+import { getIssueStore, resetIssueStore } from "../issue-store.ts"
+import * as upstreamSync from "../issue-store-sync.ts"
+import { runCommandInProcess, useTempDir } from "../utils/test-utils.ts"
+import { ensureFreshData } from "./issue/operations.ts"
 import { issueCommand } from "./issue.ts"
 
 interface RunResult {
@@ -14,29 +17,110 @@ interface RunResult {
   stdout: string
   stderr: string
   calls: string[][]
+  slots: number
 }
 
-async function runCli(args: string[], state: "OPEN" | "CLOSED" = "CLOSED"): Promise<RunResult> {
+async function runCli(
+  args: string[],
+  state: "OPEN" | "CLOSED" = "CLOSED",
+  options: { repo?: string; fail?: string } = {}
+): Promise<RunResult> {
   const calls: string[][] = []
+  let slots = 0
   const result = await runCommandInProcess(issueCommand, args.slice(1), {
     commandOptions: {
       operationDependencies: {
-        getRepoSlug: async () => null,
+        getRepoSlug: async () => options.repo ?? null,
         issueState: async () => state,
-        acquireGhSlot: async () => {},
+        acquireGhSlot: async () => {
+          slots++
+        },
         async runGh(commandArgs) {
           calls.push(commandArgs)
+          if (options.fail && commandArgs.includes(options.fail)) {
+            return { exitCode: 1, stdout: "", stderr: "GitHub request failed" }
+          }
           return { exitCode: 0, stdout: "", stderr: "" }
         },
       },
     },
   })
-  return { ...result, calls }
+  return { ...result, calls, slots }
 }
 
 function ghCallsMatching(calls: string[][], keyword: string): string[][] {
   return calls.filter((args) => args.includes(keyword))
 }
+
+describe("issue operations with unavailable SQLite", () => {
+  const tmp = useTempDir("swiz-issue-noop-")
+  let syncRequests: string[][]
+
+  beforeEach(async () => {
+    resetIssueStore()
+    // A directory cannot be opened as a SQLite file: use the real fallback.
+    expect(getIssueStore(await tmp.create()).isNoOp).toBe(true)
+    syncRequests = []
+    spyOn(upstreamSync, "syncUpstreamState").mockImplementation(async (repo, cwd) => {
+      syncRequests.push([repo, cwd])
+      throw new Error("cache sync requested")
+    })
+  })
+
+  afterEach(() => {
+    mock.restore()
+    resetIssueStore()
+  })
+
+  test("returns empty issue and pull-request snapshots", () => {
+    const store = getIssueStore()
+    expect(store.getIssueSnapshot("test/repo")).toEqual({ count: 0, maxUpdatedAt: null })
+    expect(store.getPullRequestSnapshot("test/repo")).toEqual({ count: 0, maxUpdatedAt: null })
+  })
+
+  test.each([
+    "OPEN",
+    "CLOSED",
+  ] as const)("resolves a %s issue without syncing the unavailable cache", async (state) => {
+    const result = await runCli(["issue", "resolve", "42", "--body", "Fixed."], state, {
+      repo: "test/repo",
+    })
+    expect(result.exitCode).toBe(0)
+    expect(syncRequests).toEqual([])
+    const expectedCalls = [["issue", "comment", "42", "--body", "Fixed."]]
+    if (state === "OPEN") expectedCalls.push(["issue", "close", "42"])
+    expect(result.calls).toEqual(expectedCalls)
+    expect(result.slots).toBe(expectedCalls.length)
+    expect(result.stdout).toContain(state === "OPEN" ? "Issue closed." : "already CLOSED")
+  })
+
+  test.each(["comment", "close"])("reports a remote %s failure", async (fail) => {
+    const result = await runCli(["issue", "resolve", "42", "--body", "Fixed."], "OPEN", {
+      repo: "test/repo",
+      fail,
+    })
+    expect(result.exitCode).not.toBe(0)
+    expect(result.stderr).toContain(`gh issue ${fail} failed`)
+    expect(result.stdout).not.toContain("resolved")
+    expect(syncRequests).toEqual([])
+    expect(ghCallsMatching(result.calls, "comment")).toHaveLength(1)
+    expect(ghCallsMatching(result.calls, "close")).toHaveLength(fail === "comment" ? 0 : 1)
+    expect(result.slots).toBe(result.calls.length)
+  })
+
+  test("keeps healthy empty-cache refresh and fresh-cache reuse", async () => {
+    resetIssueStore()
+    const store = getIssueStore(":memory:")
+    expect(store.isNoOp).toBe(false)
+    await expect(ensureFreshData("test/repo", process.cwd())).rejects.toThrow(
+      "cache sync requested"
+    )
+    expect(syncRequests).toEqual([["test/repo", process.cwd()]])
+    store.upsertIssues("test/repo", [{ number: 42 }])
+    await expect(ensureFreshData("test/repo", process.cwd())).resolves.toBeUndefined()
+    expect(syncRequests).toHaveLength(1)
+  })
+})
 
 describe("swiz issue resolve", () => {
   test("closes an OPEN issue and posts the resolution comment", async () => {

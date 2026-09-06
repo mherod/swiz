@@ -43,6 +43,7 @@ function resolveDependencies(overrides: IssueOperationDependencies = {}) {
 /** Sync upstream state if the local store hasn't been refreshed in the last hour. */
 export async function ensureFreshData(repo: string, cwd: string): Promise<void> {
   const store = getIssueStore()
+  if (store.isNoOp) return
   const fresh = store.listIssues(repo, ONE_HOUR_MS)
   if (fresh.length > 0) return
   console.log(`🔄 Data stale (>1h) — syncing ${repo}...`)
