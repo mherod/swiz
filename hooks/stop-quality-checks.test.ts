@@ -1,4 +1,8 @@
 import { describe, expect, test } from "bun:test"
+import { mkdir, realpath } from "node:fs/promises"
+import { delimiter, dirname, join, resolve } from "node:path"
+import { spawnWithTimeout } from "../src/utils/process-utils.ts"
+import { neutralAgentEnv, useTempDir } from "../src/utils/test-utils.ts"
 import {
   buildFeatureBranchActionSteps,
   findScript,
@@ -7,6 +11,96 @@ import {
   summarizeCheckOutput,
   TYPECHECK_SCRIPTS,
 } from "./stop-quality-checks.ts"
+
+const { create } = useTempDir("swiz-stop-quality-cwd-")
+
+describe("stop-quality-checks: project package manager", () => {
+  test("uses hook cwd even when the daemon package manager is cached", async () => {
+    const root = await realpath(await create())
+    const daemonCwd = join(root, "daemon")
+    const projectCwd = join(root, "project")
+    const binDir = join(root, "bin")
+    for (const directory of [daemonCwd, projectCwd, binDir]) {
+      await mkdir(directory, { recursive: true })
+    }
+    await Bun.write(
+      join(daemonCwd, "package.json"),
+      JSON.stringify({ packageManager: "pnpm@10.0.0" })
+    )
+    await Bun.write(
+      join(projectCwd, "package.json"),
+      JSON.stringify({
+        packageManager: "bun@1.3.14",
+        scripts: {
+          lint: "bun quality-check.ts lint",
+          typecheck: "bun quality-check.ts typecheck",
+        },
+      })
+    )
+    await Bun.write(
+      join(projectCwd, "quality-check.ts"),
+      `const script = process.argv.at(-1)
+await Bun.write("ran-" + script + ".json", JSON.stringify({ cwd: process.cwd(), bun: Bun.version }))
+if (script === "lint") {
+  process.stderr.write("project-check.ts:1:1 intended Bun lint failure\\n")
+  process.exitCode = 1
+}
+`
+    )
+    await Bun.write(
+      join(binDir, "pnpm"),
+      "#!/bin/sh\nprintf '%s\\n' 'unexpected daemon package manager' >&2\nexit 1\n"
+    )
+    const executable = await spawnWithTimeout(["/bin/chmod", "755", join(binDir, "pnpm")], {
+      cwd: root,
+      timeoutMs: 1_000,
+    })
+    expect(executable.exitCode).toBe(0)
+    const hookPath = resolve(import.meta.dir, "stop-quality-checks.ts")
+    const detectionPath = resolve(import.meta.dir, "../src/utils/package-detection.ts")
+    const code = `
+import { evaluateStopQualityChecks } from ${JSON.stringify(hookPath)}
+import { detectPackageManager } from ${JSON.stringify(detectionPath)}
+const cachedPm = await detectPackageManager()
+const result = await evaluateStopQualityChecks({
+  cwd: ${JSON.stringify(projectCwd)},
+  session_id: "quality-cwd-test",
+  _effectiveSettings: { qualityChecksGate: true, trunkMode: true }
+})
+process.stdout.write(JSON.stringify({ cachedPm, result }))
+`
+    const proc = Bun.spawn([process.execPath, "-e", code], {
+      cwd: daemonCwd,
+      env: neutralAgentEnv({
+        HOME: join(root, "home"),
+        PATH: [binDir, dirname(process.execPath), "/usr/bin", "/bin"].join(delimiter),
+        AI_TEST_NO_BACKEND: "1",
+        SWIZ_DIRECT: "1",
+      }),
+      stdout: "pipe",
+      stderr: "pipe",
+      timeout: 10_000,
+    })
+    const [stdout, stderr] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+    ])
+    await proc.exited
+    expect({ exitCode: proc.exitCode, stderr }).toEqual({ exitCode: 0, stderr: "" })
+    const output = JSON.parse(stdout)
+    expect(output.cachedPm).toBe("pnpm")
+    expect(output.result.decision).toBe("block")
+    expect(output.result.reason).toContain("`bun run lint` failed")
+    expect(output.result.reason).toContain("intended Bun lint failure")
+    expect(output.result.reason).not.toContain("unexpected daemon package manager")
+    expect(output.result.reason).not.toContain("`bun run typecheck` failed")
+    for (const script of ["lint", "typecheck"]) {
+      const receipt = await Bun.file(join(projectCwd, `ran-${script}.json`)).json()
+      expect(receipt.cwd).toBe(projectCwd)
+      expect(receipt.bun).toBe(Bun.version)
+    }
+  }, 15_000)
+})
 
 describe("stop-quality-checks: feature branch guidance", () => {
   test("keeps a preserved worktree on its open PR", () => {

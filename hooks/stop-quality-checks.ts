@@ -209,7 +209,7 @@ async function collectFailures(
   resolved: { lint: string | null; typecheck: string | null },
   cwd: string
 ): Promise<string[]> {
-  const pm = (await detectPackageManager()) ?? "npm"
+  const pm = (await detectPackageManager(cwd)) ?? "npm"
   const scriptNames = [resolved.lint, resolved.typecheck].filter((s): s is string => s !== null)
   const results = await Promise.all(scriptNames.map((s) => runScript(pm, s, cwd)))
   const failures: string[] = []
