@@ -26,6 +26,54 @@ afterEach(async () => {
 })
 
 describe("jsonl utilities", () => {
+  it("visits only the selected cold slice with absolute byte offsets", async () => {
+    await resetTestDir()
+    const path = join(TEST_DIR, "visited-tail.jsonl")
+    const first = `${JSON.stringify({ value: "é".repeat(100) })}\n`
+    const second = '{"value":"🌍"}\n'
+    const third = '{"value":"last"}\n'
+    await Bun.write(path, first + second + third)
+    const size = (await Bun.file(path).stat()).size
+    const visited: Array<[string, number]> = []
+    const cold = await readJsonlTailTextFromFile(Bun.file(path), size, {
+      initialBytes: 8,
+      maxBytes: size,
+      isEnough: (text) => splitJsonlLines(text).length >= 2,
+      onLine: (line, offset) => visited.push([line, offset]),
+    })
+    expect(visited).toEqual([
+      [second.trim(), Buffer.byteLength(first)],
+      [third.trim(), Buffer.byteLength(first + second)],
+    ])
+    const cursor = new JsonlAppendCursor()
+    const before = await Bun.file(path).stat()
+    cursor.seed(before, cold.pendingTail)
+    await appendFile(path, '\n{"value":"new"}\n')
+    visited.length = 0
+    const update = await cursor.read(Bun.file(path), await Bun.file(path).stat(), (line, offset) =>
+      visited.push([line, offset])
+    )
+    expect(update.lines).toEqual([])
+    expect(visited).toEqual([
+      ["", size],
+      ['{"value":"new"}', size + 1],
+    ])
+  })
+
+  it("rejects short cold reads and resets an append that raced with truncation", async () => {
+    await resetTestDir()
+    const path = join(TEST_DIR, "short-read.jsonl")
+    await Bun.write(path, '{"id":1}\n')
+    const before = await Bun.file(path).stat()
+    await expect(readJsonlTailTextFromFile(Bun.file(path), before.size + 1)).rejects.toThrow(
+      "Short JSONL tail read"
+    )
+    const cursor = new JsonlAppendCursor()
+    cursor.reset(before)
+    const update = await cursor.read(Bun.file(path), { ...before, size: before.size + 1 })
+    expect(update.kind).toBe("cold")
+    expect(cursor.tailByteLength).toBe(0)
+  })
   it("tryParseJsonLine parses a single valid JSONL record", () => {
     expect(tryParseJsonLine('{"name":"Alice"}')).toEqual({ name: "Alice" })
     expect(tryParseJsonLine("")).toBeUndefined()

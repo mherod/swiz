@@ -6,21 +6,34 @@ import { getSessions } from "../../tasks/task-resolver.ts"
 import type { TaskStateCache } from "../../tasks/task-state-cache.ts"
 import {
   findAllProviderSessions,
-  isHookFeedback,
   parseTranscriptEntries,
   projectKeyFromCwd,
   type Session,
   type TranscriptEntry,
 } from "../../transcript-utils.ts"
 import { CappedMap } from "../../utils/capped-map.ts"
-import { splitJsonlLines, tryParseJsonLine } from "../../utils/jsonl.ts"
-import { MAX_SESSION_CACHE_BYTES, readSessionPreview } from "./session-preview.ts"
+import type { JsonlAppendMetadata } from "../../utils/jsonl.ts"
+import { HistoricalJsonlState, supportsHistoricalAppend } from "./session-jsonl.ts"
+import {
+  MAX_TRANSCRIPT_ENTRIES,
+  messageRetainedChars,
+  type PreparedSessionEntry,
+  prepareSessionEntry,
+  readTokenStats,
+  type SessionTokenStats,
+} from "./session-records.ts"
+
+export type { SessionTokenStats } from "./session-records.ts"
+
+import {
+  MAX_SESSION_CACHE_BYTES,
+  MAX_SESSION_PREVIEW_BYTES,
+  readSessionPreview,
+} from "./session-preview.ts"
 import {
   buildProjectTasksView,
   buildSessionTasksView,
   type CapturedToolCall,
-  extractMessageText,
-  extractToolCalls,
   mergeCapturedToolCalls,
   mergeToolStats,
   type ProjectTaskPreview,
@@ -38,12 +51,13 @@ interface SessionScanResult {
   lastMessageAt: number
 }
 
-/** Max transcripts to parse per session. */
-const MAX_TRANSCRIPT_ENTRIES = 2000
 /** Max messages cached per session. */
 const MAX_SESSION_MESSAGES = 300
 
 interface CachedSessionData {
+  format?: Session["format"]
+  metadata?: JsonlAppendMetadata
+  jsonl?: HistoricalJsonlState
   mtimeMs: number
   size: number
   startedAt: number
@@ -64,15 +78,6 @@ interface CachedSessionData {
   tokenStats?: SessionTokenStats
   projectIdentity?: string
   retainedBytes: number
-}
-
-export interface SessionTokenStats {
-  totalTokens: number
-  inputTokens: number
-  outputTokens: number
-  cachedInputTokens: number
-  /** Rate between the first and last usage samples in the bounded preview window. */
-  outputTokensPerMinute: number
 }
 
 export interface SessionPreview {
@@ -97,44 +102,6 @@ interface SessionData {
   revision?: string
 }
 
-// eslint-disable-next-line complexity -- tolerant parsing keeps malformed telemetry fail-open
-function readTokenStats(text: string): SessionTokenStats | undefined {
-  let firstTotal: number | null = null
-  let firstOutput: number | null = null
-  let firstAt = 0
-  let latest: SessionTokenStats | undefined
-  let latestAt = 0
-  for (const line of splitJsonlLines(text)) {
-    const record = tryParseJsonLine(line) as Record<string, any> | undefined
-    const usage =
-      record?.payload?.type === "token_count" ? record.payload.info?.total_token_usage : null
-    const totalTokens = usage?.total_tokens
-    if (typeof totalTokens !== "number" || !Number.isFinite(totalTokens)) continue
-    const at = typeof record?.timestamp === "string" ? new Date(record.timestamp).getTime() : 0
-    if (firstTotal === null) {
-      firstTotal = totalTokens
-      firstOutput = typeof usage.output_tokens === "number" ? usage.output_tokens : 0
-      firstAt = Number.isFinite(at) ? at : 0
-    }
-    latestAt = Number.isFinite(at) ? at : latestAt
-    latest = {
-      totalTokens,
-      inputTokens: typeof usage.input_tokens === "number" ? usage.input_tokens : 0,
-      outputTokens: typeof usage.output_tokens === "number" ? usage.output_tokens : 0,
-      cachedInputTokens:
-        typeof usage.cached_input_tokens === "number" ? usage.cached_input_tokens : 0,
-      outputTokensPerMinute: 0,
-    }
-  }
-  if (!latest || firstTotal === null) return undefined
-  const elapsedMinutes = Math.max((latestAt - firstAt) / 60_000, 0)
-  latest.outputTokensPerMinute =
-    elapsedMinutes > 0 && firstOutput !== null
-      ? Math.round((latest.outputTokens - firstOutput) / elapsedMinutes)
-      : 0
-  return latest
-}
-
 function messageFallbackKey(message: SessionMessage, occurrence: number): string {
   const toolSig = (message.toolCalls ?? []).map((tc) => `${tc.name}:${tc.detail}`).join("|")
   return `${message.role}\x00${message.text}\x00${toolSig}\x00${occurrence}`
@@ -148,10 +115,17 @@ function resolveSessionProjectIdentity(sessionPath: string, cwd?: string): strin
 
 function isCacheFresh(
   cached: CachedSessionData | undefined,
-  mtimeMs: number,
-  size: number
-): cached is CachedSessionData {
-  return cached !== undefined && cached.mtimeMs === mtimeMs && cached.size === size
+  metadata: JsonlAppendMetadata,
+  format: Session["format"]
+): boolean {
+  return (
+    cached !== undefined &&
+    cached.format === format &&
+    cached.mtimeMs === metadata.mtimeMs &&
+    cached.size === metadata.size &&
+    cached.metadata?.dev === metadata.dev &&
+    cached.metadata?.ino === metadata.ino
+  )
 }
 
 /**
@@ -191,7 +165,7 @@ export function scopeRevisionToWindow(
   return `${contentRevision}.${limit.toString(36)}${suffix}`
 }
 
-class SessionDataCache {
+export class SessionDataCache {
   private entries = new LRUCache<string, CachedSessionData>({
     max: 200,
     maxSize: MAX_SESSION_CACHE_BYTES,
@@ -202,8 +176,10 @@ class SessionDataCache {
   private readonly waitingLoads: Array<() => void> = []
   private generation = 0
 
+  constructor(private readonly fileForPath = (path: string) => Bun.file(path)) {}
+
   private buildFromEntries(
-    entries: ReturnType<typeof parseTranscriptEntries>,
+    entries: readonly PreparedSessionEntry[],
     fileMtimeMs: number,
     prev?: CachedSessionData
   ): CachedSessionData {
@@ -251,26 +227,6 @@ class SessionDataCache {
     }
   }
 
-  private static buildMessage(
-    entry: TranscriptEntry
-  ): { message: SessionMessage; toolCalls: Array<{ name: string; detail: string }> } | null {
-    if (entry.type !== "user" && entry.type !== "assistant") return null
-    const content = entry.message?.content
-    if (entry.type === "user" && isHookFeedback(content)) return null
-    const extracted = extractMessageText(content)
-    const toolCalls = extractToolCalls(content)
-    if (!extracted && toolCalls.length === 0) return null
-    return {
-      message: {
-        role: entry.type,
-        timestamp: entry.timestamp ?? null,
-        text: extracted,
-        ...(toolCalls.length > 0 ? { toolCalls } : {}),
-      },
-      toolCalls,
-    }
-  }
-
   private static trackFallbackSignature(
     message: SessionMessage,
     seenSignatures: Map<string, number>,
@@ -286,7 +242,7 @@ class SessionDataCache {
   private static trackToolCalls(
     toolCalls: Array<{ name: string; detail: string }>,
     toolCounts: Map<string, number>,
-    entry: TranscriptEntry,
+    entry: Pick<TranscriptEntry, "timestamp">,
     entryIndex: number
   ): string | undefined {
     let fingerprint: string | undefined
@@ -299,7 +255,7 @@ class SessionDataCache {
   }
 
   private static trackTimestamp(
-    entry: TranscriptEntry,
+    entry: Pick<TranscriptEntry, "timestamp">,
     message: SessionMessage,
     messageIndex: number,
     current: { startedAt: number; lastMessageAt: number },
@@ -336,7 +292,7 @@ class SessionDataCache {
     for (const fallback of pendingFallback) fallback.messageIndex -= trimOffset
   }
 
-  private static extractMessages(entries: ReturnType<typeof parseTranscriptEntries>) {
+  private static extractMessages(entries: readonly PreparedSessionEntry[]) {
     const messages: SessionMessage[] = []
     const toolCounts = new Map<string, number>()
     const seenSignatures = new Map<string, number>()
@@ -352,13 +308,14 @@ class SessionDataCache {
 
     for (let i = startIdx; i < entries.length; i++) {
       const entry = entries[i]!
-      const built = SessionDataCache.buildMessage(entry)
-      if (!built) continue
-      const { message, toolCalls } = built
+      if (!entry.message) continue
+      const message = { ...entry.message }
+      const toolCalls = message.toolCalls ?? []
       lastToolCallFingerprint =
-        SessionDataCache.trackToolCalls(toolCalls, toolCounts, entry, i) ?? lastToolCallFingerprint
+        SessionDataCache.trackToolCalls(toolCalls, toolCounts, entry, entry.position) ??
+        lastToolCallFingerprint
       if (message.role === "assistant" && message.text) {
-        lastMessageFingerprint = `assistant:${message.text.slice(-100)}:${entry.timestamp ?? ""}:${i}`
+        lastMessageFingerprint = `assistant:${message.text.slice(-100)}:${entry.timestamp ?? ""}:${entry.position}`
       }
       messages.push(message)
       ;({ startedAt, lastMessageAt } = SessionDataCache.trackTimestamp(
@@ -419,13 +376,14 @@ class SessionDataCache {
     session: Pick<Session, "path" | "format">,
     cwd?: string
   ): Promise<CachedSessionData | null> {
-    const pending = this.inflight.get(session.path)
+    const key = `${session.path}\0${session.format ?? ""}`
+    const pending = this.inflight.get(key)
     if (pending) return pending
 
     const loading = this.loadWithSlot(session, cwd).finally(() => {
-      this.inflight.delete(session.path)
+      this.inflight.delete(key)
     })
-    this.inflight.set(session.path, loading)
+    this.inflight.set(key, loading)
     return loading
   }
 
@@ -453,24 +411,29 @@ class SessionDataCache {
     generation: number
   ): Promise<CachedSessionData | null> {
     try {
-      const file = Bun.file(session.path)
-      if (!(await file.exists())) return null
+      const file = this.fileForPath(session.path)
+      if (!(await file.exists())) {
+        this.entries.delete(session.path)
+        return null
+      }
       const info = await file.stat()
       const mtimeMs = info.mtimeMs ?? 0
       const size = info.size
       const projectIdentity = resolveSessionProjectIdentity(session.path, cwd)
 
+      const metadata = { size, mtimeMs, dev: info.dev, ino: info.ino }
       const cached = this.entries.get(session.path)
-      if (isCacheFresh(cached, mtimeMs, size)) {
-        if (cwd) cached.projectIdentity = projectIdentity
-        return cached
+      const next = supportsHistoricalAppend(session.format)
+        ? await this.loadJsonl(file, metadata, session.format, cached)
+        : await this.loadFallback(file, metadata, session.format, cached)
+      if (!next) {
+        this.entries.delete(session.path)
+        return null
       }
-
-      const text = await readSessionPreview(file, size, session.format)
-      if (text === null) return null
-      const parsed = parseTranscriptEntries(text, session.format)
-      const next = this.buildFromEntries(parsed, mtimeMs, cached)
-      next.tokenStats = readTokenStats(text)
+      next.projectIdentity = projectIdentity
+      if (next === cached) return next
+      next.format = session.format
+      next.metadata = metadata
       next.size = size
       // Stamped here, where `size` is finally known. The entry is rebuilt only when the freshness
       // key changes, so this revision is stable exactly as long as the content is.
@@ -481,13 +444,59 @@ class SessionDataCache {
         lastMessageFingerprint: next.lastMessageFingerprint,
         lastToolCallFingerprint: next.lastToolCallFingerprint,
       })
-      next.projectIdentity = projectIdentity
-      next.retainedBytes = estimateRetainedBytes(next, text.length)
+      next.retainedBytes =
+        estimateRetainedBytes(next, Math.min(size, MAX_SESSION_PREVIEW_BYTES)) +
+        (next.jsonl?.retainedBytes ?? 0)
       if (generation === this.generation) this.entries.set(session.path, next)
       return next
     } catch {
+      this.entries.delete(session.path)
       return null
     }
+  }
+
+  private async loadJsonl(
+    file: Bun.BunFile,
+    metadata: JsonlAppendMetadata,
+    format: HistoricalJsonlState["format"],
+    cached?: CachedSessionData
+  ): Promise<CachedSessionData> {
+    const jsonl =
+      cached?.format === format && cached.jsonl ? cached.jsonl : new HistoricalJsonlState(format)
+    const kind = await jsonl.read(file, metadata)
+    if (kind === "hit" && cached) return cached
+    const view = jsonl.view(metadata.size)
+    const next = this.buildFromEntries(
+      view.entries,
+      metadata.mtimeMs,
+      kind === "cold" ? undefined : cached
+    )
+    next.tokenStats = view.tokenStats
+    next.jsonl = jsonl
+    return next
+  }
+
+  private async loadFallback(
+    file: Bun.BunFile,
+    metadata: JsonlAppendMetadata,
+    format: Session["format"],
+    cached?: CachedSessionData
+  ): Promise<CachedSessionData | null> {
+    if (cached && isCacheFresh(cached, metadata, format)) return cached
+    const text = await readSessionPreview(file, metadata.size, format)
+    if (text === null) return null
+    const parsed = parseTranscriptEntries(text, format)
+    const start = Math.max(0, parsed.length - MAX_TRANSCRIPT_ENTRIES)
+    const prepared = parsed
+      .slice(start)
+      .map((entry, index) => prepareSessionEntry(entry, start + index))
+    const next = this.buildFromEntries(
+      prepared,
+      metadata.mtimeMs,
+      cached?.format === format ? cached : undefined
+    )
+    next.tokenStats = readTokenStats(text)
+    return next
   }
 
   pruneOlderThan(cutoffMs: number): void {
@@ -541,12 +550,6 @@ class SessionDataCache {
   getMemoryStats(): { entries: number; estimatedBytes: number } {
     return { entries: this.entries.size, estimatedBytes: this.entries.calculatedSize }
   }
-}
-
-function messageRetainedChars(message: SessionMessage): number {
-  let chars = message.text.length + (message.timestamp?.length ?? 0)
-  for (const call of message.toolCalls ?? []) chars += call.name.length + call.detail.length
-  return chars
 }
 
 /** Include backing source strings and derived copies; deliberately overestimate shared strings. */

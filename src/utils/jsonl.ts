@@ -13,6 +13,8 @@ import { getLockPathForFile, withFileLock } from "./file-lock.ts"
 const NEWLINE_BYTE = 0x0a
 
 type JsonlBuffer = Uint8Array<ArrayBufferLike>
+/** Absolute byte positions let bounded consumers evict records without rereading them. */
+export type JsonlLineVisitor = (line: string, startOffset: number) => void
 const JSONL_TMP_SUFFIX = ".swiz-jsonl.tmp"
 const DEFAULT_JSONL_TAIL_INITIAL_BYTES = 256 * 1024
 const MAX_JSONL_APPEND_REMAINDER_BYTES = 1024 * 1024
@@ -75,7 +77,11 @@ export class JsonlAppendCursor {
     this.remainder = new Uint8Array(0)
   }
 
-  async read(path: string, metadata: JsonlAppendMetadata): Promise<JsonlAppendRead> {
+  async read(
+    source: string | Bun.BunFile,
+    metadata: JsonlAppendMetadata,
+    onLine?: JsonlLineVisitor
+  ): Promise<JsonlAppendRead> {
     if (this.requiresColdRebuild(metadata)) {
       this.clear()
       return { kind: "cold", lines: [], bytesRead: 0 }
@@ -87,12 +93,12 @@ export class JsonlAppendCursor {
     }
 
     try {
-      const bytes = new Uint8Array(
-        await Bun.file(path).slice(this.offset, metadata.size).arrayBuffer()
-      )
+      const file = typeof source === "string" ? Bun.file(source) : source
+      const bytes = new Uint8Array(await file.slice(this.offset, metadata.size).arrayBuffer())
+      if (bytes.length !== metadata.size - this.offset) throw new Error("Short JSONL append read")
+      const startOffset = this.offset - this.remainder.length
       const combined = concatUint8Arrays(this.remainder, bytes)
       const lastNewline = combined.lastIndexOf(NEWLINE_BYTE)
-      const complete = lastNewline === -1 ? new Uint8Array(0) : combined.slice(0, lastNewline)
       const remainder = lastNewline === -1 ? combined : combined.slice(lastNewline + 1)
       if (remainder.length > MAX_JSONL_APPEND_REMAINDER_BYTES) {
         this.clear()
@@ -101,7 +107,11 @@ export class JsonlAppendCursor {
       this.remainder = remainder
       this.offset = metadata.size
       this.metadata = { ...metadata }
-      const text = new TextDecoder().decode(complete)
+      if (onLine) {
+        visitJsonlBytes(combined.subarray(0, lastNewline + 1), startOffset, onLine)
+        return { kind: "append", lines: [], bytesRead: bytes.length }
+      }
+      const text = new TextDecoder().decode(combined.subarray(0, Math.max(0, lastNewline)))
       return { kind: "append", lines: text ? text.split("\n") : [], bytesRead: bytes.length }
     } catch {
       this.clear()
@@ -115,6 +125,10 @@ export class JsonlAppendCursor {
    */
   get tailText(): string {
     return new TextDecoder().decode(this.remainder)
+  }
+
+  get tailByteLength(): number {
+    return this.remainder.length
   }
 
   private requiresColdRebuild(next: JsonlAppendMetadata): boolean {
@@ -472,6 +486,7 @@ interface JsonlTailTextMeta {
 interface JsonlTailTextResult extends JsonlTailTextMeta {
   text: string
   pendingTail: JsonlBuffer
+  startOffset: number
 }
 
 interface JsonlTailTextOptions {
@@ -479,6 +494,8 @@ interface JsonlTailTextOptions {
   maxBytes?: number
   /** Set false when unfinished records must remain raw bytes for an append cursor. */
   includeUnterminated?: boolean
+  /** Visit complete records only, once the final bounded slice has been selected. */
+  onLine?: JsonlLineVisitor
   isEnough?: (text: string, meta: JsonlTailTextMeta) => boolean
 }
 
@@ -493,10 +510,11 @@ async function readTailSlice(
   fileSize: number,
   byteLimit: number,
   includeUnterminated: boolean
-): Promise<JsonlTailTextResult> {
+): Promise<JsonlTailTextResult & { records: JsonlBuffer }> {
   const rawStart = Math.max(0, fileSize - byteLimit)
   const readStart = rawStart > 0 ? rawStart - 1 : 0
   const raw = new Uint8Array(await file.slice(readStart, fileSize).arrayBuffer())
+  if (raw.length !== fileSize - readStart) throw new Error("Short JSONL tail read")
   const reachedStart = rawStart === 0
   const bytesRead = fileSize - readStart
   const records = completeJsonlTailBytes(raw, reachedStart)
@@ -505,7 +523,28 @@ async function readTailSlice(
   const text = new TextDecoder().decode(
     includeUnterminated ? records : records.subarray(0, pendingStart)
   )
-  return { text, pendingTail, reachedStart, bytesRead, fileSize }
+  const startOffset = fileSize - records.length
+  return { text, pendingTail, reachedStart, bytesRead, fileSize, records, startOffset }
+}
+
+function visitJsonlBytes(bytes: JsonlBuffer, offset: number, visit: JsonlLineVisitor): void {
+  const decoder = new TextDecoder()
+  let start = 0
+  let end = bytes.indexOf(NEWLINE_BYTE)
+  while (end !== -1) {
+    visit(decoder.decode(bytes.subarray(start, end)), offset + start)
+    start = end + 1
+    end = bytes.indexOf(NEWLINE_BYTE, start)
+  }
+}
+
+function finishTailRead(
+  result: JsonlTailTextResult & { records: JsonlBuffer },
+  onLine?: JsonlLineVisitor
+): JsonlTailTextResult {
+  const { records, ...rest } = result
+  if (onLine) visitJsonlBytes(records, rest.startOffset, onLine)
+  return { ...rest, pendingTail: rest.pendingTail.slice() }
 }
 
 function isTailReadSufficient(
@@ -537,11 +576,11 @@ export async function readJsonlTailTextFromFile(
     )
 
     if (isTailReadSufficient(result.text, result, byteLimit, maxBytes, options)) {
-      return { ...result, pendingTail: result.pendingTail.slice() }
+      return finishTailRead(result, options.onLine)
     }
 
     const nextByteLimit = Math.min(maxBytes, byteLimit * 2)
-    if (nextByteLimit === byteLimit) return { ...result, pendingTail: result.pendingTail.slice() }
+    if (nextByteLimit === byteLimit) return finishTailRead(result, options.onLine)
     byteLimit = nextByteLimit
   }
 }

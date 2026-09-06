@@ -72,21 +72,21 @@ export function parseJsonlEntries(text: string): TranscriptEntry[] {
   for (const line of splitJsonlLines(text)) {
     const parsed = tryParseJsonLine(line)
     if (parsed === undefined) continue
-    const result = jsonlEntrySchema.safeParse(parsed)
-    if (!result.success) continue
-
-    const entry = result.data
-
-    // Coerce role → type when type is missing
-    if (typeof entry.type !== "string" && typeof entry.role === "string") {
-      const role = entry.role
-      if (role === "user" || role === "assistant") {
-        entry.type = role
-      }
-    }
-    entries.push(entry as TranscriptEntry)
+    const entry = parseJsonlRecord(parsed)
+    if (entry) entries.push(entry)
   }
   return entries
+}
+
+/** Shared record adapter for full readers and incremental historical reducers. */
+export function parseJsonlRecord(parsed: unknown): TranscriptEntry | undefined {
+  const result = jsonlEntrySchema.safeParse(parsed)
+  if (!result.success) return undefined
+  const entry = result.data
+  if (typeof entry.type !== "string" && (entry.role === "user" || entry.role === "assistant")) {
+    entry.type = entry.role
+  }
+  return entry as TranscriptEntry
 }
 
 // ─── Zod schemas for provider-specific transcript records ─────────────────────
@@ -609,7 +609,7 @@ const codexResponseItemSchema = z.looseObject({
   }),
 })
 
-function classifyCodexLine(
+export function classifyCodexLine(
   parsed: unknown,
   sessionId: string | undefined,
   entries: TranscriptEntry[]

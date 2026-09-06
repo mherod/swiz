@@ -8,6 +8,7 @@ import {
   MAX_SESSION_PREVIEW_BYTES,
   readSessionPreview,
 } from "./session-preview.ts"
+import { sessionUsageLine } from "./test-fixtures/session.ts"
 
 const files: string[] = []
 afterEach(async () => {
@@ -50,7 +51,8 @@ test("a multi-gigabyte preview reads one bounded suffix and drops the partial fi
     },
     slice: (start: number, end: number) => {
       slices.push([start, end])
-      return new Blob([`partial record\n${line}\n`])
+      const suffix = `\n${line}\n`
+      return new Blob(["x".repeat(end - start - Buffer.byteLength(suffix)), suffix])
     },
   } as unknown as Bun.BunFile
   expect(await readSessionPreview(file, size, "codex-jsonl")).toBe(`${line}\n`)
@@ -76,29 +78,11 @@ test("preview reads stop at the observed EOF when the file grows", async () => {
   expect(await readSessionPreview(file, size, "codex-jsonl")).toBe(`${assistant("First")}\n`)
 })
 
-function usage(timestamp: string, output: number): string {
-  return JSON.stringify({
-    type: "event_msg",
-    timestamp,
-    payload: {
-      type: "token_count",
-      info: {
-        total_token_usage: {
-          total_tokens: 1000 + output,
-          input_tokens: 1000,
-          output_tokens: output,
-          cached_input_tokens: 400,
-        },
-      },
-    },
-  })
-}
-
 test("large previews preserve recent messages and latest cumulative usage totals", async () => {
   const tail = [
-    usage("2026-09-05T10:00:00Z", 100),
+    sessionUsageLine(100, "2026-09-05T10:00:00Z", 1000, 400),
     assistant("Recent café 🦊"),
-    usage("2026-09-05T10:02:00Z", 300),
+    sessionUsageLine(300, "2026-09-05T10:02:00Z", 1000, 400),
   ].join("\n")
   const path = await fixture(MAX_SESSION_PREVIEW_BYTES + 1024 * 1024, tail)
   const result = await sessionDataCache.get({ path, format: "codex-jsonl" })
