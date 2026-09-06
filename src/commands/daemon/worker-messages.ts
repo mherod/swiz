@@ -1,5 +1,6 @@
 import type { HookGroup } from "../../hook-types.ts"
 import type { ProjectSwizSettings } from "../../settings/types.ts"
+import type { WatchRegistrationOptions } from "./cache/file-watcher-registry.ts"
 import type { WorkerMemorySnapshot } from "./memory-pressure.ts"
 
 export interface FileWatcherStatus {
@@ -17,7 +18,7 @@ export type FileWatcherWorkerMessage =
       type: "register"
       path: string
       label: string
-      options?: { recursive?: boolean; depth?: number }
+      options?: WatchRegistrationOptions
     }
   | { type: "start" }
   | { type: "status" }

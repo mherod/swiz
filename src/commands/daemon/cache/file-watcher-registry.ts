@@ -16,6 +16,21 @@ export interface FileWatcherRuntime {
   now(): number
 }
 
+/** Shared registration options for every watcher facade (direct, worker message, worker proxy). */
+export interface WatchRegistrationOptions {
+  recursive?: boolean
+  depth?: number
+  /**
+   * Register even though the path matches the ignore rules.
+   *
+   * The rules exist to stop generic recursive source watches from opening handles across
+   * `.git`, `node_modules` and friends. A caller that names such a path deliberately — the
+   * daemon watching `<cwd>/.git/` for branch and index changes — is not that case, and
+   * silently dropping it leaves the caller believing it is watching something it is not.
+   */
+  allowIgnoredPath?: boolean
+}
+
 export interface WatchEntry {
   path: string
   label: string
@@ -26,6 +41,7 @@ export interface WatchEntry {
   invalidationCount: number
   recursive?: boolean
   depth?: number
+  allowIgnoredPath?: boolean
 }
 
 const WATCH_INVALIDATION_DEBOUNCE_MS = 50
@@ -76,9 +92,9 @@ export class BaseFileWatcherRegistry {
     path: string,
     label: string,
     callback: () => void,
-    options?: { recursive?: boolean; depth?: number }
+    options?: WatchRegistrationOptions
   ): void {
-    if (this.shouldIgnore(path)) return
+    if (!options?.allowIgnoredPath && this.shouldIgnore(path)) return
 
     let entry = this.entries.get(path)
     if (!entry) {
@@ -92,6 +108,7 @@ export class BaseFileWatcherRegistry {
         invalidationCount: 0,
         recursive: options?.recursive ?? path.endsWith("/"),
         depth: options?.depth,
+        allowIgnoredPath: options?.allowIgnoredPath,
       }
       this.entries.set(path, entry)
     }
@@ -126,7 +143,9 @@ export class BaseFileWatcherRegistry {
             { recursive: true },
             (_event, filename) => {
               const rel = filename == null ? "" : `${filename}`
-              if (this.shouldIgnoreRelativePath(rel)) return
+              // An explicitly allowed path opted past the ignore rules at registration;
+              // re-applying them per event would drop the very changes it was registered for.
+              if (!entry.allowIgnoredPath && this.shouldIgnoreRelativePath(rel)) return
               fire()
             }
           )

@@ -425,7 +425,10 @@ export function setupWatchers(
     const projectFlush = () => invalidateProject(cwd)
     const projectSettings = getProjectSettingsPath(cwd)
     if (projectSettings) watchers.register(projectSettings, `project-settings:${cwd}`, projectFlush)
-    watchers.register(join(cwd, ".git/"), `git:${cwd}`, projectFlush)
+    // Deliberate: the ignore rules keep generic source watches out of `.git`, but this watcher
+    // exists precisely to catch branch, ref and index changes. Without the opt-in the registry
+    // dropped it silently and warm status snapshots stayed stale for a whole bucket (#807).
+    watchers.register(join(cwd, ".git/"), `git:${cwd}`, projectFlush, { allowIgnoredPath: true })
     const transcriptWatchFlush = () => {
       projectFlush()
       void transcriptMonitor.checkProject(cwd).catch((err) => {

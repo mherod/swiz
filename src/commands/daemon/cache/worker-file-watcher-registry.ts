@@ -5,6 +5,7 @@ import type {
   FileWatcherStatus,
   FileWatcherWorkerMessage,
 } from "../worker-messages.ts"
+import type { WatchRegistrationOptions } from "./file-watcher-registry.ts"
 
 /** Main-thread facade over `BaseFileWatcherRegistry` in a worker (Bun `fs.watch`, `recursive: true` for trees). */
 export class FileWatcherRegistry {
@@ -59,7 +60,7 @@ export class FileWatcherRegistry {
     path: string,
     label: string,
     callback: () => void,
-    options?: { recursive?: boolean; depth?: number }
+    options?: WatchRegistrationOptions
   ): void {
     const key = `${path}:${label}`
     let cbs = this.callbacks.get(key)
