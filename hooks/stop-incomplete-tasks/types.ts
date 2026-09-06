@@ -8,6 +8,8 @@ export interface TaskCheckContext {
   sessionId: string
   home: string
   tasksDir: string | null
+  tasksRoot: string
+  projectKey?: string
   allTasks: SessionTask[]
 }
 

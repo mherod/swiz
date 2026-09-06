@@ -20,9 +20,15 @@ import {
   filterIncompleteStatus,
   stripDeferralPrefix,
 } from "./incomplete-check-validator.ts"
+import { reconcileStopTaskSnapshot } from "./missing-task-guard.ts"
 
 export interface StopIncompleteTasksDependencies {
   homeDir?: string
+  resolveContext?: typeof resolveTaskCheckContext
+}
+
+function withNotice(output: SwizHookOutput, notice: string | undefined): SwizHookOutput {
+  return notice ? { ...output, systemMessage: notice } : output
 }
 
 /**
@@ -35,7 +41,10 @@ export async function evaluateStopIncompleteTasks(
   // CLI fast path already scanned tasks and found no blockers — skip redundant disk read
   if ((input as Record<string, unknown>)._fastPathTaskScanComplete) return {}
 
-  const ctx = await resolveTaskCheckContext(input, dependencies.homeDir)
+  const ctx = await (dependencies.resolveContext ?? resolveTaskCheckContext)(
+    input,
+    dependencies.homeDir
+  )
   if (!ctx) return {}
 
   if (!agentHasTaskToolsForHookPayload(input as Record<string, any>)) return {}
@@ -45,9 +54,12 @@ export async function evaluateStopIncompleteTasks(
   const taskListToolName = taskToolNameForHookPayload(input as Record<string, any>, "TaskList")
   const taskUpdateToolName = taskToolNameForHookPayload(input as Record<string, any>, "TaskUpdate")
 
+  const reconciled = await reconcileStopTaskSnapshot(ctx)
+  ctx.allTasks = reconciled.tasks
+
   const remainingIncomplete = filterIncompleteStatus(ctx.allTasks)
   if (remainingIncomplete.length === 0) {
-    return {}
+    return withNotice({}, reconciled.notice)
   }
 
   const blockingIncomplete = filterBlockingIncomplete(ctx.allTasks)
@@ -55,22 +67,20 @@ export async function evaluateStopIncompleteTasks(
     // Edge case: having deferred tasks as the sole remaining tasks. That is
     // likely a dodge — the agent parked real work under a "Future:" label instead
     // of completing it. Steer back to the actual work.
-    if (remainingIncomplete.length > 0) {
-      const subjects = remainingIncomplete
-        .map((t) => t.subject ?? "")
-        .map((s) => stripDeferralPrefix(s) || s)
-      return buildSoleDeferralSteeringOutput(subjects)
-    }
-    return {}
+    const subjects = remainingIncomplete
+      .map((t) => t.subject ?? "")
+      .map((s) => stripDeferralPrefix(s) || s)
+    return withNotice(buildSoleDeferralSteeringOutput(subjects), reconciled.notice)
   }
 
   // Build block output — list all incomplete tasks so the agent knows to complete everything.
   const taskDetails = getIncompleteDetails(ctx.allTasks)
-  return buildIncompleteBlockOutput(taskDetails, {
+  const output = buildIncompleteBlockOutput(taskDetails, {
     tasksDir: ctx.tasksDir,
     sessionId: ctx.sessionId,
     taskListAvailable,
     taskListToolName,
     taskUpdateToolName,
   })
+  return withNotice(output, reconciled.notice)
 }

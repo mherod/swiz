@@ -5,16 +5,34 @@
  * (task creation, audit log, CI evidence) should be active.
  */
 
+import { join } from "node:path"
 import { getHomeDirOrNull } from "../../src/home.ts"
+import { projectKeyFromCwd } from "../../src/project-key.ts"
 import type { StopHookInput } from "../../src/schemas.ts"
 import {
   getEffectiveSwizSettings,
   readProjectSettings,
   readSwizSettings,
 } from "../../src/settings.ts"
-import { getSessionTasksDir, readSessionTasksFresh } from "../../src/tasks/task-recovery.ts"
+import { createTaskStoreForHookPayload } from "../../src/task-roots.ts"
+import { isSafeSessionId, readTasksAcrossStores } from "../../src/tasks/task-repository.ts"
 import { getTranscriptSummary } from "../../src/transcript-summary.ts"
 import type { CompletionAuditContext, CompletionValidationGate } from "./types.ts"
+
+function resolveAuditStores(input: StopHookInput, home: string) {
+  const store = createTaskStoreForHookPayload(input, home)
+  const sessionId = input.session_id ?? ""
+  if (!sessionId || !isSafeSessionId(sessionId, store.tasksDir)) return null
+  const projectKey = input.cwd ? projectKeyFromCwd(input.cwd) : undefined
+  return {
+    root: store.tasksDir,
+    projectKey,
+    tasksDir: join(store.tasksDir, sessionId),
+    taskStoreDirs: [...new Set([sessionId, ...(projectKey ? [projectKey] : [])])].map((key) =>
+      join(store.tasksDir, key)
+    ),
+  }
+}
 
 /**
  * Resolve all prerequisites and settings for the completion auditor.
@@ -32,8 +50,8 @@ export async function resolveCompletionAuditContext(
   // Fail-open: must have home directory and session ID
   if (!home || !sessionId) return null
 
-  const tasksDir = getSessionTasksDir(sessionId, home)
-  if (!tasksDir) return null
+  const store = resolveAuditStores(input, home)
+  if (!store) return null
 
   // Load settings to determine gate configuration
   try {
@@ -51,7 +69,7 @@ export async function resolveCompletionAuditContext(
     }
 
     // Load fresh task state
-    const allTasks = await readSessionTasksFresh(sessionId, home)
+    const allTasks = await readTasksAcrossStores(sessionId, store.projectKey, store.root)
 
     // Load transcript summary for tool stats
     const summary = transcript ? getTranscriptSummary(raw) : null
@@ -61,7 +79,8 @@ export async function resolveCompletionAuditContext(
       sessionId,
       transcript,
       home,
-      tasksDir,
+      tasksDir: store.tasksDir,
+      taskStoreDirs: store.taskStoreDirs,
       gates,
       allTasks,
       toolCallCount: 0, // Will be set by caller

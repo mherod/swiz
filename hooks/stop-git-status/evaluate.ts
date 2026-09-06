@@ -238,7 +238,8 @@ export async function evaluateStopGitStatus(input: StopHookInput): Promise<SwizH
       detachedMainWorktree.sessionId,
       "stop-git-workflow-task-created",
       detachedMainWorktree.taskSubject,
-      detachedMainWorktree.taskDesc
+      detachedMainWorktree.taskDesc,
+      detachedMainWorktree.cwd
     )
     return blockStopObj(
       `${detachedMainWorktree.summary}\n\n${formatActionPlan(detachedMainWorktree.steps)}`
@@ -253,6 +254,12 @@ export async function evaluateStopGitStatus(input: StopHookInput): Promise<SwizH
   if (r.kind === "hookOutput") return r.output
 
   if (r.willNeedPush) await markPushPrompted(r.sessionId)
-  await createSessionTask(r.sessionId, "stop-git-workflow-task-created", r.taskSubject, r.taskDesc)
+  await createSessionTask(
+    r.sessionId,
+    "stop-git-workflow-task-created",
+    r.taskSubject,
+    r.taskDesc,
+    r.cwd
+  )
   return blockStopObj(r.summary + formatActionPlan(r.steps))
 }

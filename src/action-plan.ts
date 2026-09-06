@@ -7,6 +7,7 @@
 import { join } from "node:path"
 import { agentDefinitelySupportsTaskList, resolveTranslationAgent } from "./agent-paths.ts"
 import { type AgentDef, agentSupportsTool, translateTaskToolName } from "./agents.ts"
+import { projectKeyFromCwd } from "./project-key.ts"
 import { readProjectSettings, readSwizSettings } from "./settings/persistence.ts"
 import { getEffectiveSwizSettings } from "./settings/resolution.ts"
 import {
@@ -267,6 +268,7 @@ export async function mergeActionPlanIntoTasks(
   if (!effective.actionPlanMerge) return 0
   const mergeSteps: MergeStep[] = filterQualitySteps(flattenToSteps(steps))
   if (mergeSteps.length === 0) return 0
-  const created = await mergeIntoTasks(sessionId, mergeSteps, cwd, mergeOptions)
+  const storeKey = cwd ? projectKeyFromCwd(cwd) : sessionId
+  const created = await mergeIntoTasks(storeKey, mergeSteps, cwd, mergeOptions)
   return created.length
 }

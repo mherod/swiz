@@ -52,7 +52,7 @@ async function mergeChecklistStepsIntoTasks(
   }
 }
 
-async function prepareBlockingChecklistTasks(
+export async function prepareBlockingChecklistTasks(
   result: ShipChecklistResult,
   sessionId: string,
   cwd: string
@@ -61,7 +61,8 @@ async function prepareBlockingChecklistTasks(
     sessionId,
     "stop-ship-checklist-task-created",
     SHIP_CHECKLIST_TASK_SUBJECT,
-    "Follow the action plan above to resolve all blocking issues, CI failures, and uncommitted changes."
+    "Follow the action plan above to resolve all blocking issues, CI failures, and uncommitted changes.",
+    cwd
   )
   await mergeChecklistStepsIntoTasks(result.steps, sessionId, cwd)
 

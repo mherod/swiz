@@ -38,6 +38,8 @@ export interface CompletionAuditContext {
   transcript: string
   home: string
   tasksDir: string
+  /** Session and project trails corresponding to the union of task records. */
+  taskStoreDirs?: string[]
   gates: CompletionValidationGate
   allTasks: SessionTask[]
   toolCallCount: number

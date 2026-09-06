@@ -10,10 +10,12 @@
 import { join } from "node:path"
 import { stderrLog } from "../debug.ts"
 import { getHomeDirOrNull } from "../home.ts"
+import { projectKeyFromCwd } from "../project-key.ts"
 import { createDefaultTaskStore } from "../task-roots.ts"
 import {
   isIncompleteTaskStatus,
   isSafeSessionId,
+  mergeTaskStoresByRecency,
   readTasks,
   type TaskStatus,
   writeAudit,
@@ -93,28 +95,30 @@ async function createTaskViaSubprocess(
 }
 
 /**
- * Create a session task in-process with sentinel dedup.
+ * Create a hook task in the payload cwd's project store, matching MCP addressing.
  *
  * Calls `createTaskInProcess` directly — no subprocess overhead.
- * The `executor` parameter exists only for backward-compatible test injection;
- * when provided, it falls back to the legacy subprocess path.
+ * Pass the hook payload cwd explicitly: daemon process.cwd() can name another project.
+ * The function-valued fifth argument preserves legacy executor injection; callers
+ * without a cwd retain the session store.
  */
 export async function createSessionTask(
   sessionId: string | undefined,
   sentinelKey: string,
   subject: string,
   description: string,
-  executor?: (args: string[]) => Promise<number>
+  cwdOrExecutor?: string | ((args: string[]) => Promise<number>)
 ): Promise<void> {
   const validated = await validateCreateTaskInputs(sessionId, sentinelKey)
   if (!validated) return
   const { sentinel } = validated
+  const cwd = typeof cwdOrExecutor === "string" ? cwdOrExecutor : undefined
+  const storeKey = cwd ? projectKeyFromCwd(cwd) : sessionId!
+  const executor = typeof cwdOrExecutor === "function" ? cwdOrExecutor : undefined
 
   // Legacy path: test-injected executor shells out to swiz CLI
   if (executor) {
-    const exitCode = await executor(
-      buildTaskCreateArgs("swiz", subject, description, sessionId ?? "")
-    )
+    const exitCode = await executor(buildTaskCreateArgs("swiz", subject, description, storeKey))
     if (exitCode === 0) await writeSentinel(sentinel)
     return
   }
@@ -122,14 +126,14 @@ export async function createSessionTask(
   // In-process path: direct disk write, no subprocess
   try {
     const { createTaskInProcess } = await import("../tasks/task-service.ts")
-    await createTaskInProcess({ sessionId: sessionId!, subject, description })
+    await createTaskInProcess({ sessionId: storeKey, subject, description, cwd })
     await writeSentinel(sentinel)
   } catch (err) {
     stderrLog(
       "createSessionTask fallback",
       `[swiz] createSessionTask: in-process creation failed (${messageFromUnknownError(err)}), falling back to subprocess`
     )
-    await createTaskViaSubprocess(subject, description, sessionId ?? "", sentinel)
+    await createTaskViaSubprocess(subject, description, storeKey, sentinel)
   }
 }
 
@@ -147,15 +151,22 @@ export async function completeSessionTask(
   options: { cwd?: string; evidence: string }
 ): Promise<boolean> {
   if (!isValidSessionId(sessionId) || !subject.trim()) return false
+  if (!isSafeSessionId(sessionId, createDefaultTaskStore().tasksDir)) return false
 
-  const tasks = await readTasks(sessionId)
-  const task = tasks.find(
+  const cwd = options.cwd ?? process.cwd()
+  const storeKeys = [...new Set([sessionId, projectKeyFromCwd(cwd)])]
+  const groups = await Promise.all(
+    storeKeys.map(async (storeKey) =>
+      (await readTasks(storeKey)).map((task) => ({ ...task, storeKey }))
+    )
+  )
+  const match = mergeTaskStoresByRecency(...groups).find(
     (candidate) => candidate.subject === subject && isIncompleteTaskStatus(candidate.status)
   )
-  if (!task) return false
+  if (!match) return false
+  const { storeKey, ...task } = match
 
   const { applyStatusTransition } = await import("../tasks/task-service.ts")
-  const cwd = options.cwd ?? process.cwd()
 
   const transition = async (newStatus: TaskStatus): Promise<void> => {
     const oldStatus = task.status
@@ -163,8 +174,8 @@ export async function completeSessionTask(
     if (newStatus === "completed") {
       task.completionEvidence = options.evidence
     }
-    await writeTask(sessionId, task, cwd)
-    await writeAudit(sessionId, {
+    await writeTask(storeKey, task, cwd)
+    await writeAudit(storeKey, {
       timestamp: new Date().toISOString(),
       taskId: task.id,
       action: "status_change",

@@ -54,7 +54,7 @@ async function readTrailTaskIds(tasksDir: string): Promise<Set<string>> {
  * free so it can be unit-tested without touching real task storage.
  */
 export async function detectOrphanedCompletedTasks(
-  ctx: Pick<CompletionAuditContext, "gates" | "allTasks" | "tasksDir">
+  ctx: Pick<CompletionAuditContext, "gates" | "allTasks" | "tasksDir" | "taskStoreDirs">
 ): Promise<SessionTask[]> {
   if (!ctx.gates.auditLog) return []
 
@@ -65,7 +65,8 @@ export async function detectOrphanedCompletedTasks(
 
   // Require an active trail to distinguish out-of-band writes from a session that
   // never recorded one. No trail → cannot tell → stay silent (AC3).
-  const trailTaskIds = await readTrailTaskIds(ctx.tasksDir)
+  const trails = await Promise.all((ctx.taskStoreDirs ?? [ctx.tasksDir]).map(readTrailTaskIds))
+  const trailTaskIds = new Set(trails.flatMap((trail) => [...trail]))
   if (trailTaskIds.size === 0) return []
 
   return completedOnDisk.filter((t) => !trailTaskIds.has(t.id))

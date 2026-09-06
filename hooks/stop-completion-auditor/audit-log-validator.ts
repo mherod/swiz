@@ -65,9 +65,14 @@ export async function validateAuditLog(ctx: CompletionAuditContext): Promise<Val
   if (!agentHasTaskTools()) return { kind: "ok" }
 
   // Try to read and parse audit log
-  const auditLog = join(ctx.tasksDir, ".audit-log.jsonl")
-  const stats = await parseAuditLogEntries(auditLog)
-  if (stats && stats.created > 0 && stats.incomplete === 0) return { kind: "ok" }
+  const trails = await Promise.all(
+    (ctx.taskStoreDirs ?? [ctx.tasksDir]).map((dir) =>
+      parseAuditLogEntries(join(dir, ".audit-log.jsonl"))
+    )
+  )
+  const created = trails.reduce((sum, stats) => sum + (stats?.created ?? 0), 0)
+  const incomplete = trails.reduce((sum, stats) => sum + (stats?.incomplete ?? 0), 0)
+  if (created > 0 && incomplete === 0) return { kind: "ok" }
 
   // Check tool call threshold
   if (ctx.toolCallCount < TOOL_CALL_THRESHOLD) return { kind: "ok" }
