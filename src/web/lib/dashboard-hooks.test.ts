@@ -44,6 +44,27 @@ describe("snapshotChanged", () => {
     expect(snapshotChanged('[[{"id":"2"}],null]', holder)).toBe(false)
   })
 
+  it("keeps a volatile field from dragging unrelated slices, once each slice owns a holder", () => {
+    // #856: /metrics carries a fresh uptimeMs every poll, and the overview path compared
+    // all five slices as one string — so an unchanged watches payload was marked changed
+    // 30 times a minute purely because the clock moved.
+    const metrics = () => ({ uptimeMs: 0 })
+    const watches = { active: ["ci-1"] }
+
+    // The old shape: one holder over the whole batch.
+    const combined = { current: "" }
+    expect(snapshotChanged(JSON.stringify({ m: { uptimeMs: 1 }, w: watches }), combined)).toBe(true)
+    expect(snapshotChanged(JSON.stringify({ m: { uptimeMs: 2 }, w: watches }), combined)).toBe(true)
+
+    // Per-slice holders: watches is stable across the same two ticks, metrics still moves.
+    const watchesHolder = { current: "" }
+    const metricsHolder = { current: "" }
+    expect(snapshotChanged(JSON.stringify(watches), watchesHolder)).toBe(true)
+    expect(snapshotChanged(JSON.stringify(watches), watchesHolder)).toBe(false)
+    expect(snapshotChanged(JSON.stringify({ ...metrics(), uptimeMs: 1 }), metricsHolder)).toBe(true)
+    expect(snapshotChanged(JSON.stringify({ ...metrics(), uptimeMs: 2 }), metricsHolder)).toBe(true)
+  })
+
   it("applies an identical snapshot again once the holder is cleared", () => {
     // The session-switch path. The holder is a ref that outlives the polling effect, so
     // clearing it on switch is what stops the previous selection's snapshot from

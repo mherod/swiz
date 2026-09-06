@@ -125,7 +125,13 @@ interface OverviewPollingDeps {
 }
 
 export function useDashboardOverviewPolling(deps: OverviewPollingDeps): void {
-  const prevCoreSnapshotRef = useRef("")
+  // One ref per slice. A single snapshot over all of them meant the volatile uptime in
+  // /metrics marked every slice changed on every 2s poll (#856).
+  const prevMetricsSnapshotRef = useRef("")
+  const prevWatchesSnapshotRef = useRef("")
+  const prevProjectsSnapshotRef = useRef("")
+  const prevAgentProcessesSnapshotRef = useRef("")
+  const prevActiveDispatchesSnapshotRef = useRef("")
   const prevCacheSnapshotRef = useRef("")
   const initialLoadDone = useRef(false)
   const depsRef = useRef(deps)
@@ -155,25 +161,45 @@ export function useDashboardOverviewPolling(deps: OverviewPollingDeps): void {
 
     function applyUpdates(data: Awaited<ReturnType<typeof fetchAllData>>) {
       const { m, cs, w, pr, ap, ad } = data
-      const coreSnapshot = JSON.stringify({ m, w, pr, ap, ad })
       const cacheSnapshot = cs.status === "fulfilled" ? JSON.stringify(cs.value) : null
-      const coreChanged = coreSnapshot !== prevCoreSnapshotRef.current
       const cacheChanged = cacheSnapshot !== prevCacheSnapshotRef.current
-      if (!coreChanged && !cacheChanged) return
       if (cacheChanged) {
         applyFulfilled(cs, (value) => {
           prevCacheSnapshotRef.current = JSON.stringify(value)
           depsRef.current.onCacheStatus(value)
         })
       }
-      if (!coreChanged) return
-      prevCoreSnapshotRef.current = coreSnapshot
+
+      // Each slice is compared on its own, so metrics ticking with uptime no longer drags
+      // watches, projects, agent processes and dispatches into a state update with it.
+      // Metrics itself still updates every poll, which is correct — uptime is displayed.
       const currentDeps = depsRef.current
-      applyFulfilled(m, currentDeps.onMetrics)
-      applyFulfilled(w, currentDeps.onWatches)
-      applyFulfilled(pr, (value) => currentDeps.onProjects(value.projects ?? []))
-      applyFulfilled(ap, (value) => currentDeps.onAgentProcesses(value.providers ?? {}))
-      applyFulfilled(ad, (value) => currentDeps.onActiveDispatches(value.active ?? []))
+      let coreChanged = false
+      const applyIfChanged = <T>(
+        result: PromiseSettledResult<T>,
+        holder: { current: string },
+        apply: (value: T) => void
+      ): void => {
+        applyFulfilled(result, (value) => {
+          if (!snapshotChanged(JSON.stringify(value), holder)) return
+          coreChanged = true
+          apply(value)
+        })
+      }
+
+      applyIfChanged(m, prevMetricsSnapshotRef, currentDeps.onMetrics)
+      applyIfChanged(w, prevWatchesSnapshotRef, currentDeps.onWatches)
+      applyIfChanged(pr, prevProjectsSnapshotRef, (value) =>
+        currentDeps.onProjects(value.projects ?? [])
+      )
+      applyIfChanged(ap, prevAgentProcessesSnapshotRef, (value) =>
+        currentDeps.onAgentProcesses(value.providers ?? {})
+      )
+      applyIfChanged(ad, prevActiveDispatchesSnapshotRef, (value) =>
+        currentDeps.onActiveDispatches(value.active ?? [])
+      )
+
+      if (!coreChanged) return
       currentDeps.onError(settledError([m, cs, w, pr, ap, ad]))
       currentDeps.onLastUpdated(new Date().toISOString())
 
