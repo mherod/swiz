@@ -28,9 +28,16 @@ export function normalizeCommand(cmd: string): string {
  * Prevents false positives when git push/commit appears inside a heredoc body
  * rather than as an executable command.
  * Handles: <<WORD, <<-WORD, <<"WORD", <<'WORD'
+ *
+ * With `quotedOnly`, only heredocs whose delimiter is quoted are stripped.
+ * Quoted delimiters suppress shell expansion, so their bodies are inert text;
+ * unquoted bodies still expand and may hide real command substitutions.
  */
-export function stripHeredocs(command: string): string {
-  return command.replace(/<<-?[ \t]*["']?(\w+)["']?[ \t]*\n[\s\S]*?\n[ \t]*\1(?=\n|$)/g, "")
+export function stripHeredocs(command: string, options: { quotedOnly?: boolean } = {}): string {
+  const pattern = options.quotedOnly
+    ? /<<-?[ \t]*(["'])(\w+)\1[ \t]*\n[\s\S]*?\n[ \t]*\2(?=\n|$)/g
+    : /<<-?[ \t]*["']?(\w+)["']?[ \t]*\n[\s\S]*?\n[ \t]*\1(?=\n|$)/g
+  return command.replace(pattern, "")
 }
 
 const BUN_TEST_FILE_RE = /(?:\.\/)?[\w./-]+\.(?:test|spec)\.\w+/
@@ -350,7 +357,10 @@ function collectGitInvocations(command: string, depth: number): GitInvocation[] 
  * substitutions are rejected so downstream Git hooks see one stable grammar.
  */
 export function findNonCanonicalGitInvocation(command: string): NonCanonicalGitInvocation | null {
-  const usages = collectGitInvocations(normalizeCommand(command).normalize("NFKC"), 0)
+  const normalized = stripHeredocs(normalizeCommand(command).normalize("NFKC"), {
+    quotedOnly: true,
+  })
+  const usages = collectGitInvocations(normalized, 0)
   return (
     usages.find((usage): usage is NonCanonicalGitInvocation => usage.kind !== "canonical") ?? null
   )

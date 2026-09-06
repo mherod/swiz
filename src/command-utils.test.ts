@@ -42,6 +42,39 @@ describe("findNonCanonicalGitInvocation", () => {
     ).toBeNull()
   })
 
+  test("ignores git prose inside quoted heredoc bodies", () => {
+    const command = [
+      "cat >> notes.md <<'MARKER'",
+      "the fix was /usr/bin/git push --force-with-lease, then env git status",
+      "MARKER",
+    ].join("\n")
+    expect(findNonCanonicalGitInvocation(command)).toBeNull()
+  })
+
+  test("ignores substitutions inside quoted heredoc bodies", () => {
+    const command = [
+      "cat >> notes.md <<'MARKER'",
+      "V=$(env git status) and `git push origin main`",
+      "MARKER",
+    ].join("\n")
+    expect(findNonCanonicalGitInvocation(command)).toBeNull()
+  })
+
+  test("still detects executable git in unquoted heredoc substitutions", () => {
+    const command = ["cat <<MARKER", "log=$(git push origin main)", "MARKER"].join("\n")
+    expect(findNonCanonicalGitInvocation(command)?.kind).toBe("shell-substitution")
+  })
+
+  test("still detects non-canonical git in command position after a heredoc", () => {
+    const command = [
+      "cat >> notes.md <<'MARKER'",
+      "prose mentioning git push",
+      "MARKER",
+      "/usr/bin/git status",
+    ].join("\n")
+    expect(findNonCanonicalGitInvocation(command)?.kind).toBe("binary-path")
+  })
+
   test("classifies direct Git binary paths", () => {
     expect(findNonCanonicalGitInvocation("/usr/bin/git status")?.kind).toBe("binary-path")
     expect(findNonCanonicalGitInvocation("./git status")?.kind).toBe("binary-path")
