@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test"
+import { listGateRequiredSkills } from "../../../gate-required-skills.ts"
 import { evaluateGateRequiredSkills } from "./gate-required-skills.ts"
 
 describe("gate-required skills doctor check", () => {
@@ -8,7 +9,7 @@ describe("gate-required skills doctor check", () => {
     expect(result).toEqual({
       name: "Gate-required skills",
       status: "pass",
-      detail: "all 16 fail-open gate requirements resolve to installed skills",
+      detail: `all ${listGateRequiredSkills().length} fail-open gate requirements resolve to installed skills`,
     })
   })
 

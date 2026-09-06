@@ -87,5 +87,12 @@ the unused pnpm graph does not mean the seven remaining Bun advisories are fixed
 - `extract-zip`: the audited 2.0.1 line has no published fix; migrate the owning
   ripgrep downloader/provider path.
 
-Keep #874 open until the remaining graph, validation failures and unsupported
+The [Gemini CLI provider repository](https://github.com/ben-vargas/ai-sdk-provider-gemini-cli)
+was archived on 2026-08-03. Its latest published version remains 2.0.1 and pins
+`@google/gemini-cli-core` to 0.22.4. A provider migration must preserve Swiz's
+API-key and cached CLI OAuth authentication, text and structured generation,
+streaming, and abort behavior in `src/gemini.ts`; waiting for an ordinary
+provider version bump is not a remediation plan for this archived dependency.
+
+Keep #874 open until the remaining graph and unsupported
 security-update acceptance criterion have an explicit resolution.

@@ -6,6 +6,7 @@ import { join } from "node:path"
 import { projectKeyFromCwd } from "../project-key.ts"
 import { DEFAULT_SETTINGS } from "../settings.ts"
 import { findTaskStoreForSession } from "../task-roots.ts"
+import { acquireEnvLock, releaseEnvLockFn } from "../utils/test-utils.ts"
 import {
   buildSettingsFlags,
   buildTaskCountsFromTasks,
@@ -955,10 +956,11 @@ describe("computeWarmStatusLineSnapshot task stores", () => {
     for (const dir of tempDirs.splice(0)) await rm(dir, { recursive: true, force: true })
   })
 
-  function setup(): { home: string; cwd: string; restore: () => void } {
+  async function setup(): Promise<{ home: string; cwd: string; restore: () => void }> {
     const home = mkdtempSync(join(tmpdir(), "swiz-status-tasks-home-"))
     const cwd = mkdtempSync(join(tmpdir(), "swiz-status-tasks-cwd-"))
     tempDirs.push(home, cwd)
+    await acquireEnvLock()
     const previous = process.env.HOME
     process.env.HOME = home
     return {
@@ -967,6 +969,7 @@ describe("computeWarmStatusLineSnapshot task stores", () => {
       restore: () => {
         if (previous === undefined) delete process.env.HOME
         else process.env.HOME = previous
+        releaseEnvLockFn()
       },
     }
   }
@@ -993,7 +996,7 @@ describe("computeWarmStatusLineSnapshot task stores", () => {
   }
 
   it("counts session-store tasks (control)", async () => {
-    const { cwd, restore } = setup()
+    const { cwd, restore } = await setup()
     const sessionId = "00000000-0000-0000-0000-0000000000cc"
     await writeStoreTask(
       findTaskStoreForSession(sessionId).tasksDir,
@@ -1012,7 +1015,7 @@ describe("computeWarmStatusLineSnapshot task stores", () => {
   })
 
   it("counts project-keyed MCP tasks alongside session tasks", async () => {
-    const { cwd, restore } = setup()
+    const { cwd, restore } = await setup()
     const sessionId = "00000000-0000-0000-0000-0000000000dd"
     const tasksDir = findTaskStoreForSession(sessionId).tasksDir
     await writeStoreTask(tasksDir, sessionId, "dddd-1", "in_progress")
@@ -1032,7 +1035,7 @@ describe("computeWarmStatusLineSnapshot task stores", () => {
   })
 
   it("counts project-keyed tasks when the session store is empty", async () => {
-    const { cwd, restore } = setup()
+    const { cwd, restore } = await setup()
     const sessionId = "00000000-0000-0000-0000-0000000000ee"
     await writeStoreTask(
       findTaskStoreForSession(sessionId).tasksDir,

@@ -289,7 +289,7 @@ describe("createSessionTask input sanitization", () => {
     const proc = Bun.spawn([process.execPath, "-e", script], {
       stdout: "pipe",
       stderr: "pipe",
-      env: neutralAgentEnv({ HOME: home }),
+      env: neutralAgentEnv({ HOME: home, BUN_RUNTIME_TRANSPILER_CACHE_PATH: "0" }),
     })
     const [stdout, stderr] = await Promise.all([
       new Response(proc.stdout).text(),

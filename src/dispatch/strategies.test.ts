@@ -156,7 +156,9 @@ describe("collectPreToolResults denial handling", () => {
       "allow-with-reason",
       "ok",
     ])
-    expect(contexts).toEqual(["Create a task before editing."])
+    expect(contexts).toEqual([
+      "ADVISORY (this call was allowed to proceed): Create a task before editing.",
+    ])
     expect(hints).toEqual(["Keep the change focused."])
     expect(finalResponse).toEqual({})
   })
