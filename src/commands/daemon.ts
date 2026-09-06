@@ -18,7 +18,10 @@ import { invalidateTurnsCache } from "../transcript-turns.ts"
 import { findAllProviderSessions, type Session } from "../transcript-utils.ts"
 import type { Command } from "../types.ts"
 import { clearFileCache, getFileCacheMemoryStats } from "../utils/file-cache.ts"
-import { recordTranscriptMonitorCheck } from "./daemon/cache/metrics.ts"
+import {
+  recordTranscriptMonitorCheck,
+  type TranscriptMonitorRpcMetrics,
+} from "./daemon/cache/metrics.ts"
 import type { TranscriptMonitor } from "./daemon/cache/transcript-monitor.ts"
 import { WorkerTranscriptMonitor } from "./daemon/cache/worker-transcript-monitor.ts"
 import { CiWatchRegistry, notifyCiCompletion } from "./daemon/ci-watch-registry.ts"
@@ -832,7 +835,9 @@ async function startDaemonProcess(_args: string[], port: number): Promise<void> 
   // Register initial project for periodic upstream sync
   void caches.upstreamSyncRegistry.register(projectRoot)
 
-  startTranscriptMonitoring(registeredProjects, transcriptMonitor, state.globalMetrics)
+  startTranscriptMonitoring(registeredProjects, transcriptMonitor, state.globalMetrics, () =>
+    workerTranscriptMonitor.getRpcMetrics()
+  )
 
   console.log(`Daemon listening on ${server.url}`)
 }
@@ -840,7 +845,8 @@ async function startDaemonProcess(_args: string[], port: number): Promise<void> 
 function startTranscriptMonitoring(
   registeredProjects: Set<string>,
   transcriptMonitor: TranscriptMonitor,
-  globalMetrics: DaemonMetrics
+  globalMetrics: DaemonMetrics,
+  getRpcMetrics?: () => TranscriptMonitorRpcMetrics
 ) {
   // Start periodic transcript monitoring for all registered projects
   void logPseudoHook("Transcript monitor starting")
@@ -855,7 +861,9 @@ function startTranscriptMonitoring(
             await transcriptMonitor.checkProject(cwd)
           })
         )
-        // Update global metrics with current transcript dispatch concurrency state
+        // Update global metrics with current transcript dispatch concurrency state.
+        // This request is deadline-bounded; a stalled worker rejects rather than pinning
+        // isMonitoring true and suppressing every later tick.
         const metricsPromise = transcriptMonitor.getDispatchConcurrencyMetrics()
         const metrics = await Promise.resolve(metricsPromise)
         globalMetrics.transcriptDispatch = metrics
@@ -863,6 +871,7 @@ function startTranscriptMonitoring(
         stderrLog("monitoring loop exception", `[daemon] Transcript monitor error: ${err}`)
         void logPseudoHook(`Error in monitor loop: ${err}`)
       } finally {
+        if (getRpcMetrics) globalMetrics.transcriptMonitorRpc = getRpcMetrics()
         isMonitoring = false
       }
     })()

@@ -91,6 +91,28 @@ describe("daemon histogram metrics", () => {
     })
   })
 
+  test("serializes worker rpc health counters when present", () => {
+    const metrics = createMetrics()
+    // Control: the field is absent until the daemon records it.
+    expect(serializeMetrics(metrics).transcriptMonitorRpc).toBeUndefined()
+
+    metrics.transcriptMonitorRpc = {
+      pending: 1,
+      timeouts: 3,
+      failures: 4,
+      restarts: 2,
+      unavailable: false,
+    }
+
+    expect(serializeMetrics(metrics).transcriptMonitorRpc).toEqual({
+      pending: 1,
+      timeouts: 3,
+      failures: 4,
+      restarts: 2,
+      unavailable: false,
+    })
+  })
+
   test("keeps instrumentation p50 below the two millisecond budget", () => {
     const metrics = createMetrics()
     const samples: number[] = []

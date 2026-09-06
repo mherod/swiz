@@ -36,12 +36,18 @@ export type TranscriptMonitorWorkerMessage =
   | { type: "checkProject"; id: string; cwd: string }
   | { type: "pruneOldSessions"; activeSessions: string[] }
   | { type: "getDispatchConcurrencyMetrics"; requestId: string }
-  | { type: "manifestResponse"; id: string; manifest: HookGroup[] }
-  | { type: "settingsResponse"; id: string; settings: ProjectSwizSettings | null }
-  | { type: "cooldownCheckResponse"; requestId: string; withinCooldown: boolean }
+  | { type: "manifestResponse"; id: string; manifest: HookGroup[]; error?: string }
+  | {
+      type: "settingsResponse"
+      id: string
+      settings: ProjectSwizSettings | null
+      error?: string
+    }
+  | { type: "cooldownCheckResponse"; requestId: string; withinCooldown: boolean; error?: string }
 
 export type TranscriptMonitorParentMessage =
-  | { type: "initialized" }
+  /** `error` set means the worker could not construct its monitor and will serve nothing. */
+  | { type: "initialized"; error?: string }
   | { type: "memorySnapshot"; snapshot: WorkerMemorySnapshot }
   | { type: "getManifest"; id: string; cwd: string }
   | { type: "getSettings"; id: string; cwd: string }
@@ -56,6 +62,8 @@ export type TranscriptMonitorParentMessage =
       type: "dispatchConcurrencyMetricsResponse"
       requestId: string
       metrics: { active: number; queued: number; maxConcurrent: number }
+      /** Set when the worker had no monitor to read; metrics carry zeros. */
+      error?: string
     }
   | {
       type: "checkProjectResponse"

@@ -46,10 +46,20 @@ export interface TranscriptMonitorMetrics extends DistributionMetrics {
   coalescedTriggers?: number
 }
 
+/** Aggregate worker-IPC health. Counters only — never payloads, paths, or session content. */
+export interface TranscriptMonitorRpcMetrics {
+  pending: number
+  timeouts: number
+  failures: number
+  restarts: number
+  unavailable: boolean
+}
+
 export interface DaemonMetrics {
   startedAt: number
   dispatches: Map<string, EventMetrics>
   transcriptDispatch?: TranscriptDispatchMetrics
+  transcriptMonitorRpc?: TranscriptMonitorRpcMetrics
   transcriptMonitor?: TranscriptMonitorMetrics
   memoryUsage?: NodeJS.MemoryUsage
   memoryPressure?: MemoryPressureSnapshot
@@ -103,6 +113,7 @@ export interface SerializedDaemonMetrics {
   totalDispatches: number
   byEvent: Record<string, SerializedEventMetrics>
   transcriptDispatch?: TranscriptDispatchMetrics
+  transcriptMonitorRpc?: TranscriptMonitorRpcMetrics
   transcriptMonitor?: SerializedDistributionMetrics
   memoryUsage?: NodeJS.MemoryUsage
   memoryPressure?: MemoryPressureSnapshot
@@ -272,6 +283,7 @@ export function serializeMetrics(metrics: DaemonMetrics): SerializedDaemonMetric
     totalDispatches,
     byEvent,
     ...(metrics.transcriptDispatch && { transcriptDispatch: metrics.transcriptDispatch }),
+    ...(metrics.transcriptMonitorRpc && { transcriptMonitorRpc: metrics.transcriptMonitorRpc }),
     ...(metrics.transcriptMonitor && {
       transcriptMonitor: serializeDistribution(metrics.transcriptMonitor),
     }),
