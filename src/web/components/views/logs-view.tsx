@@ -1,5 +1,14 @@
-import { type KeyboardEvent, type ReactElement, useCallback, useEffect, useState } from "react"
+import {
+  type KeyboardEvent,
+  type ReactElement,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react"
 import type { HookLogEntry } from "../../../hook-log.ts"
+import { fetchJson } from "../../lib/http.ts"
+import { startVisiblePolling } from "../../lib/polling.ts"
 
 const STATUS_COLORS: Record<string, string> = {
   ok: "log-status-ok",
@@ -246,24 +255,28 @@ function useHookLogs() {
   const [entries, setEntries] = useState<HookLogEntry[]>([])
   const [loading, setLoading] = useState(true)
 
-  const fetchLogs = useCallback(async () => {
-    try {
-      const res = await fetch("/api/hook-logs?limit=300")
-      if (!res.ok) return
-      const data = (await res.json()) as { entries: HookLogEntry[] }
-      setEntries(data.entries)
-    } catch {
-      // Retry on next interval
-    } finally {
-      setLoading(false)
-    }
-  }, [])
+  const polling = useRef<ReturnType<typeof startVisiblePolling> | null>(null)
+  const fetchLogs = useCallback(() => polling.current?.refresh(), [])
 
   useEffect(() => {
-    void fetchLogs()
-    const interval = setInterval(() => void fetchLogs(), 5000)
-    return () => clearInterval(interval)
-  }, [fetchLogs])
+    polling.current = startVisiblePolling(async (signal) => {
+      try {
+        const data = await fetchJson<{ entries: HookLogEntry[] }>(
+          "/api/hook-logs?limit=300",
+          signal
+        )
+        if (!signal.aborted) setEntries(data.entries)
+      } catch {
+        // Retry on next interval
+      } finally {
+        if (!signal.aborted) setLoading(false)
+      }
+    }, 5000)
+    return () => {
+      polling.current?.stop()
+      polling.current = null
+    }
+  }, [])
 
   return { entries, loading, fetchLogs }
 }

@@ -3,8 +3,10 @@ import { Window } from "happy-dom"
 import { act, Profiler } from "react"
 import { createRoot, type Root } from "react-dom/client"
 import { Header } from "../components/header.tsx"
+import { ProjectIssuesPanel } from "../components/project-issues-panel.tsx"
 import * as browserUtils from "../components/session-browser-utils.ts"
 import { SessionMessages } from "../components/session-messages.tsx"
+import { LogsView } from "../components/views/logs-view.tsx"
 import { type DashboardState, useDashboardState } from "./dashboard-state.ts"
 
 let window: Window
@@ -15,6 +17,7 @@ let renders: number
 let headerRenders: number
 let payloads: Record<string, unknown>
 let deferSession: string | null
+const requests: Array<{ url: string; signal: AbortSignal | null | undefined }> = []
 const deferred: Array<() => void> = []
 let nextIntervalId = 0
 const intervals = new Map<number, () => void>()
@@ -42,6 +45,10 @@ function Harness() {
         />
       </Profiler>
       <SessionMessages messages={latest.sessionMessages} loading={false} hideTasks />
+      {latest.activeView === "dashboard" || latest.activeView === "issues" ? (
+        <ProjectIssuesPanel cwd={latest.optimisticProjectCwd} />
+      ) : null}
+      {latest.activeView === "logs" ? <LogsView /> : null}
     </>
   )
 }
@@ -53,6 +60,14 @@ async function settle() {
 async function tick() {
   await act(async () => {
     for (const refresh of intervals.values()) refresh()
+    await settle()
+  })
+}
+
+async function setVisibility(value: "hidden" | "visible") {
+  await act(async () => {
+    Object.defineProperty(document, "visibilityState", { configurable: true, value })
+    window.document.dispatchEvent(new window.Event("visibilitychange"))
     await settle()
   })
 }
@@ -70,6 +85,7 @@ beforeEach(async () => {
   intervals.clear()
   nextIntervalId = 0
   deferSession = null
+  requests.length = 0
   deferred.length = 0
   const schedule = (callback: () => void) => {
     const id = ++nextIntervalId
@@ -102,9 +118,12 @@ beforeEach(async () => {
     },
     "/sessions/tasks": { tasks: [], summary: null },
     "/projects/tasks": { tasks: [], summary: null },
+    "/projects/issues": { repo: null, issues: [] },
+    "/api/hook-logs?limit=300": { entries: [] },
   }
   const respond = async (...[input, init]: Parameters<typeof fetch>): Promise<Response> => {
     const url = String(input)
+    requests.push({ url, signal: init?.signal })
     const response = Response.json(payloads[url] ?? { active: [] })
     if (
       url === "/sessions/messages" &&
@@ -149,6 +168,135 @@ afterEach(async () => {
 })
 
 describe("mounted dashboard polling", () => {
+  it.each([
+    "settings",
+    "issues",
+    "logs",
+  ] as const)("does not request session data on the %s panel, including manual selection", async (view) => {
+    await act(async () => {
+      latest.setActiveView(view)
+      await settle()
+    })
+    requests.length = 0
+    await act(async () => {
+      latest.handleSelectSession("/project", "second")
+      await settle()
+    })
+    await tick()
+    expect(
+      requests.filter(({ url }) =>
+        ["/sessions/messages", "/sessions/tasks", "/projects/tasks"].includes(url)
+      )
+    ).toEqual([])
+  })
+
+  it.each([
+    ["transcript", ["/sessions/messages"]],
+    ["tasks", ["/sessions/tasks", "/projects/tasks"]],
+    ["dashboard", ["/sessions/messages", "/sessions/tasks", "/projects/tasks"]],
+  ] as const)("requests only the %s data families", async (view, expected) => {
+    await act(async () => {
+      latest.setActiveView(view)
+      await settle()
+    })
+    requests.length = 0
+    await tick()
+    expect(
+      requests
+        .map(({ url }) => url)
+        .filter((url) => ["/sessions/messages", "/sessions/tasks", "/projects/tasks"].includes(url))
+        .sort()
+    ).toEqual([...expected].sort())
+  })
+
+  it("suspends hidden polling and resumes each endpoint once immediately", async () => {
+    await setVisibility("hidden")
+    requests.length = 0
+    await tick()
+    expect(requests).toHaveLength(0)
+    await setVisibility("visible")
+    expect(requests.filter(({ url }) => url === "/metrics")).toHaveLength(1)
+    expect(requests.filter(({ url }) => url === "/sessions/messages")).toHaveLength(1)
+    expect(requests.filter(({ url }) => url === "/projects/tasks")).toHaveLength(1)
+    expect(requests.filter(({ url }) => url === "/projects/issues")).toHaveLength(1)
+    const count = requests.length
+    await setVisibility("visible")
+    expect(requests).toHaveLength(count)
+  })
+
+  it("starts hidden without requests or intervals and refreshes on visibility", async () => {
+    await act(async () => root.unmount())
+    await setVisibility("hidden")
+    requests.length = 0
+    root = createRoot(container)
+    await act(async () => {
+      root.render(<Harness />)
+      await settle()
+    })
+    expect(requests).toHaveLength(0)
+    expect(intervals.size).toBe(0)
+    await setVisibility("visible")
+    expect(requests.filter(({ url }) => url === "/sessions/messages")).toHaveLength(1)
+  })
+
+  it("refreshes project tasks without a selected session", async () => {
+    await act(async () => {
+      latest.setActiveView("tasks")
+      await settle()
+      latest.handleSelectProject("/empty")
+      await settle()
+    })
+    requests.length = 0
+    await tick()
+    expect(latest.optimisticSessionId).toBeNull()
+    expect(requests.filter(({ url }) => url === "/projects/tasks")).toHaveLength(1)
+    expect(
+      requests.filter(({ url }) => url.startsWith("/sessions/") && url !== "/sessions/projects")
+    ).toHaveLength(0)
+  })
+
+  it("keeps manual log refresh working while hiding and unmounting cancel its work", async () => {
+    await act(async () => {
+      latest.setActiveView("logs")
+      await settle()
+    })
+    requests.length = 0
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>(".logs-refresh")?.click()
+      await settle()
+    })
+    expect(requests.filter(({ url }) => url.startsWith("/api/hook-logs"))).toHaveLength(1)
+    const signals = requests.map(({ signal }) => signal)
+    await setVisibility("hidden")
+    expect(signals.every((signal) => signal?.aborted)).toBe(true)
+    requests.length = 0
+    await tick()
+    expect(requests).toHaveLength(0)
+    await setVisibility("visible")
+    expect(requests.filter(({ url }) => url.startsWith("/api/hook-logs"))).toHaveLength(1)
+    const resumed = requests.map(({ signal }) => signal)
+    await act(async () => root.unmount())
+    expect(resumed.every((signal) => signal?.aborted)).toBe(true)
+  })
+
+  it("coalesces pending polls and aborts requests when their panel becomes irrelevant", async () => {
+    deferSession = "first"
+    requests.length = 0
+    await tick()
+    await tick()
+    const messages = requests.filter(({ url }) => url === "/sessions/messages")
+    expect(messages).toHaveLength(1)
+    await act(async () => {
+      latest.setActiveView("tasks")
+      await settle()
+    })
+    expect(messages[0]?.signal?.aborted).toBe(true)
+    await act(async () => {
+      for (const resolve of deferred) resolve()
+      await settle()
+    })
+  })
+
   it("keeps equal polls from rerendering the root or memoized message rows", async () => {
     const baseline = renders
     const rows = rowRenders.mock.calls.length
@@ -212,6 +360,7 @@ describe("mounted dashboard polling", () => {
       await settle()
     })
     expect(deferred.length).toBeGreaterThan(1)
+    const oldRequests = requests.filter(({ url }) => url === "/sessions/messages")
     payloads["/sessions/messages"] = {
       ...(payloads["/sessions/messages"] as object),
       messages: [
@@ -223,6 +372,7 @@ describe("mounted dashboard polling", () => {
       await settle()
     })
     expect(container.textContent).toContain("Current selection")
+    expect(oldRequests.every(({ signal }) => signal?.aborted)).toBe(true)
     await act(async () => {
       for (const resolve of deferred) resolve()
       await settle()

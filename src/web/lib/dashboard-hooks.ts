@@ -9,9 +9,12 @@ import type {
   ToolStat,
 } from "../components/session-browser.tsx"
 import { getQueryParam, msgKey, toSortedEvents } from "./dashboard-helpers.ts"
+import type { ActiveView } from "./dashboard-state.ts"
 import { fetchJson, postJson } from "./http.ts"
+import { startVisiblePolling } from "./polling.ts"
 
 export type { ActiveHookDispatch } from "../../commands/daemon/types.ts"
+export { createSingleFlight } from "./polling.ts"
 
 export interface MetricsResponse {
   uptimeMs?: number
@@ -86,22 +89,10 @@ function settledError(results: PromiseSettledResult<unknown>[]): string {
   return failure.reason instanceof Error ? failure.reason.message : String(failure.reason)
 }
 
-export function createSingleFlight(task: () => Promise<void>): () => Promise<void> {
-  let active: Promise<void> | null = null
-  return () => {
-    if (active) return active
-    active = task().finally(() => {
-      active = null
-    })
-    return active
-  }
-}
-
 interface InitialSelectionDeps {
   projects: ProjectSessions[]
   selectSession: (cwd: string, sessionId: string) => void
   selectProjectOnly: (cwd: string) => void
-  loadProjectTasks: (cwd: string) => Promise<void>
 }
 
 export function applyInitialSelection(deps: InitialSelectionDeps): void {
@@ -124,10 +115,11 @@ export function applyInitialSelection(deps: InitialSelectionDeps): void {
     return
   }
   deps.selectProjectOnly(newest.cwd)
-  void deps.loadProjectTasks(newest.cwd)
 }
 
 interface OverviewPollingDeps {
+  selectedProjectCwd: string | null
+  selectedSessionId: string | null
   onMetrics: (metrics: MetricsResponse) => void
   onUptime: (uptime: string) => void
   onCacheStatus: (status: Record<string, number>) => void
@@ -144,9 +136,9 @@ export function useDashboardOverviewPolling(deps: OverviewPollingDeps): void {
   const initialLoadDone = useRef(false)
   const depsRef = useRef(deps)
   depsRef.current = deps
+  const { selectedProjectCwd, selectedSessionId } = deps
 
   useEffect(() => {
-    let disposed = false
     const snapshots = {
       metrics: { current: undefined as MetricsResponse | undefined },
       watches: { current: undefined as WatchesResponse | undefined },
@@ -159,22 +151,27 @@ export function useDashboardOverviewPolling(deps: OverviewPollingDeps): void {
     const applyError = (message: string) => {
       if (snapshotChanged(message, snapshots.error)) depsRef.current.onError(message)
     }
-    async function fetchAllData() {
-      const project = getQueryParam("project")
-      const session = getQueryParam("session")
+    async function fetchAllData(signal: AbortSignal) {
+      const project = selectedProjectCwd
+      const session = selectedSessionId
       const [m, cs, w, pr, ap, ad] = await Promise.allSettled([
-        fetchJson<MetricsResponse>("/metrics"),
-        fetchJson<Record<string, number>>("/cache/status"),
-        fetchJson<WatchesResponse>("/ci-watches"),
-        postJson<{ projects: ProjectSessions[] }>("/sessions/projects", {
-          limitProjects: 10,
-          limitSessionsPerProject: 10,
-          selectedProjectCwd: project,
-          selectedSessionId: session,
-        }),
-        fetchJson<AgentProcessesResponse>("/process/agents"),
+        fetchJson<MetricsResponse>("/metrics", signal),
+        fetchJson<Record<string, number>>("/cache/status", signal),
+        fetchJson<WatchesResponse>("/ci-watches", signal),
+        postJson<{ projects: ProjectSessions[] }>(
+          "/sessions/projects",
+          {
+            limitProjects: 10,
+            limitSessionsPerProject: 10,
+            selectedProjectCwd: project,
+            selectedSessionId: session,
+          },
+          signal
+        ),
+        fetchJson<AgentProcessesResponse>("/process/agents", signal),
         fetchJson<{ active?: ActiveHookDispatch[] }>(
-          `/dispatch/active?cwd=${encodeURIComponent(project ?? "")}&sessionId=${encodeURIComponent(session ?? "")}`
+          `/dispatch/active?cwd=${encodeURIComponent(project ?? "")}&sessionId=${encodeURIComponent(session ?? "")}`,
+          signal
         ),
       ])
       return { m, cs, w, pr, ap, ad }
@@ -219,68 +216,62 @@ export function useDashboardOverviewPolling(deps: OverviewPollingDeps): void {
       }
     }
 
-    const refresh = createSingleFlight(async () => {
+    return startVisiblePolling(async (signal) => {
       try {
-        const data = await fetchAllData()
-        if (disposed) return
+        const data = await fetchAllData(signal)
+        if (signal.aborted) return
         applyUpdates(data)
       } catch (err) {
-        if (!disposed) applyError(err instanceof Error ? err.message : "Unknown fetch failure")
+        if (!signal.aborted)
+          applyError(err instanceof Error ? err.message : "Unknown fetch failure")
       }
-    })
-
-    void refresh()
-    const id = setInterval(() => void refresh(), 5000)
-    return () => {
-      disposed = true
-      clearInterval(id)
-    }
-  }, [])
+    }, 5000).stop
+  }, [selectedProjectCwd, selectedSessionId])
 }
 
 export function useProjectMetricsPolling(
   selectedProjectCwd: string | null,
+  enabled: boolean,
   setProjectEvents: (events: Array<{ name: string; count: number; avgMs: number }>) => void,
   setProjectMonitor: (metric: MetricsResponse["transcriptMonitor"] | null) => void
 ): void {
   useEffect(() => {
-    if (!selectedProjectCwd) {
+    if (!selectedProjectCwd || !enabled) {
       setProjectEvents([])
       setProjectMonitor(null)
       return
     }
     const cwd = selectedProjectCwd
-    let disposed = false
     const events = {
       current: undefined as Array<{ name: string; count: number; avgMs: number }> | undefined,
     }
     const monitor = { current: undefined as MetricsResponse["transcriptMonitor"] | null }
-    const fetchProjectMetrics = createSingleFlight(async () => {
+    return startVisiblePolling(async (signal) => {
       try {
-        const pm = await fetchJson<MetricsResponse>(`/metrics?project=${encodeURIComponent(cwd)}`)
-        if (disposed) return
+        const pm = await fetchJson<MetricsResponse>(
+          `/metrics?project=${encodeURIComponent(cwd)}`,
+          signal
+        )
+        if (signal.aborted) return
         const nextEvents = toSortedEvents(pm.byEvent)
         const nextMonitor = pm.transcriptMonitor ?? null
         if (snapshotChanged(nextEvents, events)) setProjectEvents(nextEvents)
         if (snapshotChanged(nextMonitor, monitor)) setProjectMonitor(nextMonitor)
       } catch {
-        if (disposed) return
+        if (signal.aborted) return
         if (snapshotChanged([], events)) setProjectEvents([])
         if (snapshotChanged(null, monitor)) setProjectMonitor(null)
       }
-    })
-    void fetchProjectMetrics()
-    const id = setInterval(() => void fetchProjectMetrics(), 5000)
-    return () => {
-      disposed = true
-      clearInterval(id)
-    }
-  }, [selectedProjectCwd, setProjectEvents, setProjectMonitor])
+    }, 5000).stop
+  }, [selectedProjectCwd, enabled, setProjectEvents, setProjectMonitor])
 }
 
 interface SessionPollingDeps {
   selectedProjectCwd: string | null
   selectedSessionId: string | null
+  activeView: ActiveView
+  refreshVersion: number
+  onLoading: (messages: boolean, tasks: boolean, projectTasks: boolean) => void
   onMessages: (
     messages: SessionMessage[],
     toolStats: ToolStat[],
@@ -300,18 +291,55 @@ function computeFreshMessageKeys(messages: SessionMessage[], knownKeys: Set<stri
   return fresh
 }
 
+function fetchSessionSnapshots(
+  cwd: string,
+  sessionId: string | null,
+  enabled: { messages: boolean; tasks: boolean; projectTasks: boolean },
+  signal: AbortSignal
+) {
+  return Promise.allSettled([
+    enabled.messages
+      ? postJson<{
+          messages: SessionMessage[]
+          toolStats?: ToolStat[]
+          tokenStats?: SessionTokenStats
+        }>("/sessions/messages", { cwd, sessionId, limit: SESSION_MESSAGE_LIMIT }, signal)
+      : Promise.resolve(null),
+    enabled.tasks
+      ? postJson<{ tasks: SessionTask[]; summary?: SessionTaskSummary }>(
+          "/sessions/tasks",
+          { cwd, sessionId, limit: 20 },
+          signal
+        )
+      : Promise.resolve(null),
+    enabled.projectTasks
+      ? postJson<{ tasks: ProjectTask[]; summary?: SessionTaskSummary }>(
+          "/projects/tasks",
+          { cwd, limit: 80 },
+          signal
+        )
+      : Promise.resolve(null),
+  ])
+}
+
 export function useSessionPolling(deps: SessionPollingDeps): void {
   const depsRef = useRef(deps)
   depsRef.current = deps
   const selectedProjectCwd = deps.selectedProjectCwd
   const selectedSessionId = deps.selectedSessionId
+  const { activeView, refreshVersion } = deps
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: explicit refresh of the same selection restarts its cancellable flight.
   useEffect(() => {
-    if (!selectedProjectCwd || !selectedSessionId) return
+    const pollMessages =
+      !!selectedSessionId && (activeView === "dashboard" || activeView === "transcript")
+    const pollProjectTasks = activeView === "dashboard" || activeView === "tasks"
+    const pollTasks = !!selectedSessionId && pollProjectTasks
+    if (!selectedProjectCwd || (!pollMessages && !pollProjectTasks)) return
     const cwd = selectedProjectCwd
     const sid = selectedSessionId
 
-    let disposed = false
+    let initialLoad = true
     let knownKeys = new Set<string>()
     let clearFreshKeys: ReturnType<typeof setTimeout> | undefined
     const messagesSnapshot = { current: undefined as SessionMessage[] | undefined }
@@ -332,7 +360,7 @@ export function useSessionPolling(deps: SessionPollingDeps): void {
       if (fresh.size > 0) {
         if (clearFreshKeys) clearTimeout(clearFreshKeys)
         clearFreshKeys = setTimeout(() => {
-          if (!disposed) depsRef.current.onNewMessageKeys(new Set())
+          depsRef.current.onNewMessageKeys(new Set())
         }, 500)
       }
     }
@@ -359,44 +387,35 @@ export function useSessionPolling(deps: SessionPollingDeps): void {
       }
     }
 
-    const pollSessionData = createSingleFlight(async () => {
+    const polling = startVisiblePolling(async (signal) => {
+      if (initialLoad) depsRef.current.onLoading(pollMessages, pollTasks, pollProjectTasks)
       try {
-        const [messagesResult, tasksResult, projectTasksResult] = await Promise.allSettled([
-          postJson<{
-            messages: SessionMessage[]
-            toolStats?: ToolStat[]
-            tokenStats?: SessionTokenStats
-          }>("/sessions/messages", {
-            cwd,
-            sessionId: sid,
-            limit: SESSION_MESSAGE_LIMIT,
-          }),
-          postJson<{ tasks: SessionTask[]; summary?: SessionTaskSummary }>("/sessions/tasks", {
-            cwd,
-            sessionId: sid,
-            limit: 20,
-          }),
-          postJson<{ tasks: ProjectTask[]; summary?: SessionTaskSummary }>("/projects/tasks", {
-            cwd,
-            limit: 80,
-          }),
-        ])
+        const [messagesResult, tasksResult, projectTasksResult] = await fetchSessionSnapshots(
+          cwd,
+          sid,
+          { messages: pollMessages, tasks: pollTasks, projectTasks: pollProjectTasks },
+          signal
+        )
 
-        if (disposed) return
+        if (signal.aborted) return
 
-        applyFulfilled(messagesResult, applyMessages)
+        applyFulfilled(messagesResult, (value) => {
+          if (value) applyMessages(value)
+        })
 
         // Messages have been snapshot-guarded for a while; tasks were not, so every 2s
         // tick handed React new array identities for unchanged content and churned the
         // root state the whole dashboard hangs off (#856).
         const currentDeps = depsRef.current
         applyFulfilled(tasksResult, (value) => {
+          if (!value) return
           const tasks = value.tasks ?? []
           const summary = value.summary ?? null
           if (!snapshotChanged([tasks, summary], tasksSnapshot)) return
           currentDeps.onTasks(tasks, summary)
         })
         applyFulfilled(projectTasksResult, (value) => {
+          if (!value) return
           const tasks = value.tasks ?? []
           const summary = value.summary ?? null
           if (!snapshotChanged([tasks, summary], projectTasksSnapshot)) return
@@ -404,15 +423,17 @@ export function useSessionPolling(deps: SessionPollingDeps): void {
         })
       } catch {
         // ignore polling errors
+      } finally {
+        if (initialLoad && !signal.aborted) {
+          initialLoad = false
+          depsRef.current.onLoading(false, false, false)
+        }
       }
-    })
-
-    void pollSessionData()
-    const id = setInterval(() => void pollSessionData(), 2000)
+    }, 2000)
     return () => {
-      disposed = true
-      clearInterval(id)
+      polling.stop()
       if (clearFreshKeys) clearTimeout(clearFreshKeys)
+      depsRef.current.onLoading(false, false, false)
     }
-  }, [selectedProjectCwd, selectedSessionId])
+  }, [selectedProjectCwd, selectedSessionId, activeView, refreshVersion])
 }

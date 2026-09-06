@@ -1,6 +1,7 @@
 import type { CSSProperties, ReactElement } from "react"
 import { useEffect, useState } from "react"
 import { postJson } from "../lib/http.ts"
+import { startVisiblePolling } from "../lib/polling.ts"
 
 interface ProjectIssueLabel {
   name: string
@@ -266,35 +267,35 @@ function useProjectIssues(cwd: string | null) {
       return
     }
 
-    let disposed = false
+    let initialLoad = true
     setRepo(null)
     setIssues([])
     setError("")
 
-    const loadIssues = async (isInitialLoad: boolean) => {
-      if (isInitialLoad) setLoading(true)
+    return startVisiblePolling(async (signal) => {
+      if (initialLoad) setLoading(true)
       try {
-        const result = await postJson<ProjectIssuesResponse>("/projects/issues", { cwd, limit: 10 })
-        if (disposed) return
+        const result = await postJson<ProjectIssuesResponse>(
+          "/projects/issues",
+          { cwd, limit: 10 },
+          signal
+        )
+        if (signal.aborted) return
         setRepo(result.repo)
         setIssues(result.issues ?? [])
         setError("")
       } catch (loadError) {
-        if (disposed) return
+        if (signal.aborted) return
         setError(loadError instanceof Error ? loadError.message : String(loadError))
         setRepo(null)
         setIssues([])
       } finally {
-        if (!disposed) setLoading(false)
+        if (!signal.aborted) {
+          initialLoad = false
+          setLoading(false)
+        }
       }
-    }
-
-    void loadIssues(true)
-    const intervalId = window.setInterval(() => void loadIssues(false), 5000)
-    return () => {
-      disposed = true
-      window.clearInterval(intervalId)
-    }
+    }, 5000).stop
   }, [cwd])
 
   return { repo, issues, loading, error }

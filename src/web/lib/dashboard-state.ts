@@ -19,7 +19,6 @@ import {
   type ActiveHookDispatch,
   applyInitialSelection,
   type MetricsResponse,
-  SESSION_MESSAGE_LIMIT,
   type SessionTokenStats,
   useDashboardOverviewPolling,
   useProjectMetricsPolling,
@@ -151,9 +150,8 @@ function cacheSummary(status: Record<string, number> | null): { total: number; w
 }
 
 function useSessionDataLoaders() {
-  const messageRequest = useRef(0)
-  const taskRequest = useRef(0)
-  const projectTaskRequest = useRef(0)
+  const [refreshVersion, setRefreshVersion] = useState(0)
+  const refresh = useCallback(() => setRefreshVersion((version) => version + 1), [])
   const [sessionMessages, setSessionMessages] = useState<SessionMessage[]>([])
   const [sessionToolStats, setSessionToolStats] = useState<ToolStat[]>([])
   const [sessionTokenStats, setSessionTokenStats] = useState<SessionTokenStats | null>(null)
@@ -166,71 +164,26 @@ function useSessionDataLoaders() {
   const [newMessageKeys, setNewMessageKeys] = useState<Set<string>>(new Set())
   const [messagesLoading, setMessagesLoading] = useState(false)
 
-  const loadMessages = useCallback(async (cwd: string, sessionId: string) => {
-    const request = ++messageRequest.current
-    setMessagesLoading(true)
-    try {
-      const result = await postJson<{
-        messages: SessionMessage[]
-        toolStats?: ToolStat[]
-        tokenStats?: SessionTokenStats
-      }>("/sessions/messages", { cwd, sessionId, limit: SESSION_MESSAGE_LIMIT })
-      if (request !== messageRequest.current) return
-      setNewMessageKeys(new Set())
-      setSessionMessages(result.messages ?? [])
-      setSessionToolStats(result.toolStats ?? [])
-      setSessionTokenStats(result.tokenStats ?? null)
-    } finally {
-      if (request === messageRequest.current) setMessagesLoading(false)
-    }
-  }, [])
-
-  const loadTasks = useCallback(async (cwd: string, sessionId: string) => {
-    const request = ++taskRequest.current
-    setSessionTasksLoading(true)
-    try {
-      const result = await postJson<{
-        tasks: SessionTask[]
-        summary?: SessionTaskSummary
-      }>("/sessions/tasks", { cwd, sessionId, limit: 20 })
-      if (request !== taskRequest.current) return
-      setSessionTasks(result.tasks ?? [])
-      setSessionTaskSummary(result.summary ?? null)
-    } finally {
-      if (request === taskRequest.current) setSessionTasksLoading(false)
-    }
-  }, [])
-
-  const loadProjectTasks = useCallback(async (cwd: string) => {
-    const request = ++projectTaskRequest.current
-    setProjectTasksLoading(true)
-    try {
-      const result = await postJson<{
-        tasks: ProjectTask[]
-        summary?: SessionTaskSummary
-      }>("/projects/tasks", { cwd, limit: 80 })
-      if (request !== projectTaskRequest.current) return
-      setProjectTasks(result.tasks ?? [])
-      setProjectTaskSummary(result.summary ?? null)
-    } finally {
-      if (request === projectTaskRequest.current) setProjectTasksLoading(false)
-    }
-  }, [])
-
   const clearSession = useCallback(() => {
-    messageRequest.current++
-    taskRequest.current++
     setSessionMessages([])
     setSessionToolStats([])
     setSessionTokenStats(null)
     setNewMessageKeys(new Set())
     setSessionTasks([])
     setSessionTaskSummary(null)
+    setProjectTasks([])
+    setProjectTaskSummary(null)
     setMessagesLoading(false)
     setSessionTasksLoading(false)
+    setProjectTasksLoading(false)
   }, [])
 
   return {
+    refreshVersion,
+    refresh,
+    setMessagesLoading,
+    setSessionTasksLoading,
+    setProjectTasksLoading,
     sessionMessages,
     setSessionMessages,
     sessionToolStats,
@@ -250,9 +203,6 @@ function useSessionDataLoaders() {
     newMessageKeys,
     setNewMessageKeys,
     messagesLoading,
-    loadMessages,
-    loadTasks,
-    loadProjectTasks,
     clearSession,
   }
 }
@@ -292,6 +242,8 @@ function useSelectionActions(input: DashboardActionsInput) {
   const {
     loaders,
     optimisticProjects,
+    selectedProjectCwd,
+    selectedSessionId,
     setSelectedProjectCwd,
     setSelectedSessionId,
     startSelectionTransition,
@@ -302,22 +254,20 @@ function useSelectionActions(input: DashboardActionsInput) {
   const handleSelectSession = useCallback(
     (cwd: string, sessionId: string) => {
       startSelectionTransition(() => {
+        if (cwd !== selectedProjectCwd || sessionId !== selectedSessionId) loaders.clearSession()
         setSelectedProjectCwd(cwd)
         setSelectedSessionId(sessionId)
         setQueryParams({ project: cwd, session: sessionId })
         addOptimisticProjectCwd(cwd)
         addOptimisticSessionId(sessionId)
-        void Promise.all([
-          loaders.loadMessages(cwd, sessionId),
-          loaders.loadTasks(cwd, sessionId),
-          loaders.loadProjectTasks(cwd),
-        ]).catch(() => {})
+        loaders.refresh()
       })
     },
     [
-      loaders.loadMessages,
-      loaders.loadTasks,
-      loaders.loadProjectTasks,
+      loaders.clearSession,
+      loaders.refresh,
+      selectedProjectCwd,
+      selectedSessionId,
       addOptimisticProjectCwd,
       addOptimisticSessionId,
       setSelectedProjectCwd,
@@ -331,35 +281,16 @@ function useSelectionActions(input: DashboardActionsInput) {
       const project = optimisticProjects.find((p) => p.cwd === cwd)
       const firstSession = project?.sessions[0]
       if (firstSession) {
-        setSelectedProjectCwd(cwd)
-        setSelectedSessionId(firstSession.id)
-        setQueryParams({ project: cwd, session: firstSession.id })
-        startSelectionTransition(() => {
-          addOptimisticProjectCwd(cwd)
-          addOptimisticSessionId(firstSession.id)
-          void Promise.all([
-            loaders.loadMessages(cwd, firstSession.id),
-            loaders.loadTasks(cwd, firstSession.id),
-            loaders.loadProjectTasks(cwd),
-          ]).catch(() => {})
-        })
+        handleSelectSession(cwd, firstSession.id)
       } else {
         setSelectedProjectCwd(cwd)
         setSelectedSessionId(null)
         loaders.clearSession()
-        void loaders.loadProjectTasks(cwd)
+        loaders.refresh()
         setQueryParams({ project: cwd, session: null })
       }
     },
-    [
-      optimisticProjects,
-      loaders,
-      addOptimisticProjectCwd,
-      addOptimisticSessionId,
-      setSelectedProjectCwd,
-      setSelectedSessionId,
-      startSelectionTransition,
-    ]
+    [optimisticProjects, loaders, handleSelectSession, setSelectedProjectCwd, setSelectedSessionId]
   )
 
   return { handleSelectSession, handleSelectProject }
@@ -634,6 +565,39 @@ function useDerivedDashboardState(input: DerivedStateInput) {
   }
 }
 
+function useSelectedSessionPolling(
+  activeView: ActiveView,
+  selectedProjectCwd: string | null,
+  selectedSessionId: string | null,
+  loaders: ReturnType<typeof useSessionDataLoaders>
+): void {
+  useSessionPolling({
+    selectedProjectCwd,
+    selectedSessionId,
+    activeView,
+    refreshVersion: loaders.refreshVersion,
+    onLoading: (messages, tasks, projectTasks) => {
+      loaders.setMessagesLoading(messages)
+      loaders.setSessionTasksLoading(tasks)
+      loaders.setProjectTasksLoading(projectTasks)
+    },
+    onMessages: (messages, toolStats, tokenStats) => {
+      loaders.setSessionMessages(messages)
+      loaders.setSessionToolStats(toolStats)
+      loaders.setSessionTokenStats(tokenStats ?? null)
+    },
+    onTasks: (tasks, summary) => {
+      loaders.setSessionTasks(tasks)
+      loaders.setSessionTaskSummary(summary)
+    },
+    onProjectTasks: (tasks, summary) => {
+      loaders.setProjectTasks(tasks)
+      loaders.setProjectTaskSummary(summary)
+    },
+    onNewMessageKeys: loaders.setNewMessageKeys,
+  })
+}
+
 export type DashboardState = ReturnType<typeof useDashboardState>
 
 // Return type is `DashboardState` (alias above); an explicit annotation would be circular with `ReturnType`.
@@ -674,6 +638,8 @@ export function useDashboardState() {
   })
 
   useDashboardOverviewPolling({
+    selectedProjectCwd: os.selectedProjectCwd,
+    selectedSessionId: os.selectedSessionId,
     onMetrics: setMetrics,
     onUptime: clock.setUptime,
     onCacheStatus,
@@ -686,32 +652,22 @@ export function useDashboardState() {
     onInitialLoad: (loaded) =>
       applyInitialSelection({
         projects: loaded,
-        selectSession: actions.handleSelectSession,
-        selectProjectOnly: os.setSelectedProjectCwd,
-        loadProjectTasks: loaders.loadProjectTasks,
+        selectSession: (cwd, sid) => {
+          if (cwd !== os.selectedProjectCwd || sid !== os.selectedSessionId)
+            actions.handleSelectSession(cwd, sid)
+        },
+        selectProjectOnly: actions.handleSelectProject,
       }),
   })
 
-  useProjectMetricsPolling(os.selectedProjectCwd, setProjectEvents, setProjectMonitor)
+  useProjectMetricsPolling(
+    os.selectedProjectCwd,
+    activeView === "dashboard" || activeView === "transcript",
+    setProjectEvents,
+    setProjectMonitor
+  )
 
-  useSessionPolling({
-    selectedProjectCwd: os.selectedProjectCwd,
-    selectedSessionId: os.selectedSessionId,
-    onMessages: (messages, toolStats, tokenStats) => {
-      loaders.setSessionMessages(messages)
-      loaders.setSessionToolStats(toolStats)
-      loaders.setSessionTokenStats(tokenStats ?? null)
-    },
-    onTasks: (tasks, summary) => {
-      loaders.setSessionTasks(tasks)
-      loaders.setSessionTaskSummary(summary)
-    },
-    onProjectTasks: (tasks, summary) => {
-      loaders.setProjectTasks(tasks)
-      loaders.setProjectTaskSummary(summary)
-    },
-    onNewMessageKeys: loaders.setNewMessageKeys,
-  })
+  useSelectedSessionPolling(activeView, os.selectedProjectCwd, os.selectedSessionId, loaders)
 
   const derived = useDerivedDashboardState({
     optimisticProjects: os.optimisticProjects,

@@ -14,8 +14,19 @@ class JsonRequestError extends Error {
   }
 }
 
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms))
+function delay(ms: number, signal?: AbortSignal | null): Promise<void> {
+  signal?.throwIfAborted()
+  return new Promise((resolve, reject) => {
+    const abort = () => {
+      clearTimeout(timer)
+      reject(signal?.reason)
+    }
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", abort)
+      resolve()
+    }, ms)
+    signal?.addEventListener("abort", abort, { once: true })
+  })
 }
 
 function retryDelayMs(attempt: number): number {
@@ -73,18 +84,26 @@ async function parseJsonResponse<T>(response: Response, url: string): Promise<T>
   }
 }
 
+async function requestAttempt<T>(url: string, init?: RequestInit): Promise<T> {
+  init?.signal?.throwIfAborted()
+  const response = await fetch(url, {
+    ...init,
+    signal: init?.signal
+      ? AbortSignal.any([init.signal, AbortSignal.timeout(REQUEST_TIMEOUT_MS)])
+      : AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+  })
+  const data = await parseJsonResponse<T>(response, url)
+  init?.signal?.throwIfAborted()
+  return data
+}
+
 async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
   let lastError: unknown = null
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt += 1) {
     try {
-      const response = await fetch(url, {
-        ...init,
-        signal: init?.signal
-          ? AbortSignal.any([init.signal, AbortSignal.timeout(REQUEST_TIMEOUT_MS)])
-          : AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-      })
-      return await parseJsonResponse<T>(response, url)
+      return await requestAttempt<T>(url, init)
     } catch (error) {
+      init?.signal?.throwIfAborted()
       lastError = error
       const isRetryable =
         error instanceof JsonRequestError ? error.retryable : error instanceof Error
@@ -92,20 +111,25 @@ async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
       if (isLastAttempt || !isRetryable) {
         throw error
       }
-      await delay(retryDelayMs(attempt))
+      await delay(retryDelayMs(attempt), init?.signal)
     }
   }
   throw lastError instanceof Error ? lastError : new Error(String(lastError))
 }
 
-export async function fetchJson<T>(url: string): Promise<T> {
-  return requestJson<T>(url)
+export async function fetchJson<T>(url: string, signal?: AbortSignal): Promise<T> {
+  return requestJson<T>(url, { signal })
 }
 
-export async function postJson<T>(url: string, body: Record<string, any>): Promise<T> {
+export async function postJson<T>(
+  url: string,
+  body: Record<string, any>,
+  signal?: AbortSignal
+): Promise<T> {
   return requestJson<T>(url, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body),
+    signal,
   })
 }
