@@ -74,6 +74,10 @@ export function handleMetricsRoute(url: URL, ctx: MetricsRoutesContext): Respons
     caches: cacheMetrics,
     hookLogs: getHookLogMetrics(),
     workerPool: getWorkerPoolMetrics(),
+    // Mirrored from /cache/status. Watcher registration is the only evidence that a project's
+    // git state is actually being observed, and looking for it in /metrics — the obvious place —
+    // and finding nothing reads as "not watching" rather than "wrong endpoint" (#807).
+    watchers: ctx.watchers.status(),
   })
 }
 

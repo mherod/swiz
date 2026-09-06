@@ -160,6 +160,15 @@ describe("metrics routes", () => {
     })
   })
 
+  test("exposes watcher registration in the metrics payload", async () => {
+    // Watcher entries are the only evidence a project's git state is actually observed. They
+    // were reachable solely via /cache/status, so checking /metrics and finding nothing looked
+    // like "not watching" rather than "wrong endpoint" (#807).
+    const body = await routes.handleMetricsRoute(new URL("http://daemon/metrics"), createContext())
+
+    expect(await body.json()).toMatchObject({ watchers: { active: 2 } })
+  })
+
   test("clamps hook-log limits and reverses entries for newest-first output", async () => {
     const low = await routes.handleHookLogs(new URL("http://daemon/hook-logs?limit=0"))
     const high = await routes.handleHookLogs(new URL("http://daemon/hook-logs?limit=999"))
