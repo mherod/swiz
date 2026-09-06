@@ -173,7 +173,8 @@ export function buildSessionRoutesContext(ctx: DaemonWebServerContext): SessionR
       const tasks = await ctx.taskStateCache.getTasks(sessionId, sessionDir)
       return buildSessionTasksView(tasks, limit)
     },
-    getProjectTasks,
+    getProjectTasks: (cwd: string, limit: number) =>
+      getProjectTasks(cwd, limit, ctx.taskStateCache),
     getAgentProcessSnapshot: () => getCachedAgentProcesses(),
   }
 }

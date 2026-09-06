@@ -139,3 +139,154 @@ describe("sessionDataCache", () => {
     }
   })
 })
+
+// ─── getProjectTasks cache tests ────────────────────────────────────────────
+
+import { writeFile } from "node:fs/promises"
+import type { SessionTask } from "../../tasks/task-recovery.ts"
+import { TaskStateCache } from "../../tasks/task-state-cache.ts"
+import { makeSessionTask, useTempDir } from "../../utils/test-utils.ts"
+import { getProjectTasks } from "./session-data.ts"
+
+const tmp = useTempDir("swiz-get-project-tasks-")
+const makeTask = makeSessionTask
+
+async function createProjectSession(
+  tasksDir: string,
+  sessionId: string,
+  cwd: string,
+  tasks: SessionTask[]
+): Promise<string> {
+  const sessionDir = join(tasksDir, sessionId)
+  await mkdir(sessionDir, { recursive: true })
+  // Write .session-meta.json so getSessions(cwd) matches this session by cwd
+  const incomplete = tasks.filter((t) => t.status !== "completed" && t.status !== "cancelled")
+  await writeFile(
+    join(sessionDir, ".session-meta.json"),
+    JSON.stringify({
+      openCount: incomplete.length,
+      updatedAt: new Date().toISOString(),
+      cwd,
+    })
+  )
+  for (const task of tasks) {
+    await writeFile(join(sessionDir, `${task.id}.json`), JSON.stringify(task))
+  }
+  return sessionDir
+}
+
+describe("getProjectTasks", () => {
+  test("returns correct tasks without a cache (backward-compatible)", async () => {
+    const base = await tmp.create()
+    const tasksDir = join(base, "tasks")
+    const cwd = join(base, "project")
+    const sessionId = "test-proj-task-session-001"
+
+    await createProjectSession(tasksDir, sessionId, cwd, [
+      makeTask("1", "in_progress", "Alpha task"),
+      makeTask("2", "pending", "Beta task"),
+    ])
+
+    const { tasks, summary } = await getProjectTasks(cwd, 100, undefined, tasksDir, base)
+    expect(tasks.some((t) => t.subject === "Alpha task")).toBe(true)
+    expect(tasks.some((t) => t.subject === "Beta task")).toBe(true)
+    expect(summary.open).toBe(2)
+  })
+
+  test("repeated polls reuse cached snapshot — no new disk reads for unchanged sessions", async () => {
+    const base = await tmp.create()
+    const tasksDir = join(base, "tasks")
+    const cwd = join(base, "project")
+    const sessionId = "test-proj-task-session-002"
+    const sessionDir = join(tasksDir, sessionId)
+
+    await createProjectSession(tasksDir, sessionId, cwd, [
+      makeTask("1", "in_progress", "Cached task"),
+    ])
+
+    const cache = new TaskStateCache({ maxEntries: 20 })
+    try {
+      // First poll — cold load
+      const first = await getProjectTasks(cwd, 100, cache, tasksDir, base)
+      expect(first.tasks.some((t) => t.subject === "Cached task")).toBe(true)
+      expect(cache.trackedCount).toBeGreaterThanOrEqual(1)
+
+      const state1 = await cache.getState(sessionId, sessionDir)
+
+      // Second poll — unchanged session: cache snapshot must be reused (no disk reload)
+      const second = await getProjectTasks(cwd, 100, cache, tasksDir, base)
+      expect(second.tasks.some((t) => t.subject === "Cached task")).toBe(true)
+
+      const state2 = await cache.getState(sessionId, sessionDir)
+      expect(state1).toBe(state2)
+      expect(state1.syncedAtMs).toBe(state2.syncedAtMs)
+    } finally {
+      cache.close()
+    }
+  })
+
+  test("invalidation causes re-read on next poll", async () => {
+    const base = await tmp.create()
+    const tasksDir = join(base, "tasks")
+    const cwd = join(base, "project")
+    const sessionId = "test-proj-task-session-003"
+    const sessionDir = join(tasksDir, sessionId)
+
+    await createProjectSession(tasksDir, sessionId, cwd, [
+      makeTask("1", "in_progress", "Original task"),
+    ])
+
+    const cache = new TaskStateCache({ maxEntries: 20 })
+    try {
+      // Cold load
+      const first = await getProjectTasks(cwd, 100, cache, tasksDir, base)
+      expect(first.tasks).toHaveLength(1)
+
+      const stateBefore = await cache.getState(sessionId, sessionDir)
+
+      // Write a new task and invalidate
+      await writeFile(
+        join(tasksDir, sessionId, "2.json"),
+        JSON.stringify(makeTask("2", "pending", "Added after invalidation"))
+      )
+      cache.invalidate(sessionId)
+
+      // Next poll should reload from disk
+      const second = await getProjectTasks(cwd, 100, cache, tasksDir, base)
+      expect(second.tasks.some((t) => t.subject === "Added after invalidation")).toBe(true)
+      expect(second.tasks).toHaveLength(2)
+
+      const stateAfter = await cache.getState(sessionId, sessionDir)
+      expect(stateAfter).not.toBe(stateBefore)
+    } finally {
+      cache.close()
+    }
+  })
+
+  test("project isolation — different cwds never share cached snapshots", async () => {
+    const base = await tmp.create()
+    const tasksDir = join(base, "tasks")
+    const cwdAlpha = join(base, "project-alpha")
+    const cwdBeta = join(base, "project-beta")
+
+    await createProjectSession(tasksDir, "test-proj-task-session-004", cwdAlpha, [
+      makeTask("1", "in_progress", "Alpha task"),
+    ])
+    await createProjectSession(tasksDir, "test-proj-task-session-005", cwdBeta, [
+      makeTask("1", "completed", "Beta task"),
+    ])
+
+    const cache = new TaskStateCache({ maxEntries: 20 })
+    try {
+      const alpha = await getProjectTasks(cwdAlpha, 100, cache, tasksDir, base)
+      const beta = await getProjectTasks(cwdBeta, 100, cache, tasksDir, base)
+
+      expect(alpha.tasks.every((t) => t.subject === "Alpha task")).toBe(true)
+      expect(beta.tasks.every((t) => t.subject === "Beta task")).toBe(true)
+      expect(alpha.tasks.some((t) => t.subject === "Beta task")).toBe(false)
+      expect(beta.tasks.some((t) => t.subject === "Alpha task")).toBe(false)
+    } finally {
+      cache.close()
+    }
+  })
+})

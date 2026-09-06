@@ -7,7 +7,7 @@ import { MockGitClient } from "../git/mock-client.ts"
 import { projectKeyFromCwd } from "../project-key.ts"
 import { DEFAULT_SETTINGS } from "../settings/persistence.ts"
 import type { EffectiveSwizSettings, SwizSettings } from "../settings/types.ts"
-import { getSessionTasksDir } from "../tasks/task-recovery.ts"
+import { getSessionTasksDir, type SessionTask } from "../tasks/task-recovery.ts"
 import type { Command } from "../types.ts"
 import { extractPreToolSurfaceDecision, getHookSpecificOutput } from "./hook-specific-output.ts"
 
@@ -828,5 +828,19 @@ export function releaseEnvLockFn(): void {
     const release = releaseEnvLock
     releaseEnvLock = null
     release()
+  }
+}
+
+/** Construct a test SessionTask fixture with optional subject and status. */
+export function makeSessionTask(id: string, status: string, subject?: string): SessionTask {
+  return {
+    id,
+    subject: subject ?? `Task ${id}`,
+    status,
+    description: `Task ${id} description`,
+    statusChangedAt: new Date().toISOString(),
+    elapsedMs: 0,
+    startedAt: status === "in_progress" ? Date.now() : null,
+    completedAt: status === "completed" ? Date.now() : null,
   }
 }

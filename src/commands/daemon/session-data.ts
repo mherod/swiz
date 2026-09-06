@@ -1,6 +1,9 @@
+import { join } from "node:path"
 import { LRUCache } from "lru-cache"
+import { findTaskStoreForSession } from "../../task-roots.ts"
 import { readTasks } from "../../tasks/task-repository.ts"
 import { getSessions } from "../../tasks/task-resolver.ts"
+import type { TaskStateCache } from "../../tasks/task-state-cache.ts"
 import {
   findAllProviderSessions,
   isHookFeedback,
@@ -646,16 +649,39 @@ const TASK_READ_CONCURRENCY = 8
 
 export async function getProjectTasks(
   cwd: string,
-  limit = 100
+  limit = 100,
+  taskStateCache?: TaskStateCache,
+  /**
+   * Override the task store root for tests. When provided, overrides both the
+   * `getSessions` lookup directory and the per-session `tasksDir` derivation so
+   * tests can operate fully inside a temp directory without touching the real store.
+   */
+  tasksDir?: string,
+  /** Override the projects directory for tests (passed through to getSessions). */
+  projectsDir?: string
 ): Promise<{ tasks: ProjectTaskPreview[]; summary: SessionTaskSummary }> {
-  const sessions = await getSessions(cwd)
+  const sessions = await getSessions(cwd, tasksDir, projectsDir)
 
   // Read tasks in bounded-concurrency batches, preserving session order.
   const allTasks: ProjectTaskPreview[] = []
   for (let i = 0; i < sessions.length; i += TASK_READ_CONCURRENCY) {
     const batch = sessions.slice(i, i + TASK_READ_CONCURRENCY)
     const results = await Promise.all(
-      batch.map((sid) => readTasks(sid).then((tasks) => ({ sid, tasks })))
+      batch.map(async (sid) => {
+        let tasks: import("../../tasks/task-recovery.ts").SessionTask[]
+        if (taskStateCache) {
+          // Use the watcher-backed cache so repeated polls for unchanged sessions
+          // perform no per-task file reads (fixes #852: O(n*sessions) reads per poll).
+          const effectiveTasksDir = tasksDir ?? findTaskStoreForSession(sid).tasksDir
+          const sessionDir = join(effectiveTasksDir, sid)
+          // Register a watcher so the cache stays invalidation-aware for this session.
+          taskStateCache.watchSession(sid, sessionDir)
+          tasks = await taskStateCache.getTasks(sid, sessionDir)
+        } else {
+          tasks = await readTasks(sid, tasksDir)
+        }
+        return { sid, tasks }
+      })
     )
     for (const { sid, tasks } of results) {
       for (const task of tasks) {
