@@ -6,7 +6,7 @@
   "strictNoDirectMain": false,
   "ambitionMode": "aggressive",
   "trunkMode": true,
-  "autoContinue": true,
+  "autoContinue": false,
   "defaultBranch": "main",
   "pushGate": false,
   "hooks": [
