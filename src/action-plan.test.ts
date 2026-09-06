@@ -1,9 +1,9 @@
-import { mkdir, mkdtemp } from "node:fs/promises"
-import { tmpdir } from "node:os"
+import { mkdir } from "node:fs/promises"
 import { join } from "node:path"
 import { describe, expect, it } from "vitest"
 import { formatActionPlan, mergeActionPlanIntoTasks } from "./action-plan.ts"
 import { getAgent } from "./agents.ts"
+import { acquireEnvLock, releaseEnvLockFn, useTempDir } from "./utils/test-utils.ts"
 
 describe("formatActionPlan", () => {
   it("omits unavailable task readers for Codex without update_plan", () => {
@@ -49,12 +49,13 @@ describe("formatActionPlan", () => {
 
 describe("mergeActionPlanIntoTasks settings tiers", () => {
   const steps = ["Add the missing guard to the upload handler"]
+  const tempDirs = useTempDir("swiz-action-plan-tiers-")
 
   async function mergeWithTiers(options: {
     globalMerge: boolean
     projectMerge?: boolean
   }): Promise<number> {
-    const root = await mkdtemp(join(tmpdir(), "swiz-action-plan-tiers-"))
+    const root = await tempDirs.create()
     const home = join(root, "home")
     const project = join(root, "project")
     await mkdir(join(home, ".swiz"), { recursive: true })
@@ -72,6 +73,7 @@ describe("mergeActionPlanIntoTasks settings tiers", () => {
 
     // Fresh temp paths per call, so the settings and project caches cannot serve a
     // previous scenario's value.
+    await acquireEnvLock()
     const previousHome = process.env.HOME
     process.env.HOME = home
     try {
@@ -79,6 +81,7 @@ describe("mergeActionPlanIntoTasks settings tiers", () => {
     } finally {
       if (previousHome === undefined) delete process.env.HOME
       else process.env.HOME = previousHome
+      releaseEnvLockFn()
     }
   }
 

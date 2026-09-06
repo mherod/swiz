@@ -471,7 +471,7 @@ export function summarizeCiJobs(jobs: GhRunJob[]): string {
 
 export const ciWaitCommand: Command = {
   name: "ci-wait",
-  description: "Wait for authoritative CI without treating shared-directory edits as failures",
+  description: "Wait for authoritative CI (exit 3 when ignore-ci skips verification)",
   usage: "swiz ci-wait <commit-sha> [--cwd <dir>] [--timeout <seconds>]",
   options: [
     { flags: "--cwd <dir>", description: "Repository containing the commit (default: cwd)" },
@@ -486,7 +486,12 @@ export const ciWaitCommand: Command = {
     ])
     const effective = getEffectiveSwizSettings(globalSettings, undefined, projectSettings)
     if (effective.ignoreCi) {
-      stderrLog("ignore-ci", "ignore-ci is enabled — skipping CI wait.")
+      stderrLog(
+        "ignore-ci",
+        "ignore-ci is enabled — CI was not checked (exit 3). " +
+          "Verify with gh run view <run-id> --json conclusion,status,jobs."
+      )
+      process.exitCode = 3
       return
     }
 

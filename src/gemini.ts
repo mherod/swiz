@@ -1,4 +1,4 @@
-// Utility for invoking the Gemini API via the AI SDK (ai-sdk-provider-gemini-cli).
+// Utility for invoking Gemini through the AI SDK.
 // Supports API key authentication from GEMINI_API_KEY env var.
 //
 // promptGemini(prompt, options)           — plain text generation.
@@ -57,14 +57,14 @@ export interface PromptGeminiStreamOptions extends PromptGeminiOptions {
 }
 
 async function createProvider() {
-  const { createGeminiProvider } = await import("ai-sdk-provider-gemini-cli")
   if (process.env.GEMINI_API_KEY) {
-    return createGeminiProvider({
-      authType: "api-key",
+    const { createGoogleGenerativeAI } = await import("@ai-sdk/google")
+    return createGoogleGenerativeAI({
       apiKey: process.env.GEMINI_API_KEY,
     })
   }
-  // Fall back to OAuth (cached ~/.gemini/ credentials from the gemini CLI)
+  // Load the CLI dependency tree only for cached OAuth credentials.
+  const { createGeminiProvider } = await import("ai-sdk-provider-gemini-cli")
   return createGeminiProvider({ authType: "oauth-personal" })
 }
 

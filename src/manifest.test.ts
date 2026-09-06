@@ -92,19 +92,28 @@ describe("manifest.ts", () => {
   })
 
   describe("preToolUse event hooks", () => {
-    it("preToolUse hooks have matchers for tool filtering (fire-and-forget-async-only groups exempt)", () => {
-      const preToolUseGroups = manifest.filter((g) => g.event === "preToolUse")
+    it.each([
+      true,
+      false,
+    ])("preToolUse groups filter tools unless every hook handles all tools (tasksEnabled=%s)", (tasksEnabled) => {
+      const preToolUseGroups = buildManifestForAgent({ tasksEnabled }).filter(
+        (g) => g.event === "preToolUse"
+      )
       expect(preToolUseGroups.length).toBeGreaterThan(0)
 
       preToolUseGroups.forEach((group) => {
-        const allFireAndForgetAsync =
-          group.hooks.length > 0 && group.hooks.every((h) => isAsyncFireAndForgetHook(h))
-        if (allFireAndForgetAsync) return
-        // The merged task governance hook handles all tool types internally
-        const hasMergedGovernance = group.hooks.some(
-          (h) => hookIdentifier(h) === "pretooluse-task-governance.ts"
-        )
-        if (hasMergedGovernance) return
+        // These hooks intentionally run for every tool. Check every entry so
+        // adding a tool-specific blocker to their group still fails this test.
+        const allToolHooks = new Set([
+          "pretooluse-active-skills.ts",
+          "pretooluse-task-governance.ts",
+        ])
+        const allHandleEveryTool =
+          group.hooks.length > 0 &&
+          group.hooks.every(
+            (h) => isAsyncFireAndForgetHook(h) || allToolHooks.has(hookIdentifier(h))
+          )
+        if (allHandleEveryTool) return
         expect(group.matcher).toBeDefined()
         expect(typeof group.matcher).toBe("string")
       })

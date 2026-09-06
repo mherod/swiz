@@ -246,6 +246,7 @@ describe("dispatch execute integration", () => {
       const { getSwizSettingsPath, invalidateSettingsCache, readSwizSettings, writeSwizSettings } =
         await import("../settings.ts")
       const tempHome = await tempDirs.create()
+      const project = await tempDirs.create()
       const defaults = await readSwizSettings({ home: tempHome })
       await writeSwizSettings({ ...defaults, autoContinue: false }, { home: tempHome })
       const settingsPath = getSwizSettingsPath(tempHome)
@@ -266,9 +267,10 @@ describe("dispatch execute integration", () => {
         hookEventName: "Stop",
         settingsHomeOverride: tempHome,
         payloadStr: JSON.stringify({
-          cwd: process.cwd(),
+          cwd: project,
           session_id: "explicit-stop-session",
         }),
+        repositoryCapabilityProvider: async () => repositoryCapability({ canonicalRoot: project }),
         manifestProvider: async () => [{ event: "stop", hooks: [{ hook: blocker }] }],
         daemonContext: true,
       })

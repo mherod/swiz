@@ -4,7 +4,9 @@ import { mkdir, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { projectKeyFromCwd } from "../../project-key.ts"
+import { createDefaultTaskStore } from "../../task-roots.ts"
 import { TaskStateCache } from "../../tasks/task-state-cache.ts"
+import { acquireEnvLock, releaseEnvLockFn } from "../../utils/test-utils.ts"
 import type { WarmStatusLineSnapshot } from "../status-line.ts"
 import { CappedMap } from "./cache/capped-map.ts"
 import {
@@ -67,9 +69,10 @@ afterEach(async () => {
   for (const home of tempHomes.splice(0)) await rm(home, { recursive: true, force: true })
 })
 
-function withTempHome(): { home: string; restore: () => void } {
+async function withTempHome(): Promise<{ home: string; restore: () => void }> {
   const home = mkdtempSync(join(tmpdir(), "swiz-compliance-tasks-"))
   tempHomes.push(home)
+  await acquireEnvLock()
   const previous = process.env.HOME
   process.env.HOME = home
   return {
@@ -77,6 +80,7 @@ function withTempHome(): { home: string; restore: () => void } {
     restore: () => {
       if (previous === undefined) delete process.env.HOME
       else process.env.HOME = previous
+      releaseEnvLockFn()
     },
   }
 }
@@ -88,7 +92,7 @@ async function writeStoreTask(
   status: string,
   completedAt?: number
 ): Promise<void> {
-  const dir = join(home, ".claude", "tasks", storeKey)
+  const dir = join(createDefaultTaskStore(home).tasksDir, storeKey)
   await mkdir(dir, { recursive: true })
   await Bun.write(
     join(dir, `${id}.json`),
@@ -231,7 +235,7 @@ describe("compliance routes", () => {
   })
 
   test("counts session-store tasks in the warm snapshot (control)", async () => {
-    const { home, restore } = withTempHome()
+    const { home, restore } = await withTempHome()
     const cwd = "/repo/only-session"
     const sessionId = "00000000-0000-0000-0000-0000000000aa"
     await writeStoreTask(home, sessionId, "aaaa-1", "in_progress")
@@ -248,7 +252,7 @@ describe("compliance routes", () => {
     // TaskStateCache.fullLoad runs pruneStaleCompleted, which unlinks completed task files older
     // than COMPLETED_TASK_PRUNE_AGE_MS (15m). That is sound for the session store the daemon owns
     // and destructive for the long-lived project store, so the snapshot must read it from disk.
-    const { home, restore } = withTempHome()
+    const { home, restore } = await withTempHome()
     const cwd = "/repo/prune-guard"
     const sessionId = "00000000-0000-0000-0000-0000000000ff"
     const projectKey = projectKeyFromCwd(cwd)
@@ -258,7 +262,7 @@ describe("compliance routes", () => {
 
     try {
       await snapshotTaskCounts(cwd, sessionId)
-      const completedPath = join(home, ".claude", "tasks", projectKey, "349d-1.json")
+      const completedPath = join(createDefaultTaskStore(home).tasksDir, projectKey, "349d-1.json")
       expect(existsSync(completedPath)).toBe(true)
     } finally {
       restore()
@@ -266,7 +270,7 @@ describe("compliance routes", () => {
   })
 
   test("counts project-keyed MCP tasks in the warm snapshot", async () => {
-    const { home, restore } = withTempHome()
+    const { home, restore } = await withTempHome()
     const cwd = "/repo/mcp-driven"
     const sessionId = "00000000-0000-0000-0000-0000000000bb"
     await writeStoreTask(home, sessionId, "bbbb-1", "in_progress")
@@ -290,7 +294,7 @@ describe("compliance routes", () => {
   test("raises the wanted level from a project-keyed queue alone", async () => {
     // complianceBaselineWantedLevel is derived from the merged counts, so a queue held entirely in
     // the project store used to read as counts=null — a clean wanted level over unhealthy work.
-    const { home, restore } = withTempHome()
+    const { home, restore } = await withTempHome()
     const cwd = "/repo/wanted-level"
     const sessionId = "00000000-0000-0000-0000-0000000000aa"
     await writeStoreTask(home, projectKeyFromCwd(cwd), "349d-1", "pending")

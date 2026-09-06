@@ -1,7 +1,9 @@
-import { mkdir, rm, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
+import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { afterEach, describe, expect, it } from "vitest"
+import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { createDefaultTaskStore } from "../task-roots.ts"
+import { acquireEnvLock, releaseEnvLockFn } from "../utils/test-utils.ts"
 import {
   appendAuditEntry,
   getLastAuditEntry,
@@ -14,13 +16,26 @@ import { writeTaskUpdate } from "./task-service.ts"
 
 describe("Task Audit Log Verification", () => {
   const testSessionId = `test-session-${Date.now()}`
-  const tasksDir = createDefaultTaskStore().tasksDir
-  const sessionDir = join(tasksDir, testSessionId)
+  let home: string
+  let previousHome: string | undefined
+  let tasksDir: string
+
+  beforeEach(async () => {
+    home = await mkdtemp(join(tmpdir(), "swiz-task-audit-"))
+    await acquireEnvLock()
+    previousHome = process.env.HOME
+    process.env.HOME = home
+    tasksDir = createDefaultTaskStore().tasksDir
+  })
 
   afterEach(async () => {
     try {
-      await rm(sessionDir, { recursive: true, force: true })
-    } catch {}
+      await rm(home, { recursive: true, force: true })
+    } finally {
+      if (previousHome === undefined) delete process.env.HOME
+      else process.env.HOME = previousHome
+      releaseEnvLockFn()
+    }
   })
 
   it("should log action: 'field_update' when status does not change", async () => {

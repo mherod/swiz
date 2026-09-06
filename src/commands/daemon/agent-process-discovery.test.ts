@@ -132,35 +132,58 @@ async function psRow(pid: number): Promise<{ ppid: number; executable: string } 
   return { ppid: Number(match[1]), executable: command.split(/\s+/, 1)[0] ?? "" }
 }
 
-describe("live self-test (issue #835)", () => {
-  it("detects the claude session this test runs inside, when there is one", async () => {
-    // Walk our own ancestry looking for a claude CLI process. On CI there is
-    // none and the assertion is vacuously satisfied; on a dev machine running
-    // inside a Claude session, the classifier that cannot see its own session
-    // is wrong — this is the issue's portable self-test.
-    let pid = process.ppid
-    let claudeAncestor: number | null = null
-    for (let hop = 0; hop < 20 && pid > 1; hop++) {
-      const row = await psRow(pid)
-      if (!row) break
-      if (isClaudeCliExecutable(row.executable)) {
-        claudeAncestor = pid
-        break
-      }
-      pid = row.ppid
-    }
-    if (claudeAncestor === null) return
-
-    const proc = Bun.spawn(["ps", "-Ao", "pid,ppid,command"], {
+function canInspectProcesses(): boolean {
+  try {
+    const result = Bun.spawnSync(["ps", "-p", String(process.pid), "-o", "pid="], {
       stdout: "pipe",
       stderr: "pipe",
     })
-    const [stdout] = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-    ])
-    await proc.exited
-    const providers = parseProviderPids(stdout)
-    expect(providers.get("claude")?.has(claudeAncestor)).toBe(true)
-  })
+    if (result.exitCode !== 0) throw new Error(result.stderr.toString())
+    return true
+  } catch (error) {
+    if (
+      error &&
+      typeof error === "object" &&
+      "code" in error &&
+      (error.code === "EPERM" || error.code === "EACCES")
+    )
+      return false
+    throw error
+  }
+}
+
+describe("live self-test (issue #835)", () => {
+  it.skipIf(!canInspectProcesses())(
+    "detects the claude session this test runs inside, when there is one",
+    async () => {
+      // Walk our own ancestry looking for a claude CLI process. On CI there is
+      // none and the assertion is vacuously satisfied; on a dev machine running
+      // inside a Claude session, the classifier that cannot see its own session
+      // is wrong — this is the issue's portable self-test.
+      let pid = process.ppid
+      let claudeAncestor: number | null = null
+      for (let hop = 0; hop < 20 && pid > 1; hop++) {
+        const row = await psRow(pid)
+        if (!row) break
+        if (isClaudeCliExecutable(row.executable)) {
+          claudeAncestor = pid
+          break
+        }
+        pid = row.ppid
+      }
+      if (claudeAncestor === null) return
+
+      const proc = Bun.spawn(["ps", "-Ao", "pid,ppid,command"], {
+        stdout: "pipe",
+        stderr: "pipe",
+      })
+      const [stdout] = await Promise.all([
+        new Response(proc.stdout).text(),
+        new Response(proc.stderr).text(),
+      ])
+      await proc.exited
+      const providers = parseProviderPids(stdout)
+      expect(providers.get("claude")?.has(claudeAncestor)).toBe(true)
+    }
+  )
 })

@@ -1,5 +1,6 @@
 import { afterAll, describe, expect, test } from "bun:test"
 import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises"
+import { homedir } from "node:os"
 import { join } from "node:path"
 import { type HookResult, runHookInProcess, useTempDir } from "../src/utils/test-utils.ts"
 
@@ -8,7 +9,7 @@ const HOOK = "hooks/pretooluse-sandboxed-edits.ts"
 const tmp = useTempDir("swiz-sandboxed-")
 const createTempDir = () => tmp.create()
 
-const OUTSIDE_BASE = join("/var/tmp", "swiz-sandboxed-outside")
+const OUTSIDE_BASE = join(homedir(), ".cache", "swiz-sandboxed-outside")
 const AGENT_ENV_KEYS = [
   "CLAUDECODE",
   "GEMINI_CLI",
@@ -41,10 +42,10 @@ afterAll(async () => {
 })
 
 /**
- * Create a temp dir under the real HOME — used for "outside" repo fixtures.
+ * Create a disposable cache dir outside the simulated HOME, cwd and tmp roots.
  *
  * On Linux, tmpdir() returns /tmp which is hardcoded in allowedRoots. Using
- * HOME as the base ensures "outside" dirs are never inside any allowed root
+ * the real home cache as the base keeps "outside" dirs out of any allowed root
  * on either macOS or Linux.
  */
 async function createOutsideDir(): Promise<string> {

@@ -13,6 +13,8 @@ import { mkdirSync } from "node:fs"
 import { mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { createDefaultTaskStore } from "../task-roots.ts"
+import { acquireEnvLock, releaseEnvLockFn } from "../utils/test-utils.ts"
 import { readTasks, type Task } from "./task-repository.ts"
 import { completingEmptiesQueue, updateStatus } from "./task-service.ts"
 
@@ -30,7 +32,8 @@ function task(id: string, status: Task["status"], subject: string): Task {
 async function seed(sessionId: string, tasks: Task[]): Promise<string> {
   const home = await mkdtemp(join(tmpdir(), "swiz-last-task-"))
   homes.push(home)
-  const dir = join(home, ".claude", "tasks", sessionId)
+  process.env.HOME = home
+  const dir = join(createDefaultTaskStore().tasksDir, sessionId)
   mkdirSync(dir, { recursive: true })
   for (const t of tasks) await writeFile(join(dir, `${t.id}.json`), JSON.stringify(t, null, 2))
   return home
@@ -51,33 +54,36 @@ describe("completingEmptiesQueue", () => {
 describe("updateStatus on the final open task", () => {
   test("completes it instead of rejecting, and the queue really does empty", async () => {
     const sessionId = "last-task-allowed"
+    await acquireEnvLock()
     const originalHome = process.env.HOME
-    process.env.HOME = await seed(sessionId, [task("1", "in_progress", "the only task")])
     try {
+      await seed(sessionId, [task("1", "in_progress", "the only task")])
       // Before #834 this threw "would leave zero incomplete tasks".
       await updateStatus(sessionId, "1", "completed", { evidence: "note:done" })
       const after = await readTasks(sessionId)
       expect(after.find((t) => t.id === "1")?.status).toBe("completed")
       expect(after.filter((t) => t.status === "pending" || t.status === "in_progress")).toEqual([])
     } finally {
-      process.env.HOME = originalHome
+      if (originalHome === undefined) delete process.env.HOME
+      else process.env.HOME = originalHome
+      releaseEnvLockFn()
     }
   })
 
   test("control: completing a non-final task still works, so the case above is not special", async () => {
     const sessionId = "non-final-task"
+    await acquireEnvLock()
     const originalHome = process.env.HOME
-    process.env.HOME = await seed(sessionId, [
-      task("1", "in_progress", "first"),
-      task("2", "pending", "second"),
-    ])
     try {
+      await seed(sessionId, [task("1", "in_progress", "first"), task("2", "pending", "second")])
       await updateStatus(sessionId, "1", "completed", { evidence: "note:done" })
       const after = await readTasks(sessionId)
       expect(after.find((t) => t.id === "1")?.status).toBe("completed")
       expect(after.find((t) => t.id === "2")?.status).toBe("pending")
     } finally {
-      process.env.HOME = originalHome
+      if (originalHome === undefined) delete process.env.HOME
+      else process.env.HOME = originalHome
+      releaseEnvLockFn()
     }
   })
 })
