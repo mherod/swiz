@@ -1126,8 +1126,41 @@ git() {
 gh() {
   [[ -n "${SWIZ_BYPASS:-}" ]] && { command gh "$@"; return $?; }
 
-  local gh_cmd="$1"
-  local gh_subcmd="$2"
+  # Identify the GitHub CLI command after inherited global options. Reading `$1`/`$2`
+  # directly dispatched `gh --repo owner/name pr create` as command `--repo`, subcommand
+  # `owner/name`, so the trunk guard never saw a `pr create` and the bypass was silent (#816).
+  #
+  # Only `--repo`/`-R` are parsed as value-taking. Guessing arity for an undocumented flag
+  # is the opposite failure: a boolean read as value-taking swallows the real command.
+  # Everything else leading is treated as boolean, and `--` ends option parsing.
+  # Iterate values directly — bash arrays are zero-based and zsh arrays one-based, so
+  # indirect positional indexing is not portable between them.
+  local gh_cmd=""
+  local gh_subcmd=""
+  local gh_arg
+  local gh_skip_value=false
+  local gh_end_of_options=false
+  for gh_arg in "$@"; do
+    if $gh_skip_value; then
+      gh_skip_value=false
+      continue
+    fi
+    if ! $gh_end_of_options; then
+      case "$gh_arg" in
+        --) gh_end_of_options=true; continue ;;
+        --repo|-R) gh_skip_value=true; continue ;;
+        # Attached forms carry their own value; they must not consume the next token.
+        --repo=*|-R=*|-R?*) continue ;;
+        -*) continue ;;
+      esac
+    fi
+    if [[ -z "$gh_cmd" ]]; then
+      gh_cmd="$gh_arg"
+    else
+      gh_subcmd="$gh_arg"
+      break
+    fi
+  done
 
   _swiz_trunk_mode_gh_guard "$gh_cmd" "$gh_subcmd" && return 1
   

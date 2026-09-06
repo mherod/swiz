@@ -341,6 +341,54 @@ describe("shell shim runtime", () => {
     }
   })
 
+  testWithZsh("blocks pull-request creation behind repository selectors", async () => {
+    // #816: the wrapper read $1/$2 as command/subcommand, so any inherited global option
+    // shifted the real command out of view and `gh --repo x pr create --fill` ran for real.
+    const project = await createTrunkShimProject()
+    const binDir = await createShimCommandStub(
+      project,
+      "gh",
+      "#!/usr/bin/env sh\nprintf 'gh:%s\\n' \"$*\"\n"
+    )
+    const env = { PATH: [binDir, process.env.PATH ?? ""].join(":") }
+
+    for (const command of [
+      "gh --repo mherod/swiz pr create --fill",
+      "gh --repo=mherod/swiz pr create --fill",
+      "gh -R mherod/swiz pr create --fill",
+      "gh -R=mherod/swiz pr create --fill",
+      "gh -Rmherod/swiz pr create --fill",
+      // An option value that looks like a command must not be mistaken for one.
+      "gh --repo pr pr create --fill",
+    ]) {
+      const result = await runSourcedShim(project, command, env)
+      expect(result.exitCode, command).toBe(1)
+      expect(result.stderr, command).toContain("Trunk mode")
+      expect(result.stdout, command).toBe("")
+    }
+  })
+
+  testWithZsh("leaves unrelated gh commands alone behind repository selectors", async () => {
+    // Control for the block above: the parser must not turn into a blanket `pr` matcher.
+    const project = await createTrunkShimProject()
+    const binDir = await createShimCommandStub(
+      project,
+      "gh",
+      "#!/usr/bin/env sh\nprintf 'gh:%s\\n' \"$*\"\n"
+    )
+    const env = { PATH: [binDir, process.env.PATH ?? ""].join(":") }
+
+    for (const command of [
+      "gh --repo mherod/swiz issue list",
+      "gh -R mherod/swiz pr view 42",
+      "gh pr merge 42",
+    ]) {
+      const result = await runSourcedShim(project, command, env)
+      expect(result.exitCode, command).toBe(0)
+      expect(result.stderr, command).not.toContain("Trunk mode")
+    }
+  })
+
   testWithZsh("allows PR checkout only for an active trunk review", async () => {
     const project = await createTrunkShimProject({ state: "reviewing" })
     const child = join(project, "src")
