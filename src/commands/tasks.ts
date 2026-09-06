@@ -1,7 +1,8 @@
-import { join } from "node:path"
+import { dirname, join, resolve } from "node:path"
 import { DIM, RESET } from "../ansi.ts"
 import { stderrLog } from "../debug.ts"
 import { detectCurrentAgent } from "../detect.ts"
+import { getHomeDirOrNull } from "../home.ts"
 import { PROJECT_STATES } from "../settings.ts"
 import { readAuditLog } from "../tasks/task-audit-verification.ts"
 import {
@@ -38,6 +39,7 @@ import {
 } from "../tasks/task-service.ts"
 import type { Command } from "../types.ts"
 import { messageFromUnknownError } from "../utils/hook-json-helpers.ts"
+import { type McpFileData, type McpServerDef, readMcpFile } from "./mcp-config.ts"
 
 export {
   compareTaskIds,
@@ -701,21 +703,81 @@ const SUBCOMMAND_HANDLERS: Record<string, (rest: string[], filterCwd?: string) =
 
 // ─── Native-tool guard (task-aware agents) ────────────────────────────────────────
 
-function enforceNativeTaskTools(subcommand: string | undefined): void {
+function trustedCodexConfigPaths(config: McpFileData, cwd: string): string[] {
+  const projects = config.projects
+  if (!projects || typeof projects !== "object" || Array.isArray(projects)) return []
+  const paths: string[] = []
+  let directory = resolve(cwd)
+  while (true) {
+    paths.unshift(join(directory, ".codex", "config.toml"))
+    const project = Reflect.get(projects, directory)
+    if (project && typeof project === "object") {
+      return Reflect.get(project, "trust_level") === "trusted" ? paths : []
+    }
+    const parent = dirname(directory)
+    if (parent === directory) return []
+    directory = parent
+  }
+}
+
+function hasMcpTaskTools(server: Partial<McpServerDef>): boolean {
+  if (server.enabled !== undefined && server.enabled !== true) return false
+  const hasTransport = [server.command, server.url].some(
+    (value) => typeof value === "string" && value.trim().length > 0
+  )
+  if (!hasTransport) return false
+
+  const enabled = server.enabled_tools
+  const disabled = server.disabled_tools
+  return ["TaskCreate", "TaskList", "TaskUpdate"].every(
+    (tool) =>
+      (enabled === undefined || (Array.isArray(enabled) && enabled.includes(tool))) &&
+      (disabled === undefined || (Array.isArray(disabled) && !disabled.includes(tool)))
+  )
+}
+
+async function readCodexMcpLayers(cwd: string): Promise<McpFileData[]> {
+  const home = getHomeDirOrNull()
+  const codexHome = process.env.CODEX_HOME || (home ? join(home, ".codex") : undefined)
+  if (!codexHome) return []
+  const config = await readMcpFile(join(codexHome, "config.toml"))
+  const projectLayers = await Promise.all(trustedCodexConfigPaths(config, cwd).map(readMcpFile))
+  return [config, ...projectLayers]
+}
+
+/** Configuration is a capability hint; unreadable configuration keeps the CLI fallback open. */
+async function hasCodexMcpTaskTools(cwd: string): Promise<boolean> {
+  try {
+    let server: Partial<McpServerDef> = {}
+    for (const layer of await readCodexMcpLayers(cwd)) {
+      const configured = layer.mcpServers?.swiz
+      if (configured === undefined) continue
+      if (!configured || typeof configured !== "object" || Array.isArray(configured)) return false
+      server = { ...server, ...configured }
+    }
+    return hasMcpTaskTools(server)
+  } catch {
+    return false
+  }
+}
+
+async function enforceNativeTaskTools(subcommand: string | undefined, cwd: string): Promise<void> {
   const agent = detectCurrentAgent()
   if (!agent) return
-  // Only enforce for agents that actually have a native task or planning surface.
-  // Agents with `tasksEnabled=false` do not expose task-capable command surfaces.
-  if (!agent.tasksEnabled) return
-
   if (!isBlockedSwizTasksSubcommand(subcommand)) return
+
+  const hasMcpTasks = agent.id === "codex" && (await hasCodexMcpTaskTools(cwd))
+  if (!agent.tasksEnabled && !hasMcpTasks) return
 
   const agentName = agent.name
   const hint = subcommand
     ? `"swiz tasks ${subcommand}" is not available inside ${agentName}.`
     : `"swiz tasks" (list) is not available inside ${agentName}.`
 
-  throw new Error(`${hint}\n${SWIZ_TASKS_CLI_DENY_MESSAGE}`)
+  const guidance = hasMcpTasks
+    ? "Use the Swiz MCP tools TaskCreate, TaskList, and TaskUpdate instead of the swiz tasks CLI."
+    : SWIZ_TASKS_CLI_DENY_MESSAGE
+  throw new Error(`${hint}\n${guidance}`)
 }
 
 // ─── Command ──────────────────────────────────────────────────────────────────
@@ -781,7 +843,7 @@ export const tasksCommand: Command = {
 export async function runTasks(args: string[], cwd: string = process.cwd()): Promise<void> {
   const [subcommand] = args
 
-  enforceNativeTaskTools(subcommand)
+  await enforceNativeTaskTools(subcommand, cwd)
 
   if (isListInvocation(subcommand)) {
     await runListTasks(args, cwd)
