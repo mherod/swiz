@@ -26,6 +26,11 @@
       --accent-glow-soft: rgba(18, 233, 235, 0.06);
       --shadow-soft: 0 24px 80px rgba(0, 0, 0, 0.3);
       --mono: ui-monospace, "SF Mono", Menlo, "Cascadia Code", monospace;
+      --space-tight: 0.5rem;
+      --space-peer: 1rem;
+      --space-card: clamp(1.25rem, 3vw, 1.5rem);
+      --space-group: 2rem;
+      --space-section: clamp(3.5rem, 6vw, 5.5rem);
     }
 
     html {
@@ -67,7 +72,7 @@
     }
 
     section {
-      padding: 6.5rem 0;
+      padding: var(--space-section) 0;
       border-top: 1px solid var(--border-subtle);
     }
 
@@ -150,10 +155,10 @@
     /* ── Hero ────────────────────────────────────────── */
 
     .hero {
-      padding: 7.5rem 0 6rem;
+      padding: clamp(3rem, 6vw, 5rem) 0;
       display: grid;
       grid-template-columns: minmax(0, 1.08fr) minmax(20rem, 0.92fr);
-      gap: clamp(3rem, 7vw, 6rem);
+      gap: clamp(2rem, 5vw, 4rem);
       align-items: center;
     }
 
@@ -203,7 +208,7 @@
       font-size: 1.0625rem;
       line-height: 1.625;
       color: var(--text-muted);
-      margin-bottom: 2.25rem;
+      margin-bottom: var(--space-group);
       max-width: 33rem;
       text-wrap: pretty;
     }
@@ -231,6 +236,7 @@
     }
 
     .docs-link:hover { border-color: var(--accent-dim); }
+    .docs-link:active { background: var(--surface-raised); }
 
     .link-btn {
       min-height: 2.75rem;
@@ -260,12 +266,18 @@
 
     .link-btn:hover span { transform: translateX(0.2rem); }
 
+    .link-btn:active {
+      transform: translateY(0);
+      background: var(--accent-dim);
+      box-shadow: none;
+    }
+
     .hero-visual {
       display: flex;
       align-items: center;
       justify-content: center;
       position: relative;
-      min-height: 30rem;
+      aspect-ratio: 1.1;
       border-radius: 2rem;
       background:
         radial-gradient(circle at 50% 50%, rgba(18, 233, 235, 0.08), transparent 55%),
@@ -299,7 +311,7 @@
 
     /* ── Stats ───────────────────────────────────────── */
 
-    .stats-section { padding: 3rem 0; }
+    .stats-section { padding: 0 0 var(--space-section); }
 
     .stats-grid {
       display: grid;
@@ -314,7 +326,7 @@
 
     .stat {
       background: linear-gradient(145deg, var(--surface-soft), var(--bg));
-      padding: 2rem;
+      padding: var(--space-card);
       position: relative;
     }
 
@@ -355,7 +367,7 @@
     /* ── Section header ──────────────────────────────── */
 
     .section-header {
-      margin-bottom: 3rem;
+      margin-bottom: var(--space-group);
       max-width: 48rem;
     }
 
@@ -411,7 +423,7 @@
       background: linear-gradient(145deg, var(--surface), var(--surface-soft));
       border: 1px solid var(--border-strong);
       border-radius: 0.75rem;
-      padding: 1.25rem;
+      padding: var(--space-card);
       min-width: 0;
       height: 100%;
       box-shadow: inset 0 1px rgba(255, 255, 255, 0.035);
@@ -459,15 +471,14 @@
     .features-grid {
       display: grid;
       grid-template-columns: repeat(3, 1fr);
-      gap: 1rem;
+      gap: var(--space-peer);
     }
 
     .feature {
       background: linear-gradient(145deg, var(--surface), var(--surface-soft));
       border: 1px solid var(--border);
       border-radius: 1rem;
-      padding: 2rem;
-      min-height: 14rem;
+      padding: var(--space-card);
       box-shadow: inset 0 1px rgba(255, 255, 255, 0.03);
     }
 
@@ -502,16 +513,16 @@
     .agents-grid {
       display: grid;
       grid-template-columns: repeat(2, 1fr);
-      gap: 1rem;
+      gap: var(--space-peer);
     }
 
     .agent-card {
       background: linear-gradient(145deg, var(--surface), var(--surface-soft));
       border: 1px solid var(--border-strong);
       border-radius: 1rem;
-      padding: 1.5rem;
+      padding: var(--space-card);
       display: grid;
-      grid-template-columns: auto 1fr auto;
+      grid-template-columns: auto minmax(0, 1fr);
       gap: 1rem;
       align-items: start;
       box-shadow: inset 0 1px rgba(255, 255, 255, 0.03);
@@ -522,23 +533,32 @@
       height: 0.5rem;
       border-radius: 50%;
       background: #22c55e;
-      margin-top: 0.3rem;
+      margin-top: 0.5rem;
       flex-shrink: 0;
     }
 
     .agent-dot.partial { background: #eab308; }
 
+    .agent-heading {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: var(--space-tight);
+      margin-bottom: var(--space-tight);
+    }
+
     .agent-name {
       font-size: 0.9375rem;
       font-weight: 600;
       color: var(--text);
-      margin-bottom: 0.25rem;
     }
 
     .agent-detail {
       font-size: 0.8125rem;
       color: var(--text-muted);
       line-height: 1.5;
+      overflow-wrap: anywhere;
     }
 
     .agent-badge {
@@ -574,23 +594,21 @@
     .hook-categories {
       display: grid;
       grid-template-columns: repeat(3, 1fr);
-      gap: 1rem;
-      margin-bottom: 2rem;
+      gap: var(--space-peer);
     }
 
     .hook-cat {
       background: linear-gradient(145deg, var(--surface), var(--surface-soft));
       border: 1px solid var(--border-strong);
       border-radius: 1rem;
-      padding: 1.5rem;
+      padding: var(--space-card);
       box-shadow: inset 0 1px rgba(255, 255, 255, 0.03);
     }
 
     .hook-cat-header {
       display: flex;
-      align-items: center;
-      justify-content: space-between;
-      flex-wrap: wrap;
+      align-items: flex-start;
+      flex-direction: column;
       gap: 0.5rem;
       margin-bottom: 0.75rem;
     }
@@ -616,7 +634,7 @@
       list-style: none;
       display: flex;
       flex-direction: column;
-      gap: 0.25rem;
+      gap: var(--space-tight);
     }
 
     .hook-list li {
@@ -640,12 +658,11 @@
       background: linear-gradient(145deg, var(--surface), var(--surface-soft));
       border: 1px solid var(--border-strong);
       border-radius: 1.25rem;
-      padding: 2.5rem;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 1rem;
-      flex-wrap: wrap;
+      padding: var(--space-card);
+      display: grid;
+      grid-template-columns: minmax(0, 1fr);
+      align-items: stretch;
+      gap: var(--space-tight);
       position: relative;
       overflow: hidden;
     }
@@ -662,7 +679,13 @@
       background: var(--bg);
       border: 1px solid var(--border);
       border-radius: 0.625rem;
-      padding: 0.75rem 1.25rem;
+      padding: 1rem;
+      min-width: 0;
+      min-height: 3.5rem;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
       font-size: 0.875rem;
       font-weight: 600;
       color: var(--text);
@@ -677,7 +700,11 @@
     }
 
     .loop-arrow {
-      color: var(--text-faint);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transform: rotate(90deg);
+      color: var(--accent-dim);
       font-size: 1rem;
       position: relative;
       z-index: 1;
@@ -699,10 +726,10 @@
         linear-gradient(145deg, var(--surface-raised), var(--surface-soft));
       border: 1px solid var(--border-strong);
       border-radius: 1.25rem;
-      padding: 3rem;
+      padding: var(--space-group);
       display: grid;
       grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr);
-      gap: 2rem;
+      gap: var(--space-group);
       align-items: center;
       box-shadow: var(--shadow-soft);
     }
@@ -742,6 +769,12 @@
     footer {
       border-top: 1px solid var(--border-subtle);
       padding: 2.5rem 0;
+    }
+
+    .footer-content {
+      width: 100%;
+      flex-wrap: wrap;
+      gap: var(--space-peer);
       display: flex;
       justify-content: space-between;
       align-items: center;
@@ -769,10 +802,16 @@
 
     .footer-links {
       display: flex;
-      gap: 1.5rem;
+      flex-wrap: wrap;
+      gap: var(--space-peer);
     }
 
     .footer-links a {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 2.75rem;
+      min-height: 2.75rem;
       font-size: 0.875rem;
       color: var(--text-dim);
       text-decoration: none;
@@ -813,48 +852,41 @@
     }
 
     @media (max-width: 48rem) {
-      section { padding: 4.5rem 0; }
-
       .hero {
         grid-template-columns: 1fr;
         gap: 2.5rem;
-        padding: 4.75rem 0 3.5rem;
       }
 
       .hero-heading { font-size: clamp(2.625rem, 11vw, 3.75rem); }
       .hero-visual {
         order: 0;
-        min-height: 17rem;
+        aspect-ratio: 1.5;
         max-width: 28rem;
         width: 100%;
         margin: 0 auto;
       }
-      .hero-logo { max-width: 15rem; }
+      .hero-logo { max-width: min(15rem, 60%); }
       .hero-visual::before { width: 18rem; height: 18rem; }
       .stats-grid { grid-template-columns: repeat(2, 1fr); }
       .features-grid { grid-template-columns: 1fr; }
-      .feature { min-height: unset; }
       .agents-grid { grid-template-columns: 1fr; }
       .hook-categories { grid-template-columns: 1fr; }
       .install-section { grid-template-columns: 1fr; }
       .install-block { min-width: unset; }
-      footer { flex-direction: column; gap: 1.5rem; align-items: flex-start; }
       nav { gap: 1rem; }
       .nav-links { gap: 1.25rem; }
     }
 
     @media (max-width: 36rem) {
-      html { scroll-padding-top: 6rem; }
+      html { scroll-padding-top: 7rem; }
       nav { flex-wrap: wrap; gap: 0; padding: 0.5rem 0; }
-      .nav-logo { min-height: 2rem; }
       .nav-links { width: 100%; justify-content: space-between; gap: 0.5rem; }
       .nav-links a { font-size: 0.8125rem; }
       .hero-actions { align-items: stretch; }
       .docs-link,
       .link-btn { justify-content: center; width: 100%; }
-      .stat { padding: 1.5rem; }
       .stat-value { font-size: 2.25rem; }
-      .install-section { padding: 1.25rem; }
+      .install-section { padding: var(--space-card); }
       .install-block {
         padding: 1rem;
         overflow-x: auto;
@@ -863,6 +895,12 @@
     }
 
     @media (min-width: 64rem) {
+      .loop-diagram {
+        grid-template-columns: repeat(4, minmax(0, 1fr) auto) minmax(0, 1fr);
+      }
+
+      .loop-arrow { transform: none; }
+
       .pipeline {
         grid-template-columns:
           minmax(0, 1fr) auto
@@ -1162,34 +1200,42 @@
         <div class="agent-card">
           <div class="agent-dot"></div>
           <div>
-            <div class="agent-name">Claude Code</div>
+            <div class="agent-heading">
+              <div class="agent-name">Claude Code</div>
+              <div class="agent-badge badge-full">Full</div>
+            </div>
             <div class="agent-detail">Nested matcher groups in <code style="font-family:var(--mono);font-size:0.8em">~/.claude/settings.json</code>. Full support across all 5 event types.</div>
           </div>
-          <div class="agent-badge badge-full">Full</div>
         </div>
         <div class="agent-card">
           <div class="agent-dot"></div>
           <div>
-            <div class="agent-name">Cursor IDE</div>
+            <div class="agent-heading">
+              <div class="agent-name">Cursor IDE</div>
+              <div class="agent-badge badge-full">Full</div>
+            </div>
             <div class="agent-detail">Flat list format in <code style="font-family:var(--mono);font-size:0.8em">~/.cursor/hooks.json</code> (version 1). All events fire in the IDE.</div>
           </div>
-          <div class="agent-badge badge-full">Full</div>
         </div>
         <div class="agent-card">
           <div class="agent-dot"></div>
           <div>
-            <div class="agent-name">Gemini CLI</div>
+            <div class="agent-heading">
+              <div class="agent-name">Gemini CLI</div>
+              <div class="agent-badge badge-full">Full</div>
+            </div>
             <div class="agent-detail">Nested matcher groups in <code style="font-family:var(--mono);font-size:0.8em">~/.gemini/settings.json</code>. Full support across all 5 event types.</div>
           </div>
-          <div class="agent-badge badge-full">Full</div>
         </div>
         <div class="agent-card">
           <div class="agent-dot partial"></div>
           <div>
-            <div class="agent-name">Codex CLI</div>
+            <div class="agent-heading">
+              <div class="agent-name">Codex CLI</div>
+              <div class="agent-badge badge-ready">Ready</div>
+            </div>
             <div class="agent-detail">Tool mappings fully tracked. Ready to activate when Codex ships user-configurable hook support.</div>
           </div>
-          <div class="agent-badge badge-ready">Ready</div>
         </div>
       </div>
     </section>
@@ -1206,13 +1252,13 @@
 
       <div class="loop-diagram">
         <div class="loop-node">Agent completes work</div>
-        <div class="loop-arrow">→</div>
+        <div class="loop-arrow" aria-hidden="true">→</div>
         <div class="loop-node accent">swiz stop hooks audit</div>
-        <div class="loop-arrow">→</div>
+        <div class="loop-arrow" aria-hidden="true">→</div>
         <div class="loop-node accent">swiz idea generates next step</div>
-        <div class="loop-arrow">→</div>
+        <div class="loop-arrow" aria-hidden="true">→</div>
         <div class="loop-node">swiz continue resumes</div>
-        <div class="loop-arrow">→</div>
+        <div class="loop-arrow" aria-hidden="true">→</div>
         <div class="loop-node">Agent works again</div>
       </div>
       <div class="loop-note">
@@ -1246,7 +1292,7 @@
   </div><!-- /page -->
 
   <footer>
-    <div class="page" style="width:100%;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:1rem">
+    <div class="page footer-content">
       <div class="footer-left">
         <div class="footer-brand">sw<span>i</span>z</div>
         <div class="footer-tagline">107 hooks. 12 events. Every agent. Zero compromises.</div>
