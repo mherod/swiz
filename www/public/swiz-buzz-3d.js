@@ -230,7 +230,6 @@ export function createBeeScene(container) {
   const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true })
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
   renderer.setClearColor(0x000000, 0)
-  container.appendChild(renderer.domElement)
 
   scene.add(new THREE.AmbientLight(0xffffff, 0.5))
   const keyLight = new THREE.DirectionalLight(0xffffff, 1.0)
@@ -252,13 +251,21 @@ export function createBeeScene(container) {
   const mouse = { x: 0, y: 0 }
   const targetRotation = { x: 0, y: 0 }
 
-  /** @param {MouseEvent} e */
+  /** @param {PointerEvent} e */
   function onMouseMove(e) {
     const rect = container.getBoundingClientRect()
-    mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1
-    mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1
+    mouse.x = THREE.MathUtils.clamp(((e.clientX - rect.left) / rect.width) * 2 - 1, -1, 1)
+    mouse.y = THREE.MathUtils.clamp(-((e.clientY - rect.top) / rect.height) * 2 + 1, -1, 1)
   }
-  window.addEventListener("mousemove", onMouseMove)
+
+  function resetPointer() {
+    mouse.x = 0
+    mouse.y = 0
+  }
+
+  container.addEventListener("pointermove", onMouseMove)
+  container.addEventListener("pointerleave", resetPointer)
+  container.addEventListener("pointercancel", resetPointer)
 
   function resize() {
     const w = container.clientWidth
@@ -272,6 +279,7 @@ export function createBeeScene(container) {
   resizeObserver.observe(container)
 
   const clock = new THREE.Clock()
+  let frameId
   function animate() {
     const t = clock.getElapsedTime()
     bee.position.y = Math.sin(t * Math.PI) * 0.08
@@ -288,13 +296,20 @@ export function createBeeScene(container) {
     bee.rotation.y += (targetRotation.y - bee.rotation.y) * 0.05
     bee.rotation.x += (targetRotation.x - bee.rotation.x) * 0.05
     renderer.render(scene, camera)
-    requestAnimationFrame(animate)
+    frameId = requestAnimationFrame(animate)
   }
   animate()
+  container.appendChild(renderer.domElement)
 
   return function dispose() {
+    cancelAnimationFrame(frameId)
     resizeObserver.disconnect()
-    window.removeEventListener("mousemove", onMouseMove)
+    container.removeEventListener("pointermove", onMouseMove)
+    container.removeEventListener("pointerleave", resetPointer)
+    container.removeEventListener("pointercancel", resetPointer)
+    bee.traverse((object) => {
+      if (object instanceof THREE.Mesh) object.geometry.dispose()
+    })
     renderer.dispose()
     container.removeChild(renderer.domElement)
   }

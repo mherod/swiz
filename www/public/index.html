@@ -17,7 +17,7 @@
       --border-subtle: #1c1c1f;
       --text: #fafafa;
       --text-muted: #a1a1aa;
-      --text-dim: #71717a;
+      --text-dim: #a1a1aa;
       --text-faint: #3f3f46;
       --accent: #12e9eb;
       --accent-dim: #4fcdcc;
@@ -69,7 +69,6 @@
     section {
       padding: 6.5rem 0;
       border-top: 1px solid var(--border-subtle);
-      scroll-margin-top: 5rem;
     }
 
     section:first-of-type { border-top: none; }
@@ -94,7 +93,7 @@
       z-index: -1;
       margin-left: -50vw;
       margin-right: -50vw;
-      background: linear-gradient(180deg, rgba(9, 9, 11, 0.98), rgba(9, 9, 11, 0.9));
+      background: var(--bg);
       border-bottom: 1px solid rgba(39, 39, 42, 0.7);
     }
 
@@ -216,7 +215,7 @@
       flex-wrap: wrap;
     }
 
-    .install-cmd {
+    .docs-link {
       display: inline-flex;
       align-items: center;
       gap: 0.75rem;
@@ -225,13 +224,13 @@
       border: 1px solid var(--border-strong);
       border-radius: 0.625rem;
       padding: 0.75rem 1.125rem;
-      font-family: var(--mono);
-      font-size: 0.9rem;
+      font-size: 0.875rem;
       color: var(--text);
+      text-decoration: none;
       box-shadow: inset 0 1px rgba(255, 255, 255, 0.035);
     }
 
-    .install-cmd .prompt { color: var(--accent); user-select: none; }
+    .docs-link:hover { border-color: var(--accent-dim); }
 
     .link-btn {
       min-height: 2.75rem;
@@ -288,10 +287,15 @@
     .hero-logo {
       width: 100%;
       max-width: 22rem;
+      aspect-ratio: 1;
       position: relative;
       z-index: 1;
       filter: drop-shadow(0 0 40px rgba(18, 233, 235, 0.2));
     }
+
+    .bee-fallback { display: block; width: 100%; height: 100%; object-fit: contain; }
+    .hero-logo canvas { position: absolute; inset: 0; }
+    .hero-logo[data-ready] .bee-fallback { visibility: hidden; }
 
     /* ── Stats ───────────────────────────────────────── */
 
@@ -586,6 +590,8 @@
       display: flex;
       align-items: center;
       justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 0.5rem;
       margin-bottom: 0.75rem;
     }
 
@@ -695,7 +701,7 @@
       border-radius: 1.25rem;
       padding: 3rem;
       display: grid;
-      grid-template-columns: 1fr auto;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr);
       gap: 2rem;
       align-items: center;
       box-shadow: var(--shadow-soft);
@@ -723,8 +729,9 @@
       font-family: var(--mono);
       font-size: 0.875rem;
       color: var(--text);
-      white-space: pre;
-      min-width: 20rem;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      min-width: 0;
     }
 
     .install-block .prompt { color: var(--accent); }
@@ -757,7 +764,7 @@
 
     .footer-tagline {
       font-size: 0.8125rem;
-      color: var(--text-faint);
+      color: var(--text-muted);
     }
 
     .footer-links {
@@ -837,14 +844,17 @@
     }
 
     @media (max-width: 36rem) {
-      .nav-links li:nth-child(2),
-      .nav-links li:nth-child(3) { display: none; }
+      html { scroll-padding-top: 6rem; }
+      nav { flex-wrap: wrap; gap: 0; padding: 0.5rem 0; }
+      .nav-logo { min-height: 2rem; }
+      .nav-links { width: 100%; justify-content: space-between; gap: 0.5rem; }
+      .nav-links a { font-size: 0.8125rem; }
       .hero-actions { align-items: stretch; }
-      .install-cmd,
+      .docs-link,
       .link-btn { justify-content: center; width: 100%; }
       .stat { padding: 1.5rem; }
       .stat-value { font-size: 2.25rem; }
-      .install-section { padding: 2rem; }
+      .install-section { padding: 1.25rem; }
       .install-block {
         padding: 1rem;
         overflow-x: auto;
@@ -911,17 +921,18 @@
           Hooks add context before tools run, validate the result afterwards, and audit unfinished work before the session stops.
         </p>
         <div class="hero-actions">
-          <code class="install-cmd">
-            <span class="prompt">$</span>
-            <span>bun install &amp;&amp; bun link</span>
-          </code>
-          <a href="https://github.com/mherod/swiz#readme" class="link-btn">
+          <a href="#install" class="link-btn">
+            Get started <span aria-hidden="true">↓</span>
+          </a>
+          <a href="https://github.com/mherod/swiz#readme" class="docs-link">
             Read the docs <span aria-hidden="true">→</span>
           </a>
         </div>
       </div>
-      <div class="hero-visual">
-        <div id="bee-canvas" style="width:100%;max-width:22rem;aspect-ratio:1/1;position:relative;z-index:1;"></div>
+      <div class="hero-visual" aria-hidden="true">
+        <div id="bee-canvas" class="hero-logo">
+          <img class="bee-fallback" src="./swiz-buzz-flat.svg" alt="" width="1024" height="695">
+        </div>
       </div>
     </div>
 
@@ -1210,21 +1221,25 @@
     </section>
 
     <!-- Install -->
-    <section>
+    <section id="install">
       <div class="install-section">
         <div>
-          <div class="install-heading">Get started in two commands</div>
+          <h2 class="install-heading">Install from source</h2>
           <div class="install-sub">
-            Requires <a href="https://bun.sh" style="color:var(--accent-dim);text-decoration:none">Bun</a>. After install, run <code style="font-family:var(--mono);font-size:0.9em;color:var(--text)">swiz install</code> to write hooks into your agents, and <code style="font-family:var(--mono);font-size:0.9em;color:var(--text)">swiz status</code> to verify.
+            Install <a href="https://bun.sh" style="color:var(--accent-dim);text-decoration:underline">Bun</a> and Git first, then run these commands in your terminal.
+            <code style="font-family:var(--mono);font-size:0.9em;color:var(--text)">swiz install</code> configures hooks for your agents;
+            <code style="font-family:var(--mono);font-size:0.9em;color:var(--text)">swiz status</code> checks the result.
           </div>
         </div>
-        <div class="install-block"><span class="comment"># clone and link globally</span>
+        <pre class="install-block"><code><span class="comment"># clone and link globally</span>
+<span class="prompt">$</span> git clone https://github.com/mherod/swiz
+<span class="prompt">$</span> cd swiz
 <span class="prompt">$</span> bun install
 <span class="prompt">$</span> bun link
 
 <span class="comment"># install hooks into your agents</span>
 <span class="prompt">$</span> swiz install
-<span class="prompt">$</span> swiz status</div>
+<span class="prompt">$</span> swiz status</code></pre>
       </div>
     </section>
 
@@ -1248,10 +1263,31 @@
     { "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js" } }
   </script>
   <script type="module">
-    import { createBeeScene } from "./swiz-buzz-3d.js";
-
     const el = document.getElementById("bee-canvas");
-    if (el) createBeeScene(el);
+    const motion = window.matchMedia("(prefers-reduced-motion: reduce)");
+    let dispose;
+    let generation = 0;
+
+    async function updateBee() {
+      const current = ++generation;
+      dispose?.();
+      dispose = undefined;
+      if (!el) return;
+      delete el.dataset.ready;
+      if (motion.matches) return;
+
+      try {
+        const { createBeeScene } = await import("./swiz-buzz-3d.js");
+        if (current !== generation) return;
+        dispose = createBeeScene(el);
+        el.dataset.ready = "true";
+      } catch {
+        // The local illustration remains visible if the module or WebGL is unavailable.
+      }
+    }
+
+    motion.addEventListener("change", updateBee);
+    updateBee();
   </script>
 
 </body>
