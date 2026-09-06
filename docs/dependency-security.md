@@ -69,6 +69,24 @@ These are Bun audit counts, not GitHub alert counts, and they do not establish
 that every vulnerable path was exploitable. A lower GitHub count after removing
 the unused pnpm graph does not mean the seven remaining Bun advisories are fixed.
 
+## Gemini API-key transport
+
+API-key requests now use the first-party `@ai-sdk/google` provider. Keys supplied
+through `GEMINI_API_KEY` or the existing Keychain lookup use the same path.
+The CLI provider is imported only when no API key is available, preserving the
+cached OAuth fallback while its remaining enterprise use is assessed.
+
+Three fresh Bun 1.3.14 processes per implementation each completed ten mocked
+`promptGemini` requests, followed by `Bun.gc(true)`. Median RSS fell from
+252.6 MiB to 89.3 MiB (about 65%). This measures the API-key path's retained
+process footprint, not a live daemon leak rate. Regression tests exercise text,
+structured output and validation, streaming, Keychain keys, HTTP cancellation
+from caller signals and timeouts, and unchanged OAuth delegation.
+
+This adds three lockfile entries without changing existing dependency versions.
+The isolated Google provider graph audits clean; the full graph still has the
+seven advisories below because the OAuth dependency remains installed.
+
 ## Remaining work
 
 | Package | Audited installed line | Required floor or constraint | Owning dependency path |
@@ -89,10 +107,12 @@ the unused pnpm graph does not mean the seven remaining Bun advisories are fixed
 
 The [Gemini CLI provider repository](https://github.com/ben-vargas/ai-sdk-provider-gemini-cli)
 was archived on 2026-08-03. Its latest published version remains 2.0.1 and pins
-`@google/gemini-cli-core` to 0.22.4. A provider migration must preserve Swiz's
-API-key and cached CLI OAuth authentication, text and structured generation,
-streaming, and abort behavior in `src/gemini.ts`; waiting for an ordinary
-provider version bump is not a remediation plan for this archived dependency.
+`@google/gemini-cli-core` to 0.22.4.
+[Google ended personal Gemini CLI OAuth access on 2026-06-18](https://developers.googleblog.com/an-important-update-transitioning-gemini-cli-to-antigravity-cli/),
+while enterprise access remains supported. Confirm whether Swiz needs that
+enterprise fallback before removing the archived provider. API-key generation
+has already migrated; waiting for an ordinary CLI provider version bump is not
+a remediation plan for its remaining dependency tree.
 
 Keep #874 open until the remaining graph and unsupported
 security-update acceptance criterion have an explicit resolution.
