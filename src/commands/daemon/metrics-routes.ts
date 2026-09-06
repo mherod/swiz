@@ -7,6 +7,8 @@ import { getGhRateLimitStats } from "../../gh-rate-limit.ts"
 import { getHookLogMetrics, readHookLogs } from "../../hook-log.ts"
 import { getCodexPlanSyncMetrics } from "../../tasks/codex-update-plan.ts"
 import { getTurnsCacheStats } from "../../transcript-turns.ts"
+import type { FileWatcherRegistry } from "./cache/worker-file-watcher-registry.ts"
+import { RpcFailure } from "./cache/worker-rpc.ts"
 import type {
   CooldownRegistry,
   DaemonMetrics,
@@ -30,10 +32,22 @@ export interface MetricsRoutesContext {
   snapshots: { size: number }
   projectMetrics: Map<string, DaemonMetrics>
   globalMetrics: DaemonMetrics
-  watchers: { status: () => unknown }
+  watchers: Pick<FileWatcherRegistry, "status">
 }
 
-export function handleMetricsRoute(url: URL, ctx: MetricsRoutesContext): Response {
+/** Keep unrelated metrics available when watcher IPC fails, without presenting stale health. */
+async function readWatcherStatus(ctx: MetricsRoutesContext) {
+  try {
+    return { watchers: await ctx.watchers.status(), watcherStatusError: null }
+  } catch (error) {
+    return {
+      watchers: null,
+      watcherStatusError: error instanceof RpcFailure ? error.code : "UNAVAILABLE",
+    }
+  }
+}
+
+export async function handleMetricsRoute(url: URL, ctx: MetricsRoutesContext): Promise<Response> {
   const projectParam = url.searchParams.get("project")
   const cacheMetrics = {
     ghQuery: { size: ctx.ghCache.size, hits: ctx.ghCache.hits, misses: ctx.ghCache.misses },
@@ -77,13 +91,13 @@ export function handleMetricsRoute(url: URL, ctx: MetricsRoutesContext): Respons
     // Mirrored from /cache/status. Watcher registration is the only evidence that a project's
     // git state is actually being observed, and looking for it in /metrics — the obvious place —
     // and finding nothing reads as "not watching" rather than "wrong endpoint" (#807).
-    watchers: ctx.watchers.status(),
+    ...(await readWatcherStatus(ctx)),
   })
 }
 
-export function handleCacheStatus(ctx: MetricsRoutesContext): Response {
+export async function handleCacheStatus(ctx: MetricsRoutesContext): Promise<Response> {
   return Response.json({
-    watchers: ctx.watchers.status(),
+    ...(await readWatcherStatus(ctx)),
     snapshotCacheSize: ctx.snapshots.size,
     ghCacheSize: ctx.ghCache.size,
     eligibilityCacheSize: ctx.eligibilityCache.size,

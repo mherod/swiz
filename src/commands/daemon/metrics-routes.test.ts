@@ -1,5 +1,6 @@
 import { beforeAll, beforeEach, describe, expect, mock, test } from "bun:test"
 import type { HookLogEntry } from "../../hook-log.ts"
+import { RpcFailure } from "./cache/worker-rpc.ts"
 import type { MetricsRoutesContext } from "./metrics-routes.ts"
 import {
   CooldownRegistry,
@@ -12,8 +13,19 @@ import {
   recordDispatch,
   TranscriptIndexCache,
 } from "./runtime-cache.ts"
+import type { FileWatcherStatus } from "./worker-messages.ts"
 
 const requestedLogLimits: number[] = []
+const watcherEntries: FileWatcherStatus[] = [
+  {
+    path: "/repo/.git/",
+    label: "git:repo",
+    watching: true,
+    watcherCount: 1,
+    lastInvalidation: 1_000,
+    invalidationCount: 2,
+  },
+]
 const hookLogEntries: HookLogEntry[] = [
   {
     ts: "2026-07-30T00:00:00.000Z",
@@ -78,7 +90,7 @@ function createContext(): MetricsRoutesContext {
     snapshots: { size: 3 },
     projectMetrics: new Map(),
     globalMetrics: createMetrics(),
-    watchers: { status: () => ({ active: 2 }) },
+    watchers: { status: async () => watcherEntries },
   }
 }
 
@@ -90,7 +102,7 @@ describe("metrics routes", () => {
     recordDispatch(project, "preToolUse", 10)
     ctx.projectMetrics.set("/repo", project)
 
-    const response = routes.handleMetricsRoute(new URL("http://daemon/metrics"), ctx)
+    const response = await routes.handleMetricsRoute(new URL("http://daemon/metrics"), ctx)
     const body = await response.json()
 
     expect(body.totalDispatches).toBe(1)
@@ -137,12 +149,12 @@ describe("metrics routes", () => {
     recordDispatch(project, "preToolUse", 12)
     ctx.projectMetrics.set("/repo", project)
 
-    const known = await routes
-      .handleMetricsRoute(new URL("http://daemon/metrics?project=/repo"), ctx)
-      .json()
-    const unknown = await routes
-      .handleMetricsRoute(new URL("http://daemon/metrics?project=/missing"), ctx)
-      .json()
+    const known = await (
+      await routes.handleMetricsRoute(new URL("http://daemon/metrics?project=/repo"), ctx)
+    ).json()
+    const unknown = await (
+      await routes.handleMetricsRoute(new URL("http://daemon/metrics?project=/missing"), ctx)
+    ).json()
 
     expect(known).toMatchObject({ project: "/repo", totalDispatches: 1 })
     expect(known.workerPool).toMatchObject({ initialized: false })
@@ -150,10 +162,11 @@ describe("metrics routes", () => {
   })
 
   test("reports cache and watcher status", async () => {
-    const body = await routes.handleCacheStatus(createContext()).json()
+    const body = await (await routes.handleCacheStatus(createContext())).json()
 
     expect(body).toMatchObject({
-      watchers: { active: 2 },
+      watchers: watcherEntries,
+      watcherStatusError: null,
       snapshotCacheSize: 3,
       ghCacheSize: 0,
       eligibilityCacheSize: 0,
@@ -166,8 +179,49 @@ describe("metrics routes", () => {
     // like "not watching" rather than "wrong endpoint" (#807).
     const body = await routes.handleMetricsRoute(new URL("http://daemon/metrics"), createContext())
 
-    expect(await body.json()).toMatchObject({ watchers: { active: 2 } })
+    expect(await body.json()).toMatchObject({ watchers: watcherEntries, watcherStatusError: null })
   })
+
+  for (const endpoint of ["metrics", "cache/status"] as const) {
+    const read = (ctx: MetricsRoutesContext) =>
+      endpoint === "metrics"
+        ? routes.handleMetricsRoute(new URL("http://daemon/metrics"), ctx)
+        : routes.handleCacheStatus(ctx)
+
+    test(`${endpoint} waits for a delayed watcher sample`, async () => {
+      const ctx = createContext()
+      const reply = Promise.withResolvers<FileWatcherStatus[]>()
+      ctx.watchers = { status: () => reply.promise }
+      let settled = false
+      const response = read(ctx).then((value) => {
+        settled = true
+        return value
+      })
+      await new Promise<void>((resolve) => setImmediate(resolve))
+      expect(settled).toBe(false)
+      reply.resolve(watcherEntries)
+      expect(await (await response).json()).toMatchObject({
+        watchers: watcherEntries,
+        watcherStatusError: null,
+      })
+    })
+
+    for (const code of ["TIMEOUT", "WORKER_EXIT", "CLOSED", "CAPACITY"] as const) {
+      test(`${endpoint} explicitly reports ${code} while retaining other metrics`, async () => {
+        const ctx = createContext()
+        ctx.watchers = {
+          status: async () => {
+            throw new RpcFailure(code)
+          },
+        }
+        const response = await read(ctx)
+        expect(response.status).toBe(200)
+        const body = await response.json()
+        expect(body).toMatchObject({ watchers: null, watcherStatusError: code })
+        expect(endpoint === "metrics" ? body.caches.snapshots.size : body.snapshotCacheSize).toBe(3)
+      })
+    }
+  }
 
   test("clamps hook-log limits and reverses entries for newest-first output", async () => {
     const low = await routes.handleHookLogs(new URL("http://daemon/hook-logs?limit=0"))

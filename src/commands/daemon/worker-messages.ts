@@ -21,16 +21,16 @@ export type FileWatcherWorkerMessage =
       label: string
       options?: WatchRegistrationOptions
     }
-  | { type: "start" }
-  | { type: "status" }
+  | { type: "start"; id: string }
+  | { type: "status"; id: string }
   | { type: "unregisterByLabelSuffix"; suffix: string }
   | { type: "close" }
 
 export type FileWatcherParentMessage =
   | { type: "invalidation"; path: string; label: string }
-  | { type: "status"; status: FileWatcherStatus[] }
-  | { type: "error"; error: string }
-  | { type: "started" }
+  | { type: "status"; id: string; status: FileWatcherStatus[] }
+  | { type: "error"; id?: string; error: string }
+  | { type: "started"; id: string }
 
 export type TranscriptMonitorWorkerMessage =
   | { type: "init"; id: string; rpcTimeoutMs: number; maxPending: number }

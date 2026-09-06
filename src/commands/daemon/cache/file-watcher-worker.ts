@@ -18,15 +18,16 @@ const postMessage = (message: FileWatcherParentMessage): void => {
   port.postMessage(message)
 }
 
-const postStatus = (): void => {
+const postStatus = (id: string): void => {
   postMessage({
     type: "status",
+    id,
     status: registry ? registry.status() : [],
   })
 }
 
-const postError = (error: unknown): void => {
-  postMessage({ type: "error", error: String(error) })
+const postError = (error: unknown, msg: FileWatcherWorkerMessage): void => {
+  postMessage({ type: "error", id: "id" in msg ? msg.id : undefined, error: String(error) })
 }
 
 const createRegistry = (): BaseFileWatcherRegistry => {
@@ -47,15 +48,13 @@ const handleRegister = (msg: Extract<FileWatcherWorkerMessage, { type: "register
   const { path, label, options } = msg
 
   activeRegistry.register(path, label, () => postInvalidation(path, label), options)
-  postStatus()
 }
 
-const handleStart = async (): Promise<void> => {
+const handleStart = async (id: string): Promise<void> => {
   const activeRegistry = getOrCreateRegistry()
 
   await activeRegistry.start()
-  postStatus()
-  postMessage({ type: "started" })
+  postMessage({ type: "started", id })
 }
 
 const handleMessage = async (msg: FileWatcherWorkerMessage): Promise<void> => {
@@ -70,7 +69,7 @@ const handleMessage = async (msg: FileWatcherWorkerMessage): Promise<void> => {
         break
       }
       case "start": {
-        await handleStart()
+        await handleStart(msg.id)
         break
       }
       case "unregisterByLabelSuffix": {
@@ -82,12 +81,12 @@ const handleMessage = async (msg: FileWatcherWorkerMessage): Promise<void> => {
         break
       }
       case "status": {
-        postStatus()
+        postStatus(msg.id)
         break
       }
     }
   } catch (err) {
-    postError(err)
+    postError(err, msg)
   }
 }
 

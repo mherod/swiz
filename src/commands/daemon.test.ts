@@ -799,24 +799,24 @@ describe("FileWatcherRegistry", () => {
     registries.length = 0
   })
 
-  it("registers paths and reports status", () => {
+  it("registers paths and reports status", async () => {
     const reg = new FileWatcherRegistry()
     registries.push(reg)
     reg.register("/tmp/test-path", "test-label", () => {})
-    const status = reg.status()
+    const status = await reg.status()
     expect(status).toHaveLength(1)
     expect(status[0]?.label).toBe("test-label")
     expect(status[0]?.watching).toBeFalse()
     expect(status[0]?.invalidationCount).toBe(0)
   })
 
-  it("multiple callbacks on same path", () => {
+  it("multiple callbacks on same path", async () => {
     const reg = new FileWatcherRegistry()
     registries.push(reg)
     const calls: string[] = []
     reg.register("/tmp/test-path", "test", () => calls.push("a"))
     reg.register("/tmp/test-path", "test", () => calls.push("b"))
-    const status = reg.status()
+    const status = await reg.status()
     expect(status).toHaveLength(1)
   })
 
@@ -827,9 +827,9 @@ describe("FileWatcherRegistry", () => {
       registries.push(reg)
       reg.register(dir, "tmp", () => {})
       await reg.start()
-      expect(reg.status()[0]?.watching).toBeTrue()
+      expect((await reg.status())[0]?.watching).toBeTrue()
       reg.close()
-      expect(reg.status()[0]?.watching).toBeFalse()
+      await expect(reg.status()).rejects.toMatchObject({ code: "CLOSED" })
     } finally {
       try {
         await rm(dir, { recursive: true, force: true })
@@ -842,7 +842,7 @@ describe("FileWatcherRegistry", () => {
     registries.push(reg)
     reg.register("/nonexistent/path/that/does/not/exist", "missing", () => {})
     await reg.start()
-    expect(reg.status()[0]?.watching).toBeFalse()
+    expect((await reg.status())[0]?.watching).toBeFalse()
     reg.close()
   })
 })
