@@ -56,6 +56,11 @@ interface CachedSessionData {
   lastToolCallFingerprint?: string
   /** Fingerprint of the last assistant message text detected in this session. */
   lastMessageFingerprint?: string
+  /**
+   * Opaque revision of this entry's message content. Stable while the content is stable, so a
+   * client can detect "nothing changed" in constant time instead of walking the whole array.
+   */
+  contentRevision?: string
   tokenStats?: SessionTokenStats
   projectIdentity?: string
   retainedBytes: number
@@ -84,6 +89,12 @@ interface SessionData {
   messages: SessionMessage[]
   toolStats: Array<{ name: string; count: number }>
   tokenStats?: SessionTokenStats
+  /**
+   * Opaque revision of `messages`. Equal revisions mean identical content, so a client can skip
+   * comparing the array itself. Absent when the session could not be resolved; clients must fall
+   * back to structural comparison rather than assuming "unchanged".
+   */
+  revision?: string
 }
 
 // eslint-disable-next-line complexity -- tolerant parsing keeps malformed telemetry fail-open
@@ -141,6 +152,43 @@ function isCacheFresh(
   size: number
 ): cached is CachedSessionData {
   return cached !== undefined && cached.mtimeMs === mtimeMs && cached.size === size
+}
+
+/**
+ * Opaque content revision for a parsed transcript.
+ *
+ * `mtimeMs` and `size` are the cache's own freshness key, so they already change on append,
+ * deletion, reorder, and same-length edits (a rewrite bumps mtime even when the byte count is
+ * unchanged). Message count and a hash of the last-message fingerprint are folded in to separate
+ * two different edits that land in the same millisecond at the same size.
+ *
+ * The result carries no transcript text, session id, or file path — only digests and counters.
+ */
+export function computeContentRevision(input: {
+  mtimeMs: number
+  size: number
+  messageCount: number
+  lastMessageFingerprint?: string
+  lastToolCallFingerprint?: string
+}): string {
+  const digest = Bun.hash(
+    `${input.messageCount}\x00${input.lastMessageFingerprint ?? ""}\x00${input.lastToolCallFingerprint ?? ""}`
+  ).toString(36)
+  return `${input.mtimeMs.toString(36)}-${input.size.toString(36)}-${digest}`
+}
+
+/**
+ * Narrow a whole-transcript revision to the window a caller actually receives.
+ * Two clients polling the same session with different limits must not share a revision.
+ */
+export function scopeRevisionToWindow(
+  contentRevision: string | undefined,
+  limit: number,
+  toolCallSignature?: string
+): string | undefined {
+  if (!contentRevision) return undefined
+  const suffix = toolCallSignature ? `.${toolCallSignature}` : ""
+  return `${contentRevision}.${limit.toString(36)}${suffix}`
 }
 
 class SessionDataCache {
@@ -424,6 +472,15 @@ class SessionDataCache {
       const next = this.buildFromEntries(parsed, mtimeMs, cached)
       next.tokenStats = readTokenStats(text)
       next.size = size
+      // Stamped here, where `size` is finally known. The entry is rebuilt only when the freshness
+      // key changes, so this revision is stable exactly as long as the content is.
+      next.contentRevision = computeContentRevision({
+        mtimeMs,
+        size,
+        messageCount: next.messages.length,
+        lastMessageFingerprint: next.lastMessageFingerprint,
+        lastToolCallFingerprint: next.lastToolCallFingerprint,
+      })
       next.projectIdentity = projectIdentity
       next.retainedBytes = estimateRetainedBytes(next, text.length)
       if (generation === this.generation) this.entries.set(session.path, next)
@@ -626,7 +683,12 @@ export async function getSessionData(
     detail: entry.detail,
   }))
   if (captured.length === 0 || hasToolCalls || session.format !== "cursor-agent-jsonl") {
-    return { messages, toolStats: cached.toolStats, tokenStats: cached.tokenStats }
+    return {
+      messages,
+      toolStats: cached.toolStats,
+      tokenStats: cached.tokenStats,
+      revision: scopeRevisionToWindow(cached.contentRevision, limit),
+    }
   }
 
   const supplemented = supplementMessagesWithCapturedToolCalls(messages, effectiveToolCalls)
@@ -634,6 +696,15 @@ export async function getSessionData(
     messages: supplemented.slice(-limit),
     toolStats: mergeToolStats(cached.toolStats, captured),
     tokenStats: cached.tokenStats,
+    // Captured tool calls arrive live and can change the payload without touching the file, so
+    // the file-derived revision alone would go stale here.
+    revision: scopeRevisionToWindow(
+      cached.contentRevision,
+      limit,
+      Bun.hash(
+        effectiveToolCalls.map((entry) => `${entry.name}\x00${entry.detail}`).join("\x01")
+      ).toString(36)
+    ),
   }
 }
 

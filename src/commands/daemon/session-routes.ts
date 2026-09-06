@@ -19,6 +19,11 @@ export interface SessionRoutesMessagesResult {
   messages: SessionMessage[]
   toolStats: Array<{ name: string; count: number }>
   tokenStats?: SessionTokenStats
+  /**
+   * Opaque content revision for `messages`; equal revisions mean identical content.
+   * Optional so older clients and unresolved sessions keep working via structural comparison.
+   */
+  revision?: string
 }
 
 /** `getSessionTasks` payload exposed through session HTTP routes */
@@ -204,6 +209,7 @@ async function handleSessionMessages(req: Request, ctx: SessionRoutesContext): P
     messages: data.messages,
     toolStats: data.toolStats,
     tokenStats: data.tokenStats,
+    revision: data.revision,
   })
 }
 

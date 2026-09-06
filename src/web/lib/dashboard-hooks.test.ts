@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test"
-import { createSingleFlight, snapshotChanged } from "./dashboard-hooks.ts"
+import { createSingleFlight, revisionChanged, snapshotChanged } from "./dashboard-hooks.ts"
 
 describe("dashboard polling", () => {
   it("coalesces overlapping polls and permits a later refresh", async () => {
@@ -75,5 +75,54 @@ describe("snapshotChanged", () => {
 
     holder.current = ""
     expect(snapshotChanged("[[],null]", holder)).toBe(true)
+  })
+})
+
+describe("transcript revision comparison", () => {
+  it("reports the first revision as changed so the initial transcript renders", () => {
+    const holder = { current: undefined as string | undefined }
+    expect(revisionChanged("rev-1", holder)).toBe(true)
+  })
+
+  it("reports an unchanged revision without inspecting the messages", () => {
+    const holder = { current: undefined as string | undefined }
+    expect(revisionChanged("rev-1", holder)).toBe(true)
+    expect(revisionChanged("rev-1", holder)).toBe(false)
+    expect(revisionChanged("rev-1", holder)).toBe(false)
+  })
+
+  it("reports a changed revision promptly", () => {
+    const holder = { current: undefined as string | undefined }
+    revisionChanged("rev-1", holder)
+    expect(revisionChanged("rev-2", holder)).toBe(true)
+    // And settles again on the new value.
+    expect(revisionChanged("rev-2", holder)).toBe(false)
+  })
+
+  it("returns undefined for a response without a revision so the caller falls back", () => {
+    // Older daemons send no revision. Reading that as "unchanged" would freeze the transcript,
+    // so the contract is an explicit undefined rather than false.
+    const holder = { current: undefined as string | undefined }
+    expect(revisionChanged(undefined, holder)).toBeUndefined()
+
+    // Control: a real revision on the same holder still reports a change.
+    expect(revisionChanged("rev-1", holder)).toBe(true)
+  })
+
+  it("keeps falling back after a server downgrade mid-session", () => {
+    const holder = { current: undefined as string | undefined }
+    expect(revisionChanged("rev-1", holder)).toBe(true)
+    expect(revisionChanged(undefined, holder)).toBeUndefined()
+    // The retained revision must not resurrect: the next revisioned poll is judged against it.
+    expect(revisionChanged("rev-1", holder)).toBe(false)
+    expect(revisionChanged("rev-2", holder)).toBe(true)
+  })
+
+  it("compares in constant time regardless of transcript size", () => {
+    // The point of the revision: cost is one string comparison, not a walk of the viewport.
+    const holder = { current: undefined as string | undefined }
+    const big = "rev-".concat("x".repeat(64))
+    expect(revisionChanged(big, holder)).toBe(true)
+    expect(revisionChanged(big, holder)).toBe(false)
   })
 })

@@ -83,6 +83,27 @@ export function snapshotChanged<T>(next: T, holder: { current: T | undefined }):
   return true
 }
 
+/**
+ * Constant-time content-change detection from the server's opaque transcript revision.
+ *
+ * `equalSnapshot` avoids allocating a copy of the transcript, but still walks every message, key,
+ * and nested tool argument on each poll — work proportional to the whole retained viewport just
+ * to learn that nothing changed. One string comparison replaces that walk.
+ *
+ * Returns undefined when the response carried no revision (an older daemon, or a session that
+ * could not be resolved). The caller must then fall back to structural comparison; treating a
+ * missing revision as "unchanged" would freeze the transcript.
+ */
+export function revisionChanged(
+  next: string | undefined,
+  holder: { current: string | undefined }
+): boolean | undefined {
+  if (next === undefined) return undefined
+  if (holder.current === next) return false
+  holder.current = next
+  return true
+}
+
 function settledError(results: PromiseSettledResult<unknown>[]): string {
   const failure = results.find((result) => result.status === "rejected")
   if (!failure || failure.status !== "rejected") return ""
@@ -303,6 +324,7 @@ function fetchSessionSnapshots(
           messages: SessionMessage[]
           toolStats?: ToolStat[]
           tokenStats?: SessionTokenStats
+          revision?: string
         }>("/sessions/messages", { cwd, sessionId, limit: SESSION_MESSAGE_LIMIT }, signal)
       : Promise.resolve(null),
     enabled.tasks
@@ -343,6 +365,7 @@ export function useSessionPolling(deps: SessionPollingDeps): void {
     let knownKeys = new Set<string>()
     let clearFreshKeys: ReturnType<typeof setTimeout> | undefined
     const messagesSnapshot = { current: undefined as SessionMessage[] | undefined }
+    const revisionSnapshot = { current: undefined as string | undefined }
     const toolsSnapshot = { current: undefined as ToolStat[] | undefined }
     const tokensSnapshot = { current: undefined as SessionTokenStats | undefined }
     const tasksSnapshot = { current: undefined as unknown }
@@ -369,11 +392,20 @@ export function useSessionPolling(deps: SessionPollingDeps): void {
       messages: SessionMessage[]
       toolStats?: ToolStat[]
       tokenStats?: SessionTokenStats
+      revision?: string
     }): void {
       const msgs = value.messages ?? []
-      const messagesChanged = snapshotChanged(msgs, messagesSnapshot)
+      // Prefer the server revision: one string comparison instead of walking the viewport.
+      const byRevision = revisionChanged(value.revision, revisionSnapshot)
+      const messagesChanged =
+        byRevision === undefined ? snapshotChanged(msgs, messagesSnapshot) : byRevision
+      // Tool and token telemetry change independently of message content and must stay fresh
+      // even when the revision says the transcript is unchanged.
       const toolsChanged = snapshotChanged(value.toolStats ?? [], toolsSnapshot)
       const tokensChanged = snapshotChanged(value.tokenStats, tokensSnapshot)
+      // On the revision path `snapshotChanged` never ran, so the holder is synced here. An
+      // unchanged revision leaves it alone, retaining the previous array identity.
+      if (byRevision === true) messagesSnapshot.current = msgs
       if (messagesChanged) {
         const fresh = computeFreshMessageKeys(msgs, knownKeys)
         knownKeys = new Set(msgs.map(msgKey))
