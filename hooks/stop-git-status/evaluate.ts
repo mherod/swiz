@@ -11,6 +11,7 @@ import type { SwizHookOutput } from "../../src/SwizHook.ts"
 import type { StopHookInput } from "../../src/schemas.ts"
 import { blockStopObj } from "../../src/utils/hook-response.ts"
 import {
+  appendSessionFileOwnershipContext,
   buildOwnershipHoldReason,
   resolvePeerHeldFiles,
 } from "../../src/utils/session-file-ownership.ts"
@@ -20,7 +21,7 @@ import { detectBackgroundPush } from "./background-push-detector.ts"
 import { resolveGitContext } from "./context.ts"
 import { isPushCooldownActive, markPushPrompted } from "./push-cooldown-validator.ts"
 import { buildTaskDesc, describeRemoteState, selectTaskSubject } from "./remote-state-validator.ts"
-import type { GitWorkflowCollectResult } from "./types.ts"
+import type { GitContext, GitWorkflowCollectResult } from "./types.ts"
 import { buildUncommittedReason } from "./uncommitted-changes-validator.ts"
 
 interface DetachedMainWorktree {
@@ -103,11 +104,7 @@ async function checkPushCooldownOrInFlight(input: StopHookInput): Promise<SwizHo
     pushCooldownMinutes,
   } = ctx
 
-  if (!hasUncommitted && behind === 0 && ahead > 0) {
-    if (await isPushCooldownActive(sessionId, cwd, branch, pushCooldownMinutes)) {
-      return {}
-    }
-  }
+  if (hasUnresolvedUpstream(ctx) || branch === "(detached)") return null
 
   if (!hasUncommitted && ahead > 0 && behind === 0) {
     if (await detectBackgroundPush(cwd)) {
@@ -118,9 +115,38 @@ async function checkPushCooldownOrInFlight(input: StopHookInput): Promise<SwizHo
           "then try stopping again."
       )
     }
+    if (await isPushCooldownActive(sessionId, cwd, branch, pushCooldownMinutes)) {
+      return {}
+    }
   }
 
   return null
+}
+
+function hasUnresolvedUpstream(ctx: GitContext): boolean {
+  return ctx.gitStatus.upstreamGone || (ctx.hasRemote && !ctx.gitStatus.upstream)
+}
+
+function hasOutstandingGitWork(ctx: GitContext): boolean {
+  const { ahead, behind, branch } = ctx.gitStatus
+  return (
+    ctx.hasUncommitted ||
+    ahead > 0 ||
+    behind > 0 ||
+    hasUnresolvedUpstream(ctx) ||
+    branch === "(detached)"
+  )
+}
+
+function satisfiedGitResult(ctx: GitContext): GitWorkflowCollectResult {
+  if (!ctx.ownership.known || ctx.gitStatus.total === 0) return { kind: "ok" }
+  return {
+    kind: "ok",
+    context: appendSessionFileOwnershipContext(
+      "Only other active sessions have uncommitted changes. Leave their files untouched.",
+      ctx.ownership.ownership
+    ),
+  }
 }
 
 /**
@@ -132,6 +158,7 @@ async function collectGitWorkflowStopAfterDetachedCheck(
 ): Promise<GitWorkflowCollectResult> {
   const ctx = await resolveGitContext(input)
   if (!ctx) return { kind: "ok" }
+  if (!hasOutstandingGitWork(ctx)) return satisfiedGitResult(ctx)
 
   const {
     hasUncommitted,
@@ -146,6 +173,7 @@ async function collectGitWorkflowStopAfterDetachedCheck(
   } = ctx
 
   const { branch, ahead, behind } = gitStatus
+  const unresolvedUpstream = hasUnresolvedUpstream(ctx)
 
   const details = hasUncommitted
     ? buildUncommittedReason(gitStatus, upstream, behind)
@@ -166,6 +194,14 @@ async function collectGitWorkflowStopAfterDetachedCheck(
     hookPayload: input as Record<string, unknown>,
     ownership: ctx.ownership,
   })
+  if (unresolvedUpstream) {
+    steps.push(
+      "Inspect upstream tracking with git branch -vv and resolve the missing upstream before stopping."
+    )
+  }
+  if (branch === "(detached)" && steps.length === 0) {
+    steps.push("Inspect the detached worktree and its ownership before choosing a recovery branch.")
+  }
 
   const willNeedPush = ahead > 0 || (hasUncommitted && hasRemote)
   const taskSubject = selectTaskSubject(hasUncommitted, ahead, behind)
@@ -213,7 +249,7 @@ export async function evaluateStopGitStatus(input: StopHookInput): Promise<SwizH
   if (pushShortCircuit !== null) return pushShortCircuit
 
   const r = await collectGitWorkflowStopAfterDetachedCheck(input)
-  if (r.kind === "ok") return {}
+  if (r.kind === "ok") return r.context ? { systemMessage: r.context } : {}
   if (r.kind === "hookOutput") return r.output
 
   if (r.willNeedPush) await markPushPrompted(r.sessionId)

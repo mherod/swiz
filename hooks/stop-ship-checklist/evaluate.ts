@@ -10,6 +10,7 @@ import type { SwizHookOutput } from "../../src/SwizHook.ts"
 import type { StopHookInput } from "../../src/schemas.ts"
 import { blockStopObj } from "../../src/utils/hook-response.ts"
 import { completeSessionTask, createSessionTask } from "../../src/utils/session-task-io.ts"
+import type { GitWorkflowCollectResult } from "../stop-git-status/types.ts"
 import { collectGitWorkflowStop, markPushPrompted } from "../stop-git-status.ts"
 import { updateCooldown } from "../stop-personal-repo-issues/cooldown.ts"
 import { collectPersonalRepoIssuesStopParsed } from "../stop-personal-repo-issues/evaluate.ts"
@@ -20,6 +21,16 @@ import type { ShipChecklistResult, WorkflowStep } from "./types.ts"
 
 const SHIP_CHECKLIST_TASK_SUBJECT = "Complete ship checklist before stopping"
 const SHIP_CHECKLIST_COMPLETION_EVIDENCE = "note:ship checklist passed"
+
+function collectGitStep(result: GitWorkflowCollectResult | null): WorkflowStep | null {
+  if (result?.kind === "block") {
+    return { kind: "git", summary: result.summary, planSteps: result.steps }
+  }
+  if (result?.kind === "hookOutput" && "reason" in result.output) {
+    return { kind: "git", summary: result.output.reason, planSteps: [result.output.reason] }
+  }
+  return null
+}
 
 async function isProjectAffiliated(sessionId: string, cwd: string): Promise<boolean> {
   const { getSessionIdsForProject } = await import("../../src/tasks/task-resolver.ts")
@@ -85,13 +96,8 @@ export async function collectShipChecklistStopParsed(
   // Determine which are blocking
   const steps: WorkflowStep[] = []
 
-  if (gitResult && gitResult.kind === "block") {
-    steps.push({
-      kind: "git",
-      summary: gitResult.summary,
-      planSteps: gitResult.steps,
-    })
-  }
+  const gitStep = collectGitStep(gitResult)
+  if (gitStep) steps.push(gitStep)
 
   if (ciResult) {
     steps.push(ciResult)
@@ -105,11 +111,10 @@ export async function collectShipChecklistStopParsed(
     })
   }
 
-  if (steps.length === 0) return { blocked: false, steps: [] }
-
   return {
-    blocked: true,
+    blocked: steps.length > 0,
     steps,
+    context: gitResult?.kind === "ok" ? gitResult.context : undefined,
   }
 }
 
@@ -123,10 +128,10 @@ export async function evaluateStopShipChecklist(input: StopHookInput): Promise<S
     if (!result) return {}
     if (!result.blocked || result.steps.length === 0) {
       await settleShipChecklistTask(input, result)
-      return {}
+      return result.context ? { systemMessage: result.context } : {}
     }
 
-    const message = formatStopMessage(result.steps)
+    const message = [result.context, formatStopMessage(result.steps)].filter(Boolean).join("\n\n")
     const sessionId = input.session_id
     const cwd = input.cwd ?? process.cwd()
     if (sessionId) {

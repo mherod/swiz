@@ -25,6 +25,7 @@ import {
 } from "../../src/utils/git-utils.ts"
 import {
   appendSessionFileOwnershipContext,
+  hasOnlyPeerOwnedChanges,
   resolveSessionFileOwnershipResult,
   type SessionFileOwnership,
 } from "../../src/utils/session-file-ownership.ts"
@@ -98,9 +99,16 @@ async function buildStopGitSummary(
   ownership: SessionFileOwnership | null,
   gitStatus: GitStatus,
   upstream: string,
-  effective: Awaited<ReturnType<typeof resolveEffectiveSettings>>
+  options: {
+    effective: Awaited<ReturnType<typeof resolveEffectiveSettings>>
+    peerOnlyChanges: boolean
+  }
 ): Promise<string> {
-  const constructiveSummary = buildConstructiveGitSummary(gitStatus, upstream)
+  const { effective, peerOnlyChanges } = options
+  const constructiveSummary = buildConstructiveGitSummary(
+    peerOnlyChanges ? { ...gitStatus, total: 0 } : gitStatus,
+    upstream
+  )
   const unpushedCommitSummaries = await getVisibleUnpushedCommitSummaries(cwd, gitStatus)
   let gitLine = buildGitContextLine(
     gitStatus,
@@ -109,6 +117,7 @@ async function buildStopGitSummary(
       trunkMode: effective.trunkMode,
       strictNoDirectMain: effective.strictNoDirectMain,
       defaultBranch: effective.defaultBranch,
+      peerOnlyChanges,
     },
     unpushedCommitSummaries
   )
@@ -123,7 +132,7 @@ async function buildStopGitSummary(
 function gitStatusWarrantsStopHook(gitStatus: GitStatus): boolean {
   const { total, ahead, behind } = gitStatus
   if (total > 0) return true
-  return ahead > 0 || behind > 0
+  return ahead > 0 || behind > 0 || gitStatus.upstreamGone
 }
 
 /**
@@ -145,22 +154,23 @@ export async function resolveGitContext(input: StopHookInput): Promise<GitContex
   if (!gitStatus || !gitStatusWarrantsStopHook(gitStatus)) return null
 
   const { branch } = gitStatus
-  const hasUncommitted = gitStatus.total > 0
   const defaultBranch = await getDefaultBranch(cwd)
   const trunkMode = effective.trunkMode
   const upstream = gitStatus.upstream ?? `origin/${branch}`
   // Resolved once here so both the prose summary and the action plan see the
   // same ownership snapshot — the plan previously ignored it (issue #841).
   const ownership = await resolveSessionFileOwnershipResult(cwd, input.session_id, gitStatus.lines)
+  const peerOnlyChanges = hasOnlyPeerOwnedChanges(gitStatus.lines, ownership)
+  const hasUncommitted = gitStatus.total > 0 && !peerOnlyChanges
   const attribution = ownership.known
     ? ownership.ownership
     : { editedByUs: [], editedByOthers: [], unattributed: [...gitStatus.lines] }
   const summary = await buildStopGitSummary(
     cwd,
-    hasUncommitted ? attribution : null,
+    gitStatus.total > 0 ? attribution : null,
     gitStatus as GitStatus,
     upstream,
-    effective
+    { effective, peerOnlyChanges }
   )
 
   return {

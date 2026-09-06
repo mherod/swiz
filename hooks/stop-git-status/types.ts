@@ -17,6 +17,7 @@ export interface GitContext {
   sessionId: string | undefined
   gitStatus: GitStatus
   summary: string
+  /** True only when dirty files still require this session to act. */
   hasUncommitted: boolean
   hasRemote: boolean
   upstream: string
@@ -31,7 +32,7 @@ export interface GitContext {
 export type ActionPlanItem = string | string[]
 
 export type GitWorkflowCollectResult =
-  | { kind: "ok" }
+  | { kind: "ok"; context?: string }
   | { kind: "hookOutput"; output: { ok: boolean } | { reason: string } }
   | {
       kind: "block"

@@ -30,6 +30,18 @@ export type SessionFileOwnershipResult =
 
 export type PeerHeldFilesResult = { known: true; files: string[] } | UnknownOwnership
 
+/** Only complete positive peer coverage can exempt dirty files from this session's gate. */
+export function hasOnlyPeerOwnedChanges(
+  files: readonly string[],
+  result: SessionFileOwnershipResult
+): boolean {
+  if (!result.known || files.length === 0) return false
+  const { editedByUs, editedByOthers, unattributed } = result.ownership
+  if (editedByUs.length > 0 || unattributed.length > 0) return false
+  const peers = new Set(editedByOthers)
+  return files.every((file) => peers.has(file))
+}
+
 function hasIdentity(value: string | undefined): value is string {
   return !!value?.trim()
 }

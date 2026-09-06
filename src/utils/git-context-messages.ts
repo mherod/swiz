@@ -27,6 +27,7 @@ export interface GitContextLineOptions {
   trunkMode?: boolean
   strictNoDirectMain?: boolean
   defaultBranch?: string
+  peerOnlyChanges?: boolean
 }
 
 function plural(count: number, singular: string, pluralForm = `${singular}s`): string {
@@ -48,8 +49,11 @@ function describeUpstream(upstream: string | null, upstreamGone: boolean): strin
   return " with no upstream. We should set an upstream before relying on push or pull status."
 }
 
-function describeWorkingTree(uncommitted: number): string {
+function describeWorkingTree(uncommitted: number, peerOnlyChanges = false): string {
   if (uncommitted === 0) return " The working tree is clean."
+  if (peerOnlyChanges) {
+    return ` ${plural(uncommitted, "uncommitted file")} belonging to other active sessions. Leave their work untouched.`
+  }
   return [
     ` ${plural(uncommitted, "uncommitted file")}.`,
     "We should commit these uncommitted changes before switching context or stopping.",
@@ -163,7 +167,7 @@ export function buildGitContextLine(
 
   let line = branch === "(detached)" ? "HEAD is detached" : `On branch ${branch}`
   line += describeUpstream(upstream, upstreamGone)
-  line += describeWorkingTree(uncommitted)
+  line += describeWorkingTree(uncommitted, options.peerOnlyChanges)
   line += describeSyncState(ahead, behind, hasBranchPolicyConflict(options))
   line += describeUnpushedCommitSummaries(ahead, unpushedCommitSummaries)
 

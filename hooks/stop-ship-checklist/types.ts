@@ -45,4 +45,5 @@ export interface ShipChecklistContext {
 export interface ShipChecklistResult {
   blocked: boolean
   steps: WorkflowStep[]
+  context?: string
 }
