@@ -49,6 +49,22 @@ function applyFulfilled<T>(result: PromiseSettledResult<T>, apply: (value: T) =>
   if (result.status === "fulfilled") apply(result.value)
 }
 
+/**
+ * True when a polled slice's serialized content differs from the last applied one,
+ * recording it as applied when so.
+ *
+ * A 2s poll returns equal content most ticks, and handing React a fresh array each time
+ * churns the root state the whole dashboard hangs off. The holder is a `useRef` box, which
+ * outlives the effect — so callers must clear it on a project or session switch, or the
+ * previous selection's snapshot suppresses the new one's first update whenever the two
+ * serialize alike (#856).
+ */
+export function snapshotChanged(next: string, holder: { current: string }): boolean {
+  if (next === holder.current) return false
+  holder.current = next
+  return true
+}
+
 function settledError(results: PromiseSettledResult<unknown>[]): string {
   const failure = results.find((result) => result.status === "rejected")
   if (!failure || failure.status !== "rejected") return ""
@@ -226,6 +242,8 @@ interface SessionPollingDeps {
 export function useSessionPolling(deps: SessionPollingDeps): void {
   const knownKeysRef = useRef<Set<string>>(new Set())
   const messagesPrevSnapshotRef = useRef("")
+  const tasksPrevSnapshotRef = useRef("")
+  const projectTasksPrevSnapshotRef = useRef("")
   const depsRef = useRef(deps)
   depsRef.current = deps
   const selectedProjectCwd = deps.selectedProjectCwd
@@ -235,6 +253,14 @@ export function useSessionPolling(deps: SessionPollingDeps): void {
     if (!selectedProjectCwd || !selectedSessionId) return
     const cwd = selectedProjectCwd
     const sid = selectedSessionId
+
+    // These refs outlive the effect, so a switch would otherwise carry the previous
+    // selection's snapshot into the new one and suppress its first update whenever the
+    // two serialize alike — two empty lists being the common case (#856).
+    messagesPrevSnapshotRef.current = ""
+    tasksPrevSnapshotRef.current = ""
+    projectTasksPrevSnapshotRef.current = ""
+    knownKeysRef.current = new Set()
 
     function computeFreshMessageKeys(
       messages: SessionMessage[],
@@ -287,9 +313,7 @@ export function useSessionPolling(deps: SessionPollingDeps): void {
 
         if (messagesResult.status === "fulfilled") {
           const msgs = messagesResult.value.messages ?? []
-          const snap = JSON.stringify(msgs)
-          if (snap !== messagesPrevSnapshotRef.current) {
-            messagesPrevSnapshotRef.current = snap
+          if (snapshotChanged(JSON.stringify(msgs), messagesPrevSnapshotRef)) {
             const fresh = computeFreshMessageKeys(msgs, knownKeysRef.current)
             knownKeysRef.current = new Set(msgs.map(msgKey))
             handleMessagesUpdate(
@@ -301,12 +325,22 @@ export function useSessionPolling(deps: SessionPollingDeps): void {
           }
         }
 
+        // Messages have been snapshot-guarded for a while; tasks were not, so every 2s
+        // tick handed React new array identities for unchanged content and churned the
+        // root state the whole dashboard hangs off (#856).
         const currentDeps = depsRef.current
         applyFulfilled(tasksResult, (value) => {
-          currentDeps.onTasks(value.tasks ?? [], value.summary ?? null)
+          const tasks = value.tasks ?? []
+          const summary = value.summary ?? null
+          if (!snapshotChanged(JSON.stringify([tasks, summary]), tasksPrevSnapshotRef)) return
+          currentDeps.onTasks(tasks, summary)
         })
         applyFulfilled(projectTasksResult, (value) => {
-          currentDeps.onProjectTasks(value.tasks ?? [], value.summary ?? null)
+          const tasks = value.tasks ?? []
+          const summary = value.summary ?? null
+          if (!snapshotChanged(JSON.stringify([tasks, summary]), projectTasksPrevSnapshotRef))
+            return
+          currentDeps.onProjectTasks(tasks, summary)
         })
       } catch {
         // ignore polling errors
