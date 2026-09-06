@@ -1,6 +1,10 @@
-import { dirname, join } from "node:path"
+import { dirname, join, resolve } from "node:path"
+import { z } from "zod"
+import { detectCurrentAgent } from "../agent-paths.ts"
 import { stderrLog } from "../debug.ts"
 import { detectProjectStack } from "../detect-frameworks.ts"
+import { suggest } from "../fuzzy.ts"
+import { findGitWorkTree } from "../git-helpers.ts"
 import {
   DEFAULT_MEMORY_LINE_THRESHOLD,
   DEFAULT_MEMORY_WORD_THRESHOLD,
@@ -52,6 +56,7 @@ interface ParsedSettingsArgs {
   sessionQuery: string | null
   force: boolean
   json: boolean
+  forgiving: boolean
 }
 
 /**
@@ -76,8 +81,10 @@ function resolveSettingScope(
     return requestedScope
   }
 
-  // User didn't specify a scope and the default (global) isn't supported
-  // If there's only one supported scope, use it
+  // Personal settings still belong globally when invoked from a project.
+  if (def.scopes.includes("global")) return "global"
+
+  // Project-only settings can also be used outside a Git repository.
   if (def.scopes.length === 1) {
     return def.scopes[0] as SettingsScope
   }
@@ -100,20 +107,11 @@ function primaryAlias(def: SettingDef): string {
   return def.aliases[0] ?? def.key
 }
 
-function aliasesForScope(scope: SettingsScope): string {
-  return SETTINGS_REGISTRY.filter((def) => def.scopes.includes(scope))
-    .map(primaryAlias)
-    .join(", ")
-}
-
 function usage(): string {
   return (
-    "Usage: swiz settings [show | enable <setting> | disable <setting> | set <setting> <value> | disable-hook <filename> | enable-hook <filename>] (--global | --project | --session [id]) [--dir <path>] [--force]\n" +
-    "Scope (required): --global (~/.swiz/settings.json), --project (.swiz/config.json), --session [id] (per-session)\n" +
-    `Settings (--global): ${aliasesForScope("global")}\n` +
-    `Settings (--project): ${aliasesForScope("project")}\n` +
-    `Settings (--session): ${aliasesForScope("session")}\n` +
-    "Hook management: disable-hook <filename> (e.g. stop-ship-checklist.ts), enable-hook <filename>"
+    "Usage: swiz settings [show | enable <setting> | disable <setting> | set <setting> <value> | disable-hook <filename> | enable-hook <filename>] [--global | --project | --session [id]] [--dir <path>] [--force]\n" +
+    "Scope defaults outside agents: project in a Git repo or with --dir; global elsewhere. Agents must specify scope.\n" +
+    "Run swiz settings --help for all settings and options."
   )
 }
 
@@ -122,7 +120,8 @@ function parseSetting(raw: string | undefined): SettingKey {
   const normalized = raw.trim().toLowerCase()
   const key = ALIAS_MAP.get(normalized)
   if (key) return key as SettingKey
-  throw new Error(`Unknown setting: ${raw}\n${usage()}`)
+  const hint = suggest(normalized, ALIAS_MAP.keys())
+  throw new Error(`Unknown setting: ${raw}${hint ? ` (did you mean: "${hint}"?)` : ""}\n${usage()}`)
 }
 
 function getSettingDef(key: SettingKey): SettingDef {
@@ -155,6 +154,7 @@ const VALID_ACTIONS = new Set(["show", "enable", "disable", "set", "disable-hook
 interface SettingsArgState {
   positionals: string[]
   targetDir: string
+  dirExplicitlySet: boolean
   scope: SettingsScope
   scopeExplicitlySet: boolean
   sessionQuery: string | null
@@ -166,6 +166,30 @@ const SIMPLE_FLAGS: Record<string, keyof Pick<SettingsArgState, "force" | "json"
   "--force": "force",
   "-f": "force",
   "--json": "json",
+}
+
+function processScopeArg(
+  args: string[],
+  i: number,
+  state: SettingsArgState,
+  scope: SettingsScope
+): number {
+  if (state.scopeExplicitlySet && state.scope !== scope) {
+    throw new Error(`Choose one scope: --global, --project, or --session [id].\n${usage()}`)
+  }
+  state.scope = scope
+  state.scopeExplicitlySet = true
+  const next = args[i + 1]
+  if (
+    scope === "session" &&
+    next &&
+    !next.startsWith("-") &&
+    !VALID_ACTIONS.has(next.toLowerCase())
+  ) {
+    state.sessionQuery = next
+    return i + 1
+  }
+  return i
 }
 
 function processSettingsArg(args: string[], i: number, state: SettingsArgState): number {
@@ -181,28 +205,39 @@ function processSettingsArg(args: string[], i: number, state: SettingsArgState):
   if (arg === "--dir" || arg === "-d") {
     if (!next || next.startsWith("-")) throw new Error(`Missing value for ${arg}.\n${usage()}`)
     state.targetDir = next
+    state.dirExplicitlySet = true
     return i + 1
   }
 
   const scopeValue = SCOPE_FLAGS[arg]
   if (scopeValue) {
-    state.scope = scopeValue
-    state.scopeExplicitlySet = true
-    if (scopeValue === "session" && next && !next.startsWith("-")) {
-      state.sessionQuery = next
-      return i + 1
-    }
-    return i
+    return processScopeArg(args, i, state, scopeValue)
   }
 
+  if (arg.startsWith("-") && !/^-\d/.test(arg)) {
+    throw new Error(`Unknown option: ${arg}\n${usage()}`)
+  }
   state.positionals.push(arg)
   return i
+}
+
+function inferSettingsScope(state: SettingsArgState, forgiving: boolean): void {
+  if (state.scopeExplicitlySet) return
+  if (!forgiving) {
+    throw new Error(`Scope is required. Pass --global, --project, or --session [id].\n${usage()}`)
+  }
+  const projectRoot = findGitWorkTree(state.targetDir)
+  state.scope = state.dirExplicitlySet || projectRoot ? "project" : "global"
+  state.targetDir = state.dirExplicitlySet
+    ? resolve(state.targetDir)
+    : (projectRoot ?? state.targetDir)
 }
 
 function parseSettingsArgs(args: string[]): ParsedSettingsArgs {
   const state: SettingsArgState = {
     positionals: [],
     targetDir: process.cwd(),
+    dirExplicitlySet: false,
     scope: "global",
     scopeExplicitlySet: false,
     sessionQuery: null,
@@ -211,7 +246,6 @@ function parseSettingsArgs(args: string[]): ParsedSettingsArgs {
   }
 
   for (let i = 0; i < args.length; i++) {
-    if (!args[i]) continue
     i = processSettingsArg(args, i, state)
   }
 
@@ -219,9 +253,12 @@ function parseSettingsArgs(args: string[]): ParsedSettingsArgs {
   if (!VALID_ACTIONS.has(rawAction)) {
     throw new Error(`Unknown subcommand: ${state.positionals[0]}\n${usage()}`)
   }
-  if (!state.scopeExplicitlySet) {
-    throw new Error(`Scope is required. Pass --global, --project, or --session [id].\n${usage()}`)
+  const maxPositionals = rawAction === "show" ? 1 : rawAction === "set" ? 3 : 2
+  if (state.positionals.length > maxPositionals) {
+    throw new Error(`Unexpected argument: ${state.positionals[maxPositionals]}\n${usage()}`)
   }
+  const forgiving = !detectCurrentAgent() && !process.env.CURSOR_TRACE_ID
+  inferSettingsScope(state, forgiving)
 
   return {
     action: rawAction as Action,
@@ -233,6 +270,7 @@ function parseSettingsArgs(args: string[]): ParsedSettingsArgs {
     sessionQuery: state.sessionQuery,
     force: state.force,
     json: state.json,
+    forgiving,
   }
 }
 
@@ -860,12 +898,31 @@ function parseNumericSettingValue(raw: string): number {
   return Number(raw)
 }
 
+function parseBooleanSettingValue(parsed: ParsedSettingsArgs, raw: string): boolean {
+  const value = raw.trim().toLowerCase()
+  const truthy = ["true", "on", "yes", "1", "enabled"]
+  const falsy = ["false", "off", "no", "0", "disabled"]
+  if (parsed.forgiving && (truthy.includes(value) || falsy.includes(value))) {
+    return truthy.includes(value)
+  }
+  throw new Error(
+    `Invalid boolean value "${raw}". Use: swiz settings enable ${parsed.settingArg} or swiz settings disable ${parsed.settingArg}\n${usage()}`
+  )
+}
+
+function parseStringSettingValue(def: SettingDef, raw: string, forgiving: boolean): string {
+  const value = forgiving && def.zodSchema instanceof z.ZodEnum ? raw.trim().toLowerCase() : raw
+  const error = def.validate?.(value)
+  if (error) throw new Error(`${error}\n${usage()}`)
+  return value
+}
+
 async function setValueSetting(
   parsed: ParsedSettingsArgs,
   daemonReady: () => Promise<boolean>
 ): Promise<void> {
   const key = parseSetting(parsed.settingArg)
-  if (!parsed.settingValue) {
+  if (parsed.settingValue === undefined) {
     throw new Error(
       `Missing value. Usage: swiz settings set ${parsed.settingArg} <value>\n${usage()}`
     )
@@ -875,13 +932,18 @@ async function setValueSetting(
   const resolved = { ...parsed, scope: resolvedScope }
   const def = getSettingDef(key)
 
+  if (def.kind === "boolean") {
+    return setBooleanSetting(
+      parseBooleanSettingValue(parsed, parsed.settingValue),
+      resolved,
+      daemonReady
+    )
+  }
+
   if (def.kind === "string") {
-    if (def.validate) {
-      const error = def.validate(parsed.settingValue)
-      if (error) throw new Error(`${error}\n${usage()}`)
-    }
-    const path = await writeSettingToScope(resolved, key, parsed.settingValue, daemonReady)
-    printSetConfirmation(resolved, key, parsed.settingValue, path, def)
+    const value = parseStringSettingValue(def, parsed.settingValue, parsed.forgiving)
+    const path = await writeSettingToScope(resolved, key, value, daemonReady)
+    printSetConfirmation(resolved, key, value, path, def)
     return
   }
 
@@ -997,11 +1059,20 @@ export interface SettingsCommandOptions {
 
 export const settingsCommand: Command<SettingsCommandOptions> = {
   name: "settings",
-  description: "View and modify swiz global and per-session settings",
+  description: "View and modify swiz global, project, and session settings",
   usage:
-    "swiz settings [show | enable <setting> | disable <setting>] [--global | --project | --session [id]] [--dir <path>]",
+    "swiz settings [show | enable <setting> | disable <setting> | set <setting> <value>] [--global | --project | --session [id]] [--dir <path>]",
   options: [
     { flags: "show", description: "Show current effective settings (default action)" },
+    {
+      flags: "scope",
+      description:
+        "Outside agents: project in a Git repo or with --dir, global elsewhere; global-only settings use global. Agents must specify scope.",
+    },
+    {
+      flags: "set <boolean> <value>",
+      description: "Outside agents, accepts true/false, on/off, yes/no, 1/0, enabled/disabled",
+    },
     {
       flags: "--json",
       description:
@@ -1014,8 +1085,8 @@ export const settingsCommand: Command<SettingsCommandOptions> = {
         "Override conflict checks when enabling settings that conflict with existing configuration",
     },
     {
-      flags: "--global, -g",
-      description: "Write to global settings (~/.swiz/settings.json) [default]",
+      flags: "--global, -g, --user, -u",
+      description: "Write to global settings (~/.swiz/settings.json)",
     },
     {
       flags: "--project, -p",

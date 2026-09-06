@@ -45,7 +45,7 @@ async function runSwiz(
   args: string[],
   home: string
 ): Promise<{ stdout: string; stderr: string; exitCode: number }> {
-  // Scope is required by the CLI; tests that don't specify one default to --global.
+  // These tests exercise explicit scope; inference has its own command-boundary tests.
   const SCOPE_FLAGS_RE = /^(--global|-g|--user|-u|--project|-p|--session|-s)$/
   const settingsArgs = args[0] === "settings" ? args.slice(1) : []
   if (args[0] === "settings" && !settingsArgs.some((a) => SCOPE_FLAGS_RE.test(a))) {
@@ -238,7 +238,8 @@ describe("swiz settings", () => {
     const result = await runSwiz(["settings", "disable", "unknown-flag"], home)
     expect(result.exitCode).toBe(1)
     expect(result.stderr).toContain("Unknown setting")
-    expect(result.stderr).toContain("auto-continue")
+    expect(result.stderr).toContain("swiz settings --help")
+    expect(result.stderr).not.toContain("Settings (--global)")
   })
 
   test("new sessions inherit the global setting by default", async () => {

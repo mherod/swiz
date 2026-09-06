@@ -517,6 +517,7 @@ export async function writeProjectSettings(
   let existing: Record<string, any> = {}
   const file = Bun.file(path)
   if (await file.exists()) {
+    await Bun.write(`${path}.bak`, file)
     try {
       existing = (await file.json()) as Record<string, any>
     } catch {
@@ -638,6 +639,8 @@ export async function writeSwizSettings(
   if (!path) throw new Error("HOME is not set; cannot write swiz settings.")
 
   await mkdir(dirname(path), { recursive: true })
+  const file = Bun.file(path)
+  if (await file.exists()) await Bun.write(`${path}.bak`, file)
   await Bun.write(path, `${JSON.stringify(normalizeSettings(settings), null, 2)}\n`)
   invalidateSettingsCache(path)
   return path
