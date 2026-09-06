@@ -274,6 +274,110 @@ describe("TranscriptIndexCache", () => {
     void rm(path, { force: true }).catch(() => {})
   })
 
+  test("counts a record split across a cold seed exactly once", async () => {
+    // #819: the cold builder folded an unterminated final record into durable state while
+    // `cursor.reset` discarded its bytes. The completing suffix then arrived alone and was
+    // reduced as its own record, so one Read showed up twice — once truncated, once orphaned.
+    const path = testTranscript("cold-seed")
+    const boundary = `${JSON.stringify({ type: "system", content: "Compacted" })}\n`
+    const record = JSON.stringify({
+      type: "assistant",
+      message: { content: [{ type: "tool_use", name: "Read", input: { file_path: "x.ts" } }] },
+    })
+    // Cold read observes the file mid-write: the final record has no newline yet.
+    const partial = record.slice(0, -5)
+    await Bun.write(path, boundary + partial)
+    let size = (await Bun.file(path).stat()).size
+    let mtimeMs = 1
+    const cache = new TranscriptIndexCache({
+      readMetadata: () => Promise.resolve({ size, mtimeMs, dev: 1, ino: 1 }),
+    })
+
+    // Provisional only: a mid-write fragment is not parse-valid, so it contributes nothing.
+    expect((await cache.getSummary(path))?.toolNames).toEqual([])
+
+    const rest = `${record.slice(-5)}\n`
+    await appendFile(path, rest)
+    size += new TextEncoder().encode(rest).length
+    mtimeMs++
+
+    expect((await cache.getSummary(path))?.toolNames).toEqual(["Read"])
+    void rm(path, { force: true }).catch(() => {})
+  })
+
+  test("cold and incremental reads agree on the same final transcript", async () => {
+    // Equivalence control: whatever the seeding path does, arriving at a given file by
+    // append must match reading that same file cold.
+    const boundary = `${JSON.stringify({ type: "system", content: "Compacted" })}\n`
+    const first = `${JSON.stringify({
+      type: "assistant",
+      message: { content: [{ type: "tool_use", name: "Bash", input: { command: "ls" } }] },
+    })}\n`
+    const second = `${JSON.stringify({
+      type: "assistant",
+      message: { content: [{ type: "tool_use", name: "Read", input: { file_path: "x.ts" } }] },
+    })}\n`
+
+    // Incremental: seed cold mid-record, then complete it.
+    const incrementalPath = testTranscript("equiv-incremental")
+    await Bun.write(incrementalPath, boundary + first + second.slice(0, -6))
+    let size = (await Bun.file(incrementalPath).stat()).size
+    let mtimeMs = 1
+    const incrementalCache = new TranscriptIndexCache({
+      readMetadata: () => Promise.resolve({ size, mtimeMs, dev: 2, ino: 2 }),
+    })
+    await incrementalCache.getSummary(incrementalPath)
+    await appendFile(incrementalPath, second.slice(-6))
+    size = (await Bun.file(incrementalPath).stat()).size
+    mtimeMs++
+    const incremental = await incrementalCache.getSummary(incrementalPath)
+
+    // Cold: read the identical finished bytes with a fresh cache.
+    const coldPath = testTranscript("equiv-cold")
+    await Bun.write(coldPath, boundary + first + second)
+    const coldStat = await Bun.file(coldPath).stat()
+    const coldCache = new TranscriptIndexCache({
+      readMetadata: () => Promise.resolve({ size: coldStat.size, mtimeMs: 1, dev: 3, ino: 3 }),
+    })
+    const cold = await coldCache.getSummary(coldPath)
+
+    expect(incremental?.toolNames).toEqual(cold?.toolNames)
+    expect(incremental?.bashCommands).toEqual(cold?.bashCommands)
+    expect(cold?.toolNames).toEqual(["Bash", "Read"])
+    void rm(incrementalPath, { force: true }).catch(() => {})
+    void rm(coldPath, { force: true }).catch(() => {})
+  })
+
+  test("cold-rebuilds a same-length in-place rewrite rather than serving a hot hit", async () => {
+    const path = testTranscript("same-size-rewrite")
+    const boundary = `${JSON.stringify({ type: "system", content: "Compacted" })}\n`
+    // `"command":"ls -la"` and `"file_path":"x.ts"` are both 18 characters, so the two
+    // records serialise to identical byte lengths — the case the guard has to catch.
+    const withBash = `${JSON.stringify({
+      type: "assistant",
+      message: { content: [{ type: "tool_use", name: "Bash", input: { command: "ls -la" } }] },
+    })}\n`
+    await Bun.write(path, boundary + withBash)
+    const size = (await Bun.file(path).stat()).size
+    let mtimeMs = 1
+    const cache = new TranscriptIndexCache({
+      readMetadata: () => Promise.resolve({ size, mtimeMs, dev: 4, ino: 4 }),
+    })
+    expect((await cache.getSummary(path))?.toolNames).toEqual(["Bash"])
+
+    // Same dev/ino, same byte length, newer mtime — an in-place replacement.
+    const withRead = `${JSON.stringify({
+      type: "assistant",
+      message: { content: [{ type: "tool_use", name: "Read", input: { file_path: "x.ts" } }] },
+    })}\n`
+    await Bun.write(path, boundary + withRead)
+    expect((await Bun.file(path).stat()).size).toBe(size)
+    mtimeMs++
+
+    expect((await cache.getSummary(path))?.toolNames).toEqual(["Read"])
+    void rm(path, { force: true }).catch(() => {})
+  })
+
   test("does not retain a full summary larger than the character budget", async () => {
     const oversizedLine = "x".repeat(17 * 1024 * 1024)
     let buildCalls = 0

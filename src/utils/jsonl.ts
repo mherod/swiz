@@ -50,6 +50,22 @@ export class JsonlAppendCursor {
     this.remainder = new Uint8Array(0)
   }
 
+  /**
+   * Adopt an existing cold read: every byte up to `metadata.size` is accounted for, but
+   * `pendingTail` had no terminating newline and is still owed to a later record.
+   *
+   * `reset` is the wrong tool for a cold seed. It marks the same bytes consumed while
+   * dropping the partial ones, so the completing suffix later arrives alone — `,"b":2}`
+   * rather than `{"a":1,"b":2}` — and is reduced as its own malformed record while the
+   * truncated prefix stays counted (#819). Carrying the tail forward means the whole
+   * record lands exactly once, when its newline does.
+   */
+  seed(metadata: JsonlAppendMetadata, pendingTail: string): void {
+    this.offset = metadata.size
+    this.metadata = { ...metadata }
+    this.remainder = pendingTail ? new TextEncoder().encode(pendingTail) : new Uint8Array(0)
+  }
+
   clear(): void {
     this.offset = 0
     this.metadata = null
@@ -105,10 +121,19 @@ export class JsonlAppendCursor {
     if (next.size - this.offset > MAX_JSONL_APPEND_READ_BYTES) return true
     const previousIdentity = identityOf(previous)
     const nextIdentity = identityOf(next)
-    if (previousIdentity && nextIdentity && previousIdentity !== nextIdentity) return true
+    // Continuity must be provable. A changed pair is replacement outright; a pair that
+    // appears or disappears between reads leaves the question unanswerable, which is the
+    // same risk. Requiring both sides to agree covers all three.
+    if (previousIdentity !== nextIdentity) return true
     // Without a stable device/inode pair, a changed file is indistinguishable
     // from replacement and must not retain derived state.
-    return !previousIdentity && (next.size !== this.offset || next.mtimeMs !== previous.mtimeMs)
+    if (!previousIdentity) {
+      return next.size !== this.offset || next.mtimeMs !== previous.mtimeMs
+    }
+    // Identity holds, so growth is a genuine append. An unchanged size with a newer mtime
+    // is not: that is a same-length in-place rewrite, and serving it as a hot hit would
+    // return the previous contents forever (#819).
+    return next.size === this.offset && next.mtimeMs !== previous.mtimeMs
   }
 }
 

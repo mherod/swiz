@@ -155,4 +155,166 @@ describe("jsonl utilities", () => {
       kind: "cold",
     })
   })
+
+  it("requires a cold rebuild for a same-size rewrite with stable identity", async () => {
+    // An in-place rewrite of equal length keeps dev/ino and size, moving only mtime. The
+    // identity check used to accept that as continuity and the size check then served a
+    // hot hit, so the replaced contents were never read (#819).
+    const cursor = new JsonlAppendCursor()
+    cursor.reset({ size: 10, mtimeMs: 1, dev: 7, ino: 42 })
+    await expect(
+      cursor.read("/missing", { size: 10, mtimeMs: 2, dev: 7, ino: 42 })
+    ).resolves.toMatchObject({ kind: "cold" })
+  })
+
+  it("still reports a hot hit when identity, size, and mtime are all unchanged", async () => {
+    // Control for the two rebuild cases above: without it they would pass just as well
+    // against a cursor that had been made to rebuild unconditionally.
+    const cursor = new JsonlAppendCursor()
+    cursor.reset({ size: 10, mtimeMs: 1, dev: 7, ino: 42 })
+    await expect(
+      cursor.read("/missing", { size: 10, mtimeMs: 1, dev: 7, ino: 42 })
+    ).resolves.toMatchObject({ kind: "hit" })
+  })
+
+  it("requires a cold rebuild when device/inode identity is lost between reads", async () => {
+    // Identity that disappears is as unprovable as identity that changed; the old
+    // `previousIdentity && nextIdentity` guard skipped this case entirely.
+    const cursor = new JsonlAppendCursor()
+    cursor.reset({ size: 10, mtimeMs: 1, dev: 7, ino: 42 })
+    await expect(cursor.read("/missing", { size: 20, mtimeMs: 2 })).resolves.toMatchObject({
+      kind: "cold",
+    })
+  })
+
+  it("requires a cold rebuild when device/inode identity appears between reads", async () => {
+    const cursor = new JsonlAppendCursor()
+    cursor.reset({ size: 10, mtimeMs: 1 })
+    await expect(
+      cursor.read("/missing", { size: 20, mtimeMs: 2, dev: 7, ino: 42 })
+    ).resolves.toMatchObject({ kind: "cold" })
+  })
+
+  it("seed carries an unterminated tail so its completion is reduced exactly once", async () => {
+    await resetTestDir()
+    const path = join(TEST_DIR, "seed.jsonl")
+    // A cold reader observed the whole file, but the final record is still being written.
+    await Bun.write(path, '{"id":1}\n{"id":2')
+    const stat = await Bun.file(path).stat()
+    const metadata = {
+      size: stat.size,
+      mtimeMs: stat.mtimeMs,
+      dev: (stat as { dev?: number }).dev,
+      ino: (stat as { ino?: number }).ino,
+    }
+
+    const cursor = new JsonlAppendCursor()
+    cursor.seed(metadata, '{"id":2')
+    expect(cursor.tailText).toBe('{"id":2')
+
+    await appendFile(path, "}\n")
+    const done = await Bun.file(path).stat()
+    const update = await cursor.read(path, {
+      size: done.size,
+      mtimeMs: done.mtimeMs,
+      dev: (done as { dev?: number }).dev,
+      ino: (done as { ino?: number }).ino,
+    })
+    // The whole record, not the bare `}` suffix that `reset` would have yielded.
+    expect(update.lines).toEqual(['{"id":2}'])
+  })
+
+  it("reset drops the tail, which is why the cold path must seed instead", async () => {
+    // Control pinning the difference the seed API exists for: same fixture, same append,
+    // and `reset` yields the orphaned suffix that corrupted durable state (#819).
+    await resetTestDir()
+    const path = join(TEST_DIR, "reset-drops.jsonl")
+    await Bun.write(path, '{"id":1}\n{"id":2')
+    const stat = await Bun.file(path).stat()
+    const cursor = new JsonlAppendCursor()
+    cursor.reset({
+      size: stat.size,
+      mtimeMs: stat.mtimeMs,
+      dev: (stat as { dev?: number }).dev,
+      ino: (stat as { ino?: number }).ino,
+    })
+
+    await appendFile(path, "}\n")
+    const done = await Bun.file(path).stat()
+    const update = await cursor.read(path, {
+      size: done.size,
+      mtimeMs: done.mtimeMs,
+      dev: (done as { dev?: number }).dev,
+      ino: (done as { ino?: number }).ino,
+    })
+    expect(update.lines).toEqual(["}"])
+  })
+
+  it("never reads past the observed size, so a concurrent append lands exactly once", async () => {
+    // Bytes written after the stat must not be consumed against the older size and then
+    // read again on the next pass. `readTailSlice` grew its `fileSize` upper bound in
+    // e1d27627; this pins the same guarantee for the append cursor's own bounded slice.
+    await resetTestDir()
+    const path = join(TEST_DIR, "concurrent.jsonl")
+    await Bun.write(path, '{"id":1}\n')
+    const cursor = new JsonlAppendCursor()
+    const first = await Bun.file(path).stat()
+    cursor.reset({
+      size: first.size,
+      mtimeMs: first.mtimeMs,
+      dev: (first as { dev?: number }).dev,
+      ino: (first as { ino?: number }).ino,
+    })
+
+    await appendFile(path, '{"id":2}\n')
+    const observed = await Bun.file(path).stat()
+    // A writer races in after the stat is taken.
+    await appendFile(path, '{"id":3}\n')
+
+    const staleRead = await cursor.read(path, {
+      size: observed.size,
+      mtimeMs: observed.mtimeMs,
+      dev: (observed as { dev?: number }).dev,
+      ino: (observed as { ino?: number }).ino,
+    })
+    expect(staleRead.lines).toEqual(['{"id":2}'])
+
+    const latest = await Bun.file(path).stat()
+    const nextRead = await cursor.read(path, {
+      size: latest.size,
+      mtimeMs: latest.mtimeMs,
+      dev: (latest as { dev?: number }).dev,
+      ino: (latest as { ino?: number }).ino,
+    })
+    // Neither skipped above nor repeated here.
+    expect(nextRead.lines).toEqual(['{"id":3}'])
+  })
+
+  it("seed survives a tail split mid UTF-8 sequence", async () => {
+    await resetTestDir()
+    const path = join(TEST_DIR, "seed-utf8.jsonl")
+    const record = '{"value":"café"}'
+    await Bun.write(path, record.slice(0, -3))
+    const stat = await Bun.file(path).stat()
+    const cursor = new JsonlAppendCursor()
+    cursor.seed(
+      {
+        size: stat.size,
+        mtimeMs: stat.mtimeMs,
+        dev: (stat as { dev?: number }).dev,
+        ino: (stat as { ino?: number }).ino,
+      },
+      record.slice(0, -3)
+    )
+
+    await appendFile(path, `${record.slice(-3)}\n`)
+    const done = await Bun.file(path).stat()
+    const update = await cursor.read(path, {
+      size: done.size,
+      mtimeMs: done.mtimeMs,
+      dev: (done as { dev?: number }).dev,
+      ino: (done as { ino?: number }).ino,
+    })
+    expect(update.lines).toEqual([record])
+  })
 })

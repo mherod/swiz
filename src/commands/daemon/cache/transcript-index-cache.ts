@@ -293,29 +293,44 @@ export class TranscriptIndexCache {
     }
 
     this._coldRebuilds++
-    const built = await this.buildIndex(Bun.file(transcriptPath), metadata.size, metadata.mtimeMs)
-    if (!built) return null
+    const cold = await this.buildIndex(Bun.file(transcriptPath), metadata.size, metadata.mtimeMs)
+    if (!cold) return null
+    const { index: built, pendingTail } = cold
     const accumulator = collectSessionToolUsage(built.summary.sessionLines)
     const cursor = new JsonlAppendCursor()
-    cursor.reset(metadata)
+    // Seed rather than reset: the durable index deliberately excludes an unterminated tail,
+    // so the cursor must still owe those bytes to the record their newline completes.
+    cursor.seed(metadata, pendingTail)
     this.incrementalEntries.set(transcriptPath, { index: built, accumulator, cursor })
-    return built
+    // Cold and hot must return the same shape, so the tail shows provisionally here too.
+    return withProvisionalTail(built, pendingTail)
   }
 
   private async buildIndex(
     transcriptFile: Bun.BunFile,
     fileSize: number,
     mtimeMs: number
-  ): Promise<TranscriptIndex | null> {
+  ): Promise<{ index: TranscriptIndex; pendingTail: string } | null> {
     try {
       let sessionLines: string[] = []
+      let endsWithNewline = true
       await readJsonlTailTextFromFile(transcriptFile, fileSize, {
         isEnough: (text, meta) => {
           const result = splitSessionLinesAfterLatestSystem(text)
           sessionLines = result.sessionLines
+          endsWithNewline = text === "" || text.endsWith("\n")
           return result.sawSystem || meta.reachedStart
         },
       })
+
+      // A trailing record with no newline is still being written. Splitting it off keeps
+      // durable state to whole records only, matching what the append cursor can reduce.
+      let pendingTail = ""
+      if (!endsWithNewline && sessionLines.length > 0) {
+        pendingTail = sessionLines[sessionLines.length - 1] ?? ""
+        sessionLines = sessionLines.slice(0, -1)
+      }
+
       const summary = computeSummaryFromSessionLines(sessionLines)
       const blockedIds = extractBlockedToolUseIds(sessionLines)
 
@@ -326,7 +341,7 @@ export class TranscriptIndexCache {
         size: fileSize,
         computedAt: Date.now(),
       }
-      return index
+      return { index, pendingTail }
     } catch {
       return null
     }
