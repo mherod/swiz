@@ -64,9 +64,8 @@ describe("pretooluse-guardian-awareness", () => {
     expect(specific?.permissionDecisionReason).toContain("Guardian denial 1 of at most 3")
     expect(specific?.permissionDecisionReason).toContain("Retry permitted by guard")
     expect(specific?.permissionDecisionReason).toContain("you may retry")
-    expect(specific?.permissionDecisionReason).toContain("git commit -a")
-    expect(specific?.permissionDecisionReason).toContain("already tracked")
-    expect(specific?.permissionDecisionReason).toContain("untracked")
+    expect(specific?.permissionDecisionReason).toContain("missing-cwd")
+    expect(specific?.permissionDecisionReason).not.toContain("git commit -a")
   })
 
   test("allows the retry after three recent git add guardian denials", async () => {
@@ -88,14 +87,17 @@ describe("pretooluse-guardian-awareness", () => {
 
 describe("gitAddAvoidanceMessage peer gating (issue #843 finding A)", () => {
   test("control: without peer files the commit -a route is offered", () => {
-    const message = gitAddAvoidanceMessage(0, [])
+    const message = gitAddAvoidanceMessage(0, { known: true, files: [] })
     expect(message).toContain("git commit -a")
     expect(message).toContain("already tracked")
     expect(message).not.toContain("another live session")
   })
 
   test("peer files present: commit -a is refused and named as unsafe", () => {
-    const message = gitAddAvoidanceMessage(0, ["src/theirs.ts", "hooks/also-theirs.ts"])
+    const message = gitAddAvoidanceMessage(0, {
+      known: true,
+      files: ["src/theirs.ts", "hooks/also-theirs.ts"],
+    })
     expect(message).toContain("Do not use `git commit -a` here")
     expect(message).toContain("src/theirs.ts, hooks/also-theirs.ts")
     expect(message).toContain("stage their tracked modifications as yours")
@@ -104,8 +106,13 @@ describe("gitAddAvoidanceMessage peer gating (issue #843 finding A)", () => {
 
   test("long peer lists are bounded", () => {
     const many = Array.from({ length: 12 }, (_, i) => `src/f${i}.ts`)
-    const message = gitAddAvoidanceMessage(0, many)
+    const message = gitAddAvoidanceMessage(0, { known: true, files: many })
     expect(message).toContain("src/f9.ts, …")
     expect(message).not.toContain("src/f11.ts")
+  })
+  test("unknown discovery offers inspection without a whole-tree commit route", () => {
+    const message = gitAddAvoidanceMessage(0, { known: false, reason: "query-failed" })
+    expect(message).toContain("Inspect the intended checkout")
+    expect(message).not.toContain("git commit -a")
   })
 })

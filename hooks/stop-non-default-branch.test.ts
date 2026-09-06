@@ -1,15 +1,19 @@
 import { describe, expect, test } from "bun:test"
 import { mkdir, writeFile } from "node:fs/promises"
 import { join } from "node:path"
+import { stopHookOutputSchema } from "../src/schemas.ts"
 import { type HookResult, runHookInProcess, useTempDir } from "../src/utils/test-utils.ts"
 import {
   buildStandardFeatureBranchReason,
   buildTrunkModeOutput,
+  evaluateStopNonDefaultBranch,
 } from "./stop-non-default-branch.ts"
 
 async function enableTrunkMode(dir: string): Promise<void> {
   await mkdir(join(dir, ".swiz"), { recursive: true })
   await writeFile(join(dir, ".swiz", "config.json"), JSON.stringify({ trunkMode: true }))
+  Bun.spawnSync(["git", "add", "--", ".swiz/config.json"], { cwd: dir })
+  Bun.spawnSync(["git", "commit", "-m", "enable trunk mode"], { cwd: dir })
 }
 
 const HOOK = "hooks/stop-non-default-branch.ts"
@@ -154,42 +158,79 @@ describe("peer-held file caution (issue #842)", () => {
   const PEER_FILES = ["src/theirs.ts", "hooks/also-theirs.ts"]
 
   test("control: trunk-mode output without peer files has no caution", () => {
-    const reason = buildTrunkModeOutput("feat/x", "main", []).reason ?? ""
+    const reason = buildTrunkModeOutput("feat/x", "main", { known: true, files: [] }).reason ?? ""
     expect(reason).not.toContain("peer session")
     expect(reason).toContain("git checkout main")
   })
 
   test("trunk-mode output leads with the defer caution when a peer holds files", () => {
-    const reason = buildTrunkModeOutput("feat/x", "main", PEER_FILES).reason ?? ""
+    const reason =
+      buildTrunkModeOutput("feat/x", "main", { known: true, files: PEER_FILES }).reason ?? ""
     expect(reason.startsWith("A peer session holds uncommitted edits")).toBe(true)
     expect(reason).toContain("src/theirs.ts, hooks/also-theirs.ts")
     expect(reason).toContain("Do not switch branches")
     expect(reason).toContain("stranding the peer's work")
+    expect(reason).not.toContain("git checkout")
   })
 
   test("control: standard reason without peer files has no caution", () => {
-    const reason = buildStandardFeatureBranchReason("feat/x", "main", null, null, [])
+    const reason = buildStandardFeatureBranchReason("feat/x", "main", null, null, {
+      known: true,
+      files: [],
+    })
     expect(reason).not.toContain("peer session")
     expect(reason).toContain("git checkout main")
   })
 
   test("standard reason leads with the defer caution when a peer holds files", () => {
-    const reason = buildStandardFeatureBranchReason("feat/x", "main", null, null, PEER_FILES)
+    const reason = buildStandardFeatureBranchReason("feat/x", "main", null, null, {
+      known: true,
+      files: PEER_FILES,
+    })
     expect(reason.startsWith("A peer session holds uncommitted edits")).toBe(true)
     expect(reason).toContain("Do not switch branches")
+    expect(reason).not.toContain("git checkout")
   })
 
   test("PR-path reason also carries the caution", () => {
     const pr = { mergeable: "MERGEABLE", number: 7 }
-    const reason = buildStandardFeatureBranchReason("feat/x", "main", pr, null, PEER_FILES)
+    const reason = buildStandardFeatureBranchReason("feat/x", "main", pr, null, {
+      known: true,
+      files: PEER_FILES,
+    })
     expect(reason.startsWith("A peer session holds uncommitted edits")).toBe(true)
-    expect(reason).toContain("PR #7 is open")
+    expect(reason).not.toContain("git checkout")
+    expect(reason).not.toContain("gh pr merge")
   })
 
   test("long peer file lists are bounded", () => {
     const many = Array.from({ length: 25 }, (_, i) => `src/f${i}.ts`)
-    const reason = buildTrunkModeOutput("feat/x", "main", many).reason ?? ""
+    const reason = buildTrunkModeOutput("feat/x", "main", { known: true, files: many }).reason ?? ""
     expect(reason).toContain("(and 5 more)")
     expect(reason).not.toContain("src/f24.ts")
+  })
+  test("unknown ownership replaces both trunk and PR checkout plans", () => {
+    const unknown = { known: false, reason: "query-failed" } as const
+    for (const reason of [
+      buildTrunkModeOutput("feat/x", "main", unknown).reason,
+      buildStandardFeatureBranchReason(
+        "feat/x",
+        "main",
+        { number: 7, mergeable: "MERGEABLE" },
+        null,
+        unknown
+      ),
+    ]) {
+      expect(reason).toContain("Ownership discovery is unavailable")
+      expect(reason).not.toContain("git checkout")
+      expect(reason).not.toContain("gh pr merge")
+    }
+  })
+  test("missing cwd yields an inspection hold instead of inspecting the daemon checkout", async () => {
+    const output = stopHookOutputSchema.parse(
+      await evaluateStopNonDefaultBranch({ session_id: "self" })
+    )
+    expect(output.reason).toContain("missing-cwd")
+    expect(output.reason).not.toContain("git checkout")
   })
 })

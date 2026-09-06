@@ -12,6 +12,28 @@ export interface SessionFileOwnership {
   unattributed: string[]
 }
 
+export interface UnknownOwnership {
+  known: false
+  reason:
+    | "missing-cwd"
+    | "missing-session"
+    | "missing-project"
+    | "git-status-unavailable"
+    | "git-root-unavailable"
+    | "store-unavailable"
+    | "query-failed"
+}
+
+export type SessionFileOwnershipResult =
+  | { known: true; ownership: SessionFileOwnership }
+  | UnknownOwnership
+
+export type PeerHeldFilesResult = { known: true; files: string[] } | UnknownOwnership
+
+function hasIdentity(value: string | undefined): value is string {
+  return !!value?.trim()
+}
+
 interface ClassifySessionFilesOptions {
   cwd: string
   gitRoot: string
@@ -78,63 +100,100 @@ export async function resolveSessionFileOwnership(
   files: readonly string[],
   nowMs = Date.now()
 ): Promise<SessionFileOwnership> {
-  const unknown: SessionFileOwnership = {
-    editedByUs: [],
-    editedByOthers: [],
-    unattributed: [...files],
-  }
-  if (!sessionId) return unknown
+  const result = await resolveSessionFileOwnershipResult(cwd, sessionId, files, nowMs)
+  return result.known
+    ? result.ownership
+    : { editedByUs: [], editedByOthers: [], unattributed: [...files] }
+}
+
+/** Preserve query certainty separately from the three attribution buckets. */
+export async function resolveSessionFileOwnershipResult(
+  cwd: string | undefined,
+  sessionId: string | undefined,
+  files: readonly string[],
+  nowMs = Date.now()
+): Promise<SessionFileOwnershipResult> {
+  if (!hasIdentity(cwd)) return { known: false, reason: "missing-cwd" }
+  if (!hasIdentity(sessionId)) return { known: false, reason: "missing-session" }
 
   try {
-    const [{ getIssueStore, getIssueStoreReader }, { projectKeyFromCwd }, { git }] =
-      await Promise.all([
-        import("../issue-store.ts"),
-        import("../transcript-utils.ts"),
-        import("../git-helpers.ts"),
-      ])
+    const { projectKeyFromCwd } = await import("../transcript-utils.ts")
     const projectKey = projectKeyFromCwd(cwd)
-    if (!projectKey) return unknown
+    if (!projectKey) return { known: false, reason: "missing-project" }
+    if (files.length === 0) {
+      return { known: true, ownership: { editedByUs: [], editedByOthers: [], unattributed: [] } }
+    }
+    const [{ getIssueStore, getIssueStoreReader }, { git }] = await Promise.all([
+      import("../issue-store.ts"),
+      import("../git-helpers.ts"),
+    ])
+    const store = getIssueStore()
+    if (store.isNoOp) return { known: false, reason: "store-unavailable" }
 
     const ownEdits = await getIssueStoreReader().listSessionEdits<SessionFileEdit>(
       projectKey,
       sessionId
     )
-    const otherEdits = getIssueStore().listOtherSessionEdits(
+    const otherEdits = store.listOtherSessionEdits(
       projectKey,
       sessionId,
       nowMs - CONCURRENT_EDIT_WINDOW_MS
     )
-    let gitRoot = cwd
-    try {
-      gitRoot = (await git(["rev-parse", "--show-toplevel"], cwd)).trim() || cwd
-    } catch {
-      // Keep cwd as the normalization root. Attribution remains conservative.
-    }
+    const gitRoot = (await git(["rev-parse", "--show-toplevel"], cwd)).trim()
+    if (!gitRoot) return { known: false, reason: "git-root-unavailable" }
 
-    return classifySessionFileOwnership({ cwd, gitRoot, files, ownEdits, otherEdits })
+    return {
+      known: true,
+      ownership: classifySessionFileOwnership({ cwd, gitRoot, files, ownEdits, otherEdits }),
+    }
   } catch {
-    return unknown
+    return { known: false, reason: "query-failed" }
   }
 }
 
 /**
- * Dirty files confirmed to belong to another live session; [] when the tree is
- * clean, ownership cannot be resolved, or any step fails (fail-open).
- * Shared by hooks that must not sweep or carry peer WIP (issues #841–#843).
+ * Dirty files confirmed to belong to another live session. Only a successful
+ * lookup or verified clean tree can establish that no peer holds dirty files.
  */
 export async function resolvePeerHeldFiles(
-  cwd: string,
+  cwd: string | undefined,
   sessionId: string | undefined
-): Promise<string[]> {
+): Promise<PeerHeldFilesResult> {
+  if (!hasIdentity(cwd)) return { known: false, reason: "missing-cwd" }
+  if (!hasIdentity(sessionId)) return { known: false, reason: "missing-session" }
   try {
-    const { getGitStatusV2 } = await import("./git-utils.ts")
+    const [{ getGitStatusV2 }, { projectKeyFromCwd }] = await Promise.all([
+      import("./git-utils.ts"),
+      import("../transcript-utils.ts"),
+    ])
+    if (!projectKeyFromCwd(cwd)) return { known: false, reason: "missing-project" }
     const status = await getGitStatusV2(cwd)
-    if (!status || status.lines.length === 0) return []
-    const ownership = await resolveSessionFileOwnership(cwd, sessionId, status.lines)
-    return ownership.editedByOthers
+    if (!status) return { known: false, reason: "git-status-unavailable" }
+    if (status.total === 0) return { known: true, files: [] }
+    const result = await resolveSessionFileOwnershipResult(cwd, sessionId, status.lines)
+    return result.known ? { known: true, files: result.ownership.editedByOthers } : result
   } catch {
-    return []
+    return { known: false, reason: "query-failed" }
   }
+}
+
+/** Empty only when discovery positively established that no peer holds dirty files. */
+export function buildOwnershipHoldReason(result: PeerHeldFilesResult): string {
+  if (!result.known) {
+    return (
+      `Ownership discovery is unavailable (${result.reason}). ` +
+      "Inspect the intended checkout with git status --short --branch and git diff. " +
+      "Confirm the project cwd and session identity, then retry ownership discovery before staging or changing branches."
+    )
+  }
+  if (result.files.length === 0) return ""
+  const shown = result.files.slice(0, 20).join(", ")
+  const suffix = result.files.length > 20 ? ` (and ${result.files.length - 20} more)` : ""
+  return (
+    `A peer session holds uncommitted edits in this checkout: ${shown}${suffix}.\n` +
+    "Do not switch branches while those edits remain; this risks stranding the peer's work. " +
+    "Inspect git status --short --branch and retry ownership discovery after the peer commits."
+  )
 }
 
 function appendFileSection(

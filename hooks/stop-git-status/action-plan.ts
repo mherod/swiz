@@ -9,7 +9,11 @@ import { getCollaborationModePolicy } from "../../src/collaboration-policy.ts"
 import type { CollaborationMode } from "../../src/settings.ts"
 import { skillExistsForHookPayload } from "../../src/skill-utils.ts"
 import { isDefaultBranch } from "../../src/utils/git-utils.ts"
-import type { SessionFileOwnership } from "../../src/utils/session-file-ownership.ts"
+import {
+  buildOwnershipHoldReason,
+  type SessionFileOwnership,
+  type SessionFileOwnershipResult,
+} from "../../src/utils/session-file-ownership.ts"
 import { quotePosixShellArg } from "../../src/utils/shell-patterns.ts"
 import type { ActionPlanItem } from "./types.ts"
 
@@ -131,9 +135,11 @@ function buildCommitSteps(
           // become a git option (quoting alone cannot prevent that).
           `git add -- ${formatPathArgs(ownership.editedByUs)}`
         : "No dirty files are recorded to this session — do not stage anything yet.",
-      'git commit -m "<type>(<scope>): <summary>"',
       `Leave the peer session's files uncommitted: ${formatPathList(ownership.editedByOthers)}`
     )
+    if (ownership.editedByUs.length > 0) {
+      subSteps.push('git commit -m "<type>(<scope>): <summary>"')
+    }
     if (ownership.unattributed.length > 0) {
       subSteps.push(
         "Unattributed files (not evidence of a peer — may be yours): establish ownership " +
@@ -172,6 +178,7 @@ function buildPullSteps(
       "A peer session has uncommitted files here — prefer waiting for them to commit " +
         "before rebasing; --autostash would sweep their work through a stash."
     )
+    return ["Hold the rebase until peer files are committed:", subSteps]
   }
   subSteps.push("git pull --rebase --autostash")
   return ["Pull and rebase:", subSteps]
@@ -231,7 +238,7 @@ export function buildGitWorkflowSections(opts: {
   trunkMode: boolean
   defaultBranch: string
   hookPayload?: Record<string, unknown>
-  ownership?: SessionFileOwnership | null
+  ownership: SessionFileOwnershipResult
 }): ActionPlanItem[] {
   const {
     summary: _,
@@ -245,9 +252,11 @@ export function buildGitWorkflowSections(opts: {
     trunkMode,
     defaultBranch,
     hookPayload,
-    ownership,
+    ownership: resolution,
   } = opts
 
+  if (!resolution.known) return [buildOwnershipHoldReason(resolution)]
+  const ownership = resolution.ownership
   const steps: ActionPlanItem[] = []
 
   if (hasUncommitted) {
@@ -259,6 +268,12 @@ export function buildGitWorkflowSections(opts: {
     steps.push(header, ...subSteps)
   }
   if (ahead > 0 || (hasUncommitted && hasRemote)) {
+    if (ownership.editedByOthers.length > 0) {
+      steps.push(
+        "Inspect the remaining peer files and retry ownership discovery before continuing the push workflow."
+      )
+      return steps
+    }
     const [header, subSteps] = buildPushSteps({
       branch,
       upstream,

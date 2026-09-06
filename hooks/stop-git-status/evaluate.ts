@@ -10,6 +10,10 @@ import { git } from "../../src/git-helpers.ts"
 import type { SwizHookOutput } from "../../src/SwizHook.ts"
 import type { StopHookInput } from "../../src/schemas.ts"
 import { blockStopObj } from "../../src/utils/hook-response.ts"
+import {
+  buildOwnershipHoldReason,
+  resolvePeerHeldFiles,
+} from "../../src/utils/session-file-ownership.ts"
 import { createSessionTask } from "../../src/utils/session-task-io.ts"
 import { buildGitWorkflowSections } from "./action-plan.ts"
 import { detectBackgroundPush } from "./background-push-detector.ts"
@@ -41,7 +45,14 @@ function parseDetachedMainWorktree(porcelain: string): DetachedMainWorktree | nu
 async function collectDetachedMainWorktreeStop(
   input: StopHookInput
 ): Promise<GitWorkflowCollectResult | null> {
-  const cwd = input.cwd ?? process.cwd()
+  const cwd = input.cwd
+  if (!cwd?.trim()) {
+    const reason = buildOwnershipHoldReason({ known: false, reason: "missing-cwd" })
+    return {
+      kind: "hookOutput",
+      output: { ...blockStopObj(reason), reason },
+    }
+  }
   const state = parseDetachedMainWorktree(await git(["worktree", "list", "--porcelain", "-z"], cwd))
   if (!state) return null
 
@@ -50,15 +61,19 @@ async function collectDetachedMainWorktreeStop(
     `The main Git worktree is on a detached HEAD at ${shortCommit}.\n\n` +
     `Main worktree: ${state.path}\n\n` +
     "Stop is blocked until the main worktree is attached to a branch."
-  const steps = [
-    "Reattach the main worktree HEAD:",
-    [
-      `Open the main worktree at ${state.path}`,
-      `If the detached commit must be preserved: git switch -c <branch> ${shortCommit}`,
-      "Otherwise switch to the intended existing branch: git switch <branch>",
-      "Verify the result: git status --short --branch",
-    ],
-  ]
+  const ownership = await resolvePeerHeldFiles(state.path, input.session_id)
+  const hold = buildOwnershipHoldReason(ownership)
+  const steps = hold
+    ? [hold]
+    : [
+        "Reattach the main worktree HEAD:",
+        [
+          `Open the main worktree at ${state.path}`,
+          `If the detached commit must be preserved: git switch -c <branch> ${shortCommit}`,
+          "Otherwise switch to the intended existing branch: git switch <branch>",
+          "Verify the result: git status --short --branch",
+        ],
+      ]
 
   return {
     kind: "block",
@@ -181,6 +196,7 @@ export async function collectGitWorkflowStop(
  */
 export async function evaluateStopGitStatus(input: StopHookInput): Promise<SwizHookOutput> {
   const detachedMainWorktree = await collectDetachedMainWorktreeStop(input)
+  if (detachedMainWorktree?.kind === "hookOutput") return detachedMainWorktree.output
   if (detachedMainWorktree?.kind === "block") {
     await createSessionTask(
       detachedMainWorktree.sessionId,

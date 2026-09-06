@@ -18,7 +18,11 @@ import {
 } from "../src/SwizHook.ts"
 import { shellHookInputSchema } from "../src/schemas.ts"
 import { isShellTool } from "../src/tool-matchers.ts"
-import { resolvePeerHeldFiles } from "../src/utils/session-file-ownership.ts"
+import {
+  buildOwnershipHoldReason,
+  type PeerHeldFilesResult,
+  resolvePeerHeldFiles,
+} from "../src/utils/session-file-ownership.ts"
 import { gitSubcommandRe, stripQuotedShellStrings } from "../src/utils/shell-patterns.ts"
 
 const GIT_ADD_RE = gitSubcommandRe("add\\b")
@@ -51,11 +55,13 @@ function avoidanceMessage(evidence: Exclude<SandboxAttemptEvidence, "permission-
  */
 export function gitAddAvoidanceMessage(
   recentDenialCount: number,
-  peerHeldFiles: readonly string[] = []
+  ownership: PeerHeldFilesResult
 ): string {
   const denialNumber = Math.min(recentDenialCount + 1, GIT_ADD_GUARDIAN_DENIAL_LIMIT)
-  const commitRoute =
-    peerHeldFiles.length > 0
+  const peerHeldFiles = ownership.known ? ownership.files : []
+  const commitRoute = !ownership.known
+    ? [buildOwnershipHoldReason(ownership)]
+    : peerHeldFiles.length > 0
       ? [
           "Do not use `git commit -a` here: another live session holds uncommitted edits " +
             `(${peerHeldFiles.slice(0, 10).join(", ")}${peerHeldFiles.length > 10 ? ", …" : ""}), ` +
@@ -102,10 +108,7 @@ export async function evaluateGuardianAwareness(input: unknown): Promise<SwizHoo
           { rephrase: false }
         )
       }
-      const peerHeldFiles = await resolvePeerHeldFiles(
-        parsed.cwd ?? process.cwd(),
-        parsed.session_id
-      )
+      const peerHeldFiles = await resolvePeerHeldFiles(parsed.cwd, parsed.session_id)
       return preToolUseDeny(
         gitAddAvoidanceMessage(context.recentGitAddGuardianDenialCount, peerHeldFiles)
       )

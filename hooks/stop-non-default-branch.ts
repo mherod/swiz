@@ -25,7 +25,11 @@ import { readProjectSettings } from "../src/settings.ts"
 import { skillAdvice } from "../src/skill-utils.ts"
 import { getDefaultBranch, isDefaultBranch } from "../src/utils/git-utils.ts"
 import { blockStopObj } from "../src/utils/hook-response.ts"
-import { resolvePeerHeldFiles } from "../src/utils/session-file-ownership.ts"
+import {
+  buildOwnershipHoldReason,
+  type PeerHeldFilesResult,
+  resolvePeerHeldFiles,
+} from "../src/utils/session-file-ownership.ts"
 import type { WorktreePreservationDecision } from "../src/worktree-preservation.ts"
 import { evaluateWorktreePreservation } from "../src/worktree-preservation.ts"
 
@@ -41,31 +45,15 @@ async function getOpenBranchPr(branch: string, cwd: string): Promise<OpenBranchP
   return await getOpenPrForBranch<OpenBranchPr>(branch, cwd, "mergeable,number")
 }
 
-/**
- * A branch switch carries uncommitted files with it (or fails midway), so a
- * checkout remedy is unsafe while another live session holds dirty files in
- * this checkout (issue #842). Empty when no peer edits are confirmed.
- */
-function buildPeerHoldCaution(defaultBranch: string, peerHeldFiles: readonly string[]): string {
-  if (peerHeldFiles.length === 0) return ""
-  const shown = peerHeldFiles.slice(0, 20).join(", ")
-  const suffix = peerHeldFiles.length > 20 ? ` (and ${peerHeldFiles.length - 20} more)` : ""
-  return (
-    `A peer session holds uncommitted edits in this checkout: ${shown}${suffix}.\n` +
-    `Do not switch branches (\`git checkout ${defaultBranch}\`) until their owner commits them — ` +
-    `a switch carries those files onto '${defaultBranch}' or fails midway, stranding the peer's work. ` +
-    `Wait for the peer's commit, then continue with the steps below.\n\n`
-  )
-}
-
 export function buildTrunkModeOutput(
   branch: string,
   defaultBranch: string,
-  peerHeldFiles: readonly string[] = []
+  ownership: PeerHeldFilesResult
 ): ReturnType<typeof blockStopObj> {
+  const hold = buildOwnershipHoldReason(ownership)
+  if (hold) return blockStopObj(hold)
   return blockStopObj(
-    buildPeerHoldCaution(defaultBranch, peerHeldFiles) +
-      `Stopping on branch '${branch}' — trunk mode requires the default branch ('${defaultBranch}') before the session ends.\n\n` +
+    `Stopping on branch '${branch}' — trunk mode requires the default branch ('${defaultBranch}') before the session ends.\n\n` +
       `Switch back: \`git checkout ${defaultBranch}\`\n\n` +
       `Do not open a pull request for trunk-mode work; integrate on '${defaultBranch}'.`
   )
@@ -96,11 +84,11 @@ export function buildStandardFeatureBranchReason(
   defaultBranch: string,
   pr: OpenBranchPr | null,
   fork: ForkTopology,
-  peerHeldFiles: readonly string[] = []
+  ownership: PeerHeldFilesResult
 ): string {
-  let reason =
-    buildPeerHoldCaution(defaultBranch, peerHeldFiles) +
-    `Stopping on feature branch '${branch}' — the repository must be on '${defaultBranch}' before the session ends.\n\n`
+  const hold = buildOwnershipHoldReason(ownership)
+  if (hold) return hold
+  let reason = `Stopping on feature branch '${branch}' — the repository must be on '${defaultBranch}' before the session ends.\n\n`
 
   if (pr) {
     reason += `PR #${pr.number} is open for this branch. Complete the full PR workflow:\n\n`
@@ -161,7 +149,10 @@ async function handlePreservedWorktree(
 
 export async function evaluateStopNonDefaultBranch(input: StopHookInput): Promise<SwizHookOutput> {
   const parsed = stopHookInputSchema.parse(input)
-  const cwd = parsed.cwd ?? process.cwd()
+  const cwd = parsed.cwd
+  if (!cwd?.trim()) {
+    return blockStopObj(buildOwnershipHoldReason({ known: false, reason: "missing-cwd" }))
+  }
 
   if (!(await isGitRepoForHookPayload(parsed, cwd))) return {}
 
@@ -172,6 +163,8 @@ export async function evaluateStopNonDefaultBranch(input: StopHookInput): Promis
   if (isDefaultBranch(branch, defaultBranch)) return {}
 
   const peerHeldFiles = await resolvePeerHeldFiles(cwd, parsed.session_id)
+  const hold = buildOwnershipHoldReason(peerHeldFiles)
+  if (hold) return blockStopObj(hold)
 
   const trunkMode = (await readProjectSettings(cwd))?.trunkMode === true
   if (trunkMode) return buildTrunkModeOutput(branch, defaultBranch, peerHeldFiles)

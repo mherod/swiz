@@ -1,14 +1,20 @@
-import { describe, expect, test } from "bun:test"
+import { afterAll, describe, expect, spyOn, test } from "bun:test"
 import { mkdir, realpath } from "node:fs/promises"
 import { join } from "node:path"
+import { stopHookOutputSchema } from "../../src/schemas.ts"
+import * as ownershipUtils from "../../src/utils/session-file-ownership.ts"
+import * as taskIo from "../../src/utils/session-task-io.ts"
 import {
   buildEffectiveTestSettings,
   runHookInProcess,
   useTempDir,
 } from "../../src/utils/test-utils.ts"
-import { collectGitWorkflowStop } from "./evaluate.ts"
+import { resolveGitContext } from "./context.ts"
+import { collectGitWorkflowStop, evaluateStopGitStatus } from "./evaluate.ts"
 
 const { create: createTempDir } = useTempDir("swiz-detached-main-")
+const createTask = spyOn(taskIo, "createSessionTask").mockResolvedValue(undefined)
+afterAll(() => createTask.mockRestore())
 
 async function git(args: string[], cwd: string): Promise<string> {
   const proc = Bun.spawn(["git", ...args], { cwd, stdout: "pipe", stderr: "pipe" })
@@ -38,6 +44,7 @@ async function createRepository(): Promise<{ main: string; linked: string }> {
 async function runStopHook(cwd: string) {
   return await runHookInProcess("hooks/stop-git-status.ts", {
     cwd,
+    session_id: "detached-main-test",
     _agent: "claude",
     _effectiveSettings: buildEffectiveTestSettings(),
   })
@@ -77,5 +84,56 @@ describe("stop-git-status detached main worktree", () => {
     const result = await runStopHook(linked)
 
     expect(result.stdout).toBe("")
+  })
+
+  test("a missing session blocks detached recovery without a branch-switch command", async () => {
+    const { main } = await createRepository()
+    await git(["switch", "--detach", "HEAD"], main)
+    const result = await collectGitWorkflowStop({ cwd: main })
+    expect(result.kind).toBe("block")
+    expect(JSON.stringify(result)).toContain("missing-session")
+    expect(JSON.stringify(result)).not.toContain("git switch")
+  })
+
+  test("peer ownership of the main worktree replaces recovery commands with inspection", async () => {
+    const { main, linked } = await createRepository()
+    await git(["worktree", "add", "-b", "feature/peer", linked], main)
+    await git(["switch", "--detach", "HEAD"], main)
+    const discovery = spyOn(ownershipUtils, "resolvePeerHeldFiles").mockResolvedValue({
+      known: true,
+      files: ["peer.ts"],
+    })
+    try {
+      const result = await collectGitWorkflowStop({ cwd: linked, session_id: "self" })
+      expect(discovery).toHaveBeenCalledWith(await realpath(main), "self")
+      expect(result.kind).toBe("block")
+      expect(JSON.stringify(result)).toContain("peer.ts")
+      expect(JSON.stringify(result)).not.toContain("git switch")
+    } finally {
+      discovery.mockRestore()
+    }
+  })
+
+  test("unknown ownership of dirty files remains a block with no staging command", async () => {
+    const { main } = await createRepository()
+    await Bun.write(join(main, "unknown.ts"), "export {}\n")
+    const input = { cwd: main, _effectiveSettings: buildEffectiveTestSettings() }
+    const result = await collectGitWorkflowStop(input)
+    const output = stopHookOutputSchema.parse(await evaluateStopGitStatus(input))
+    expect(result.kind).toBe("block")
+    expect(output.reason).toContain("missing-session")
+    expect(JSON.stringify(result)).not.toMatch(/git (add|commit|pull|checkout|switch)/)
+    expect(output.reason).not.toMatch(/git (add|commit|pull|checkout|switch)/)
+  })
+
+  test("missing cwd never uses the daemon repository for context or recovery", async () => {
+    expect(await resolveGitContext({ session_id: "self" })).toBeNull()
+    const collected = await collectGitWorkflowStop({ session_id: "self" })
+    const evaluated = stopHookOutputSchema.parse(
+      await evaluateStopGitStatus({ session_id: "self" })
+    )
+    expect(collected.kind).toBe("hookOutput")
+    expect(evaluated.reason).toContain("missing-cwd")
+    expect(evaluated.reason).not.toMatch(/git (add|commit|checkout|switch)/)
   })
 })

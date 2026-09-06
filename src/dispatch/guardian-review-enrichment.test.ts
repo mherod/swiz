@@ -150,7 +150,8 @@ describe("guardian review dispatch enrichment", () => {
     const specific = getHookSpecificOutput(response)
     expect(specific?.permissionDecision).toBe("deny")
     expect(specific?.permissionDecisionReason).toContain("Retry permitted by guard")
-    expect(specific?.permissionDecisionReason).toContain("git commit -a")
+    expect(specific?.permissionDecisionReason).toContain("git-status-unavailable")
+    expect(specific?.permissionDecisionReason).not.toContain("git commit -a")
   })
 
   test("lets git add reach approval after three recent guardian denials", async () => {

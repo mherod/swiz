@@ -25,7 +25,7 @@ import {
 } from "../../src/utils/git-utils.ts"
 import {
   appendSessionFileOwnershipContext,
-  resolveSessionFileOwnership,
+  resolveSessionFileOwnershipResult,
   type SessionFileOwnership,
 } from "../../src/utils/session-file-ownership.ts"
 import type { GitContext, GitStatus } from "./types.ts"
@@ -131,7 +131,8 @@ function gitStatusWarrantsStopHook(gitStatus: GitStatus): boolean {
  * Returns null (fail-open) if not a git repo or if status doesn't warrant checking.
  */
 export async function resolveGitContext(input: StopHookInput): Promise<GitContext | null> {
-  const cwd = input.cwd ?? process.cwd()
+  const cwd = input.cwd
+  if (!cwd?.trim()) return null
   if (!(await isGitRepoForHookPayload(input, cwd))) return null
 
   const effective = await resolveEffectiveSettings(input, cwd)
@@ -150,13 +151,13 @@ export async function resolveGitContext(input: StopHookInput): Promise<GitContex
   const upstream = gitStatus.upstream ?? `origin/${branch}`
   // Resolved once here so both the prose summary and the action plan see the
   // same ownership snapshot — the plan previously ignored it (issue #841).
-  const ownership =
-    hasUncommitted && gitStatus.lines && gitStatus.lines.length > 0
-      ? await resolveSessionFileOwnership(cwd, input.session_id, gitStatus.lines)
-      : null
+  const ownership = await resolveSessionFileOwnershipResult(cwd, input.session_id, gitStatus.lines)
+  const attribution = ownership.known
+    ? ownership.ownership
+    : { editedByUs: [], editedByOthers: [], unattributed: [...gitStatus.lines] }
   const summary = await buildStopGitSummary(
     cwd,
-    ownership,
+    hasUncommitted ? attribution : null,
     gitStatus as GitStatus,
     upstream,
     effective

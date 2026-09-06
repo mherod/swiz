@@ -1,8 +1,15 @@
 import { describe, expect, test } from "bun:test"
-import type { SessionFileOwnership } from "../../src/utils/session-file-ownership.ts"
+import type {
+  SessionFileOwnership,
+  UnknownOwnership,
+} from "../../src/utils/session-file-ownership.ts"
 import { buildGitWorkflowSections } from "./action-plan.ts"
 
-function planFor(opts: { ownership?: SessionFileOwnership | null; behind?: number }): string {
+function planFor(opts: {
+  ownership?: SessionFileOwnership | null
+  behind?: number
+  unknown?: UnknownOwnership
+}): string {
   const steps = buildGitWorkflowSections({
     summary: "s",
     hasUncommitted: true,
@@ -14,7 +21,11 @@ function planFor(opts: { ownership?: SessionFileOwnership | null; behind?: numbe
     collabMode: "solo",
     trunkMode: true,
     defaultBranch: "main",
-    ownership: opts.ownership,
+    ownership:
+      opts.unknown ??
+      (opts.ownership
+        ? { known: true, ownership: opts.ownership }
+        : { known: false, reason: "query-failed" }),
   })
   return JSON.stringify(steps)
 }
@@ -26,9 +37,11 @@ const PEER_OWNERSHIP: SessionFileOwnership = {
 }
 
 describe("buildGitWorkflowSections ownership gating (issue #841)", () => {
-  test("control: without ownership data the solo plan still uses git add .", () => {
+  test("without ownership data the plan holds instead of assuming solo", () => {
     const plan = planFor({ ownership: null })
-    expect(plan).toContain("git add .")
+    expect(plan).toContain("Inspect the intended checkout")
+    expect(plan).not.toContain("git add")
+    expect(plan).not.toContain("git commit")
   })
 
   test("control: an ownership snapshot with no peer edits keeps the solo plan", () => {
@@ -111,8 +124,14 @@ describe("buildGitWorkflowSections ownership gating (issue #841)", () => {
   test("pull step warns about autostash sweeping peer files when behind", () => {
     const plan = planFor({ ownership: PEER_OWNERSHIP, behind: 2 })
     expect(plan).toContain("--autostash would sweep their work")
+    expect(plan).not.toContain("git pull --rebase --autostash")
     // Control: without peer edits the caution is absent.
     const solo = planFor({ ownership: null, behind: 2 })
     expect(solo).not.toContain("--autostash would sweep")
+  })
+  test("unknown ownership replaces commit, rebase and push commands", () => {
+    const plan = planFor({ behind: 2, unknown: { known: false, reason: "missing-session" } })
+    expect(plan).toContain("missing-session")
+    expect(plan).not.toMatch(/git (add|commit|pull|push|checkout|switch)/)
   })
 })
