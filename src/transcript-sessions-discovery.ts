@@ -1,5 +1,6 @@
 import { readdir, stat } from "node:fs/promises"
 import { basename, join, resolve } from "node:path"
+import { LRUCache } from "lru-cache"
 import { getHomeDir } from "./home.ts"
 import { projectKeyFromCwd } from "./project-key.ts"
 import type { Session } from "./transcript-schemas.ts"
@@ -372,6 +373,47 @@ export async function findCodexSessions(
   return limitSessionList(sessions, limit)
 }
 
+/**
+ * What a Cursor `store.db` was found to match, without keeping the database itself.
+ *
+ * The scan only ever asks "does this session belong to this project", but it used to
+ * answer that by decoding the whole SQLite file to a string through the shared file
+ * cache — so every workspace Cursor had ever opened stayed resident as raw local data
+ * (#814). Only the fingerprint and the roots already compared are retained; the
+ * decoded text is dropped as soon as the comparison is done.
+ *
+ * Checked roots are tracked alongside matched ones so a proven non-match — the common
+ * case, since most sessions belong to other projects — does not re-read on every poll.
+ */
+interface CursorMatchRecord {
+  mtimeMs: number
+  size: number
+  ino?: number
+  matchedProjectRoots: Set<string>
+  checkedProjectRoots: Set<string>
+}
+
+const CURSOR_MATCH_CACHE = new LRUCache<string, CursorMatchRecord>({ max: 512 })
+
+/** The retained record for this exact file, or a fresh one when identity moved. */
+function cursorRecordFor(
+  sessionPath: string,
+  s: { mtimeMs: number; size: number; ino?: number }
+): CursorMatchRecord {
+  const ino = typeof s.ino === "number" && Number.isFinite(s.ino) ? s.ino : undefined
+  const cached = CURSOR_MATCH_CACHE.get(sessionPath)
+  if (cached && cached.mtimeMs === s.mtimeMs && cached.size === s.size && cached.ino === ino) {
+    return cached
+  }
+  return {
+    mtimeMs: s.mtimeMs,
+    size: s.size,
+    ino,
+    matchedProjectRoots: new Set<string>(),
+    checkedProjectRoots: new Set<string>(),
+  }
+}
+
 async function cursorSessionMatchesTarget(
   sessionPath: string,
   targetDir: string
@@ -379,11 +421,29 @@ async function cursorSessionMatchesTarget(
   const targetPath = resolve(targetDir)
   const fileUrlNeedle = `file://${targetPath}`
   try {
-    const text = await getCachedFileText(sessionPath)
-    return text.includes(targetPath) || text.includes(fileUrlNeedle)
+    const s = await stat(sessionPath)
+    const record = cursorRecordFor(sessionPath, s)
+    if (record.checkedProjectRoots.has(targetPath)) {
+      return record.matchedProjectRoots.has(targetPath)
+    }
+
+    // Read without caching the bytes: this is a binary database, and the answer we
+    // want is one boolean per project root.
+    const text = await Bun.file(sessionPath).text()
+    const matched = text.includes(targetPath) || text.includes(fileUrlNeedle)
+
+    record.checkedProjectRoots.add(targetPath)
+    if (matched) record.matchedProjectRoots.add(targetPath)
+    CURSOR_MATCH_CACHE.set(sessionPath, record)
+    return matched
   } catch {
     return false
   }
+}
+
+/** Test seam: drop retained Cursor match records. */
+export function clearCursorMatchCache(): void {
+  CURSOR_MATCH_CACHE.clear()
 }
 
 async function processCursorSessionEntry(

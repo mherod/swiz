@@ -21,7 +21,12 @@ test("pressure relief preserves disk data and pending durable writes", async () 
   await Bun.write(path, content)
   clearFileCache()
   await getCachedFileText(path)
-  expect(getFileCacheMemoryStats()).toEqual({ entries: 1, estimatedBytes: content.length * 2 })
+  // UTF-8 bytes, not UTF-16 code units: the emoji is 4 bytes, so this is deliberately
+  // larger than `content.length` and smaller than the old `length * 2` estimate (#814).
+  expect(getFileCacheMemoryStats()).toEqual({
+    entries: 1,
+    estimatedBytes: Buffer.byteLength(content, "utf8"),
+  })
   await getCachedFileText(path)
   expect(getFileCacheMemoryStats().entries).toBe(1)
   let finish!: () => void

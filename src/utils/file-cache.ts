@@ -1,52 +1,91 @@
 import { stat } from "node:fs/promises"
+import { LRUCache } from "lru-cache"
 
 /**
- * A simple in-memory cache for file contents to avoid repeated reads
- * of stable files (those not modified in the last 2 hours).
+ * In-memory cache for file contents, to avoid repeated reads of stable files
+ * (those not modified in the last 2 hours).
+ *
+ * Bounded on three axes because an unbounded `Map` here meant ordinary dashboard
+ * polling retained every transcript and Cursor database it had ever discovered —
+ * unbounded retention of local data that is often sensitive (#814). Entry count
+ * caps pathological file counts, total bytes cap aggregate residency, and the
+ * per-entry admission ceiling stops one large file from evicting everything else.
  */
-const FILE_CACHE = new Map<string, { content: string; mtime: number; cachedAt: number }>()
-let estimatedStringBytes = 0
-
-/** String storage estimate (UTF-16 code units), not measured allocator ownership. */
-export function getFileCacheMemoryStats(): { entries: number; estimatedBytes: number } {
-  return { entries: FILE_CACHE.size, estimatedBytes: estimatedStringBytes }
-}
-
-function cacheContent(key: string, content: string, mtime: number, cachedAt: number): void {
-  estimatedStringBytes += (content.length - (FILE_CACHE.get(key)?.content.length ?? 0)) * 2
-  FILE_CACHE.set(key, { content, mtime, cachedAt })
-}
-
+const MAX_CACHE_ENTRIES = 256
+const MAX_CACHE_BYTES = 16 * 1024 * 1024
+/** Above this, a read still serves its caller but is never retained. */
+const MAX_ENTRY_BYTES = 2 * 1024 * 1024
 const TWO_HOURS_MS = 2 * 60 * 60 * 1000
 
 /**
- * Reads a file's content with caching for "stable" files (older than 2 hours).
+ * Identity of the bytes a cache entry was built from.
  *
- * If the file's mtime is older than 2 hours AND we have it in cache with the
- * SAME mtime, we return the cached content without reading the file again.
+ * mtime alone is not enough: a replaced file can land with a preserved timestamp,
+ * and same-size replacement is exactly the case that looks like a hit. Inode is
+ * included when the platform reports it, and its absence is itself part of the
+ * fingerprint, so identity that appears or disappears counts as a change.
+ */
+interface CachedFile {
+  content: string
+  mtime: number
+  size: number
+  ino?: number
+  bytes: number
+}
+
+const FILE_CACHE = new LRUCache<string, CachedFile>({
+  max: MAX_CACHE_ENTRIES,
+  maxSize: MAX_CACHE_BYTES,
+  // lru-cache rejects a zero size, and an empty file still occupies an entry slot.
+  sizeCalculation: (entry) => Math.max(1, entry.bytes),
+})
+
+/** Aggregate UTF-8 bytes of cached content. Never serializes content or paths. */
+export function getFileCacheMemoryStats(): { entries: number; estimatedBytes: number } {
+  return { entries: FILE_CACHE.size, estimatedBytes: FILE_CACHE.calculatedSize ?? 0 }
+}
+
+function fingerprintMatches(
+  cached: CachedFile,
+  s: { mtimeMs: number; size: number; ino?: number }
+) {
+  return cached.mtime === s.mtimeMs && cached.size === s.size && cached.ino === s.ino
+}
+
+function inodeOf(s: { ino?: number }): number | undefined {
+  return typeof s.ino === "number" && Number.isFinite(s.ino) ? s.ino : undefined
+}
+
+/** Store only when the payload fits the admission ceiling; oversized reads pass through. */
+function admit(key: string, content: string, s: { mtimeMs: number; size: number; ino?: number }) {
+  const bytes = Buffer.byteLength(content, "utf8")
+  if (bytes > MAX_ENTRY_BYTES) {
+    // A previously admitted smaller version must not be served for these bytes.
+    FILE_CACHE.delete(key)
+    return
+  }
+  FILE_CACHE.set(key, { content, mtime: s.mtimeMs, size: s.size, ino: s.ino, bytes })
+}
+
+/**
+ * Reads a file's content, caching "stable" files (older than 2 hours).
  *
- * Otherwise, we read the file and update the cache.
+ * A cached entry is returned only when the file is stable and its fingerprint still
+ * matches; otherwise the file is re-read.
  */
 export async function getCachedFileText(path: string): Promise<string> {
   try {
     const s = await stat(path)
-    const mtime = s.mtimeMs
+    const identity = { mtimeMs: s.mtimeMs, size: s.size, ino: inodeOf(s) }
     const now = Date.now()
 
     const cached = FILE_CACHE.get(path)
-
-    // If we have a cached version and the file is "stable" (mtime > 2h ago)
-    // AND the mtime matches what we have cached, return the cache.
-    if (cached && now - mtime > TWO_HOURS_MS && cached.mtime === mtime) {
+    if (cached && now - s.mtimeMs > TWO_HOURS_MS && fingerprintMatches(cached, identity)) {
       return cached.content
     }
 
-    // Otherwise, read the file
     const content = await Bun.file(path).text()
-
-    // Update cache
-    cacheContent(path, content, mtime, now)
-
+    admit(path, content, identity)
     return content
   } catch {
     return ""
@@ -88,19 +127,19 @@ const LINES_PREFIX_BYTES = 128 * 1024
 export async function getCachedPrefix(path: string, maxBytes: number): Promise<string> {
   try {
     const s = await stat(path)
-    const mtime = s.mtimeMs
+    const identity = { mtimeMs: s.mtimeMs, size: s.size, ino: inodeOf(s) }
     const now = Date.now()
     const cacheKey = `${path}\0prefix:${maxBytes}`
 
     const cached = FILE_CACHE.get(cacheKey)
-    if (cached && now - mtime > TWO_HOURS_MS && cached.mtime === mtime) {
+    if (cached && now - s.mtimeMs > TWO_HOURS_MS && fingerprintMatches(cached, identity)) {
       return cached.content
     }
 
     const file = Bun.file(path)
     const content = await file.slice(0, maxBytes).text()
 
-    cacheContent(cacheKey, content, mtime, now)
+    admit(cacheKey, content, identity)
     return content
   } catch {
     return ""
@@ -109,5 +148,4 @@ export async function getCachedPrefix(path: string, maxBytes: number): Promise<s
 
 export function clearFileCache(): void {
   FILE_CACHE.clear()
-  estimatedStringBytes = 0
 }

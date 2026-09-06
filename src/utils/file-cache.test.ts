@@ -3,7 +3,13 @@ import { utimesSync } from "node:fs"
 import { unlink } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { getCachedFileText, getCachedLines, getCachedPrefix } from "./file-cache.ts"
+import {
+  clearFileCache,
+  getCachedFileText,
+  getCachedLines,
+  getCachedPrefix,
+  getFileCacheMemoryStats,
+} from "./file-cache.ts"
 
 describe("file-cache", () => {
   const content = "line 1\nline 2\nline 3"
@@ -31,16 +37,32 @@ describe("file-cache", () => {
       const threeHoursAgo = (Date.now() - 3 * 60 * 60 * 1000) / 1000
       utimesSync(tempFile, threeHoursAgo, threeHoursAgo)
 
-      // First read to populate cache with old mtime
       const firstRead = await getCachedFileText(tempFile)
       expect(firstRead).toBe(content)
 
-      // Modify file on disk WITHOUT changing mtime (simulated)
+      // Untouched file: the entry is served from cache rather than re-read.
+      const secondRead = await getCachedFileText(tempFile)
+      expect(secondRead).toBe(content)
+    } finally {
+      await unlink(tempFile).catch(() => {})
+    }
+  })
+
+  test("re-reads a stable file whose size changed under a preserved mtime", async () => {
+    // #814: the entry was keyed on mtime alone, so a replacement that restored the
+    // timestamp kept serving the previous bytes indefinitely. Size and inode are now
+    // part of the fingerprint.
+    const tempFile = getTempFile()
+    await Bun.write(tempFile, content)
+    try {
+      const threeHoursAgo = (Date.now() - 3 * 60 * 60 * 1000) / 1000
+      utimesSync(tempFile, threeHoursAgo, threeHoursAgo)
+      expect(await getCachedFileText(tempFile)).toBe(content)
+
       await Bun.write(tempFile, "new content")
       utimesSync(tempFile, threeHoursAgo, threeHoursAgo)
 
-      const secondRead = await getCachedFileText(tempFile)
-      expect(secondRead).toBe(content) // Should return old content from cache
+      expect(await getCachedFileText(tempFile)).toBe("new content")
     } finally {
       await unlink(tempFile).catch(() => {})
     }
@@ -95,14 +117,56 @@ describe("file-cache", () => {
       const prefix = await getCachedPrefix(tempFile, 3)
       expect(prefix).toBe("pre")
 
-      // Change file but keep mtime
+      // Untouched file: served from cache.
+      expect(await getCachedPrefix(tempFile, 3)).toBe("pre")
+
+      // Changed size under a preserved mtime must still invalidate the prefix.
       await Bun.write(tempFile, "changed")
       utimesSync(tempFile, threeHoursAgo, threeHoursAgo)
 
-      const prefix2 = await getCachedPrefix(tempFile, 3)
-      expect(prefix2).toBe("pre") // Still old content
+      expect(await getCachedPrefix(tempFile, 3)).toBe("cha")
     } finally {
       await unlink(tempFile).catch(() => {})
+    }
+  })
+
+  test("serves a caller a file above the admission ceiling without retaining it", async () => {
+    const tempFile = getTempFile()
+    try {
+      // 2 MiB is the ceiling; go past it so admission is refused.
+      const oversized = "x".repeat(2 * 1024 * 1024 + 1024)
+      await Bun.write(tempFile, oversized)
+      const threeHoursAgo = (Date.now() - 3 * 60 * 60 * 1000) / 1000
+      utimesSync(tempFile, threeHoursAgo, threeHoursAgo)
+
+      clearFileCache()
+      expect((await getCachedFileText(tempFile)).length).toBe(oversized.length)
+      // The caller got its bytes, but nothing was retained.
+      expect(getFileCacheMemoryStats().entries).toBe(0)
+    } finally {
+      await unlink(tempFile).catch(() => {})
+    }
+  })
+
+  test("bounds retention to the entry cap under a many-file scan", async () => {
+    const created: string[] = []
+    try {
+      clearFileCache()
+      const threeHoursAgo = (Date.now() - 3 * 60 * 60 * 1000) / 1000
+      for (let i = 0; i < 300; i++) {
+        const path = getTempFile()
+        created.push(path)
+        await Bun.write(path, `entry-${i}`)
+        utimesSync(path, threeHoursAgo, threeHoursAgo)
+        await getCachedFileText(path)
+      }
+
+      const stats = getFileCacheMemoryStats()
+      // 300 distinct stable files, but retention stops at the 256-entry cap.
+      expect(stats.entries).toBeLessThanOrEqual(256)
+      expect(stats.estimatedBytes).toBeLessThanOrEqual(16 * 1024 * 1024)
+    } finally {
+      for (const path of created) await unlink(path).catch(() => {})
     }
   })
 })
