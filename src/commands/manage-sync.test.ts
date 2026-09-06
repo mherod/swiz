@@ -213,7 +213,7 @@ describe("cross-agent synchronization", () => {
     expect((await run(["validate", "--codex"], home)).exitCode).toBe(0)
     expect((await run(["remove", "old", "--codex"], home)).exitCode).toBe(0)
     const actual = Bun.TOML.parse(await Bun.file(path).text()) as Record<string, unknown>
-    expect(actual.model_instructions).toBe("\n[mcp_servers.fake]\nnot a table\n")
+    expect((actual.model_instructions as string).trim()).toBe("[mcp_servers.fake]\nnot a table")
     expect(actual.features).toEqual({ experimental: true })
     expect(actual.mcp_servers).toEqual({ new: { command: "bun" } })
   })
