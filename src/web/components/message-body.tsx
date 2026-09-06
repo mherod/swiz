@@ -1,4 +1,4 @@
-import type { ReactElement, ReactNode } from "react"
+import { type ReactElement, type ReactNode, useState } from "react"
 import { cn } from "../lib/cn.ts"
 import {
   formatAssistantJsonBlocks,
@@ -366,6 +366,28 @@ function MessageContent({ text, asLog }: { text: string; asLog: boolean }) {
   return asLog ? <pre className="message-log">{text}</pre> : <Markdown text={text} />
 }
 
+export function LazyMessageDetails({
+  summary,
+  children,
+  defaultOpen = false,
+}: {
+  summary: ReactNode
+  children: ReactNode
+  defaultOpen?: boolean
+}): ReactElement {
+  const [expanded, setExpanded] = useState(defaultOpen)
+  return (
+    <details
+      className="message-collapsible"
+      open={expanded}
+      onToggle={(event) => setExpanded(event.currentTarget.open)}
+    >
+      <summary>{summary}</summary>
+      {expanded ? children : null}
+    </details>
+  )
+}
+
 type AssistantParts = ReturnType<typeof splitAssistantMessage> | null
 
 function AssistantBody({ text, parts }: { text: string; parts: AssistantParts }) {
@@ -394,13 +416,16 @@ function AssistantBody({ text, parts }: { text: string; parts: AssistantParts })
   return (
     <>
       {preparedText ? (
-        <details className="message-collapsible">
-          <summary>
-            <MessageContent text={preview} asLog={asLog} />
-            <span className="message-expand-hint">{hint}</span>
-          </summary>
+        <LazyMessageDetails
+          summary={
+            <>
+              <MessageContent text={preview} asLog={asLog} />
+              <span className="message-expand-hint">{hint}</span>
+            </>
+          }
+        >
           <MessageContent text={preparedText} asLog={asLog} />
-        </details>
+        </LazyMessageDetails>
       ) : null}
       <AssistantContextBlocks thoughtText={thoughtText} memoryCitation={memoryCitation} />
     </>
@@ -435,13 +460,16 @@ function UserBodyCollapsed({
   const hint = buildCollapseHint(userVisible)
   return (
     <>
-      <details className="message-collapsible">
-        <summary>
-          <pre className="message-text">{preview}</pre>
-          <span className="message-expand-hint">{hint}</span>
-        </summary>
+      <LazyMessageDetails
+        summary={
+          <>
+            <pre className="message-text">{preview}</pre>
+            <span className="message-expand-hint">{hint}</span>
+          </>
+        }
+      >
         <pre className="message-text">{userVisible}</pre>
-      </details>
+      </LazyMessageDetails>
       {contextBlocks}
     </>
   )

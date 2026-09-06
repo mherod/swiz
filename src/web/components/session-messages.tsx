@@ -1,4 +1,4 @@
-import { type KeyboardEvent, type ReactElement, type ReactNode, useMemo } from "react"
+import { type KeyboardEvent, memo, type ReactElement, type ReactNode, useMemo } from "react"
 import { cn } from "../lib/cn.ts"
 import type { EventMetric } from "../lib/dashboard-helpers.ts"
 import {
@@ -636,7 +636,32 @@ function MessageTextContent({
   return <MessageBody text={message.text} role={message.role} />
 }
 
-function MessageRow({
+function sameToolCalls(
+  left: SessionMessage["toolCalls"],
+  right: SessionMessage["toolCalls"]
+): boolean {
+  if (left === right) return true
+  if (!left || !right || left.length !== right.length) return false
+  return left.every((call, index) => {
+    const candidate = right[index]
+    return candidate?.name === call.name && candidate.detail === call.detail
+  })
+}
+
+export function areMessageRowsEqual(previous: MessageRowProps, next: MessageRowProps): boolean {
+  return (
+    previous.count === next.count &&
+    previous.isNew === next.isNew &&
+    previous.adjacentSkillName === next.adjacentSkillName &&
+    previous.isToolOnlyAssistant === next.isToolOnlyAssistant &&
+    previous.message.role === next.message.role &&
+    previous.message.timestamp === next.message.timestamp &&
+    previous.message.text === next.message.text &&
+    sameToolCalls(previous.message.toolCalls, next.message.toolCalls)
+  )
+}
+
+const MessageRow = memo(function MessageRow({
   message,
   count,
   isNew,
@@ -675,7 +700,7 @@ function MessageRow({
       )}
     </li>
   )
-}
+}, areMessageRowsEqual)
 
 function resolveMessageRowProps(
   grouped: ReturnType<typeof groupMessages>,
