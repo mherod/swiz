@@ -15,7 +15,7 @@ function collectContextsFromResults(
   results: Array<{ execution: HookExecution; parsed: Record<string, any> | null }>,
   executions: HookExecution[]
 ): string[] {
-  const contexts: string[] = []
+  const contexts = new Set<string>()
   for (const { execution, parsed: resp } of results) {
     if (execution.status === "skipped" || execution.status === "aborted") {
       executions.push(execution)
@@ -26,17 +26,25 @@ function collectContextsFromResults(
       executions.push(execution)
       continue
     }
-    const ctxText = extractContext(resp)
+    const ctxText = collectHookContext(resp)
     if (ctxText) {
       execution.status = "allow-with-reason"
-      contexts.push(ctxText)
-      log(`   ✓ ${execution.file} (context: ${ctxText.slice(0, 100)})`)
+      for (const text of ctxText) contexts.add(text)
+      log(`   ✓ ${execution.file} (context: ${ctxText.join("\n\n").slice(0, 100)})`)
     } else {
       log(`   ✓ ${execution.file} (no context extracted)`)
     }
     executions.push(execution)
   }
-  return contexts
+  return [...contexts]
+}
+
+/** Context routes preserve distinct directives and details, unlike preview-only consumers. */
+function collectHookContext(response: Record<string, any>): string[] | null {
+  const systemMessage =
+    typeof response.systemMessage === "string" ? response.systemMessage.trim() : ""
+  const fields = [systemMessage, extractContext(response)].filter((text): text is string => !!text)
+  return fields.length > 0 ? fields : null
 }
 
 async function resolveHumaniseParams(enrichedPayloadStr: string): Promise<HumaniseContextParams> {
@@ -80,8 +88,9 @@ async function applyContextHumanisation(
 }
 
 /**
- * Context strategy: runs all hooks, merges additionalContext for
- * sessionStart and userPromptSubmit events.
+ * Runs hooks for every context-routed event in DISPATCH_ROUTES, preserving each
+ * distinct systemMessage and additionalContext once. The shared pipeline's final
+ * agent sanitizer owns envelope compatibility, including confirmed compact rejections.
  */
 export class ContextStrategy implements HookExecutionStrategy {
   async execute(ctx: HookStrategyContext): Promise<Record<string, any>> {
@@ -106,6 +115,7 @@ export class ContextStrategy implements HookExecutionStrategy {
 
         log(`   result: merged ${contexts.length} context(s), hookEventName=${hookEventName}`)
         return hookOutputSchema.parse({
+          systemMessage: additionalContext,
           hookSpecificOutput: hookSpecificOutputSchema.parse({
             hookEventName,
             additionalContext,
