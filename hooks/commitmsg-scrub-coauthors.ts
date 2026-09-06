@@ -13,10 +13,23 @@ const commitMsgHookInputSchema = z.looseObject({
   commit_msg_file: z.string().optional(),
 })
 
+/**
+ * Session-attribution trailers, which agent harnesses inject by convention.
+ *
+ * These are the forms the co-author and generation patterns miss: a harness told to append
+ * `Claude-Session: <url>` produces a line matching neither `^Co-authored-by:` nor
+ * `generated…with…claude…code`, so it reached the commit unscrubbed. The bare session URL
+ * is included because the trailer key alone is easy to rename.
+ */
+const SESSION_ATTRIBUTION_RE =
+  /^(?:Claude-Session|Generated-With|Assisted-By):|claude\.ai\/code\/session/i
+
 function isProhibitedAttributionLine(line: string): boolean {
   const normalized = line.normalize("NFKC")
   return (
-    /^Co-authored-by:.*$/i.test(normalized) || /generated.*with.*claude.*code/i.test(normalized)
+    /^Co-authored-by:.*$/i.test(normalized) ||
+    /generated.*with.*claude.*code/i.test(normalized) ||
+    SESSION_ATTRIBUTION_RE.test(normalized.trim())
   )
 }
 
