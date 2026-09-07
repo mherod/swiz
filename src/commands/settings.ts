@@ -1122,11 +1122,39 @@ function buildSettingOptions(): Array<{ flags: string; description: string }> {
   return SETTINGS_REGISTRY.flatMap(settingDefToOptions)
 }
 
+/** Options that consume the following argument, so it is never the action. */
+const VALUE_TAKING_FLAGS = new Set(["--dir", "-d"])
+
+/**
+ * First non-option argument — the action position — mirroring how `parseSettingsArgs` skips
+ * option values so a flag's argument is never mistaken for the action.
+ */
+function firstPositionalArg(args: string[]): string | undefined {
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i]!
+    if (VALUE_TAKING_FLAGS.has(arg)) {
+      i++
+      continue
+    }
+    if (arg === "--session" || arg === "-s") {
+      const next = args[i + 1]
+      // `--session` takes an optional id, consumed under the same rule the parser uses.
+      if (next && !next.startsWith("-") && !VALID_ACTIONS.has(next.toLowerCase())) i++
+      continue
+    }
+    if (arg.startsWith("-")) continue
+    return arg
+  }
+  return undefined
+}
+
 function isJsonHelpRequest(args: string[]): boolean {
-  return (
-    args.includes("--json") &&
-    (args.includes("--help") || args.includes("-h") || args.includes("help"))
-  )
+  if (!args.includes("--json")) return false
+  if (args.includes("--help") || args.includes("-h")) return true
+  // A bare `help` is a help request only in the action position. Matching it anywhere treated a
+  // legitimate value — `default-branch help`, a real branch name — as a schema request, so the
+  // write silently did nothing and still exited 0 (#897).
+  return firstPositionalArg(args)?.toLowerCase() === "help"
 }
 
 export interface SettingsCommandOptions {

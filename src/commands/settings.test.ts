@@ -888,6 +888,49 @@ describe("swiz settings", () => {
     expect(result.stdout).toMatch(/critiques-enabled:\s+enabled \(user\)/)
   })
 
+  // Issue #897: `args.includes("help")` matched anywhere, so a legitimate value that happened to
+  // be the word "help" was consumed as a schema request — the write silently did nothing and
+  // still exited 0, which is the worst combination for a script.
+  test("a literal help value is written rather than treated as a help request", async () => {
+    const home = await createTempHome()
+    const projectDir = await createIsolatedGitProject(home)
+    const result = await runSwiz(
+      ["settings", "set", "default-branch", "help", "--project", "--dir", projectDir, "--json"],
+      home
+    )
+
+    expect(result.exitCode).toBe(0)
+    const payload = JSON.parse(result.stdout.trim()) as { action?: string; value?: string }
+    expect(payload.action).toBe("set")
+    expect(payload.value).toBe("help")
+
+    const config = JSON.parse(
+      await readFile(join(projectDir, ".swiz", "config.json"), "utf-8")
+    ) as { defaultBranch?: string }
+    expect(config.defaultBranch).toBe("help")
+  })
+
+  test("real help requests still return the schema and write nothing", async () => {
+    // Control for the case above: narrowing the predicate must not break actual help.
+    for (const args of [
+      ["settings", "help", "--json"],
+      ["settings", "--help", "--json"],
+      ["settings", "-h", "--json"],
+    ]) {
+      const home = await createTempHome()
+      const result = await runSwiz(args, home)
+      expect(result.exitCode).toBe(0)
+      const payload = JSON.parse(result.stdout.trim()) as Array<{ key?: string }>
+      expect(Array.isArray(payload)).toBe(true)
+      expect(payload.length).toBeGreaterThan(0)
+      expect(payload[0]).toHaveProperty("key")
+      // A help request must not have written a settings file.
+      expect(await readFile(join(home, ".swiz", "settings.json"), "utf-8").catch(() => null)).toBe(
+        null
+      )
+    }
+  })
+
   test("control: explicit project scope still reaches the project hook list", async () => {
     // Proves the guard rejects only session scope rather than every explicit scope.
     const home = await createTempHome()
