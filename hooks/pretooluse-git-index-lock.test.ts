@@ -14,6 +14,7 @@ const REPO_ROOT = "/repo"
 const GIT_DIR = `${REPO_ROOT}/.git`
 
 interface HarnessOptions {
+  extraProcesses?: string[]
   activeGit?: boolean
   /** The active git row names the repo in argv (git -C /repo …) instead of via cwd. */
   gitArgvNamesRepo?: boolean
@@ -92,6 +93,7 @@ function createHarness(options: HarnessOptions = {}): Harness {
           `310 1 vim ${REPO_ROOT}/.git/config`,
           "100 50 bun hook",
           "50 1 zsh",
+          ...(options.extraProcesses ?? []),
         ]
         if (options.gitArgvNamesRepo) rows.push(`200 1 git -C ${REPO_ROOT} commit`)
         else if (options.activeGit) rows.push("200 1 git commit")
@@ -290,6 +292,64 @@ describe("pretooluse-git-index-lock", () => {
   })
 
   describe("stale lock resolution", () => {
+    test.each([
+      "git-fsmonitor--daemon run",
+      "/usr/libexec/git-core/git-fsmonitor--daemon run --detach --ipc-threads=8",
+      "git fsmonitor--daemon run",
+      "/usr/bin/git -C /repo fsmonitor--daemon run --detach",
+    ])("ignores resident observer %s", async (command) => {
+      const harness = createHarness({ extraProcesses: [`220 1 ${command}`], activeGit: false })
+      harness.runtime.spawn = (cmd) => {
+        harness.processCalls.push(cmd)
+        return Promise.resolve(
+          processResult(cmd[0] === "ps" ? `PID PPID COMMAND\n220 1 ${command}` : "p220\nn/repo")
+        )
+      }
+      const result = await runHook("git status", harness)
+      expect(result.decision).toBe("allow")
+      expect(harness.unlinkCalls()).toBe(1)
+      expect(harness.processCalls.map((cmd) => cmd[0])).toEqual(["ps"])
+    })
+
+    test("resident observer does not hide a real writer", async () => {
+      const harness = createHarness({
+        activeGit: true,
+        extraProcesses: ["220 1 git fsmonitor--daemon run"],
+      })
+      const result = await runHook("git status", harness)
+      expect(result.decision).toBe("deny")
+      expect(harness.unlinkCalls()).toBe(0)
+      expect(harness.processCalls.find((cmd) => cmd[0] === "lsof")?.[3]).toBe("200")
+    })
+
+    test.each([
+      "git-credential-helper /repo",
+      "git-fsmonitor--daemon-unknown /repo",
+      "git -C /repo commit -m fsmonitor--daemon",
+      "git fsmonitor--daemon unknown /repo",
+      "git fsmonitor--daemon",
+      "git fsmonitor--daemon run --unknown-option",
+      "git fsmonitor--daemon start",
+      "/Applications/Git Tools/bin/git fsmonitor--daemon run",
+    ])("keeps ambiguous or unrelated helper conservative: %s", async (command) => {
+      const harness = createHarness({
+        extraProcesses: [`220 1 ${command}`],
+        processInspectionThrowsOn: "lsof",
+      })
+      const result = await runHook("git status", harness)
+      expect(result.decision).toBe("deny")
+      expect(harness.unlinkCalls()).toBe(0)
+    })
+
+    test("resident filtering preserves ancestor exclusion", async () => {
+      const harness = createHarness({
+        extraProcesses: ["50 1 git -C /repo commit", "220 1 git fsmonitor--daemon run"],
+      })
+      const result = await runHook("git status", harness)
+      expect(result.decision).toBe("allow")
+      expect(harness.unlinkCalls()).toBe(1)
+    })
+
     for (const command of [
       "git status",
       'git commit -m "test"',

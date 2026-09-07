@@ -296,6 +296,18 @@ function isGitExecutable(command: string): boolean {
 }
 
 /**
+ * Only the known resident observer is exempt. Git starts it as
+ * `git fsmonitor--daemon run --detach --ipc-threads=N`; the dashed executable
+ * form and unambiguous -C prefixes are equivalent. Unknown options, helpers,
+ * and ambiguous spaced executable paths remain candidates for the repo probe.
+ */
+function isResidentFsmonitor(command: string): boolean {
+  return /^(?:[^\s"']*\/)?git(?:-fsmonitor--daemon|(?:\s+-C\s+[^\s"']+)*\s+fsmonitor--daemon)\s+run(?:\s+(?:--detach|--ipc-threads=\d+))*\s*$/.test(
+    command
+  )
+}
+
+/**
  * Whether a command's argv names this repo as a path token. A bare
  * `includes(repoRoot)` false-positives on sibling paths that merely extend
  * ours (…/swiz matching inside …/swiz-other), so the character after the
@@ -325,7 +337,7 @@ function parseGitProcessTable(out: string): {
     const row = parseGitProcessLine(line)
     if (!row) continue
     parentMap.set(row.pid, row.ppid)
-    if (isGitExecutable(row.command)) rows.push(row)
+    if (isGitExecutable(row.command) && !isResidentFsmonitor(row.command)) rows.push(row)
   }
   return { rows, parentMap }
 }
