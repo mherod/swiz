@@ -6,6 +6,7 @@ const globalWrites: Array<{ key: string; value: unknown }> = []
 const projectWrites: Array<{ cwd: string; updates: Record<string, unknown> }> = []
 const swizWrites: Array<Record<string, unknown>> = []
 let globalSettings: Record<string, unknown> = { prMergeMode: false }
+let projectWriteError: Error | undefined
 
 void mock.module("../../settings.ts", () => ({
   readSwizSettings: async () => ({ ...globalSettings }),
@@ -16,6 +17,7 @@ void mock.module("../../settings.ts", () => ({
     },
   },
   writeProjectSettings: async (cwd: string, updates: Record<string, unknown>) => {
+    if (projectWriteError) throw projectWriteError
     projectWrites.push({ cwd, updates })
   },
   writeSwizSettings: async (settings: Record<string, unknown>) => {
@@ -35,6 +37,7 @@ beforeEach(() => {
   projectWrites.length = 0
   swizWrites.length = 0
   globalSettings = { prMergeMode: false }
+  projectWriteError = undefined
 })
 
 function createContext(): SettingsRoutesContext {
@@ -55,6 +58,21 @@ function post(path: string, body: Record<string, unknown>): Request {
 }
 
 describe("settings routes", () => {
+  test("propagates project write errors before global updates", async () => {
+    const ctx = createContext()
+    projectWriteError = new Error(
+      "Invalid project settings at /repo/.swiz/config.json. Repair the file."
+    )
+    const req = post("/settings/project/update", {
+      cwd: "/repo",
+      updates: { autoContinue: true, prMergeMode: true },
+    })
+    await expect(routes.handleSettingsRoutes(req, new URL(req.url), ctx)).rejects.toThrow(
+      projectWriteError.message
+    )
+    expect(projectWrites).toEqual([])
+    expect(swizWrites).toEqual([])
+  })
   test("filters unsupported global updates", async () => {
     const ctx = createContext()
     const req = post("/settings/global/update", {

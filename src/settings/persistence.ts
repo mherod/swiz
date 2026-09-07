@@ -508,22 +508,40 @@ export async function writeProjectState(
   await ensureGitExclude(cwd, ".swiz/")
 }
 
+function parseProjectSettingsForWrite(source: string, path: string): Record<string, unknown> {
+  try {
+    const parsed: unknown = JSON.parse(source)
+    if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+      throw new Error("Expected a JSON object")
+    }
+    return parsed as Record<string, unknown>
+  } catch (error) {
+    throw new Error(
+      `Invalid project settings at ${path}. Repair the file to contain a valid JSON object before retrying.`,
+      { cause: error }
+    )
+  }
+}
+
 export async function writeProjectSettings(
   cwd: string,
   updates: Partial<ProjectSwizSettings>
 ): Promise<string> {
   const path = getProjectSettingsPath(cwd)
-  await mkdir(dirname(path), { recursive: true })
-  let existing: Record<string, any> = {}
-  const file = Bun.file(path)
-  if (await file.exists()) {
-    await Bun.write(`${path}.bak`, file)
-    try {
-      existing = (await file.json()) as Record<string, any>
-    } catch {
-      // Ignore parse errors — overwrite with clean object
+  let source: string | undefined
+  try {
+    source = await Bun.file(path).text()
+  } catch (error) {
+    if (!error || typeof error !== "object" || !("code" in error) || error.code !== "ENOENT") {
+      throw new Error(
+        `Cannot read project settings at ${path}. Repair the file or its permissions before retrying.`,
+        { cause: error }
+      )
     }
   }
+  const existing = source === undefined ? {} : parseProjectSettingsForWrite(source, path)
+  await mkdir(dirname(path), { recursive: true })
+  if (source !== undefined) await Bun.write(`${path}.bak`, source)
   await Bun.write(path, JSON.stringify({ ...existing, ...updates }, null, 2))
   invalidateProjectSettingsCache(path)
   await ensureGitExclude(cwd, ".swiz/")
