@@ -900,7 +900,7 @@ async function setBooleanSetting(
 function printSetConfirmation(
   parsed: ParsedSettingsArgs & { scope: string },
   key: string,
-  displayValue: string,
+  value: string | number,
   path: string,
   def: ReturnType<typeof getSettingDef>
 ): void {
@@ -909,7 +909,7 @@ function printSetConfirmation(
       JSON.stringify({
         action: "set",
         setting: key,
-        value: def.kind === "numeric" ? Number(displayValue) : displayValue,
+        value,
         scope: parsed.scope,
         path,
         description: def.docs?.description,
@@ -918,6 +918,12 @@ function printSetConfirmation(
     )
     return
   }
+  const displayValue =
+    value === 0
+      ? key === "transcriptMonitorMaxConcurrentDispatches"
+        ? "unlimited"
+        : formatNumericDisplay(value, def.docs?.valuePlaceholder)
+      : String(value)
   console.log(`\n  Set ${parsed.settingArg} = ${displayValue} (${parsed.scope})`)
   if (def.docs?.effectExplanation) {
     console.log(`\n  Effect: ${def.docs.effectExplanation}`)
@@ -983,8 +989,7 @@ async function setValueSetting(
 
   const value = parseNumericSettingValue(parsed.settingValue)
   const path = await writeSettingToScope(resolved, key, value, daemonReady)
-  const label = value === 0 ? "system default" : `${value}`
-  printSetConfirmation(resolved, key, label, path, def)
+  printSetConfirmation(resolved, key, value, path, def)
 }
 
 /** Best-effort daemon notification after a settings write (issue #330). */

@@ -26,6 +26,36 @@ import { createHelpCommand } from "./help.ts"
 import { settingsCommand } from "./settings.ts"
 
 const _tmp = useTempDir("swiz-settings-test-")
+
+describe("typed JSON set confirmations", () => {
+  test.each([
+    ["narrator-speed", "narratorSpeed", 0, "system default"],
+    ["push-cooldown", "pushCooldownMinutes", 0, "disabled"],
+    ["transcript-dispatch-cap", "transcriptMonitorMaxConcurrentDispatches", 0, "unlimited"],
+    ["narrator-speed", "narratorSpeed", 250, "250"],
+    ["narrator-voice", "narratorVoice", "Reed", "Reed"],
+  ] as const)("preserves %s = %s", async (alias, key, value, label) => {
+    const home = await createTempHome()
+    const args = ["settings", "set", alias, String(value), "--global"]
+    const result = await runSwiz([...args, "--json"], home)
+    expect(result.exitCode).toBe(0)
+    const confirmation = JSON.parse(result.stdout)
+    expect(confirmation).toEqual({
+      action: "set",
+      setting: key,
+      value,
+      scope: "global",
+      path: getSwizSettingsPath(home),
+      description: SETTINGS_REGISTRY.find((def) => def.key === key)?.docs?.description,
+      effect: SETTINGS_REGISTRY.find((def) => def.key === key)?.docs?.effectExplanation,
+    })
+    expect((await Bun.file(getSwizSettingsPath(home)!).json())[key]).toBe(value)
+    const shown = await runSwiz(["settings", "show", "--global", "--json"], home)
+    expect(JSON.parse(shown.stdout)[key]).toBe(value)
+    const human = await runSwiz(args, home)
+    expect(human.stdout).toContain(`Set ${alias} = ${label} (global)`)
+  })
+})
 async function createTempHome(): Promise<string> {
   return realpath(await _tmp.create())
 }
