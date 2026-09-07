@@ -60,10 +60,6 @@ export function speakCooldownPath(sessionId: string): string {
   return `${TMP_ROOT}/speak-cooldown-${sessionId}.timestamp`
 }
 
-export function sessionTaskSentinelPath(safeSentinel: string, safeSession: string): string {
-  return `${TMP_ROOT}/${safeSentinel}-${safeSession}.flag`
-}
-
 export function claudeTaskOutputPath(uid: number, cwdKey: string, taskId: string): string {
   return `${TMP_ROOT}/claude-${uid}/${cwdKey}/tasks/${taskId}.output`
 }

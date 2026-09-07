@@ -4,7 +4,7 @@
  * Extracted from `hook-utils.ts` (#679) so the catch-all barrel shrinks toward
  * its focused clusters. `hook-utils.ts` re-exports `createSessionTask` so all
  * existing importers are unchanged. Keep this module free of imports from
- * `hook-utils.ts` to avoid a cycle — its deps (`debug`, `home`, `temp-paths`,
+ * `hook-utils.ts` to avoid a cycle — its deps (`debug`, `home`,
  * `hook-json-helpers`) do not import back, and `task-service` stays dynamic.
  */
 import { join } from "node:path"
@@ -17,11 +17,11 @@ import {
   isSafeSessionId,
   mergeTaskStoresByRecency,
   readTasks,
+  sessionDirPath,
   type TaskStatus,
   writeAudit,
   writeTask,
 } from "../tasks/task-repository.ts"
-import { sessionTaskSentinelPath } from "../temp-paths.ts"
 import { messageFromUnknownError } from "./hook-json-helpers.ts"
 
 const defaultTaskExecutor: (args: string[]) => Promise<number> = async (args) => {
@@ -35,30 +35,23 @@ function isValidSessionId(sessionId: string | undefined): sessionId is string {
   return !!sessionId && sessionId !== "null" && !!sessionId.trim()
 }
 
-function sanitizePathComponent(raw: string): string {
-  return raw.replace(/[^a-zA-Z0-9_-]/g, "")
-}
-
 /** Validate session/sentinel inputs and check dedup sentinel. */
 async function validateCreateTaskInputs(
   sessionId: string | undefined,
-  sentinelKey: string
-): Promise<{ safeSentinel: string; safeSession: string; sentinel: string } | null> {
+  sentinelKey: string,
+  storeKey: string
+): Promise<{ sentinel: string } | null> {
   if (!isValidSessionId(sessionId) || !sentinelKey.trim()) return null
   const home = getHomeDirOrNull()
   if (!home) return null
-  const safeSentinel = sanitizePathComponent(sentinelKey)
-  const safeSession = sanitizePathComponent(sessionId)
-  if (!safeSentinel || !safeSession) return null
-  // `safeSession` only ever guarded the sentinel filename — the raw `sessionId` still reached
-  // `createTaskInProcess` below and was joined straight onto the store root, so a payload id of
-  // `"../../etc/passwd"` wrote a task directory into `~/etc`. Refuse the id here rather than
-  // sanitizing it: hooks must stay quiet, and rewriting a traversing id would silently file the
-  // task under a different real session.
-  if (!isSafeSessionId(sessionId, createDefaultTaskStore().tasksDir)) return null
-  const sentinel = sessionTaskSentinelPath(safeSentinel, safeSession)
+  const { tasksDir } = createDefaultTaskStore()
+  if (!isSafeSessionId(sessionId, tasksDir) || !isSafeSessionId(storeKey, tasksDir)) return null
+  const digest = new Bun.CryptoHasher("sha256")
+    .update(JSON.stringify([sessionId, sentinelKey]))
+    .digest("hex")
+  const sentinel = join(sessionDirPath(storeKey, tasksDir), `.hook-dedup-${digest}.flag`)
   if (await Bun.file(sentinel).exists()) return null
-  return { safeSentinel, safeSession, sentinel }
+  return { sentinel }
 }
 
 /** Write sentinel file to mark a task as already created. */
@@ -109,11 +102,11 @@ export async function createSessionTask(
   description: string,
   cwdOrExecutor?: string | ((args: string[]) => Promise<number>)
 ): Promise<void> {
-  const validated = await validateCreateTaskInputs(sessionId, sentinelKey)
+  const cwd = typeof cwdOrExecutor === "string" ? cwdOrExecutor : undefined
+  const storeKey = cwd ? projectKeyFromCwd(cwd) : (sessionId ?? "")
+  const validated = await validateCreateTaskInputs(sessionId, sentinelKey, storeKey)
   if (!validated) return
   const { sentinel } = validated
-  const cwd = typeof cwdOrExecutor === "string" ? cwdOrExecutor : undefined
-  const storeKey = cwd ? projectKeyFromCwd(cwd) : sessionId!
   const executor = typeof cwdOrExecutor === "function" ? cwdOrExecutor : undefined
 
   // Legacy path: test-injected executor shells out to swiz CLI

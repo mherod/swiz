@@ -264,13 +264,9 @@ describe("createSessionTask input sanitization", () => {
    */
   async function createSessionTaskInTempHome(
     sessionId: string,
-    sentinelKeyPrefix: string
+    sentinelKey: string
   ): Promise<{ escaped: string[]; storeEntries: string[]; exitCode: number; stderr: string }> {
     const home = await createTempHome()
-    // The dedup sentinel lives under /tmp keyed by the sanitized session+key, NOT under HOME, so
-    // it outlives the temp home. A fixed key makes the second run a silent no-op and the
-    // assertions vacuous — uniquify it so each case actually exercises the write path.
-    const sentinelKey = `${sentinelKeyPrefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
     const script = `
       import { readdir } from "node:fs/promises";
       import { join } from "node:path";
@@ -310,6 +306,52 @@ describe("createSessionTask input sanitization", () => {
     const result = await createSessionTaskInTempHome("valid-session-id", "../../etc/cron.d/evil")
     expect(result.exitCode).toBe(0)
     expect(result.escaped).toEqual([])
+  })
+
+  test("identical session and key create tasks in consecutive isolated homes", async () => {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const result = await createSessionTaskInTempHome("test-session-replay", "stable-key")
+      expect(result.exitCode).toBe(0)
+      expect(result.storeEntries).toEqual(["test-session-replay"])
+    }
+  })
+
+  test("dedup preserves exact identities and retries failed creation", async () => {
+    const home = await createTempHome()
+    const script = `
+      import { readdir } from "node:fs/promises";
+      import { join } from "node:path";
+      import { createSessionTask } from "./src/utils/session-task-io.ts";
+      const calls = [];
+      const executor = (args) => { calls.push(args); return Promise.resolve(0); };
+      await createSessionTask("$(whoami)", "key", "subject", "desc", executor);
+      await createSessionTask("whoami", "key", "subject", "desc", executor);
+      await createSessionTask("whoami", "key", "subject", "desc", executor);
+      await createSessionTask("whoami", "$(key)", "subject", "desc", executor);
+      await createSessionTask("retry", "key", "subject", "desc", () => Promise.resolve(1));
+      await createSessionTask("retry", "key", "subject", "desc", executor);
+      const root = join(process.env.HOME, ".claude", "tasks");
+      const entries = await readdir(root);
+      const markers = await Promise.all(entries.sort().map(id => readdir(join(root, id))));
+      console.log(JSON.stringify({ calls: calls.length, entries, markers }));
+    `
+    const proc = Bun.spawn([process.execPath, "-e", script], {
+      stdout: "pipe",
+      stderr: "pipe",
+      env: neutralAgentEnv({ HOME: home }),
+    })
+    const [stdout, stderr] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+    ])
+    expect(await proc.exited, stderr).toBe(0)
+    const result = JSON.parse(stdout.trim())
+    expect(result.calls).toBe(4)
+    expect(result.entries).toEqual(["$(whoami)", "retry", "whoami"])
+    expect(result.markers.map((files: string[]) => files.length)).toEqual([1, 1, 2])
+    for (const files of result.markers) {
+      for (const file of files) expect(file).toMatch(/^\.hook-dedup-[a-f0-9]{64}\.flag$/)
+    }
   })
 
   test("path-traversal in sessionId writes nothing outside the task store", async () => {

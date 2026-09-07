@@ -1,10 +1,19 @@
 /**
  * Probe session-id path traversal in the task store.
  *
- * `createSessionTask` sanitizes `sessionId` into `safeSession` but uses it only for the dedup
- * sentinel path; the raw value reaches `createTaskInProcess`, which joins it straight onto
- * `tasksDir`. A hook payload's `session_id` therefore escapes the store — the real
- * `~/.claude/tasks` picked up an `$(whoami)` directory, and `../../etc/passwd` landed in `~/etc`.
+ * Historical reproduction: unchecked session ids escaped the task store. Writes now use
+ * containment checks, and hook dedup markers live beside tasks with hashed exact identities.
+ *
+ * Legacy fixture cleanup (manual, after reviewing each directory's task JSON): quit sessions
+ * using those stores, then move only confirmed test fixtures to the Trash. For the historical
+ * Claude fixtures, use these literal quoted paths so shell substitution cannot run:
+ *
+ *   trash "$HOME/.claude/tasks/"'$(whoami)'
+ *   trash "$HOME/.claude/tasks/valid-session-id"
+ *   trash "$HOME/.claude/tasks/test-session-replay"
+ *
+ * Skip absent paths and preserve any directory containing real work. Other providers use
+ * their own task roots. Old temporary dedup flags are no longer read and need no migration.
  *
  * Run: bun scripts/debug-session-dir-traversal.ts
  *
