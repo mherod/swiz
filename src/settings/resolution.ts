@@ -224,3 +224,43 @@ export function getEffectiveSwizSettings(
   }
   return { ...base, source: "global" }
 }
+
+/** Which configuration tier actually supplied an effective value. */
+export type SettingSourceTier = "session" | "project" | "user" | "default"
+
+export interface SettingSourceInputs {
+  /** Keys physically present in the global file, from `readGlobalExplicitSettingKeys`. */
+  globalExplicitKeys: ReadonlySet<string>
+  projectSettings?: ProjectSwizSettings | null
+  /** The resolved session's own overrides, when a session scope is in play. */
+  sessionSettings?: object | null
+}
+
+/**
+ * The tier that won for one setting key, following the existing session > project > global
+ * precedence and falling through to `default` when no tier set it explicitly.
+ *
+ * `EffectiveSwizSettings.source` is a single label for the whole object, so it cannot answer this
+ * per key: it reports `"global"` for a non-session result even when project overrides were
+ * merged in, which is why `settings show` labelled project values and built-in defaults alike as
+ * `(user)` (#900).
+ *
+ * A tier counts as the source when it holds the key explicitly, including when the stored value
+ * happens to equal the default — an explicit choice still comes from the file that states it.
+ */
+export function resolveSettingSourceTier(
+  key: string,
+  inputs: SettingSourceInputs
+): SettingSourceTier {
+  const session = inputs.sessionSettings as Record<string, unknown> | null | undefined
+  if (session && session[key] !== undefined) return "session"
+  const project = inputs.projectSettings as Record<string, unknown> | null | undefined
+  if (project && project[key] !== undefined) return "project"
+  if (inputs.globalExplicitKeys.has(key)) return "user"
+  return "default"
+}
+
+/** Display label for a source tier, matching the existing `settings show` vocabulary. */
+export function settingSourceLabel(tier: SettingSourceTier): string {
+  return `(${tier === "user" ? "user" : tier})`
+}

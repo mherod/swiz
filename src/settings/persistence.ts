@@ -606,6 +606,29 @@ function cacheAndReturn(path: string, value: SwizSettings, strict?: boolean): Sw
   return value
 }
 
+/**
+ * Top-level keys physically present in the global settings file.
+ *
+ * `readSwizSettings` runs the file through `swizSettingsSchema`, which materialises every
+ * default, so a key being present on the returned object proves nothing about whether the user
+ * ever set it. Provenance reporting needs the pre-schema shape to tell an explicit global value
+ * apart from a built-in default (#900). Returns an empty set when there is no file or it cannot
+ * be read — both mean "nothing was explicitly set globally".
+ */
+export async function readGlobalExplicitSettingKeys(home?: string): Promise<Set<string>> {
+  const path = getSwizSettingsPath(home)
+  if (!path) return new Set()
+  const file = Bun.file(path)
+  if (!(await file.exists())) return new Set()
+  try {
+    const raw: unknown = await file.json()
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return new Set()
+    return new Set(Object.keys(raw as Record<string, unknown>))
+  } catch {
+    return new Set()
+  }
+}
+
 export async function readSwizSettings(options: ReadOptions = {}): Promise<SwizSettings> {
   const path = getSwizSettingsPath(options.home)
   if (!path) return cloneDefaults()

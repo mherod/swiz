@@ -13,14 +13,17 @@ import {
   getProjectSettingsPath,
   getSwizSettingsPath,
   type ProjectSwizSettings,
+  readGlobalExplicitSettingKeys,
   readProjectSettings,
   readSwizSettings,
   resolveMemoryThresholds,
   resolvePolicy,
+  resolveSettingSourceTier,
   SETTINGS_REGISTRY,
   type SettingDef,
   type SettingsScope,
   type SwizSettings,
+  settingSourceLabel,
   settingsStore,
 } from "../settings.ts"
 import { spawnSpeak } from "../speech.ts"
@@ -322,6 +325,8 @@ interface PrintSettingsOptions {
   projectPolicyInfo?: ProjectPolicyInfo
   detectedStacks?: string[]
   rawSettings?: SwizSettings
+  /** Per-key provenance label. Without it, rows fall back to their previous fixed labels. */
+  sourceOf?: (key: string) => string
 }
 
 function printHeader(path: string | null, fileExists: boolean, sessionId: string | null): void {
@@ -364,14 +369,17 @@ function boolToEnabledDisabled(v: boolean): "enabled" | "disabled" {
 
 function booleanRowsToSettingsRows(
   rows: BoolSettingRow[],
-  effective: EffectiveSwizSettings
+  effective: EffectiveSwizSettings,
+  sourceOf?: (key: string) => string
 ): SettingsRow[] {
   return rows.map(([label, key, scope]) => {
     const def = DEF_BY_KEY.get(key)
     return {
       label,
       value: boolToEnabledDisabled(Boolean(effective[key])),
-      scope,
+      // The literal in BoolSettingRow is a fallback only: it hardcodes "(user)" for every row,
+      // which mislabelled project overrides and built-in defaults alike (#900).
+      scope: sourceOf?.(key) ?? scope,
       description: def?.docs?.description,
     }
   })
@@ -400,17 +408,20 @@ function formatSettingValue(def: (typeof SETTINGS_REGISTRY)[number], value: unkn
 
 function numericGlobalSettingsRows(
   effective: EffectiveSwizSettings,
-  rawSettings?: SwizSettings
+  rawSettings?: SwizSettings,
+  sourceOf?: (key: string) => string
 ): SettingsRow[] {
   return SETTINGS_REGISTRY.filter(
     (def) => (def.kind === "numeric" || def.kind === "string") && def.scopes.includes("global")
   ).map((def) => {
+    // Presence on `rawSettings` is not evidence of an explicit value: it has already been through
+    // the schema, which materialises every default. Fall back to it only without a resolver.
     const isExplicitlySet =
       rawSettings !== undefined && rawSettings[def.key as keyof SwizSettings] !== undefined
     return {
       label: `${def.aliases[0] ?? def.key}:`,
       value: formatSettingValue(def, effective[def.key as keyof EffectiveSwizSettings]),
-      scope: isExplicitlySet ? "(user)" : "(default)",
+      scope: sourceOf?.(def.key) ?? (isExplicitlySet ? "(user)" : "(default)"),
       description: def.docs?.description,
     }
   })
@@ -436,64 +447,63 @@ function descFor(key: string): string | undefined {
   return DEF_BY_KEY.get(key)?.docs?.description
 }
 
+/** Source-attribution inputs for the global rows, grouped so the row builders stay within arity. */
+interface GlobalRowSources {
+  autoContinueSource?: "global" | "project" | "session"
+  ambitionSource?: "global" | "project" | "session"
+  strictNoDirectMainSource?: "global" | "project"
+  rawSettings?: SwizSettings
+  /** Per-key provenance. Rows fall back to their previous fixed labels without it. */
+  sourceOf?: (key: string) => string
+}
+
 function buildGlobalSettingsRows(
   effective: EffectiveSwizSettings & { disabledHooks?: string[] },
-  autoContinueSource: "global" | "project" | "session" | undefined,
-  ambitionSource: "global" | "project" | "session" | undefined,
-  strictNoDirectMainSource: "global" | "project" | undefined,
-  rawSettings?: SwizSettings
+  sources: GlobalRowSources = {}
 ): SettingsRow[] {
+  const { rawSettings, sourceOf } = sources
   const scopes = resolveGlobalScopes(
     effective,
-    autoContinueSource,
-    ambitionSource,
-    strictNoDirectMainSource
+    sources.autoContinueSource,
+    sources.ambitionSource,
+    sources.strictNoDirectMainSource
   )
 
   return [
     {
       label: "auto-continue:",
       value: boolToEnabledDisabled(effective.autoContinue),
-      scope: scopes.autoContinue,
+      scope: sourceOf?.("autoContinue") ?? scopes.autoContinue,
       description: descFor("autoContinue"),
     },
     {
       label: "ambition-mode:",
       value: effective.ambitionMode,
-      scope: scopes.ambition,
+      scope: sourceOf?.("ambitionMode") ?? scopes.ambition,
       description: descFor("ambitionMode"),
     },
     {
       label: "collaboration:",
       value: effective.collaborationMode,
-      scope: scopes.collaboration,
+      scope: sourceOf?.("collaborationMode") ?? scopes.collaboration,
       description: descFor("collaborationMode"),
     },
-    ...booleanRowsToSettingsRows(GLOBAL_BOOL_ROWS, effective),
+    ...booleanRowsToSettingsRows(GLOBAL_BOOL_ROWS, effective, sourceOf),
     {
       label: "strict-no-direct-main:",
       value: boolToEnabledDisabled(effective.strictNoDirectMain),
-      scope: scopes.strict,
+      scope: sourceOf?.("strictNoDirectMain") ?? scopes.strict,
       description: descFor("strictNoDirectMain"),
     },
-    ...numericGlobalSettingsRows(effective, rawSettings),
+    ...numericGlobalSettingsRows(effective, rawSettings, sourceOf),
   ]
 }
 
 function printGlobalSettings(
   effective: EffectiveSwizSettings & { disabledHooks?: string[] },
-  autoContinueSource: "global" | "project" | "session" | undefined,
-  ambitionSource: "global" | "project" | "session" | undefined,
-  strictNoDirectMainSource: "global" | "project" | undefined,
-  rawSettings?: SwizSettings
+  sources: GlobalRowSources = {}
 ): void {
-  const rows = buildGlobalSettingsRows(
-    effective,
-    autoContinueSource,
-    ambitionSource,
-    strictNoDirectMainSource,
-    rawSettings
-  )
+  const rows = buildGlobalSettingsRows(effective, sources)
 
   const globalDisabled = effective.disabledHooks ?? []
   if (globalDisabled.length > 0) {
@@ -590,13 +600,13 @@ function printProjectPolicy(projectPolicyInfo: ProjectPolicyInfo, detectedStacks
 
 function printSettings(opts: PrintSettingsOptions): void {
   printHeader(opts.path, opts.fileExists, opts.sessionId)
-  printGlobalSettings(
-    opts.effective,
-    opts.autoContinueSource,
-    opts.ambitionSource,
-    opts.strictNoDirectMainSource,
-    opts.rawSettings
-  )
+  printGlobalSettings(opts.effective, {
+    autoContinueSource: opts.autoContinueSource,
+    ambitionSource: opts.ambitionSource,
+    strictNoDirectMainSource: opts.strictNoDirectMainSource,
+    rawSettings: opts.rawSettings,
+    sourceOf: opts.sourceOf,
+  })
   if (opts.projectPolicyInfo) {
     printProjectPolicy(opts.projectPolicyInfo, opts.detectedStacks)
   }
@@ -689,6 +699,9 @@ async function showSettings(parsed: ParsedSettingsArgs): Promise<void> {
       ? await resolveSessionId(parsed.sessionQuery, parsed.targetDir)
       : null
   const settings = await readSwizSettings({ strict: true })
+  // Read separately from `settings`: the schema materialises defaults, so only the raw file
+  // reveals which global values the user actually set (#900).
+  const globalExplicitKeys = await readGlobalExplicitSettingKeys()
   const projectSettings = await readProjectSettings(parsed.targetDir)
   const effective = getEffectiveSwizSettings(settings, sessionId, projectSettings)
   const path = getSwizSettingsPath()
@@ -712,6 +725,14 @@ async function showSettings(parsed: ParsedSettingsArgs): Promise<void> {
     projectPolicyInfo: buildProjectPolicyInfo(parsed.targetDir, settings, projectSettings),
     detectedStacks,
     rawSettings: settings,
+    sourceOf: (key) =>
+      settingSourceLabel(
+        resolveSettingSourceTier(key, {
+          globalExplicitKeys,
+          projectSettings,
+          sessionSettings: sessionId ? settings.sessions[sessionId] : null,
+        })
+      ),
   })
 }
 

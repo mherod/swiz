@@ -15,6 +15,7 @@ export {
   getSwizSettingsPath,
   invalidateSettingsCache,
   type ReadOptions,
+  readGlobalExplicitSettingKeys,
   readProjectSettings,
   readProjectState,
   readStateData,
@@ -43,6 +44,10 @@ export {
   resolveMemoryThresholds,
   resolveNumericSetting,
   resolvePolicy,
+  resolveSettingSourceTier,
+  type SettingSourceInputs,
+  type SettingSourceTier,
+  settingSourceLabel,
 } from "./resolution"
 // SettingsStore
 export { SettingsStore, settingsStore } from "./store"

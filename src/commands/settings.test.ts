@@ -768,6 +768,49 @@ describe("swiz settings", () => {
     expect(json.disabledHooks).toEqual(["stop-lint-staged.ts"])
   })
 
+  // Issue #900: rows hardcoded "(user)", so project overrides and built-in defaults were both
+  // attributed to the user file. The value shown was right; only its source was wrong.
+  test("settings show attributes each value to the tier that actually set it", async () => {
+    const home = await createTempHome()
+    const projectDir = await createIsolatedGitProject(home)
+    // push-gate is a boolean setting, so it is configured with disable rather than set.
+    await runSwiz(["settings", "disable", "push-gate", "--project", "--dir", projectDir], home)
+    await runSwiz(
+      ["settings", "set", "collaboration", "team", "--project", "--dir", projectDir],
+      home
+    )
+
+    const result = await runSwiz(["settings", "show", "--project", "--dir", projectDir], home)
+    expect(result.exitCode).toBe(0)
+
+    // The two project-configured rows name the project.
+    expect(result.stdout).toMatch(/collaboration:\s+team \(project\)/)
+    expect(result.stdout).toMatch(/push-gate:\s+disabled \(project\)/)
+    // Control: a setting nobody configured is a default, not "(user)".
+    expect(result.stdout).toMatch(/narrator-speed:\s+system default \(default\)/)
+    expect(result.stdout).not.toMatch(/narrator-speed:.*\(user\)/)
+  })
+
+  test("settings show marks values as default when no global file exists", async () => {
+    const home = await createTempHome()
+    const projectDir = await createIsolatedGitProject(home)
+    const result = await runSwiz(["settings", "show", "--project", "--dir", projectDir], home)
+
+    expect(result.exitCode).toBe(0)
+    expect(result.stdout).toMatch(/auto-continue:\s+\w+ \(default\)/)
+    expect(result.stdout).toMatch(/ambition-mode:\s+\w+ \(default\)/)
+  })
+
+  test("settings show keeps a stored value's source even when it equals the default", async () => {
+    const home = await createTempHome()
+    // Writing any global setting persists the file; the stored key is then genuinely user-set.
+    await runSwiz(["settings", "enable", "critiques-enabled", "--global"], home)
+
+    const result = await runSwiz(["settings", "show", "--global"], home)
+    expect(result.exitCode).toBe(0)
+    expect(result.stdout).toMatch(/critiques-enabled:\s+enabled \(user\)/)
+  })
+
   test("control: explicit project scope still reaches the project hook list", async () => {
     // Proves the guard rejects only session scope rather than every explicit scope.
     const home = await createTempHome()
