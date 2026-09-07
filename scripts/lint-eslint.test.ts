@@ -37,7 +37,12 @@ export default [{
   files: ["**/*.ts"],
   languageOptions: {
     parser: tseslint.parser,
-    parserOptions: { project: "./tsconfig.json", tsconfigRootDir: import.meta.dirname },
+    parserOptions: {
+      project: "./tsconfig.json",
+      tsconfigRootDir: import.meta.dirname,
+      // This fixture performs several independent lint runs in the same process.
+      disallowAutomaticSingleRunInference: true,
+    },
   },
   plugins: { "@typescript-eslint": tseslint.plugin },
   settings: { swizTypeFingerprint: process.env.SWIZ_ESLINT_TYPE_FINGERPRINT },
