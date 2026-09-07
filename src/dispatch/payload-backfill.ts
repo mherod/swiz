@@ -35,6 +35,7 @@
 
 import { readdir, stat } from "node:fs/promises"
 import { join } from "node:path"
+import { ZodError } from "zod"
 import { getHomeDirOrNull } from "../home.ts"
 import { projectKeyFromCwd } from "../project-key.ts"
 import { log } from "./engine.ts"
@@ -48,7 +49,20 @@ type CwdSource = "payload" | "env" | "process"
  * Idempotent — safe to call multiple times. Records each filled field in
  * `payload._inferredFields: string[]`.
  */
-export async function backfillPayloadDefaults(payload: Record<string, any>): Promise<void> {
+export async function backfillPayloadDefaults(
+  payload: Record<string, any>,
+  options: { daemonContext?: boolean } = {}
+): Promise<void> {
+  if (options.daemonContext && !isNonEmptyString(payload.cwd)) {
+    throw new ZodError([
+      {
+        code: "custom",
+        path: ["cwd"],
+        message:
+          "Daemon dispatch requires caller cwd; send an explicit project directory or invoke swiz dispatch from the project. No hooks were run.",
+      },
+    ])
+  }
   const cwdSource = backfillCwd(payload)
   await backfillSessionId(payload, cwdSource)
 }

@@ -482,7 +482,7 @@ async function buildDispatchContext(
     payload = parsed.payload
     normalizeAgentHookPayload(payload)
   }
-  await backfillPayloadDefaults(payload)
+  await backfillPayloadDefaults(payload, { daemonContext: req.daemonContext })
   const validated = assertNormalizedDispatchPayload(canonicalEvent, payload)
   for (const k of Object.keys(payload)) unset(payload, k)
   merge(payload, validated)

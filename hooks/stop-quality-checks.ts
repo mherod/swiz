@@ -12,7 +12,7 @@ import { runSwizHookAsMain } from "../src/SwizHook.ts"
 import { type StopHookInput, stopHookInputSchema } from "../src/schemas.ts"
 import { getDefaultBranch, isDefaultBranch } from "../src/utils/git-utils.ts"
 import { blockStopObj } from "../src/utils/hook-response.ts"
-import { detectPackageManager } from "../src/utils/package-detection.ts"
+import { detectPackageManagerDetails } from "../src/utils/package-detection.ts"
 import { spawnWithTimeout } from "../src/utils/process-utils.ts"
 import { evaluateWorktreePreservation } from "../src/worktree-preservation.ts"
 
@@ -209,14 +209,21 @@ async function collectFailures(
   resolved: { lint: string | null; typecheck: string | null },
   cwd: string
 ): Promise<string[]> {
-  const pm = (await detectPackageManager(cwd)) ?? "npm"
+  const selection = await detectPackageManagerDetails(cwd)
+  if (!selection) {
+    return [
+      "Cannot select a package manager safely. Add an explicit packageManager declaration or a project lockfile; no verification command was run.",
+    ]
+  }
+  const pm = selection.packageManager
   const scriptNames = [resolved.lint, resolved.typecheck].filter((s): s is string => s !== null)
   const results = await Promise.all(scriptNames.map((s) => runScript(pm, s, cwd)))
   const failures: string[] = []
   for (let i = 0; i < results.length; i++) {
     if (!results[i]!.passed) {
       failures.push(
-        `\`${pm} run ${scriptNames[i]}\` failed:\n${summarizeCheckOutput(results[i]!.output)}`
+        `\`${pm} run ${scriptNames[i]}\` failed:\n${summarizeCheckOutput(results[i]!.output)}\n` +
+          `Selection: ${pm}; root: ${selection.root}; evidence: ${selection.source}; command cwd: ${cwd}`
       )
     }
   }

@@ -11,6 +11,8 @@ export type Runtime = "bun" | "node"
 export interface PackageManagerDetection {
   packageManager: PackageManager
   signals: ReadonlySet<PackageManager>
+  root: string
+  source: "packageManager" | "lockfile" | "npmrc"
 }
 
 let _pmDetectionCache: Promise<PackageManagerDetection | null> | undefined
@@ -92,6 +94,19 @@ async function detectFromLockfiles(dir: string): Promise<LockfileDetection> {
   return { packageManager: null, signals }
 }
 
+function selectPackageManager(
+  declared: PackageManager | null,
+  npmrc: boolean,
+  lockfile: LockfileDetection
+): Pick<PackageManagerDetection, "packageManager" | "source"> | null {
+  if (declared) return { packageManager: declared, source: "packageManager" }
+  if (lockfile.packageManager === "npm") return { packageManager: "npm", source: "lockfile" }
+  if (npmrc) return { packageManager: "pnpm", source: "npmrc" }
+  if (lockfile.packageManager)
+    return { packageManager: lockfile.packageManager, source: "lockfile" }
+  return null
+}
+
 async function detectPackageManagerDetailsInner(
   startDir: string
 ): Promise<PackageManagerDetection | null> {
@@ -100,13 +115,13 @@ async function detectPackageManagerDetailsInner(
     const fromPkg = await detectFromPkgJson(dir)
     const fromNpmrc = await detectFromNpmrc(dir)
     const fromLockfile = await detectFromLockfiles(dir)
-    const packageManager = fromPkg ?? (fromNpmrc ? "pnpm" : null) ?? fromLockfile.packageManager
+    const selection = selectPackageManager(fromPkg, fromNpmrc, fromLockfile)
 
-    if (packageManager) {
+    if (selection) {
       const signals = fromLockfile.signals
       if (fromPkg) signals.add(fromPkg)
       if (fromNpmrc) signals.add("pnpm")
-      return { packageManager, signals }
+      return { ...selection, signals, root: dir }
     }
 
     const parent = dirname(dir)
