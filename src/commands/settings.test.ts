@@ -69,11 +69,12 @@ async function runSwiz(
             ])
           ),
           effectiveArgs.slice(1),
-          { env }
+          { env, cwd: home }
         )
       : await runCommandInProcess(settingsCommand, effectiveArgs.slice(1), {
           commandOptions: { daemonReady: async () => false },
           env,
+          cwd: home,
         })
   const settingsPath = getSwizSettingsPath(home)
   if (settingsPath) invalidateSettingsCache(settingsPath)
@@ -1577,6 +1578,184 @@ describe("readSwizSettings schema constraint enforcement", () => {
 // ─── strictNoDirectMain: enable/disable, conflict detection, --force ──────────
 
 describe("strictNoDirectMain setting", () => {
+  const compatibleGlobal = {
+    collaborationMode: "team",
+    pushGate: true,
+    nonDefaultBranchGate: true,
+  }
+
+  async function createConflictFixture(
+    global: Record<string, unknown>,
+    project: Record<string, unknown>
+  ) {
+    const home = await createTempHome()
+    const projectDir = await createIsolatedGitProject(home)
+    const globalPath = join(home, ".swiz", "settings.json")
+    const projectPath = join(projectDir, ".swiz", "config.json")
+    await mkdir(join(home, ".swiz"), { recursive: true })
+    await mkdir(join(projectDir, ".swiz"), { recursive: true })
+    await Bun.write(globalPath, JSON.stringify({ ...compatibleGlobal, ...global }))
+    await Bun.write(projectPath, JSON.stringify(project))
+    return { home, projectDir, globalPath, projectPath }
+  }
+
+  const rejectedChanges = [
+    {
+      name: "project strict mode against trunk mode",
+      setting: "strict-no-direct-main",
+      scope: "project",
+      global: {},
+      project: { trunkMode: true, strictNoDirectMain: false },
+      conflict: "trunkMode=true",
+    },
+    {
+      name: "global strict mode inherited by a trunk project",
+      setting: "strict-no-direct-main",
+      scope: "global",
+      global: {},
+      project: { trunkMode: true },
+      conflict: "trunkMode=true",
+    },
+    {
+      name: "trunk mode against inherited global strict mode",
+      setting: "trunk-mode",
+      scope: "project",
+      global: { strictNoDirectMain: true },
+      project: {},
+      conflict: "strictNoDirectMain",
+    },
+    {
+      name: "trunk mode against project strict mode",
+      setting: "trunk-mode",
+      scope: "project",
+      global: { strictNoDirectMain: false },
+      project: { strictNoDirectMain: true },
+      conflict: "strictNoDirectMain",
+    },
+    {
+      name: "strict mode against project solo collaboration",
+      setting: "strict-no-direct-main",
+      scope: "project",
+      global: {},
+      project: { collaborationMode: "solo" },
+      conflict: "collaborationMode=solo",
+    },
+    {
+      name: "strict mode against a disabled project push gate",
+      setting: "strict-no-direct-main",
+      scope: "project",
+      global: {},
+      project: { pushGate: false },
+      conflict: "pushGate=false",
+    },
+  ]
+
+  for (const existingBackup of [false, true]) {
+    for (const change of rejectedChanges) {
+      test(`rejects ${change.name}; existing backup=${existingBackup}`, async () => {
+        const { home, projectDir, globalPath, projectPath } = await createConflictFixture(
+          change.global,
+          change.project
+        )
+        const paths = [globalPath, projectPath, `${globalPath}.bak`, `${projectPath}.bak`]
+        if (existingBackup) {
+          await Bun.write(`${globalPath}.bak`, "previous global backup\n")
+          await Bun.write(`${projectPath}.bak`, "previous project backup\n")
+        }
+        const snapshot = () =>
+          Promise.all(
+            paths.map((path) =>
+              Bun.file(path)
+                .text()
+                .catch(() => null)
+            )
+          )
+        const before = await snapshot()
+        const result = await runSwiz(
+          [
+            "settings",
+            "enable",
+            change.setting,
+            `--${change.scope}`,
+            "--dir",
+            projectDir,
+            "--json",
+          ],
+          home
+        )
+        expect(result.exitCode).toBe(1)
+        expect(result.stderr).toContain(change.conflict)
+        expect(result.stdout).toBe("")
+        expect(await snapshot()).toEqual(before)
+      })
+    }
+  }
+
+  for (const change of [
+    {
+      name: "project false overrides inherited strict mode",
+      setting: "trunk-mode",
+      scope: "project",
+      global: { strictNoDirectMain: true },
+      project: { strictNoDirectMain: false },
+    },
+    {
+      name: "project false shadows a prospective global strict mode",
+      setting: "strict-no-direct-main",
+      scope: "global",
+      global: {},
+      project: { strictNoDirectMain: false, trunkMode: true },
+    },
+    {
+      name: "project collaboration and push gate override global conflicts",
+      setting: "strict-no-direct-main",
+      scope: "project",
+      global: { collaborationMode: "solo", pushGate: false },
+      project: { collaborationMode: "team", pushGate: true },
+    },
+  ]) {
+    test(`allows ${change.name}`, async () => {
+      const { home, projectDir, globalPath, projectPath } = await createConflictFixture(
+        change.global,
+        change.project
+      )
+      const result = await runSwiz(
+        ["settings", "enable", change.setting, `--${change.scope}`, "--dir", projectDir, "--json"],
+        home
+      )
+      expect(result.exitCode).toBe(0)
+      expect(result.stderr).toBe("")
+      const confirmation = JSON.parse(result.stdout)
+      expect(confirmation.value).toBe(true)
+      const path = change.scope === "global" ? globalPath : projectPath
+      expect((await Bun.file(path).json())[confirmation.setting]).toBe(true)
+    })
+  }
+
+  for (const setting of ["strict-no-direct-main", "trunk-mode"]) {
+    test(`force enables ${setting} with a warning and preserves the other mode`, async () => {
+      const strict = setting === "strict-no-direct-main"
+      const { home, projectDir, projectPath } = await createConflictFixture(
+        {},
+        strict ? { trunkMode: true } : { strictNoDirectMain: true }
+      )
+      const before = await Bun.file(projectPath).text()
+      const result = await runSwiz(
+        ["settings", "enable", setting, "--project", "--dir", projectDir, "--force", "--json"],
+        home
+      )
+      expect(result.exitCode).toBe(0)
+      expect(result.stderr).toContain("Warning")
+      expect(result.stderr).toContain(strict ? "trunkMode=true" : "strictNoDirectMain")
+      expect(JSON.parse(result.stdout).value).toBe(true)
+      expect(await Bun.file(projectPath).json()).toMatchObject({
+        strictNoDirectMain: true,
+        trunkMode: true,
+      })
+      expect(await Bun.file(`${projectPath}.bak`).text()).toBe(before)
+    })
+  }
+
   test("defaults to false", async () => {
     const home = await createTempHome()
     const settings = await readSwizSettings({ home })

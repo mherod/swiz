@@ -740,11 +740,15 @@ async function showSettings(parsed: ParsedSettingsArgs): Promise<void> {
  * Detect settings that conflict with enabling strictNoDirectMain.
  * Returns a list of human-readable conflict descriptions, or [] if none.
  */
-async function detectStrictNoDirectMainConflicts(targetDir: string): Promise<string[]> {
-  const settings = await readSwizSettings()
-  const projectSettings = await readProjectSettings(targetDir)
+function detectStrictNoDirectMainConflicts(
+  settings: EffectiveSwizSettings,
+  projectSettings: ProjectSwizSettings | null
+): string[] {
   const conflicts: string[] = []
 
+  if (settings.trunkMode) {
+    conflicts.push("trunkMode=true (allows direct pushes; disable trunk-mode first)")
+  }
   if (settings.collaborationMode === "solo") {
     conflicts.push(
       `collaborationMode=solo (relaxes branch protection to solo workflow; ` +
@@ -771,20 +775,23 @@ async function detectStrictNoDirectMainConflicts(targetDir: string): Promise<str
   return conflicts
 }
 
-async function enforceStrictNoDirectMainConflicts(parsed: ParsedSettingsArgs): Promise<void> {
-  const conflicts = await detectStrictNoDirectMainConflicts(parsed.targetDir)
+function enforceSettingConflicts(
+  parsed: ParsedSettingsArgs,
+  setting: string,
+  conflicts: string[]
+): void {
   if (conflicts.length === 0) return
   if (!parsed.force) {
     const conflictList = conflicts.map((c) => `  - ${c}`).join("\n")
     throw new Error(
-      `Cannot enable strict-no-direct-main: conflicting settings detected:\n\n${conflictList}\n\n` +
+      `Cannot enable ${setting}: conflicting settings detected:\n\n${conflictList}\n\n` +
         `Resolve the conflicts above, or use --force to override:\n` +
-        `  swiz settings enable strict-no-direct-main --force\n`
+        `  swiz settings enable ${setting} --${parsed.scope} --force\n`
     )
   }
   stderrLog(
     "settings enable --force prints a warning about conflicting settings",
-    `\n  Warning: enabling strict-no-direct-main with conflicting settings (--force):\n` +
+    `\n  Warning: enabling ${setting} with conflicting settings (--force):\n` +
       conflicts.map((c) => `    - ${c}`).join("\n") +
       `\n`
   )
@@ -834,19 +841,25 @@ async function enforceBooleanSettingConflicts(
   enabled: boolean,
   parsed: ParsedSettingsArgs
 ): Promise<void> {
-  if (key === "strictNoDirectMain" && enabled) {
-    await enforceStrictNoDirectMainConflicts(parsed)
-  }
-  if (key === "trunkMode" && enabled) {
-    const projectSettings = await readProjectSettings(parsed.targetDir)
-    if (projectSettings?.strictNoDirectMain && !parsed.force) {
-      throw new Error(
-        `Cannot enable trunk-mode: strictNoDirectMain is enabled for this project.\n` +
-          `These settings are mutually exclusive. Disable strict-no-direct-main first,\n` +
-          `or use --force to override:\n  swiz settings enable trunk-mode --project --force\n`
-      )
-    }
-  }
+  if (!enabled || (key !== "strictNoDirectMain" && key !== "trunkMode")) return
+  const [settings, projectSettings] = await Promise.all([
+    readSwizSettings(),
+    readProjectSettings(parsed.targetDir),
+  ])
+  /** Validate the proposed write before persistence, preserving explicit project overrides. */
+  const prospectiveProject =
+    parsed.scope === "project" ? { ...projectSettings, [key]: true } : projectSettings
+  const effective = getEffectiveSwizSettings(
+    parsed.scope === "global" ? { ...settings, [key]: true } : settings,
+    null,
+    prospectiveProject
+  )
+  if (!effective.strictNoDirectMain) return
+  const conflicts =
+    key === "trunkMode"
+      ? ["strictNoDirectMain=true (blocks direct pushes; disable strict-no-direct-main first)"]
+      : detectStrictNoDirectMainConflicts(effective, prospectiveProject)
+  enforceSettingConflicts(parsed, primaryAlias(getSettingDef(key)), conflicts)
 }
 
 async function setBooleanSetting(

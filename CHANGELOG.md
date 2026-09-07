@@ -1,5 +1,20 @@
 # Changelog
 
+## 2026-09-07
+
+### Fixes
+
+- **Push wrapper** — Fixed HTTPS pushes failing when the desktop app supplied
+  Git's helper location. Repository and index overrides stayed isolated.
+  (#892)
+- **Branch settings** — Rejected conflicting trunk and strict modes before
+  changing settings or backups. Project overrides were honoured, and forced
+  changes warned about conflicts while retaining push protection. (#899)
+- **Settings sources** — Reported whether each effective setting came from
+  the project, user configuration or defaults. (#900)
+- **Hook settings** — Rejected unsupported session scope instead of changing
+  the global hook configuration. (#894)
+
 ## 2026-09-06
 
 ### Features
