@@ -5,7 +5,6 @@ import { readTasks } from "../../tasks/task-repository.ts"
 import { getSessions } from "../../tasks/task-resolver.ts"
 import type { TaskStateCache } from "../../tasks/task-state-cache.ts"
 import {
-  findAllProviderSessions,
   parseTranscriptEntries,
   projectKeyFromCwd,
   type Session,
@@ -13,6 +12,7 @@ import {
 } from "../../transcript-utils.ts"
 import { CappedMap } from "../../utils/capped-map.ts"
 import type { JsonlAppendMetadata } from "../../utils/jsonl.ts"
+import { ProviderSessionIndex } from "./cache/provider-session-index.ts"
 import { HistoricalJsonlState, supportsHistoricalAppend } from "./session-jsonl.ts"
 import {
   MAX_TRANSCRIPT_ENTRIES,
@@ -564,6 +564,9 @@ function estimateRetainedBytes(data: CachedSessionData, sourceChars: number): nu
 
 export const sessionDataCache = new SessionDataCache()
 
+/** Shared provider discovery index; invalidated from the daemon's project watchers (#813). */
+export const providerSessionIndex = new ProviderSessionIndex()
+
 async function scanSession(
   session: Pick<Session, "path" | "format">,
   cwd?: string
@@ -601,7 +604,7 @@ export async function listProjectSessions(
   liveActivity?: Map<string, { lastSeen: number; dispatches: number }>,
   pinnedSessionId?: string
 ): Promise<{ sessionCount: number; sessions: SessionPreview[] }> {
-  const all = await findAllProviderSessions(cwd)
+  const all = await providerSessionIndex.get(cwd)
   const candidates = all.slice(0, limit * 2)
   const pinned =
     typeof pinnedSessionId === "string" && pinnedSessionId.length > 0
@@ -659,7 +662,8 @@ export async function resolveSession(
   sessionId: string
 ): Promise<{ session: Session; cached: CachedSessionData } | null> {
   if (sessionId.trim().length === 0) return null
-  const sessions = await findAllProviderSessions(cwd)
+  // Shares one provider walk with listProjectSessions: the dashboard hits both on every poll.
+  const sessions = await providerSessionIndex.get(cwd)
   const session = sessions.find(
     (candidate) => candidate.id === sessionId || candidate.id.startsWith(sessionId)
   )

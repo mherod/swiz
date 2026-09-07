@@ -2,7 +2,12 @@ import { afterAll, afterEach, describe, expect, spyOn, test } from "bun:test"
 import { join } from "node:path"
 import * as transcripts from "../../transcript-utils.ts"
 import { useTempDir } from "../../utils/test-utils.ts"
-import { getSessionData, resolveSession, sessionDataCache } from "./session-data.ts"
+import {
+  getSessionData,
+  providerSessionIndex,
+  resolveSession,
+  sessionDataCache,
+} from "./session-data.ts"
 
 const tmp = useTempDir("swiz-session-resolution-")
 const discovery = spyOn(transcripts, "findAllProviderSessions")
@@ -10,6 +15,10 @@ afterAll(() => discovery.mockRestore())
 afterEach(() => {
   discovery.mockReset()
   sessionDataCache.invalidateAll()
+  // Discovery now runs behind a cache. Each test uses a fresh temp cwd so entries do not
+  // collide today, but without this a future test reusing a cwd would be served a cached
+  // result and its discovery assertions would quietly stop meaning anything.
+  providerSessionIndex.clear()
 })
 
 async function seedSessions() {

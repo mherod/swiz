@@ -46,7 +46,7 @@ import {
   RepositoryCapabilityCache,
   TranscriptIndexCache,
 } from "./daemon/runtime-cache.ts"
-import { sessionDataCache } from "./daemon/session-data.ts"
+import { providerSessionIndex, sessionDataCache } from "./daemon/session-data.ts"
 import { sessionToolCallPersistenceQueue } from "./daemon/session-tool-call-persistence.ts"
 import {
   buildSnapshotFingerprint,
@@ -388,6 +388,7 @@ export function setupWatchers(
     manifestCache.invalidateProject(cwd)
     transcriptIndex.invalidateProject(cwd)
     sessionDataCache.invalidateProject(cwd)
+    providerSessionIndex.invalidate(cwd)
     invalidateTurnsCache(cwd)
     watchers.unregisterByLabelSuffix(`:${cwd}`)
     caches.upstreamSyncRegistry.unregister(cwd)
@@ -405,6 +406,7 @@ export function setupWatchers(
     manifestCache.invalidateProject(cwd)
     transcriptIndex.invalidateProject(cwd)
     sessionDataCache.invalidateProject(cwd)
+    providerSessionIndex.invalidate(cwd)
     invalidateTurnsCache(cwd)
     caches.cooldownRegistry.invalidateProject(cwd)
     deleteProjectSnapshots(snapshots, cwd)
