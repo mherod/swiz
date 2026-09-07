@@ -5,6 +5,8 @@
 
 import { asRecord as asObject } from "../../issue-store.ts"
 
+export { issueUpdatedAtMs } from "../../issue-store-dashboard.ts"
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function pickString(...values: unknown[]): string | null {
@@ -79,12 +81,6 @@ export function normalizeDashboardIssue(raw: unknown): DashboardIssueRecord | nu
     assignees,
     labels,
   }
-}
-
-export function issueUpdatedAtMs(updatedAt: string | null): number {
-  if (!updatedAt) return 0
-  const parsed = Date.parse(updatedAt)
-  return Number.isFinite(parsed) ? parsed : 0
 }
 
 // ─── PR types ────────────────────────────────────────────────────────────────

@@ -3,7 +3,8 @@
  * Extracted from web-server.ts (issue #685) to keep routing code focused.
  */
 import { getRepoSlug } from "../../git-helpers.ts"
-import { getIssueStoreReader } from "../../issue-store.ts"
+import { getIssueStoreReader, type IssueStoreReader } from "../../issue-store.ts"
+import { type DashboardStoreList, dashboardListLimit } from "../../issue-store-dashboard.ts"
 import {
   type DashboardIssueRecord,
   type DashboardPrRecord,
@@ -19,10 +20,29 @@ export interface IssueRoutesContext {
   touchProject: (cwd: string) => void
   registerProjectWatchers: (cwd: string) => void
   upstreamSyncRegistry: UpstreamSyncRegistry
+  issueStoreReader?: IssueStoreReader
 }
 
 function clampDashboardListLimit(raw: number | undefined): number {
-  return Math.max(1, Math.min(30, raw ?? 10))
+  return dashboardListLimit(raw ?? 10)
+}
+
+async function readDashboardList(
+  reader: IssueStoreReader,
+  repo: string,
+  limit: number,
+  kind: "issues" | "prs",
+  ttlMs?: number
+): Promise<DashboardStoreList<unknown>> {
+  if (kind === "issues" && reader.listDashboardIssues)
+    return reader.listDashboardIssues(repo, limit, ttlMs)
+  if (kind === "prs" && reader.listDashboardPullRequests)
+    return reader.listDashboardPullRequests(repo, limit, ttlMs)
+  const records =
+    kind === "issues"
+      ? await reader.listIssues(repo, ttlMs)
+      : await reader.listPullRequests(repo, ttlMs)
+  return { records, total: records.length }
 }
 
 /** Fire-and-forget upstream sync when the store returned no rows; returns whether a sync was scheduled. */
@@ -55,22 +75,20 @@ export async function handleProjectPrsRoute(
   if (!repo) return Response.json({ repo: null, pullRequests: [] satisfies DashboardPrRecord[] })
 
   const limit = clampDashboardListLimit(body?.limit)
-  const reader = getIssueStoreReader()
-  let prs = await reader.listPullRequests<unknown>(repo)
+  const reader = ctx.issueStoreReader ?? getIssueStoreReader()
+  let prs = await readDashboardList(reader, repo, limit, "prs")
 
-  const syncing = kickUpstreamSyncWhenEmpty(ctx, projectCwd, prs.length === 0)
+  const syncing = kickUpstreamSyncWhenEmpty(ctx, projectCwd, prs.total === 0)
 
-  if (prs.length === 0) {
-    prs = await reader.listPullRequests<unknown>(repo, STALE_ISSUES_TTL_MS)
+  if (prs.total === 0) {
+    prs = await readDashboardList(reader, repo, limit, "prs", STALE_ISSUES_TTL_MS)
   }
 
-  const normalizedPrs = prs
+  const normalizedPrs = prs.records
     .map((pr) => normalizeDashboardPr(pr))
     .filter((pr): pr is DashboardPrRecord => pr !== null)
     .toSorted((a, b) => {
-      const aMs = a.updatedAt ? Date.parse(a.updatedAt) : 0
-      const bMs = b.updatedAt ? Date.parse(b.updatedAt) : 0
-      return (Number.isFinite(bMs) ? bMs : 0) - (Number.isFinite(aMs) ? aMs : 0)
+      return issueUpdatedAtMs(b.updatedAt) - issueUpdatedAtMs(a.updatedAt) || a.number - b.number
     })
     .slice(0, limit)
 
@@ -113,19 +131,21 @@ export async function handleProjectIssuesRoute(
   if (!repo) return Response.json({ repo: null, issues: [] satisfies DashboardIssueRecord[] })
 
   const limit = clampDashboardListLimit(body?.limit)
-  const reader = getIssueStoreReader()
-  let issues = await reader.listIssues<unknown>(repo)
+  const reader = ctx.issueStoreReader ?? getIssueStoreReader()
+  let issues = await readDashboardList(reader, repo, limit, "issues")
 
-  const syncing = kickUpstreamSyncWhenEmpty(ctx, projectCwd, issues.length === 0)
+  const syncing = kickUpstreamSyncWhenEmpty(ctx, projectCwd, issues.total === 0)
 
-  if (issues.length === 0) {
-    issues = await reader.listIssues<unknown>(repo, STALE_ISSUES_TTL_MS)
+  if (issues.total === 0) {
+    issues = await readDashboardList(reader, repo, limit, "issues", STALE_ISSUES_TTL_MS)
   }
 
-  const normalizedIssues = issues
+  const normalizedIssues = issues.records
     .map((issue) => normalizeDashboardIssue(issue))
     .filter((issue): issue is DashboardIssueRecord => issue !== null)
-    .toSorted((a, b) => issueUpdatedAtMs(b.updatedAt) - issueUpdatedAtMs(a.updatedAt))
+    .toSorted(
+      (a, b) => issueUpdatedAtMs(b.updatedAt) - issueUpdatedAtMs(a.updatedAt) || a.number - b.number
+    )
     .slice(0, limit)
 
   return Response.json({ repo, issues: normalizedIssues, syncing })

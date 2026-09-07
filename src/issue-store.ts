@@ -18,6 +18,11 @@ import { debugLog } from "./debug.ts"
 import { acquireGhSlot, observeGhApiIncludeOutput } from "./gh-rate-limit.ts"
 import { getHomeDirWithFallback } from "./home.ts"
 import {
+  type DashboardStoreList,
+  dashboardListLimit,
+  dashboardListSql,
+} from "./issue-store-dashboard.ts"
+import {
   asRecord as asRecordImpl,
   ghListToRestFallback as ghListToRestFallbackImpl,
   isGraphQLRateLimited as isGraphQLRateLimitedImpl,
@@ -242,6 +247,17 @@ const ISSUE_STORE_SCHEMA_SQL = `
  * implementations. Consumers depend on this interface rather than concrete classes.
  */
 export interface IssueStoreReader {
+  /** SQLite capability; readers without local SQL retain the full-list fallback. */
+  listDashboardIssues?<T = unknown>(
+    repo: string,
+    limit: number,
+    ttlMs?: number
+  ): Promise<DashboardStoreList<T>>
+  listDashboardPullRequests?<T = unknown>(
+    repo: string,
+    limit: number,
+    ttlMs?: number
+  ): Promise<DashboardStoreList<T>>
   listIssues<T = unknown>(repo: string, ttlMs?: number): Promise<T[]>
   listPullRequests<T = unknown>(repo: string, ttlMs?: number): Promise<T[]>
   getIssue<T = unknown>(repo: string, number: number): Promise<T | null>
@@ -440,6 +456,8 @@ export class IssueStore {
 
   private db: Database
   private _stmtListIssues!: Statement<{ data: string }>
+  private _stmtDashboardIssues!: Statement<{ data: string }>
+  private _stmtDashboardPrs!: Statement<{ data: string }>
   private _stmtGetIssue!: Statement<{ data: string }>
   private _stmtRemoveIssue!: Statement
   private _stmtListPullRequests!: Statement<{ data: string }>
@@ -462,6 +480,8 @@ export class IssueStore {
     this.db = new Database(path)
     this.db.run("PRAGMA journal_mode=WAL")
     this.migrate()
+    this._stmtDashboardIssues = this.db.prepare(dashboardListSql("issues"))
+    this._stmtDashboardPrs = this.db.prepare(dashboardListSql("pull_requests"))
     this._stmtListIssues = this.db.prepare(
       "SELECT data FROM issues WHERE repo = ? AND synced_at > ?"
     )
@@ -606,6 +626,46 @@ export class IssueStore {
     if (ttlMs <= 0) return [] // short-circuit: caller wants fresh data, skip query
     const rows = this._stmtListIssues.all(repo, Date.now() - ttlMs)
     return rows.map((r) => JSON.parse(r.data) as T)
+  }
+
+  /** Dashboard-only bounded reads; normalization predicates run before JSON decoding. */
+  listDashboardIssues<T = unknown>(
+    repo: string,
+    limit: number,
+    ttlMs = DEFAULT_TTL_MS
+  ): DashboardStoreList<T> {
+    return this.readDashboardList<T>("issues", this._stmtDashboardIssues, repo, limit, ttlMs)
+  }
+
+  listDashboardPullRequests<T = unknown>(
+    repo: string,
+    limit: number,
+    ttlMs = DEFAULT_TTL_MS
+  ): DashboardStoreList<T> {
+    return this.readDashboardList<T>("pull_requests", this._stmtDashboardPrs, repo, limit, ttlMs)
+  }
+
+  private readDashboardList<T>(
+    table: "issues" | "pull_requests",
+    statement: Statement<{ data: string }>,
+    repo: string,
+    limit: number,
+    ttlMs: number
+  ): DashboardStoreList<T> {
+    if (ttlMs <= 0) return { records: [], total: 0 }
+    const cutoff = Date.now() - ttlMs
+    return this.db.transaction(() => {
+      const total =
+        this.db
+          .query<{ total: number }, [string, number]>(
+            `SELECT COUNT(*) AS total FROM ${table} WHERE repo = ? AND synced_at > ?`
+          )
+          .get(repo, cutoff)?.total ?? 0
+      const records = statement
+        .all(repo, cutoff, dashboardListLimit(limit))
+        .map((row) => JSON.parse(row.data) as T)
+      return { records, total }
+    })()
   }
 
   /** Get a single cached issue by repo and number. */
@@ -1257,6 +1317,10 @@ export class IssueStore {
   /** Return an IssueStoreReader adapter wrapping this store's sync reads. */
   asReader(): IssueStoreReader {
     return {
+      listDashboardIssues: <T = unknown>(repo: string, limit: number, ttlMs?: number) =>
+        Promise.resolve(this.listDashboardIssues<T>(repo, limit, ttlMs)),
+      listDashboardPullRequests: <T = unknown>(repo: string, limit: number, ttlMs?: number) =>
+        Promise.resolve(this.listDashboardPullRequests<T>(repo, limit, ttlMs)),
       listIssues: <T = unknown>(repo: string, ttlMs?: number) =>
         Promise.resolve(this.listIssues<T>(repo, ttlMs)),
       listPullRequests: <T = unknown>(repo: string, ttlMs?: number) =>
@@ -1516,12 +1580,18 @@ export function getIssueStore(dbPath?: string): IssueStore {
  *  count on process exit for full observability. */
 let noOpExitHandlerRegistered = false
 
+const READ_SNAPSHOT_METHODS = new Set([
+  "getIssueSnapshot",
+  "getPullRequestSnapshot",
+  "listDashboardIssues",
+  "listDashboardPullRequests",
+])
+
 function createNoOpStore(): IssueStore {
   const noop = {} as IssueStore
   let warnedOnce = false
   let suppressedOps = 0
   const READ_LIST_METHODS = new Set(["listIssues", "listPullRequests", "listCiStatuses"])
-  const READ_SNAPSHOT_METHODS = new Set(["getIssueSnapshot", "getPullRequestSnapshot"])
   const READ_GET_METHODS = new Set([
     "getIssue",
     "getPullRequest",
@@ -1555,9 +1625,11 @@ function createNoOpStore(): IssueStore {
       if (prop === "isNoOp") return true
       if (prop === "close") return () => {}
       if (READ_SNAPSHOT_METHODS.has(prop as string)) {
-        return (): ReturnType<IssueStore["getIssueSnapshot"]> => {
+        return (): ReturnType<IssueStore["getIssueSnapshot"]> | DashboardStoreList<unknown> => {
           suppressedOps++
           warnOnFirstRead(prop)
+          if (prop === "listDashboardIssues" || prop === "listDashboardPullRequests")
+            return { records: [], total: 0 }
           return { count: 0, maxUpdatedAt: null }
         }
       }
