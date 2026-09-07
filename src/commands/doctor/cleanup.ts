@@ -4,7 +4,7 @@
  * stay focused on diagnostics and command routing.
  */
 import type { Stats } from "node:fs"
-import { cp, readdir, readFile, rm, stat } from "node:fs/promises"
+import { cp, lstat, readdir, readFile, rm, stat } from "node:fs/promises"
 import { join } from "node:path"
 import { BOLD, DIM, GREEN, RESET, YELLOW } from "../../ansi.ts"
 import { debugLog } from "../../debug.ts"
@@ -379,13 +379,40 @@ export async function truncateJsonlFile(
 
 function parseJsonlTimestamp(line: string): number | null {
   try {
-    const timestamp = (JSON.parse(line) as { timestamp?: string }).timestamp
-    if (!timestamp) return null
-    const parsed = Date.parse(timestamp)
-    return Number.isNaN(parsed) ? null : parsed
+    const record = JSON.parse(line) as { timestamp?: unknown; created_at?: unknown } | null
+    for (const timestamp of [record?.timestamp, record?.created_at]) {
+      if (typeof timestamp !== "string" || !timestamp) continue
+      const parsed = Date.parse(timestamp)
+      if (!Number.isNaN(parsed)) return parsed
+    }
+    return null
   } catch {
     return null
   }
+}
+
+/** Enumerate supported text paths without recursing or following session symlinks. */
+async function sessionTranscriptPaths(path: string): Promise<string[]> {
+  const info = await lstat(path).catch(() => null)
+  if (!info) return []
+  if (info.isFile()) return path.endsWith(".jsonl") ? [path] : []
+  if (!info.isDirectory()) return []
+
+  const entries = await readdir(path, { withFileTypes: true }).catch(() => [])
+  const candidates = new Set(
+    entries
+      .filter((entry) => entry.isFile() && entry.name.endsWith(".jsonl"))
+      .map((entry) => join(path, entry.name))
+  )
+
+  let nested = path
+  for (const directory of [".system_generated", "logs"]) {
+    nested = join(nested, directory)
+    if (!(await lstat(nested).catch(() => null))?.isDirectory()) return [...candidates]
+  }
+  const transcript = join(nested, "transcript.jsonl")
+  if ((await lstat(transcript).catch(() => null))?.isFile()) candidates.add(transcript)
+  return [...candidates]
 }
 
 interface TruncationResult {
@@ -398,17 +425,9 @@ async function truncateSessionPath(
   cutoffMs: number,
   skipBackup?: boolean
 ): Promise<TruncationResult> {
-  if (path.endsWith(".jsonl")) {
-    const linesRemoved = await truncateJsonlFile(path, cutoffMs, skipBackup)
-    return { filesAffected: linesRemoved > 0 ? 1 : 0, linesRemoved }
-  }
-
-  const entries = await readdir(path).catch(() => null)
-  if (!entries) return { filesAffected: 0, linesRemoved: 0 }
   const result = { filesAffected: 0, linesRemoved: 0 }
-  for (const entry of entries) {
-    if (!entry.endsWith(".jsonl")) continue
-    const removed = await truncateJsonlFile(join(path, entry), cutoffMs)
+  for (const transcript of await sessionTranscriptPaths(path)) {
+    const removed = await truncateJsonlFile(transcript, cutoffMs, skipBackup)
     if (removed > 0) result.filesAffected++
     result.linesRemoved += removed
   }
