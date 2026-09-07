@@ -31,7 +31,9 @@ function gitEnv(overrides: Record<string, string | undefined> = {}): Record<stri
   const merged: Record<string, string | undefined> = { ...process.env, ...overrides }
   const cleaned: Record<string, string> = {}
   for (const [key, value] of Object.entries(merged)) {
-    if (value === undefined || key.startsWith("GIT_")) continue
+    if (value === undefined) continue
+    /** Helper discovery belongs to the Git installation, not the caller's repository. */
+    if (key.startsWith("GIT_") && (key !== "GIT_EXEC_PATH" || value === "")) continue
     cleaned[key] = value
   }
   return cleaned
