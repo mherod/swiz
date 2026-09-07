@@ -15,6 +15,7 @@
 
 import { appendFile, mkdir } from "node:fs/promises"
 import { dirname, join } from "node:path"
+import { isDeepStrictEqual } from "node:util"
 import { z } from "zod"
 import { getHomeDirWithFallback } from "./home.ts"
 import { projectKeyFromCwd } from "./project-key.ts"
@@ -49,6 +50,7 @@ export interface McpToolTextContent {
 export interface McpToolResult {
   content: McpToolTextContent[]
   isError?: boolean
+  structuredContent?: { taskMutation: { changed: boolean } }
 }
 
 export const MCP_TOOL_NAMES = ["reply", "TaskCreate", "TaskUpdate", "TaskList"] as const
@@ -62,6 +64,7 @@ export type McpToolInput = z.infer<typeof mcpToolInputSchema>
 export const mcpToolResultSchema = z.object({
   content: z.array(z.object({ type: z.literal("text"), text: z.string() })),
   isError: z.boolean().optional(),
+  structuredContent: z.object({ taskMutation: z.object({ changed: z.boolean() }) }).optional(),
 })
 
 function textResult(text: string): McpToolResult {
@@ -145,7 +148,10 @@ async function runTaskCreateTool(input: McpToolInput, cwd: string): Promise<McpT
     })
     const tasks = await readProjectTasksWithPrune(projectKey)
     const headline = `Created #${task.id} — ${truncateForLine(task.subject)}`
-    return textResult(renderTaskToolResult(headline, tasks, task.id))
+    return {
+      ...textResult(renderTaskToolResult(headline, tasks, task.id)),
+      structuredContent: { taskMutation: { changed: true } },
+    }
   } catch (error) {
     return errorResult(`${name} failed: ${messageFromUnknownError(error)}`)
   }
@@ -288,6 +294,7 @@ async function runTaskUpdateTool(rawInput: McpToolInput, cwd: string): Promise<M
       return errorResult(renderUnknownTaskId(taskUpdateName, input.taskId, tasksBefore))
     }
     const previousStatus = task.status
+    const movementBefore = taskMovementFields(task)
     // Snapshot before applyTaskFieldUpdates mutates `task` in place, so the unblock comparison
     // sees the pre-update blockedBy edges rather than the ones this call just wrote.
     const snapshotBefore = tasksBefore.map((candidate) => ({
@@ -307,9 +314,29 @@ async function runTaskUpdateTool(rawInput: McpToolInput, cwd: string): Promise<M
     )
     const unblocked = renderUnblockedLine(findNewlyUnblockedTasks(snapshotBefore, tasksAfter))
     const fullHeadline = unblocked ? `${headline}\n${unblocked}` : headline
-    return textResult(renderTaskToolResult(fullHeadline, tasksAfter, input.taskId))
+    return {
+      ...textResult(renderTaskToolResult(fullHeadline, tasksAfter, input.taskId)),
+      structuredContent: {
+        taskMutation: {
+          changed:
+            finalTask !== undefined &&
+            !isDeepStrictEqual(movementBefore, taskMovementFields(finalTask)),
+        },
+      },
+    }
   } catch (error) {
     return errorResult(`${taskUpdateName} failed: ${messageFromUnknownError(error)}`)
+  }
+}
+
+/** Compare persisted task content, excluding timestamps and edge ordering. */
+function taskMovementFields(task: Task): object {
+  return {
+    status: task.status,
+    subject: task.subject,
+    description: task.description,
+    blocks: [...new Set(task.blocks)].sort(),
+    blockedBy: [...new Set(task.blockedBy)].sort(),
   }
 }
 

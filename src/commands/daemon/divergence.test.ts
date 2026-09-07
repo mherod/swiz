@@ -6,6 +6,7 @@ import {
   DEFAULT_DIVERGENCE_ADVISORY_THRESHOLD,
   DEFAULT_DIVERGENCE_STEER_THRESHOLD,
   type DivergenceMovementKind,
+  divergenceEvidence,
   hasMutatingUpdateFields,
   isOutwardShellCommand,
   MAX_DIVERGENCE_SESSIONS,
@@ -15,6 +16,7 @@ import {
   resolveTaskMovement,
   type SessionDivergenceState,
   snapshotSessionDivergence,
+  taskMutationOutcome,
 } from "./divergence.ts"
 import type { CapturedToolCall } from "./utils.ts"
 
@@ -172,10 +174,10 @@ describe("resolveTaskMovement", () => {
     expect(resolveTaskMovement("mcp__swiz__TaskUpdate", undefined, null)).toBeNull()
   })
 
-  test("a field-carrying TaskUpdate is movement when prior state is unavailable", () => {
-    expect(resolveTaskMovement("TaskUpdate", { taskId: "349d-1", status: "completed" }, null)).toBe(
-      "task-update"
-    )
+  test("unknown prior state cannot prove movement", () => {
+    expect(
+      resolveTaskMovement("TaskUpdate", { taskId: "349d-1", status: "completed" }, null)
+    ).toBeNull()
   })
 
   test("valid status transitions are movement; same-status and invalid ones are not", () => {
@@ -220,13 +222,13 @@ describe("resolveTaskMovement", () => {
     ).toBe("task-update")
   })
 
-  test("unknown prior fields compare optimistically", () => {
+  test("unknown prior fields cannot prove movement", () => {
     expect(
       resolveTaskMovement("TaskUpdate", { taskId: "349d-2", description: "Anything" }, PRIOR)
-    ).toBe("task-update")
+    ).toBeNull()
     expect(
       resolveTaskMovement("TaskUpdate", { taskId: "349d-2", addBlocks: ["349d-1"] }, PRIOR)
-    ).toBe("task-update")
+    ).toBeNull()
   })
 
   test("edge additions already held and removals not held are no-ops", () => {
@@ -374,7 +376,77 @@ describe("incidence", () => {
 })
 
 describe("recoverSessionDivergence", () => {
-  test("rebuilds weights and movements from captured calls", () => {
+  test("normalized checkpoints survive the 400-call window without command text", () => {
+    const map = new Map<string, SessionDivergenceState>()
+    rec(map, "checkpoint", { name: "TaskCreate", movement: "task-create" })
+    const calls: CapturedToolCall[] = []
+    for (let i = 0; i < 600; i++) {
+      rec(map, "checkpoint", { name: "Edit", at: NOW + i })
+      calls.push({
+        ...captured("Edit", "", i),
+        divergence: divergenceEvidence(map.get("checkpoint")!, "call", "unknown", 1),
+      })
+    }
+    const recovered = recoverSessionDivergence(calls.slice(-400), NOW + 700)
+    expect(recovered.weightedSum).toBe(600)
+    expect(recovered.callsSinceMovement).toBe(600)
+    expect(recovered.complete).toBe(true)
+    expect(recovered.lastMovementKind).toBe("task-create")
+    expect(recovered.provenance).toBe("recovered")
+    expect(JSON.stringify(calls.at(-1)?.divergence)).not.toContain("command")
+  })
+
+  test("only confirmed changed outcomes reset the session", () => {
+    const map = new Map<string, SessionDivergenceState>()
+    rec(map, "other", { name: "Edit" })
+    rec(map, "outcomes", { name: "Edit" })
+    for (const response of [
+      undefined,
+      { success: true },
+      { isError: true },
+      { structuredContent: { taskMutation: { changed: false } } },
+    ]) {
+      const outcome = taskMutationOutcome(response)
+      recordDivergenceToolCall(map, {
+        sessionId: "outcomes",
+        toolName: "TaskUpdate",
+        nowMs: NOW,
+        countCall: false,
+        movement: outcome === "changed" ? "task-update" : null,
+      })
+      expect(map.get("outcomes")!.weightedSum).toBe(1)
+    }
+    expect(
+      taskMutationOutcome({ isError: true, structuredContent: { taskMutation: { changed: true } } })
+    ).toBe("failed")
+    expect(taskMutationOutcome({ structuredContent: { taskMutation: { changed: true } } })).toBe(
+      "changed"
+    )
+    const state = recordDivergenceToolCall(map, {
+      sessionId: "outcomes",
+      toolName: "TaskUpdate",
+      nowMs: NOW,
+      countCall: false,
+      movement: "task-update",
+    })
+    expect(state.weightedSum).toBe(0)
+    expect(state.complete).toBe(true)
+    expect(map.get("other")!.weightedSum).toBe(1)
+    const recovered = recoverSessionDivergence(
+      [
+        {
+          ...captured("TaskUpdate", ""),
+          divergence: divergenceEvidence(state, "outcome", "changed", 0),
+        },
+      ],
+      NOW
+    )
+    expect(recovered.weightedSum).toBe(0)
+    expect(recovered.peaks).toEqual(state.peaks)
+    expect(recovered.complete).toBe(true)
+  })
+
+  test("legacy captures retain weights without inventing confirmed movement", () => {
     const calls: CapturedToolCall[] = [
       captured("Read", "/x.ts"),
       captured("Bash", "rg -n foo src", 1),
@@ -385,11 +457,12 @@ describe("recoverSessionDivergence", () => {
       captured("Bash", 'bun -e "console.log(1)"', 6),
     ]
     const state = recoverSessionDivergence(calls, NOW + 100)
-    expect(state.peaks).toHaveLength(1)
-    expect(state.peaks[0]).toMatchObject({ peak: 3, calls: 4, movementKind: "task-update" })
-    expect(state.weightedSum).toBe(1)
-    expect(state.callsSinceMovement).toBe(2)
-    expect(state.lastMovementKind).toBe("task-update")
+    expect(state.peaks).toHaveLength(0)
+    expect(state.weightedSum).toBe(4)
+    expect(state.callsSinceMovement).toBe(7)
+    expect(state.lastMovementKind).toBeNull()
+    expect(state.complete).toBe(false)
+    expect(state.provenance).toBe("recovered")
     expect(state.updatedAt).toBe(NOW + 100)
   })
 

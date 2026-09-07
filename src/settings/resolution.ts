@@ -135,6 +135,8 @@ const PROJECT_OVERRIDABLE_KEYS = [
   "skillRecencyMaxAgeMinutes",
   "largeFileSizeKb",
   "dirtyWorktreeThreshold",
+  "divergenceAdvisoryThreshold",
+  "divergenceSteerThreshold",
   "speak",
   "suggestWebSearch",
   "autoSteerTranscriptWatching",

@@ -1177,6 +1177,8 @@ describe("SETTINGS_REGISTRY", () => {
       "taskDurationWarningMinutes",
       "narratorSpeed",
       "memoryLineThreshold",
+      "divergenceAdvisoryThreshold",
+      "divergenceSteerThreshold",
       "memoryWordThreshold",
       "largeFileSizeKb",
       "largeFileSizeBlockKb",

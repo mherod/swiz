@@ -292,6 +292,10 @@ function parseDefaultBranch(value: unknown): string | undefined {
 }
 
 function applySchemaFields(obj: Record<string, any>, result: ProjectSwizSettings): void {
+  for (const key of ["divergenceAdvisoryThreshold", "divergenceSteerThreshold"] as const) {
+    const parsed = z.number().int().min(1).safeParse(obj[key])
+    if (parsed.success) result[key] = parsed.data
+  }
   const ambitionMode = ambitionModeSchema.safeParse(obj.ambitionMode)
   if (ambitionMode.success) result.ambitionMode = ambitionMode.data
   const collaborationMode = collaborationModeSchema.safeParse(obj.collaborationMode)

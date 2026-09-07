@@ -1,5 +1,6 @@
 import { debugLog } from "../../debug.ts"
 import { messageFromUnknownError } from "../../utils/hook-json-helpers.ts"
+import type { DivergenceEvidence } from "./divergence.ts"
 import { persistSessionToolCall } from "./utils.ts"
 
 const MAX_PENDING_CALLS_PER_SESSION = 400
@@ -10,6 +11,7 @@ export interface SessionToolCallPersistenceInput {
   toolName: string
   toolInput: Record<string, any> | undefined
   nowMs: number
+  divergence?: DivergenceEvidence
 }
 
 type SessionToolCallWriter = (input: SessionToolCallPersistenceInput) => Promise<void>
@@ -25,7 +27,9 @@ async function defaultWriter(input: SessionToolCallPersistenceInput): Promise<vo
     input.sessionId,
     input.toolName,
     input.toolInput,
-    input.nowMs
+    input.nowMs,
+    undefined,
+    input.divergence
   )
 }
 

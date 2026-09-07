@@ -14,6 +14,7 @@ import type { CappedMap } from "./cache/capped-map.ts"
 import {
   type DivergenceSnapshot,
   recoverSessionDivergence,
+  resolveDivergenceThresholds,
   type SessionDivergenceState,
   snapshotSessionDivergence,
 } from "./divergence.ts"
@@ -179,13 +180,16 @@ async function resolveDivergenceSnapshot(
   ctx: ComplianceRoutesContext
 ): Promise<DivergenceSnapshot | null> {
   if (!sessionId) return null
-  const live = snapshotSessionDivergence(ctx.sessionDivergence, sessionId)
+  const thresholds = await resolveDivergenceThresholds(cwd)
+  const live = snapshotSessionDivergence(ctx.sessionDivergence, sessionId, thresholds)
   if (live) return live
   try {
-    const calls = await readPersistedSessionToolCalls(cwd, sessionId)
+    const calls = await readPersistedSessionToolCalls(cwd, sessionId, undefined, undefined, true)
     if (calls.length === 0) return null
-    ctx.sessionDivergence.set(sessionId, recoverSessionDivergence(calls, Date.now()))
-    return snapshotSessionDivergence(ctx.sessionDivergence, sessionId)
+    if (!ctx.sessionDivergence.has(sessionId)) {
+      ctx.sessionDivergence.set(sessionId, recoverSessionDivergence(calls, Date.now()))
+    }
+    return snapshotSessionDivergence(ctx.sessionDivergence, sessionId, thresholds)
   } catch {
     return null
   }

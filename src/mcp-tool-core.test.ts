@@ -18,6 +18,7 @@ interface DriverResult {
   edgeId: string
   storedBlocks: string[] | null
   blocksAfterRemove: string[] | null
+  mutationOutcomes: Array<boolean | undefined>
 }
 
 /**
@@ -55,6 +56,7 @@ async function runDriver(): Promise<DriverResult> {
       cwd
     )
     const listed = await runMcpTool("TaskList", {}, cwd)
+    const unchanged = await runMcpTool("TaskUpdate", { taskId: createdId, description: "note: bare form still works" }, cwd)
     const unknownBare = await runMcpTool("TaskUpdate", { taskId: "zzzz-99", status: "pending" }, cwd)
     const unknownPrefixed = await runMcpTool(
       "TaskUpdate",
@@ -86,6 +88,7 @@ async function runDriver(): Promise<DriverResult> {
     console.log(
       JSON.stringify({
         createdId,
+        mutationOutcomes: [created, prefixed, bare, unchanged].map(result => result.structuredContent?.taskMutation?.changed),
         createdText,
         updatedText: textOf(prefixed),
         listedText: textOf(listed),
@@ -125,6 +128,7 @@ describe("runTaskUpdateTool id normalization (issue #846)", () => {
     expect(result.prefixedUpdateOk).toBe(true)
     expect(result.prefixedHeadline).toContain(`Updated #${result.createdId}`)
     expect(result.bareUpdateOk).toBe(true)
+    expect(result.mutationOutcomes).toEqual([true, true, true, false])
     // Controls: a genuinely unknown id still errors in both forms.
     expect(result.unknownBareIsError).toBe(true)
     expect(result.unknownPrefixedIsError).toBe(true)

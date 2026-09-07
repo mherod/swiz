@@ -104,6 +104,8 @@ export interface ProjectSwizSettings {
   /** Project default branch override (e.g. "main", "master", "trunk"). */
   defaultBranch?: string
   memoryLineThreshold?: number
+  divergenceAdvisoryThreshold?: number
+  divergenceSteerThreshold?: number
   memoryWordThreshold?: number
   largeFileSizeKb?: number
   dirtyWorktreeThreshold?: number
@@ -244,6 +246,8 @@ export interface SwizSettings {
   skillRecencyMaxTurns: number
   skillRecencyMaxAgeMinutes: number
   memoryLineThreshold: number
+  divergenceAdvisoryThreshold: number
+  divergenceSteerThreshold: number
   memoryWordThreshold: number
   largeFileSizeKb: number
   /** Hard-block threshold for the push-gate large-file check (KB). Default 5120 (5MB). */
@@ -320,6 +324,8 @@ export const projectSettingsSchema = z.object({
   trivialMaxLines: z.number().int().min(1).optional(),
   defaultBranch: z.string().min(1).regex(/^\S+$/).optional(),
   memoryLineThreshold: z.number().int().min(1).optional(),
+  divergenceAdvisoryThreshold: z.number().int().min(1).optional(),
+  divergenceSteerThreshold: z.number().int().min(1).optional(),
   memoryWordThreshold: z.number().int().min(1).optional(),
   largeFileSizeKb: z.number().int().min(1).optional(),
   dirtyWorktreeThreshold: z.number().int().min(1).optional(),

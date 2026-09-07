@@ -174,6 +174,46 @@ describe("handleDispatchActive", () => {
 })
 
 describe("handleDispatchRoute", () => {
+  test("task attempts and unsuccessful outcomes never reset weighted telemetry", async () => {
+    const ctx = createDispatchContext()
+    const sessionId = `divergence-${crypto.randomUUID()}`
+    const dispatch = async (event: string, tool: string, response?: unknown) => {
+      const url = new URL(`http://daemon/dispatch?event=${event}`)
+      const result = await handleDispatchRoute(
+        new Request(url, {
+          method: "POST",
+          body: JSON.stringify({
+            cwd: process.cwd(),
+            session_id: sessionId,
+            tool_name: tool,
+            tool_input: { subject: "Attempt" },
+            tool_response: response,
+          }),
+        }),
+        url,
+        ctx
+      )
+      expect(result.status).toBe(200)
+    }
+    await dispatch("preToolUse", "Edit")
+    await dispatch("preToolUse", "mcp__swiz__TaskCreate")
+    expect(ctx.sessionDivergence.get(sessionId)?.weightedSum).toBe(1)
+    for (const response of [
+      { isError: true },
+      {},
+      { structuredContent: { taskMutation: { changed: false } } },
+    ]) {
+      await dispatch("postToolUse", "mcp__swiz__TaskUpdate", response)
+      expect(ctx.sessionDivergence.get(sessionId)?.weightedSum).toBe(1)
+    }
+    await dispatch("postToolUse", "mcp__swiz__TaskCreate", {
+      structuredContent: { taskMutation: { changed: true } },
+    })
+    expect(ctx.sessionDivergence.get(sessionId)?.weightedSum).toBe(0)
+    expect(ctx.sessionDivergence.get(sessionId)?.complete).toBe(true)
+    expect(ctx.sessionToolCalls.get(sessionId)).toHaveLength(2)
+  })
+
   test("injects one shared transcript summary across concurrent requests", async () => {
     let releaseBuild!: () => void
     const buildGate = new Promise<void>((resolve) => {

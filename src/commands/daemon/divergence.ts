@@ -21,28 +21,27 @@
  *       purposes, but shipping while off-plan is the strongest drift
  *       evidence there is.
  *
- * Movement (resets the sum): TaskCreate, or a TaskUpdate that would
- * actually change its task — a valid status transition, a different
- * subject or description, or a blocks/blockedBy edit with real effect.
- * Bare TaskList/TaskGet and no-op TaskUpdates are sampling, not movement,
- * and never reset. Where prior task state is unavailable, a
- * field-carrying TaskUpdate counts as movement — optimism in the honest
- * direction: a missed reset fires a false advisory later, while a
- * fabricated reset would hide real drift. A TaskUpdate carrying no
- * mutating fields is a no-op regardless of prior state and never counts.
+ * Movement requires a confirmed successful TaskCreate or changed TaskUpdate
+ * outcome. Attempts, failures, no-ops and unknown provider outcomes never reset.
  *
  * State is in-memory per session. lefthook restarts the daemon on every
  * commit, so consumers rebuild lazily from the captured tool-call JSONL
- * via `recoverSessionDivergence` — best-effort: shell details are
- * truncated to 80 characters at capture time and prior task state is
- * gone, so recovered movement uses the field-carrying rule only.
+ * via normalized bounded checkpoints in the captured tool-call ledger.
+ * Legacy captures lack outcomes and are explicitly incomplete.
  *
  * Phase 1 exposes the counter and provisional thresholds for observation
  * only; no hook consumes them yet (rollout step 2 in #844 swaps the
  * queue-depth advisory separately, gated on observed distributions).
  */
 
+import { z } from "zod"
 import { debugLog } from "../../debug.ts"
+import {
+  readGlobalExplicitSettingKeys,
+  readProjectSettings,
+  readSwizSettings,
+} from "../../settings/persistence.ts"
+import { resolveSettingSourceTier, type SettingSourceTier } from "../../settings/resolution.ts"
 import { isValidTransition } from "../../tasks/task-transitions.ts"
 import {
   isAnyProviderTaskCreateTool,
@@ -73,6 +72,7 @@ export interface DivergencePeak {
   peak: number
   calls: number
   movementKind: DivergenceMovementKind
+  complete: boolean
 }
 
 export interface SessionDivergenceState {
@@ -82,6 +82,8 @@ export interface SessionDivergenceState {
   lastMovementKind: DivergenceMovementKind | null
   peaks: DivergencePeak[]
   updatedAt: number
+  complete: boolean
+  provenance: "live" | "recovered"
 }
 
 /** Read-only view served to snapshot consumers (status line, dashboard). */
@@ -92,13 +94,17 @@ export interface DivergenceSnapshot {
   lastMovementKind: DivergenceMovementKind | null
   advisoryThreshold: number
   steerThreshold: number
+  advisoryThresholdSource: SettingSourceTier
+  steerThresholdSource: SettingSourceTier
   recentPeaks: DivergencePeak[]
+  complete: boolean
+  provenance: "live" | "recovered"
 }
 
 /**
  * Prior task state for no-op detection. `undefined` fields mean "unknown to
  * the source" (e.g. event-state carries only id/status/subject) and compare
- * optimistically; `null` description means "known to be absent".
+ * conservatively; `null` description means "known to be absent".
  */
 export interface PriorTaskState {
   id: string
@@ -119,15 +125,38 @@ export const DEFAULT_DIVERGENCE_ADVISORY_THRESHOLD = 15
 export const DEFAULT_DIVERGENCE_STEER_THRESHOLD = 30
 
 /**
- * Threshold resolution seam. Phase 1 observes only, so this returns the
- * provisional defaults; phase 2 wires project > global > default resolution
- * through the settings registry (a surface this change deliberately does not
- * touch) the way the memory-size hooks resolve theirs.
+ * Observation thresholds do not activate enforcement.
  */
-export function divergenceThresholds(): { advisoryThreshold: number; steerThreshold: number } {
+export function divergenceThresholds(): DivergenceThresholds {
   return {
     advisoryThreshold: DEFAULT_DIVERGENCE_ADVISORY_THRESHOLD,
     steerThreshold: DEFAULT_DIVERGENCE_STEER_THRESHOLD,
+    advisoryThresholdSource: "default",
+    steerThresholdSource: "default",
+  }
+}
+
+type DivergenceThresholds = Pick<
+  DivergenceSnapshot,
+  "advisoryThreshold" | "steerThreshold" | "advisoryThresholdSource" | "steerThresholdSource"
+>
+
+export async function resolveDivergenceThresholds(
+  cwd: string,
+  home?: string
+): Promise<DivergenceThresholds> {
+  const [settings, projectSettings, globalExplicitKeys] = await Promise.all([
+    readSwizSettings({ home }),
+    readProjectSettings(cwd),
+    readGlobalExplicitSettingKeys(home),
+  ])
+  const sources = { projectSettings, globalExplicitKeys }
+  return {
+    advisoryThreshold:
+      projectSettings?.divergenceAdvisoryThreshold ?? settings.divergenceAdvisoryThreshold,
+    steerThreshold: projectSettings?.divergenceSteerThreshold ?? settings.divergenceSteerThreshold,
+    advisoryThresholdSource: resolveSettingSourceTier("divergenceAdvisoryThreshold", sources),
+    steerThresholdSource: resolveSettingSourceTier("divergenceSteerThreshold", sources),
   }
 }
 
@@ -221,7 +250,7 @@ function statusChanges(requested: unknown, prior: PriorTaskState): boolean {
 
 function textFieldChanges(requested: unknown, prior: string | null | undefined): boolean {
   if (typeof requested !== "string") return false
-  if (prior === undefined) return true
+  if (prior === undefined) return false
   return requested !== (prior ?? "")
 }
 
@@ -237,7 +266,7 @@ function normalizedIdSet(prior: readonly string[]): Set<string> {
 function edgeAdditionsChange(requested: unknown, prior: readonly string[] | undefined): boolean {
   const ids = normalizeIdArray(requested)
   if (ids.length === 0) return false
-  if (prior === undefined) return true
+  if (prior === undefined) return false
   const held = normalizedIdSet(prior)
   return ids.some((id) => !held.has(id))
 }
@@ -245,7 +274,7 @@ function edgeAdditionsChange(requested: unknown, prior: readonly string[] | unde
 function edgeRemovalsChange(requested: unknown, prior: readonly string[] | undefined): boolean {
   const ids = normalizeIdArray(requested)
   if (ids.length === 0) return false
-  if (prior === undefined) return true
+  if (prior === undefined) return false
   const held = normalizedIdSet(prior)
   return ids.some((id) => held.has(id))
 }
@@ -263,10 +292,10 @@ function taskUpdateChangesPrior(toolInput: Record<string, any>, prior: PriorTask
 }
 
 /**
- * Decide whether a task tool call is a movement event.
+ * Identify a prospective change, not execution evidence. Live telemetry must
+ * wait for a confirmed outcome before recording movement.
  *
- * `priorTasks: null` means no prior state was obtainable — a field-carrying
- * update counts as movement (documented optimism). A provided-but-missing
+ * `priorTasks: null` means no prior state was obtainable. A provided-but-missing
  * task is NOT movement: the store will reject the update, and treating it
  * as movement would let updates against invented ids reset the counter.
  */
@@ -279,7 +308,7 @@ export function resolveTaskMovement(
   if (!isAnyProviderTaskUpdateTool(toolName)) return null
   if (!hasMutatingUpdateFields(toolInput)) return null
   const input = toolInput ?? {}
-  if (priorTasks === null) return "task-update"
+  if (priorTasks === null) return null
   const taskId = normalizeTaskId(input.taskId ?? input.id)
   const prior = taskId ? priorTasks.find((task) => normalizeTaskId(task.id) === taskId) : undefined
   if (!prior) return null
@@ -296,6 +325,8 @@ function freshDivergenceState(nowMs: number): SessionDivergenceState {
     lastMovementKind: null,
     peaks: [],
     updatedAt: nowMs,
+    complete: false,
+    provenance: "live",
   }
 }
 
@@ -312,6 +343,7 @@ function applyMovement(
       peak: state.weightedSum,
       calls: state.callsSinceMovement,
       movementKind: kind,
+      complete: state.complete,
     })
     if (state.peaks.length > MAX_DIVERGENCE_PEAKS) {
       state.peaks.splice(0, state.peaks.length - MAX_DIVERGENCE_PEAKS)
@@ -325,6 +357,7 @@ function applyMovement(
   state.callsSinceMovement = 0
   state.lastMovementAt = endedAt
   state.lastMovementKind = kind
+  state.complete = true
 }
 
 function evictStaleDivergenceSessions(
@@ -354,6 +387,8 @@ export interface DivergenceCallRecord {
   toolInput?: Record<string, any>
   nowMs: number
   movement: DivergenceMovementKind | null
+  countCall?: boolean
+  incomplete?: boolean
 }
 
 export function recordDivergenceToolCall(
@@ -364,11 +399,12 @@ export function recordDivergenceToolCall(
   const state = sessionDivergence.get(sessionId) ?? freshDivergenceState(nowMs)
   if (movement) {
     applyMovement(state, movement, nowMs, sessionId)
-  } else {
+  } else if (call.countCall !== false) {
     state.weightedSum += classifyDivergenceWeight(toolName, toolInput)
     state.callsSinceMovement += 1
   }
   state.updatedAt = nowMs
+  if (call.incomplete) state.complete = false
   sessionDivergence.set(sessionId, state)
   evictStaleDivergenceSessions(sessionDivergence)
   return state
@@ -376,7 +412,8 @@ export function recordDivergenceToolCall(
 
 export function snapshotSessionDivergence(
   sessionDivergence: Map<string, SessionDivergenceState>,
-  sessionId: string
+  sessionId: string,
+  thresholds: DivergenceThresholds = divergenceThresholds()
 ): DivergenceSnapshot | null {
   const state = sessionDivergence.get(sessionId)
   if (!state) return null
@@ -385,8 +422,10 @@ export function snapshotSessionDivergence(
     callsSinceMovement: state.callsSinceMovement,
     lastMovementAt: state.lastMovementAt,
     lastMovementKind: state.lastMovementKind,
-    ...divergenceThresholds(),
+    ...thresholds,
     recentPeaks: state.peaks.slice(-SNAPSHOT_RECENT_PEAKS),
+    complete: state.complete,
+    provenance: state.provenance,
   }
 }
 
@@ -413,8 +452,7 @@ function capturedInputFromDetail(call: CapturedToolCall): Record<string, any> | 
 
 /**
  * Rebuild a session's divergence state from its persisted captured calls
- * after a daemon restart. Prior task state is unavailable here, so
- * movement uses the field-carrying rule (`priorTasks: null`).
+ * after a daemon restart. Legacy input-only records never imply movement.
  */
 export function recoverSessionDivergence(
   calls: readonly CapturedToolCall[],
@@ -422,18 +460,78 @@ export function recoverSessionDivergence(
 ): SessionDivergenceState {
   const state = freshDivergenceState(nowMs)
   for (const call of calls) {
+    if (call.divergence) {
+      Object.assign(state, call.divergence.state, { peaks: [...call.divergence.state.peaks] })
+      continue
+    }
+    state.complete = false
     const toolInput = capturedInputFromDetail(call)
-    const movement = resolveTaskMovement(call.name, toolInput, null)
     const atMs = Date.parse(call.timestamp)
     const callMs = Number.isFinite(atMs) ? atMs : nowMs
-    if (movement) {
-      applyMovement(state, movement, callMs, "recovered")
-    } else {
-      state.weightedSum += classifyDivergenceWeight(call.name, toolInput)
-      state.callsSinceMovement += 1
-    }
+    state.weightedSum += classifyDivergenceWeight(call.name, toolInput)
+    state.callsSinceMovement += 1
     state.updatedAt = callMs
   }
   state.updatedAt = nowMs
+  state.provenance = "recovered"
   return state
+}
+
+/** Bounded checkpoint plus normalized outcome; no command, task text or response body. */
+export const divergenceEvidenceSchema = z.object({
+  phase: z.enum(["call", "outcome"]),
+  outcome: z.enum(["unknown", "failed", "unchanged", "changed"]),
+  weight: z.union([z.literal(0), z.literal(1), z.literal(2)]),
+  state: z.object({
+    weightedSum: z.number().nonnegative(),
+    callsSinceMovement: z.number().int().nonnegative(),
+    lastMovementAt: z.string().nullable(),
+    lastMovementKind: z.enum(["task-create", "task-update"]).nullable(),
+    complete: z.boolean(),
+    peaks: z
+      .array(
+        z.object({
+          endedAt: z.string(),
+          peak: z.number(),
+          calls: z.number(),
+          movementKind: z.enum(["task-create", "task-update"]),
+          complete: z.boolean(),
+        })
+      )
+      .max(MAX_DIVERGENCE_PEAKS),
+  }),
+})
+export type DivergenceEvidence = z.infer<typeof divergenceEvidenceSchema>
+
+export function divergenceEvidence(
+  state: SessionDivergenceState,
+  phase: DivergenceEvidence["phase"],
+  outcome: DivergenceEvidence["outcome"],
+  weight: DivergenceWeight
+): DivergenceEvidence {
+  const { weightedSum, callsSinceMovement, lastMovementAt, lastMovementKind, complete, peaks } =
+    state
+  return {
+    phase,
+    outcome,
+    weight,
+    state: {
+      weightedSum,
+      callsSinceMovement,
+      lastMovementAt,
+      lastMovementKind,
+      complete,
+      peaks: peaks.map((peak) => ({ ...peak })),
+    },
+  }
+}
+
+/** Unsupported provider response shapes stay unknown rather than inventing movement. */
+export function taskMutationOutcome(response: unknown): DivergenceEvidence["outcome"] {
+  if (!response || typeof response !== "object") return "unknown"
+  const value = response as Record<string, any>
+  if (value.isError === true || value.success === false) return "failed"
+  const changed = value.structuredContent?.taskMutation?.changed
+  if (typeof changed === "boolean") return changed ? "changed" : "unchanged"
+  return "unknown"
 }

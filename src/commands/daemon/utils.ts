@@ -3,6 +3,7 @@ import { z } from "zod"
 import { getHomeDir } from "../../home.ts"
 import type { CurrentSessionToolUsage, CurrentSessionUsageEvent } from "../../transcript-summary.ts"
 import { appendJsonlEntry, readJsonlFileTail } from "../../utils/jsonl.ts"
+import { type DivergenceEvidence, divergenceEvidenceSchema } from "./divergence.ts"
 import type { SessionMessage, SessionTaskSummary, ToolCallSummary } from "./types.ts"
 
 export type { SessionMessage, SessionTaskSummary, ToolCallSummary } from "./types.ts"
@@ -85,6 +86,7 @@ export interface CapturedToolCall {
   name: string
   detail: string
   timestamp: string
+  divergence?: DivergenceEvidence
 }
 
 export interface SessionToolUsageState extends CurrentSessionToolUsage {
@@ -130,6 +132,7 @@ const capturedToolCallSchema = z.object({
   name: z.string(),
   detail: z.string(),
   timestamp: z.string(),
+  divergence: divergenceEvidenceSchema.optional(),
 })
 
 function formatToolInputForDisplay(name: string, input: Record<string, any> | undefined): string {
@@ -276,24 +279,27 @@ type PersistSessionToolCallArgs = [
   toolInput: Record<string, any> | undefined,
   nowMs: number,
   homeDir?: string,
+  divergence?: DivergenceEvidence,
 ]
 
 export const persistSessionToolCall = async (
   ...args: PersistSessionToolCallArgs
 ): Promise<void> => {
-  const [cwd, sessionId, toolName, toolInput, nowMs, homeDir = getHomeDir()] = args
+  const [cwd, sessionId, toolName, toolInput, nowMs, homeDir = getHomeDir(), divergence] = args
   const path = capturedSessionToolCallLogPath(cwd, sessionId, homeDir)
-  await appendJsonlEntry(path, buildCapturedToolCall(toolName, toolInput, nowMs))
+  await appendJsonlEntry(path, { ...buildCapturedToolCall(toolName, toolInput, nowMs), divergence })
 }
 
 export async function readPersistedSessionToolCalls(
   cwd: string,
   sessionId: string,
   limit = MAX_CAPTURED_TOOL_CALLS_PER_SESSION,
-  homeDir = getHomeDir()
+  homeDir = getHomeDir(),
+  includeOutcomes = false
 ): Promise<CapturedToolCall[]> {
   const path = capturedSessionToolCallLogPath(cwd, sessionId, homeDir)
-  return readJsonlFileTail(path, capturedToolCallSchema, limit)
+  const calls = await readJsonlFileTail(path, capturedToolCallSchema, limit)
+  return includeOutcomes ? calls : calls.filter((call) => call.divergence?.phase !== "outcome")
 }
 
 export function mergeCapturedToolCalls(...sources: CapturedToolCall[][]): CapturedToolCall[] {

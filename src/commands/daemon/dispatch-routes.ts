@@ -28,22 +28,20 @@ import {
 } from "../../dispatch/stop-response.ts"
 import type { DispatchStageDurations } from "../../dispatch/timing.ts"
 import { DISPATCH_TIMEOUTS } from "../../manifest.ts"
-import { projectKeyFromCwd } from "../../project-key.ts"
 import { taskCompletedHookInputSchema, taskCreatedHookInputSchema } from "../../schemas.ts"
-import { createTaskStoreForHookPayload, findTaskStoreForSession } from "../../task-roots.ts"
-import { readTasksAcrossStores } from "../../tasks/task-repository.ts"
+import { createTaskStoreForHookPayload } from "../../task-roots.ts"
 import { sessionDirPath } from "../../tasks/task-store-path.ts"
 import { isAnyProviderTaskCreateTool, isAnyProviderTaskUpdateTool } from "../../tool-matchers.ts"
 import type { CurrentSessionToolUsage } from "../../transcript-summary.ts"
 import type { WarmStatusLineSnapshot } from "../status-line.ts"
 import type { CappedMap } from "./cache/capped-map.ts"
 import {
-  type DivergenceMovementKind,
-  hasMutatingUpdateFields,
-  type PriorTaskState,
+  classifyDivergenceWeight,
+  divergenceEvidence,
   recordDivergenceToolCall,
-  resolveTaskMovement,
+  recoverSessionDivergence,
   type SessionDivergenceState,
+  taskMutationOutcome,
 } from "./divergence.ts"
 import {
   ACTIVE_LIFECYCLE_TASKS_PAYLOAD_KEY,
@@ -65,7 +63,12 @@ import { sessionToolCallPersistenceQueue } from "./session-tool-call-persistence
 import type { ActiveHookDispatch } from "./types.ts"
 import type { UpstreamSyncRegistry } from "./upstream-sync.ts"
 import type { CapturedToolCall, SessionToolUsageState } from "./utils.ts"
-import { captureSessionToolCall, captureSessionToolUsage, seedSessionToolUsage } from "./utils.ts"
+import {
+  captureSessionToolCall,
+  captureSessionToolUsage,
+  readPersistedSessionToolCalls,
+  seedSessionToolUsage,
+} from "./utils.ts"
 import type { DaemonWebServerContext } from "./web-server-context.ts"
 import type { DaemonWorkerRuntime } from "./worker-runtime.ts"
 
@@ -271,7 +274,7 @@ async function updateParsedPayloadMetrics(
   const projectMetrics = await metricsForParsedProject(ctx, parsed.cwd)
   if (!parsed.sessionId) return projectMetrics
   recordParsedSessionActivity(ctx, parsed.sessionId, canonicalEvent, nowMs)
-  await captureParsedToolUse(ctx, parsed, canonicalEvent, nowMs)
+  await captureParsedToolUse(ctx, parsed, canonicalEvent, nowMs, payloadStr)
   return projectMetrics
 }
 
@@ -308,10 +311,27 @@ async function captureParsedToolUse(
   ctx: DispatchRoutesContext,
   parsed: ParsedDispatchPayload,
   canonicalEvent: string,
-  nowMs: number
+  nowMs: number,
+  payloadStr: string
 ): Promise<void> {
   const { sessionId, toolName } = parsed
-  if (canonicalEvent !== "preToolUse" || !sessionId || !toolName) return
+  if (!sessionId || !toolName) return
+  await hydrateDivergence(ctx, parsed.cwd, sessionId)
+  const taskMutation =
+    isAnyProviderTaskCreateTool(toolName) || isAnyProviderTaskUpdateTool(toolName)
+  if (canonicalEvent === "postToolUse" && taskMutation) {
+    captureTaskOutcome(ctx, { ...parsed, sessionId, toolName }, nowMs, payloadStr)
+    return
+  }
+  if (canonicalEvent !== "preToolUse") return
+  const state = recordDivergenceToolCall(ctx.sessionDivergence, {
+    sessionId,
+    toolName,
+    toolInput: parsed.toolInput,
+    nowMs,
+    movement: null,
+    incomplete: taskMutation,
+  })
   captureSessionToolCall(ctx.sessionToolCalls, sessionId, toolName, parsed.toolInput, nowMs)
   if (parsed.cwd) {
     sessionToolCallPersistenceQueue.enqueue({
@@ -320,68 +340,56 @@ async function captureParsedToolUse(
       toolName,
       toolInput: parsed.toolInput,
       nowMs,
+      divergence: divergenceEvidence(
+        state,
+        "call",
+        "unknown",
+        classifyDivergenceWeight(toolName, parsed.toolInput)
+      ),
     })
   }
   captureSessionToolUsage(ctx.sessionToolUsage, sessionId, toolName, parsed.toolInput, nowMs)
-  const movement = await resolveDispatchDivergenceMovement(parsed)
-  recordDivergenceToolCall(ctx.sessionDivergence, {
+}
+
+async function hydrateDivergence(
+  ctx: DispatchRoutesContext,
+  cwd: string | null | undefined,
+  sessionId: string
+): Promise<void> {
+  if (!cwd || ctx.sessionDivergence.has(sessionId)) return
+  const calls = await readPersistedSessionToolCalls(cwd, sessionId, undefined, undefined, true)
+  if (calls.length > 0 && !ctx.sessionDivergence.has(sessionId)) {
+    ctx.sessionDivergence.set(sessionId, recoverSessionDivergence(calls, Date.now()))
+  }
+}
+
+function captureTaskOutcome(
+  ctx: DispatchRoutesContext,
+  parsed: ParsedDispatchPayload & { sessionId: string; toolName: string },
+  nowMs: number,
+  payloadStr: string
+): void {
+  const { sessionId, toolName } = parsed
+  const payload = JSON.parse(payloadStr)
+  const outcome = taskMutationOutcome(payload.tool_response ?? payload.toolResponse)
+  const kind = isAnyProviderTaskCreateTool(toolName) ? "task-create" : "task-update"
+  const state = recordDivergenceToolCall(ctx.sessionDivergence, {
     sessionId,
     toolName,
-    toolInput: parsed.toolInput,
     nowMs,
-    movement,
+    countCall: false,
+    movement: outcome === "changed" ? kind : null,
+    incomplete: outcome === "unknown",
   })
-}
-
-/**
- * Divergence movement for a captured preToolUse call (issue #844 phase 1).
- * Prior task state comes from the same dual-keyed store union the compliance
- * route reads; lookup failures return null, which the resolver treats
- * optimistically rather than suppressing honest movement.
- */
-async function resolveDispatchDivergenceMovement(
-  parsed: ParsedDispatchPayload
-): Promise<DivergenceMovementKind | null> {
-  const { sessionId, toolName } = parsed
-  if (!sessionId || !toolName) return null
-  if (isAnyProviderTaskCreateTool(toolName)) return "task-create"
-  if (!isAnyProviderTaskUpdateTool(toolName)) return null
-  if (!hasMutatingUpdateFields(parsed.toolInput)) return null
-  const priorTasks = await loadPriorTasksForMovement(sessionId, parsed.cwd)
-  return resolveTaskMovement(toolName, parsed.toolInput, priorTasks)
-}
-
-function priorTaskFromRecord(task: { id: string; status: string }): PriorTaskState {
-  const record = task as Record<string, unknown>
-  return {
-    id: task.id,
-    status: task.status,
-    subject: typeof record.subject === "string" ? record.subject : undefined,
-    description: typeof record.description === "string" ? record.description : null,
-    blockedBy: Array.isArray(record.blockedBy) ? (record.blockedBy as string[]) : [],
-    blocks: Array.isArray(record.blocks) ? (record.blocks as string[]) : [],
-  }
-}
-
-/**
- * Disk records are full, so absent fields map to "known absent" rather than
- * "unknown". An empty read means the update will be rejected by the store;
- * read failures return null so movement stays optimistic.
- */
-async function loadPriorTasksForMovement(
-  sessionId: string,
-  cwd: string | null | undefined
-): Promise<PriorTaskState[] | null> {
-  try {
-    const { tasksDir } = findTaskStoreForSession(sessionId)
-    const projectKey = cwd ? projectKeyFromCwd(cwd) : undefined
-    const tasks = await readTasksAcrossStores(sessionId, projectKey, tasksDir)
-    const prior = tasks.map(priorTaskFromRecord)
-    const { overlayEventState } = await import("../../tasks/task-event-state.ts")
-    return overlayEventState(prior, sessionId)
-  } catch {
-    return null
-  }
+  if (parsed.cwd)
+    sessionToolCallPersistenceQueue.enqueue({
+      cwd: parsed.cwd,
+      sessionId,
+      toolName,
+      toolInput: undefined,
+      nowMs,
+      divergence: divergenceEvidence(state, "outcome", outcome, 0),
+    })
 }
 
 async function getCurrentSessionToolUsageFromDaemon(

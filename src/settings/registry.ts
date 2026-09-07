@@ -552,6 +552,34 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
     },
   },
   {
+    key: "divergenceAdvisoryThreshold",
+    aliases: ["divergence-advisory", "divergence-advisory-threshold"],
+    kind: "numeric",
+    scopes: ["global", "project"],
+    default: 15,
+    zodSchema: z.number().int().min(1),
+    docs: {
+      description: "Observation-only weighted divergence advisory threshold",
+      effectExplanation:
+        "Included in divergence telemetry; does not enable advisories or change enforcement.",
+      valuePlaceholder: "weight",
+    },
+  },
+  {
+    key: "divergenceSteerThreshold",
+    aliases: ["divergence-steer", "divergence-steer-threshold"],
+    kind: "numeric",
+    scopes: ["global", "project"],
+    default: 30,
+    zodSchema: z.number().int().min(1),
+    docs: {
+      description: "Observation-only weighted divergence steering threshold",
+      effectExplanation:
+        "Included in divergence telemetry; does not enable steering or change enforcement.",
+      valuePlaceholder: "weight",
+    },
+  },
+  {
     key: "memoryLineThreshold",
     aliases: ["memory-line-threshold", "memorylinethreshold", "memory_line_threshold"],
     kind: "numeric",
