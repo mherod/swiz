@@ -9,7 +9,7 @@ import {
 import { MAX_SESSION_PREVIEW_BYTES } from "./session-preview.ts"
 import {
   MAX_TRANSCRIPT_ENTRIES,
-  messageRetainedChars,
+  messageRetainedBytes,
   type PreparedSessionEntry,
   prepareSessionEntry,
   readTokenSample,
@@ -122,9 +122,10 @@ export class HistoricalJsonlState {
   }
 
   get retainedBytes(): number {
-    let bytes = this.cursor.tailByteLength + this.samples.size * 160
+    let bytes = 512 + this.cursor.tailByteLength + this.samples.size * 256
     for (const entry of this.entries.values()) {
-      bytes += 128 + (entry.message ? messageRetainedChars(entry.message) * 2 : 0)
+      bytes += 160 + (entry.timestamp?.length ?? 0) * 2
+      if (entry.message) bytes += messageRetainedBytes(entry.message)
     }
     return bytes
   }

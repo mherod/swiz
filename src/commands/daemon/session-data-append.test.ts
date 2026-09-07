@@ -46,6 +46,45 @@ function measuredCache() {
   return { cache, reads }
 }
 
+test("three large compact previews stay hot for twenty cycles and append independently", async () => {
+  const sessions = await Promise.all(
+    ["A", "B", "C"].map((name) => fixture(`${"x".repeat(9 * 1024 * 1024)}\n${line(name)}\n`))
+  )
+  const { cache, reads } = measuredCache()
+  const warm = await Promise.all(sessions.map((session) => cache.get(session)))
+  expect(reads).toHaveLength(3)
+  expect(reads.every(([start, end]) => end - start <= MAX_SESSION_PREVIEW_BYTES + 1)).toBe(true)
+  expect(cache.getMemoryStats().entries).toBe(3)
+  expect(cache.getMemoryStats().estimatedBytes).toBeLessThan(64 * 1024)
+  reads.length = 0
+  for (let cycle = 0; cycle < 20; cycle++) {
+    for (const [index, session] of sessions.entries())
+      expect(await cache.get(session)).toBe(warm[index]!)
+  }
+  expect(reads).toEqual([])
+  const appended = `${line("Appended café 🦊\ud800")}\n`
+  await appendFile(sessions[0]!.path, appended)
+  const next = await cache.get(sessions[0]!)
+  expect(next?.messages).toEqual((await new SessionDataCache().get(sessions[0]!))?.messages)
+  expect(next?.messages.at(-1)?.text).toBe("Appended café 🦊\ud800")
+  for (const index of [1, 2]) expect(await cache.get(sessions[index]!)).toBe(warm[index]!)
+  expect(reads).toEqual([[warm[0]!.size, warm[0]!.size + Buffer.byteLength(appended)]])
+})
+
+test("compact accounting includes pending bytes and every token sample", async () => {
+  const session = await fixture(`${line("Visible")}\n`)
+  const cache = new SessionDataCache()
+  const initial = (await cache.get(session))!.retainedBytes
+  const samples = Array.from({ length: 1000 }, (_, index) =>
+    usage(index, "2026-09-07T10:00:00Z")
+  ).join("\n")
+  await appendFile(session.path, `${samples}\n`)
+  const withSamples = (await cache.get(session))!.retainedBytes
+  expect(withSamples - initial).toBeGreaterThanOrEqual(1000 * 256)
+  await appendFile(session.path, "x".repeat(100_000))
+  expect((await cache.get(session))!.retainedBytes - withSamples).toBeGreaterThanOrEqual(100_000)
+})
+
 test("a historical append reads only new bytes and agrees with a fresh preview", async () => {
   const session = await fixture(`${line("First café")}\n`)
   const { cache, reads } = measuredCache()

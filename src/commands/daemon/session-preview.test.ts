@@ -99,7 +99,9 @@ test("large previews preserve recent messages and latest cumulative usage totals
 })
 
 test("preview cache evicts by retained bytes across different sessions", async () => {
-  const paths = await Promise.all(Array.from({ length: 3 }, () => fixture(6 * 1024 * 1024)))
+  const paths = await Promise.all(
+    Array.from({ length: 3 }, () => fixture(0, `${assistant("x".repeat(6 * 1024 * 1024))}\n`))
+  )
   const first = await sessionDataCache.get({ path: paths[0]!, format: "codex-jsonl" })
   for (const path of paths.slice(1)) {
     expect(await sessionDataCache.get({ path, format: "codex-jsonl" })).not.toBeNull()

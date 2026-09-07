@@ -11,20 +11,36 @@ export interface PreparedSessionEntry {
   message: SessionMessage | null
 }
 
+/** Own the UTF-16 storage instead of retaining a slice of a provider record. */
+function ownString(value: string): string {
+  return Buffer.from(value, "utf16le").toString("utf16le")
+}
+
+function ownOptionalString(value: string | undefined): string | undefined {
+  return value === undefined ? undefined : ownString(value)
+}
+
 export function prepareSessionEntry(
   entry: TranscriptEntry,
   position: number
 ): PreparedSessionEntry {
-  const prepared: PreparedSessionEntry = { position, timestamp: entry.timestamp, message: null }
+  const prepared: PreparedSessionEntry = {
+    position,
+    timestamp: ownOptionalString(entry.timestamp),
+    message: null,
+  }
   if (entry.type !== "user" && entry.type !== "assistant") return prepared
   const content = entry.message?.content
   if (entry.type === "user" && isHookFeedback(content)) return prepared
-  const text = extractMessageText(content)
-  const toolCalls = extractToolCalls(content)
+  const text = ownString(extractMessageText(content))
+  const toolCalls = extractToolCalls(content).map(({ name, detail }) => ({
+    name: ownString(name),
+    detail: ownString(detail),
+  }))
   if (!text && toolCalls.length === 0) return prepared
   prepared.message = {
     role: entry.type,
-    timestamp: entry.timestamp ?? null,
+    timestamp: prepared.timestamp ?? null,
     text,
     ...(toolCalls.length ? { toolCalls } : {}),
   }
@@ -35,6 +51,11 @@ export function messageRetainedChars(message: SessionMessage): number {
   let chars = message.text.length + (message.timestamp?.length ?? 0)
   for (const call of message.toolCalls ?? []) chars += call.name.length + call.detail.length
   return chars
+}
+
+/** Conservative object, array-slot and string-header allowances, including shared copies. */
+export function messageRetainedBytes(message: SessionMessage): number {
+  return 192 + messageRetainedChars(message) * 2 + (message.toolCalls?.length ?? 0) * 160
 }
 
 export interface SessionTokenStats {

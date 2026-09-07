@@ -16,7 +16,7 @@ import { ProviderSessionIndex } from "./cache/provider-session-index.ts"
 import { HistoricalJsonlState, supportsHistoricalAppend } from "./session-jsonl.ts"
 import {
   MAX_TRANSCRIPT_ENTRIES,
-  messageRetainedChars,
+  messageRetainedBytes,
   type PreparedSessionEntry,
   prepareSessionEntry,
   readTokenStats,
@@ -535,14 +535,21 @@ export class SessionDataCache {
   }
 }
 
-/** Include backing source strings and derived copies; deliberately overestimate shared strings. */
+/** Compact JSONL owns its strings; fallback formats retain their conservative source allowance. */
 function estimateRetainedBytes(data: CachedSessionData, sourceChars: number): number {
-  let chars = sourceChars + (data.lastToolCallFingerprint?.length ?? 0)
-  chars += data.lastMessageFingerprint?.length ?? 0
-  for (const message of data.messages) chars += messageRetainedChars(message)
+  const strings = [
+    data.lastToolCallFingerprint,
+    data.lastMessageFingerprint,
+    data.contentRevision,
+    data.projectIdentity,
+  ]
+  let chars =
+    (data.jsonl ? 0 : sourceChars) + strings.reduce((sum, value) => sum + (value?.length ?? 0), 0)
+  let bytes = 1024 + (data.tokenStats ? 128 : 0)
+  for (const message of data.messages) bytes += messageRetainedBytes(message)
   for (const [key, timestamp] of data.fallbackTimestamps) chars += key.length + timestamp.length
   for (const tool of data.toolStats) chars += tool.name.length
-  return Math.max(1, chars * 2)
+  return bytes + chars * 2 + data.fallbackTimestamps.size * 160 + data.toolStats.length * 128
 }
 
 export const sessionDataCache = new SessionDataCache()
