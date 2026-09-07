@@ -46,6 +46,7 @@ export const stateHistoryEntrySchema = z.object({
   from: projectStateSchema.nullable(),
   to: projectStateSchema,
   timestamp: z.string().min(1),
+  sessionId: z.string().trim().min(1).optional().catch(undefined),
 })
 export type StateHistoryEntry = z.infer<typeof stateHistoryEntrySchema>
 

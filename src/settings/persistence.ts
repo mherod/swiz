@@ -479,7 +479,8 @@ export async function readProjectState(
 
 export async function writeProjectState(
   cwd: string,
-  state: import("./types").ProjectState
+  state: import("./types").ProjectState,
+  sessionId?: string
 ): Promise<void> {
   const path = getStatePath(cwd)
   await mkdir(dirname(path), { recursive: true })
@@ -488,7 +489,12 @@ export async function writeProjectState(
     const existing = await readStateData(cwd)
     const previousState = existing?.state ?? null
     const history = existing?.stateHistory ?? []
-    history.push({ from: previousState, to: state, timestamp: new Date().toISOString() })
+    history.push({
+      from: previousState,
+      to: state,
+      timestamp: new Date().toISOString(),
+      sessionId: sessionId?.trim() || undefined,
+    })
     await Bun.write(path, `${JSON.stringify({ state, stateHistory: history }, null, 2)}\n`)
   }
 

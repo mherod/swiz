@@ -5,7 +5,7 @@ import { join } from "node:path"
 import { withGitClient } from "../src/git/client.ts"
 import { MockGitClient } from "../src/git/mock-client.ts"
 import type { RepositoryCapability } from "../src/repository-capability.ts"
-import { readProjectState, writeProjectState } from "../src/settings.ts"
+import { readProjectState, readStateData, writeProjectState } from "../src/settings.ts"
 import { evaluatePosttooluseStateTransition } from "./posttooluse-state-transition.ts"
 
 interface GitState {
@@ -93,13 +93,17 @@ async function runHook(
   }
 
   try {
+    const before = (await readStateData(cwd))?.stateHistory.length ?? 0
     await withGitClient(git, async () => {
       await evaluatePosttooluseStateTransition({
         tool_name: "Bash",
         tool_input: { command },
         cwd,
+        session_id: "lifecycle-session",
       })
     })
+    const history = (await readStateData(cwd))?.stateHistory ?? []
+    for (const entry of history.slice(before)) expect(entry.sessionId).toBe("lifecycle-session")
   } finally {
     for (const [key, value] of previousEnv) {
       if (value === undefined) delete process.env[key]

@@ -111,7 +111,10 @@ async function isHeadAuthoredByOther(cwd: string): Promise<boolean> {
   }
 }
 
-async function transitionToAddressingFeedbackOnChangesRequested(cwd: string): Promise<boolean> {
+async function transitionToAddressingFeedbackOnChangesRequested(
+  cwd: string,
+  sessionId?: string
+): Promise<boolean> {
   if (!hasGhCli() || !(await isGitHubRemote(cwd))) return false
 
   try {
@@ -125,7 +128,7 @@ async function transitionToAddressingFeedbackOnChangesRequested(cwd: string): Pr
     )
     if (!pr?.reviews?.some((r) => r.state === "CHANGES_REQUESTED")) return false
 
-    await writeProjectState(cwd, "addressing-feedback")
+    await writeProjectState(cwd, "addressing-feedback", sessionId)
     return true
   } catch {
     // gh unavailable or API error — skip
@@ -134,7 +137,8 @@ async function transitionToAddressingFeedbackOnChangesRequested(cwd: string): Pr
 }
 
 async function transitionToDevelopingOnMissingUpstream(
-  cwd: string
+  cwd: string,
+  sessionId?: string
 ): Promise<UpstreamTransitionStatus> {
   try {
     const status = await getGitStatusV2(cwd)
@@ -146,7 +150,7 @@ async function transitionToDevelopingOnMissingUpstream(
     // 1) no upstream configured (status.upstream === null)
     // 2) upstream configured but gone on remote (status.upstreamGone === true)
     if (status.upstream === null || status.upstreamGone) {
-      await writeProjectState(cwd, "developing")
+      await writeProjectState(cwd, "developing", sessionId)
       return "transitioned"
     }
     return "no-transition"
@@ -156,7 +160,10 @@ async function transitionToDevelopingOnMissingUpstream(
   }
 }
 
-async function transitionToDevelopingOnDefaultBranchCommit(cwd: string): Promise<boolean> {
+async function transitionToDevelopingOnDefaultBranchCommit(
+  cwd: string,
+  sessionId?: string
+): Promise<boolean> {
   try {
     const branch = (await git(["branch", "--show-current"], cwd)).trim()
     if (!branch) return false
@@ -164,7 +171,7 @@ async function transitionToDevelopingOnDefaultBranchCommit(cwd: string): Promise
     const defaultBranch = await getDefaultBranch(cwd)
     if (!isDefaultBranch(branch, defaultBranch)) return false
 
-    await writeProjectState(cwd, "developing")
+    await writeProjectState(cwd, "developing", sessionId)
     return true
   } catch {
     // skip
@@ -175,7 +182,8 @@ async function transitionToDevelopingOnDefaultBranchCommit(cwd: string): Promise
 async function handleCommitTransitions(
   command: string,
   cwd: string,
-  state: ProjectState
+  state: ProjectState,
+  sessionId?: string
 ): Promise<boolean> {
   const isCommit = GIT_COMMIT_RE.test(command)
   if (!isCommit) return false
@@ -184,17 +192,17 @@ async function handleCommitTransitions(
   const isNoUpstreamState = state === "planning" || isReviewingLike
 
   if (state === "reviewing") {
-    if (await transitionToAddressingFeedbackOnChangesRequested(cwd)) return true
+    if (await transitionToAddressingFeedbackOnChangesRequested(cwd, sessionId)) return true
   }
 
   if (isNoUpstreamState) {
-    const upstreamStatus = await transitionToDevelopingOnMissingUpstream(cwd)
+    const upstreamStatus = await transitionToDevelopingOnMissingUpstream(cwd, sessionId)
     if (upstreamStatus === "transitioned") return true
-    if (await transitionToDevelopingOnDefaultBranchCommit(cwd)) return true
+    if (await transitionToDevelopingOnDefaultBranchCommit(cwd, sessionId)) return true
   }
 
   if (state !== "developing") {
-    if (await transitionToDevelopingOnDefaultBranchCommit(cwd)) return true
+    if (await transitionToDevelopingOnDefaultBranchCommit(cwd, sessionId)) return true
   }
 
   return false
@@ -203,7 +211,8 @@ async function handleCommitTransitions(
 async function handleCheckoutToDeveloping(
   command: string,
   cwd: string,
-  state: ProjectState
+  state: ProjectState,
+  sessionId?: string
 ): Promise<boolean> {
   if (state === "developing") return false
   const isCheckout =
@@ -217,7 +226,7 @@ async function handleCheckoutToDeveloping(
   try {
     const defaultBranch = await getDefaultBranch(cwd)
     if (isDefaultBranch(targetBranch, defaultBranch)) {
-      await writeProjectState(cwd, "developing")
+      await writeProjectState(cwd, "developing", sessionId)
       return true
     }
   } catch {}
@@ -227,7 +236,8 @@ async function handleCheckoutToDeveloping(
 async function handleCheckoutToReviewing(
   command: string,
   cwd: string,
-  state: ProjectState
+  state: ProjectState,
+  sessionId?: string
 ): Promise<boolean> {
   if (state === "reviewing") return false
   const isPlainCheckout = GIT_CHECKOUT_RE.test(command) && !GIT_CHECKOUT_NEW_BRANCH_RE.test(command)
@@ -235,19 +245,23 @@ async function handleCheckoutToReviewing(
   if (!(isPlainCheckout || isPrCheckout)) return false
 
   if (await isHeadAuthoredByOther(cwd)) {
-    await writeProjectState(cwd, "reviewing")
+    await writeProjectState(cwd, "reviewing", sessionId)
     return true
   }
   return false
 }
 
-async function handleNewBranchCheckout(command: string, cwd: string): Promise<boolean> {
+async function handleNewBranchCheckout(
+  command: string,
+  cwd: string,
+  sessionId?: string
+): Promise<boolean> {
   if (!GIT_CHECKOUT_NEW_BRANCH_RE.test(command)) return false
   try {
     const sourceBranch = await resolveCheckoutSourceBranch(command, cwd)
     const defaultBranch = await getDefaultBranch(cwd)
     if (sourceBranch && isDefaultBranch(sourceBranch, defaultBranch)) {
-      await writeProjectState(cwd, "developing")
+      await writeProjectState(cwd, "developing", sessionId)
       return true
     }
   } catch {}
@@ -257,12 +271,13 @@ async function handleNewBranchCheckout(command: string, cwd: string): Promise<bo
 async function handleAsyncTransitions(
   command: string,
   cwd: string,
-  state: ProjectState
+  state: ProjectState,
+  sessionId?: string
 ): Promise<boolean> {
-  if (await handleCommitTransitions(command, cwd, state)) return true
-  if (await handleCheckoutToDeveloping(command, cwd, state)) return true
-  if (await handleCheckoutToReviewing(command, cwd, state)) return true
-  return await handleNewBranchCheckout(command, cwd)
+  if (await handleCommitTransitions(command, cwd, state, sessionId)) return true
+  if (await handleCheckoutToDeveloping(command, cwd, state, sessionId)) return true
+  if (await handleCheckoutToReviewing(command, cwd, state, sessionId)) return true
+  return await handleNewBranchCheckout(command, cwd, sessionId)
 }
 
 export async function evaluatePosttooluseStateTransition(input: unknown): Promise<SwizHookOutput> {
@@ -279,11 +294,11 @@ export async function evaluatePosttooluseStateTransition(input: unknown): Promis
 
   const syncRule = matchesSyncRule(command, state)
   if (syncRule) {
-    await writeProjectState(cwd, syncRule.to)
+    await writeProjectState(cwd, syncRule.to, hookInput.session_id)
     return {}
   }
 
-  await handleAsyncTransitions(command, cwd, state)
+  await handleAsyncTransitions(command, cwd, state, hookInput.session_id)
   return {}
 }
 

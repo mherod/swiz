@@ -22,9 +22,10 @@ import {
   type ProjectState,
   type ProjectSwizSettings,
   readProjectSettings,
-  readProjectState,
+  readStateData,
   readSwizSettings,
   resolveProjectHooks,
+  type StateHistoryEntry,
 } from "../settings.ts"
 import { syncCodexUpdatePlanFromTranscriptSummary } from "../tasks/codex-update-plan.ts"
 import { isMarkdownOnlyFileReadPayload, isSkillMdOnlyFileEditPayload } from "../tool-matchers.ts"
@@ -56,6 +57,7 @@ import {
 } from "./index.ts"
 import { backfillPayloadDefaults } from "./payload-backfill.ts"
 import { normalizeAgentHookPayload } from "./payload-normalize.ts"
+import { injectProjectStateProvenance } from "./state-provenance.ts"
 import { isStopLikeDispatchEvent, normalizeStopDispatchResponseInPlace } from "./stop-response.ts"
 import { STRATEGY_REGISTRY } from "./strategies.ts"
 import { isSubagentSession } from "./subagent-detect.ts"
@@ -78,6 +80,7 @@ export interface EnrichedDispatchPayload extends Record<string, unknown> {
   _effectiveSettings?: EffectiveSwizSettings
   /** Current project state (planning/developing/reviewing/addressing-feedback) or null if not set. */
   _projectState?: ProjectState | null
+  _projectStateTransition?: StateHistoryEntry | null
   /** Current session tool invocation counts and skill names. */
   _currentSessionToolUsage?: CurrentSessionToolUsage
   /** Pre-parsed transcript metadata (tool calls, commands, skills, elapsed time). */
@@ -699,15 +702,16 @@ async function injectEffectiveSettings(
   ctx: DispatchContext,
   projectSettings: ProjectSwizSettings | null
 ): Promise<void> {
-  const [globalSettings, projectState] = await Promise.all([
+  const [globalSettings, stateData] = await Promise.all([
     readSwizSettings(ctx.settingsHomeOverride ? { home: ctx.settingsHomeOverride } : undefined),
-    readProjectState(ctx.cwd),
+    readStateData(ctx.cwd),
   ])
   const sessionId = typeof ctx.payload.session_id === "string" ? ctx.payload.session_id : undefined
   const effectiveSettings = getEffectiveSwizSettings(globalSettings, sessionId, projectSettings)
   const enrichedCtx = ctx as { payload: EnrichedDispatchPayload }
   enrichedCtx.payload._effectiveSettings = effectiveSettings
-  enrichedCtx.payload._projectState = projectState
+  enrichedCtx.payload._projectState = stateData?.state ?? null
+  enrichedCtx.payload._projectStateTransition = stateData?.stateHistory.at(-1) ?? null
 }
 
 function shouldAllowExplicitStop(ctx: DispatchContext): boolean {
@@ -894,9 +898,8 @@ async function prepareAndFilterDispatchGroups(
     req.manifestProvider,
     req.replayPendingMutations
   )
-  if (filteredGroups.length === 0) return null
-
   await injectEffectiveSettings(ctx, projectSettings ?? null)
+  if (filteredGroups.length === 0) return null
 
   if (shouldAllowExplicitStop(ctx)) {
     log(`   ⏭ autoContinue disabled, allowing explicit stop`)
@@ -904,6 +907,16 @@ async function prepareAndFilterDispatchGroups(
   }
 
   return filteredGroups
+}
+
+function buildFilteredSkipResponse(
+  ctx: DispatchContext,
+  daemonContext?: boolean
+): Record<string, any> {
+  const response = buildSkipResponse(ctx, daemonContext)
+  injectProjectStateProvenance(response, ctx.canonicalEvent, JSON.stringify(ctx.payload))
+  if (response.systemMessage && !daemonContext) writeResponse(response)
+  return response
 }
 
 async function performDispatch(req: DispatchRequest): Promise<DispatchResult> {
@@ -935,7 +948,7 @@ async function performDispatch(req: DispatchRequest): Promise<DispatchResult> {
     req
   )
   if (!filteredGroups) {
-    const response = buildSkipResponse(ctx, req.daemonContext)
+    const response = buildFilteredSkipResponse(ctx, req.daemonContext)
     assertDispatchResponseMatchesWire(response, ctx.canonicalEvent, ctx.hookEventName, ctx.agentId)
     return result(response)
   }
