@@ -931,11 +931,29 @@ function printSetConfirmation(
   console.log(`\n  Saved: ${path}\n`)
 }
 
-function parseNumericSettingValue(raw: string): number {
+function parseNumericSettingValue(raw: string, def: SettingDef): number {
   if (!/^\d+$/.test(raw)) {
     throw new Error(`Invalid value "${raw}". Must be a non-negative integer.\n${usage()}`)
   }
-  return Number(raw)
+  const value = Number(raw)
+  if (!Number.isSafeInteger(value)) {
+    throw new Error(
+      `Invalid value "${raw}" for ${primaryAlias(def)}. Must be a finite safe integer.`
+    )
+  }
+  const schema =
+    def.zodSchema ??
+    z
+      .number()
+      .int()
+      .min(def.default === 0 ? 0 : 1)
+  const result = schema.safeParse(value)
+  if (!result.success) {
+    throw new Error(
+      `Invalid value "${raw}" for ${primaryAlias(def)}: ${result.error.issues.map((issue) => issue.message).join("; ")}`
+    )
+  }
+  return value
 }
 
 function parseBooleanSettingValue(parsed: ParsedSettingsArgs, raw: string): boolean {
@@ -987,7 +1005,7 @@ async function setValueSetting(
     return
   }
 
-  const value = parseNumericSettingValue(parsed.settingValue)
+  const value = parseNumericSettingValue(parsed.settingValue, def)
   const path = await writeSettingToScope(resolved, key, value, daemonReady)
   printSetConfirmation(resolved, key, value, path, def)
 }

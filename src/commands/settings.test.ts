@@ -27,6 +27,52 @@ import { settingsCommand } from "./settings.ts"
 
 const _tmp = useTempDir("swiz-settings-test-")
 
+describe("numeric settings validation", () => {
+  test.each([
+    ["narrator-speed", "700", "global"],
+    ["transcript-dispatch-cap", "65", "project"],
+    ["memory-line-threshold", "0", "global"],
+    ["narrator-speed", "3.5", "global"],
+    ["narrator-speed", "-1", "global"],
+    ["narrator-speed", "30abc", "global"],
+    ["push-cooldown", "9007199254740992", "global"],
+    ["push-cooldown", "9".repeat(400), "global"],
+  ])("rejects %s %s without writes", async (alias, value, scope) => {
+    const home = await createTempHome()
+    const path = join(home, ".swiz", scope === "project" ? "config.json" : "settings.json")
+    await mkdir(join(home, ".swiz"), { recursive: true })
+    const before = '{ "pushGate": false }\n'
+    const backup = "earlier recovery bytes"
+    await Bun.write(path, before)
+    await Bun.write(`${path}.bak`, backup)
+    const result = await runSwiz(["settings", "set", alias!, value!, `--${scope}`, "--json"], home)
+    expect(result.exitCode).toBe(1)
+    expect(result.stderr).toContain("Invalid value")
+    expect(result.stdout).not.toContain('"action":"set"')
+    expect(await Bun.file(path).text()).toBe(before)
+    expect(await Bun.file(`${path}.bak`).text()).toBe(backup)
+  })
+
+  test.each([
+    ["narrator-speed", "narratorSpeed", 0, "global"],
+    ["narrator-speed", "narratorSpeed", 600, "global"],
+    ["transcript-dispatch-cap", "transcriptMonitorMaxConcurrentDispatches", 0, "project"],
+    ["transcript-dispatch-cap", "transcriptMonitorMaxConcurrentDispatches", 64, "project"],
+  ] as const)("accepts boundary for %s", async (alias, key, value, scope) => {
+    const home = await createTempHome()
+    const result = await runSwiz(
+      ["settings", "set", alias, String(value), `--${scope}`, "--json"],
+      home
+    )
+    expect(result.exitCode).toBe(0)
+    expect(JSON.parse(result.stdout).value).toBe(value)
+    const path = join(home, ".swiz", scope === "project" ? "config.json" : "settings.json")
+    expect((await Bun.file(path).json())[key]).toBe(value)
+    const shown = await runSwiz(["settings", "show", `--${scope}`, "--json"], home)
+    expect(JSON.parse(shown.stdout)[key]).toBe(value)
+  })
+})
+
 describe("typed JSON set confirmations", () => {
   test.each([
     ["narrator-speed", "narratorSpeed", 0, "system default"],
