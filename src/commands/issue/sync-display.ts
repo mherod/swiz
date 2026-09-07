@@ -189,7 +189,7 @@ export async function handleSync(args: string[]): Promise<void> {
   }
 
   console.log(`🔄 Syncing upstream state for ${repo}${syncAge}...`)
-  const result = await syncUpstreamState(repo, cwd)
+  const result = await syncUpstreamState(repo, cwd, { forceComments: force })
   printSyncCompletion(result)
   printOpenItems(repo)
 }

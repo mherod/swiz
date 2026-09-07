@@ -464,7 +464,7 @@ export function ghListToRestFallback(args: string[]): RestFallbackMapping | null
 }
 
 /** Fetch via REST API for a mapped gh list command. */
-async function fetchViaRest(
+export async function fetchViaRest(
   endpoint: string,
   cwd: string,
   etagValue?: string | null,
@@ -497,10 +497,7 @@ function parseRestResponse(
   stdout: string
 ): { status: number | null; headers: Record<string, string>; body: string } | null {
   const parsed = parseGhApiIncludeOutput(stdout)
-  if (parsed.headers.etag) {
-    // Call observeGhApiIncludeOutput to update rate limit state from headers
-    observeGhApiIncludeOutput(stdout)
-  }
+  observeGhApiIncludeOutput(stdout)
   if (parsed.status === 304) {
     return { status: 304, headers: parsed.headers, body: "" }
   }

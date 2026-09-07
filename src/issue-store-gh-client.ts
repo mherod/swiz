@@ -6,6 +6,7 @@
  */
 
 import { acquireGhSlot, observeGhApiIncludeOutput } from "./gh-rate-limit.ts"
+import { fetchIssueDiscussion } from "./issue-discussion-fetch.ts"
 import type {
   GitHubBranchProtectionRecord,
   GitHubCiRunRecord,
@@ -17,6 +18,7 @@ import type {
   GitHubMilestoneRecord,
   GitHubPullRequestRecord,
   GitHubReviewRecord,
+  IssueStore,
 } from "./issue-store.ts"
 import { fetchGhJson } from "./issue-store.ts"
 import type { RestFallbackStats } from "./issue-store-rest-fallback.ts"
@@ -82,6 +84,15 @@ export class GhCliGitHubClient implements GitHubClient {
       undefined,
       this.signal
     )
+  }
+
+  async listIssueDiscussion(
+    cwd: string,
+    issueNumber: number,
+    store: IssueStore,
+    repo: string
+  ): Promise<GitHubCommentRecord[] | null> {
+    return fetchIssueDiscussion({ cwd, issueNumber, store, repo, signal: this.signal })
   }
 
   async listPullRequestReviews(

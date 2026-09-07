@@ -247,6 +247,9 @@ interface SyncContext {
   repo: string
   cwd: string
   result: UpstreamSyncResult
+  forceComments?: boolean
+  signal?: AbortSignal
+  fetchComments: (number: number) => Promise<GitHubCommentRecord[] | null>
 }
 
 interface EntitySyncOps {
@@ -620,24 +623,39 @@ function collectCommentSyncTargets(
   return toSync
 }
 
+function isDiscussionFresh(ctx: SyncContext, cursorKey: string, version: string): boolean {
+  const checkedAt = Number(ctx.store.getSyncCursor(ctx.repo, cursorKey))
+  const syncedVersion = ctx.store.getSyncCursor(ctx.repo, `${cursorKey}:version`)
+  return !ctx.forceComments && version === syncedVersion && checkedAt > Date.now() - 300_000
+}
+
 /** Sync comments for blocked/stalled issues AND recently-updated issues. */
 async function syncComments(
   ctx: SyncContext,
   issues: { number: number; labels?: unknown; updatedAt?: string }[] | null,
-  issuesChanged: boolean
+  changedNumbers: Set<number>
 ): Promise<void> {
-  if (!issues || !issuesChanged) return
-
-  const toSync = collectCommentSyncTargets(issues)
-  let commentCount = 0
-  for (const issueNumber of toSync) {
-    const comments = await ctx.client.listIssueComments(ctx.cwd, issueNumber)
-    if (comments && comments.length > 0) {
-      ctx.store.upsertIssueComments(ctx.repo, issueNumber, comments)
-      commentCount += comments.length
+  if (!issues || ctx.signal?.aborted) return
+  const targets = collectCommentSyncTargets(issues)
+  const tasks = [...targets].map((number) => async () => {
+    const cursorKey = `issue_comments:${number}`
+    const version = ctx.store.getIssueRaw(ctx.repo, number) ?? ""
+    const fresh = isDiscussionFresh(ctx, cursorKey, version)
+    if (fresh && !changedNumbers.has(number)) return
+    if (ctx.signal?.aborted) return
+    try {
+      const comments = await ctx.fetchComments(number)
+      if (comments === null || ctx.signal?.aborted) return
+      ctx.store.removeIssueComments(ctx.repo, number)
+      ctx.store.upsertIssueComments(ctx.repo, number, comments)
+      ctx.store.setSyncCursor(ctx.repo, cursorKey, String(Date.now()))
+      ctx.store.setSyncCursor(ctx.repo, `${cursorKey}:version`, version)
+      ctx.result.comments.upserted += comments.length
+    } catch (error) {
+      debugLog(`[issue-sync] comment refresh failed for ${ctx.repo}#${number}: ${String(error)}`)
     }
-  }
-  ctx.result.comments.upserted = commentCount
+  })
+  await runWithLimit(RAW_ENRICHMENT_CONCURRENCY, tasks)
 }
 
 function createInitialSyncResult(): UpstreamSyncResult {
@@ -804,6 +822,7 @@ interface PrimarySyncState {
   issuesChanged: boolean
   prsChanged: boolean
   changedPrNumbers: Set<number>
+  changedIssueNumbers: Set<number>
 }
 
 async function syncSecondaryEntities(
@@ -811,6 +830,8 @@ async function syncSecondaryEntities(
   primary: PrimarySyncState,
   signal?: AbortSignal
 ): Promise<void> {
+  await syncComments(ctx, primary.payloads.issues, primary.changedIssueNumbers)
+  if (signal?.aborted) return
   const allPrimaryListsCached = checkAllPrimaryListsCached(
     ctx.result.restCache.notModified,
     primary.payloads,
@@ -820,8 +841,6 @@ async function syncSecondaryEntities(
   if (allPrimaryListsCached) return
 
   await syncBranchData(ctx, primary.payloads.prs, primary.changedPrNumbers)
-  if (signal?.aborted) return
-  await syncComments(ctx, primary.payloads.issues, primary.issuesChanged)
   if (signal?.aborted) return
   await syncIssueEvents(ctx.store, ctx.client, ctx.repo, ctx.result)
 }
@@ -861,24 +880,46 @@ async function syncPrimaryData(
     issuesChanged,
     prsChanged,
     changedPrNumbers: outcome.changedPrNumbers,
+    changedIssueNumbers: outcome.changedIssueNumbers,
   }
 }
 
 async function resolveSyncSetup(
   repo: string,
   cwd: string,
-  opts?: { store?: IssueStore; client?: GitHubClient; signal?: AbortSignal }
+  opts: {
+    store?: IssueStore
+    client?: GitHubClient
+    signal?: AbortSignal
+    forceComments?: boolean
+  } = {}
 ): Promise<{ ctx: SyncContext; signal?: AbortSignal } | null> {
-  const signal = opts?.signal
+  const signal = opts.signal
   const { getIssueStore, GhCliGitHubClient } = await import("./issue-store.ts")
-  const store = opts?.store ?? getIssueStore()
+  const store = opts.store ?? getIssueStore()
   const result = createInitialSyncResult()
-  const client = opts?.client ?? new GhCliGitHubClient(result.restCache, signal)
+  const defaultClient = new GhCliGitHubClient(result.restCache, signal)
+  const client = opts.client ?? defaultClient
 
-  const allowed = await verifyRepoOriginInvariant(repo, cwd, Boolean(opts?.client))
+  const allowed = await verifyRepoOriginInvariant(repo, cwd, Boolean(opts.client))
   if (!allowed || signal?.aborted) return null
 
-  return { ctx: { store, client, repo, cwd, result }, signal }
+  const fetchComments = opts.client
+    ? (number: number) => client.listIssueComments(cwd, number)
+    : (number: number) => defaultClient.listIssueDiscussion(cwd, number, store, repo)
+  return {
+    ctx: {
+      store,
+      client,
+      repo,
+      cwd,
+      result,
+      signal,
+      forceComments: opts.forceComments,
+      fetchComments,
+    },
+    signal,
+  }
 }
 
 /**
@@ -889,7 +930,12 @@ async function resolveSyncSetup(
 export async function syncUpstreamState(
   repo: string,
   cwd: string,
-  opts?: { store?: IssueStore; client?: GitHubClient; signal?: AbortSignal }
+  opts?: {
+    store?: IssueStore
+    client?: GitHubClient
+    signal?: AbortSignal
+    forceComments?: boolean
+  }
 ): Promise<UpstreamSyncResult> {
   const setup = await resolveSyncSetup(repo, cwd, opts)
   if (!setup) return createInitialSyncResult()
