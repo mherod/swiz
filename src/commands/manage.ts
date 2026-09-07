@@ -33,6 +33,7 @@ interface ParsedManageArgs {
   action: ManageAction
   name?: string
   command?: string
+  url?: string
   args: string[]
   env: Record<string, string>
   targetAgents: AgentId[]
@@ -173,6 +174,7 @@ function usage(): string {
     "  swiz manage mcp show figma --cursor",
     "  swiz manage mcp add figma --command npx --arg -y --arg @modelcontextprotocol/server-figma --env FIGMA_TOKEN=token --cursor",
     "  swiz manage mcp add figma --command npx --project --cursor",
+    "  swiz manage mcp add remote --url https://example.com/mcp --cursor --codex",
     "  swiz manage mcp remove figma --claude --cursor",
     "  swiz manage mcp validate",
     "  swiz manage mcp validate --project",
@@ -195,6 +197,7 @@ function parseEnvAssignment(value: string): { key: string; val: string } {
 interface ManageParseState {
   name?: string
   command?: string
+  url?: string
   project: boolean
   dryRun: boolean
   actionArgs: string[]
@@ -216,6 +219,12 @@ function consumeManageValueFlag(
       },
     ],
     ["--arg", (value) => state.actionArgs.push(value)],
+    [
+      "--url",
+      (value) => {
+        state.url = value
+      },
+    ],
     [
       "--env",
       (value) => {
@@ -336,6 +345,7 @@ export function parseManageArgs(args: string[]): ParsedManageArgs {
     action,
     name: state.name,
     command: state.command,
+    url: state.url,
     args: state.actionArgs,
     env: state.env,
     targetAgents: resolveTargetAgents(state),
@@ -355,14 +365,23 @@ function validateManageOptions(action: ManageAction, state: ManageParseState): v
     throw new Error("--dry-run supports sync and merge only")
 }
 
+function validateAddTransport(state: ManageParseState): void {
+  if (Boolean(state.command) === Boolean(state.url))
+    throw new Error(`"add" requires exactly one of --command <cmd> or --url <url>\n${usage()}`)
+  if (!state.url) return
+  if (!URL.canParse(state.url) || !["http:", "https:"].includes(new URL(state.url).protocol))
+    throw new Error("Invalid --url: expected an absolute HTTP or HTTPS endpoint")
+  if (state.actionArgs.length || Object.keys(state.env).length)
+    throw new Error("--arg and --env require --command; they cannot be used with --url")
+}
+
 function validateManageParseState(action: ManageAction, state: ManageParseState): void {
   validateManageOptions(action, state)
   if (ACTIONS_REQUIRING_NAME.has(action) && !state.name) {
     throw new Error(`"${action}" requires a server name\n${usage()}`)
   }
-  if (action === "add" && !state.command) {
-    throw new Error(`"add" requires --command <cmd>\n${usage()}`)
-  }
+  if (action === "add") validateAddTransport(state)
+  else if (state.url !== undefined) throw new Error("--url supports add only")
   if (action === "merge" && state.sourceAgentFlags.size === 0) {
     throw new Error(`"merge" requires --from <agent|all>\n${usage()}`)
   }
@@ -481,16 +500,15 @@ async function showMcpServer(
 
 async function addMcpServer(parsed: ParsedManageArgs, base: string): Promise<void> {
   const name = parsed.name!
-  const command = parsed.command!
+  const definition: McpServerDef = parsed.url ? { url: parsed.url } : { command: parsed.command! }
+  if (parsed.args.length > 0) definition.args = parsed.args
+  if (Object.keys(parsed.env).length > 0) definition.env = parsed.env
   for (const agentId of parsed.targetAgents) {
     const agent = getAgentConfig(agentId, parsed.project)
     const path = agent.resolvePath(base)
     const json = await readMcpFile(path)
     const mcpServers = { ...(json.mcpServers ?? {}) }
-    const server: McpServerDef = { command }
-    if (parsed.args.length > 0) server.args = parsed.args
-    if (Object.keys(parsed.env).length > 0) server.env = parsed.env
-    mcpServers[name] = server
+    mcpServers[name] = translateServerForAgent(definition, agentId)
     await writeMcpFile(path, { ...json, mcpServers })
     console.log(`Added "${name}" to ${agent.displayName} (${path})`)
   }
@@ -852,6 +870,10 @@ export const manageCommand: Command<ManageCommandOptions> = {
     {
       flags: "mcp add <name> --command <cmd> [--arg ...] [--env KEY=VALUE]",
       description: "Add or update an MCP server entry",
+    },
+    {
+      flags: "mcp add <name> --url <url>",
+      description: "Add or update a remote HTTP or HTTPS MCP endpoint",
     },
     { flags: "mcp remove <name>", description: "Remove an MCP server entry" },
     { flags: "mcp validate", description: "Validate MCP server configuration files" },

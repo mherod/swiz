@@ -4,6 +4,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { runCommandInProcess } from "../utils/test-utils.ts"
 import { manageCommand, parseManageArgs } from "./manage.ts"
+import { readMcpFile } from "./mcp-config.ts"
 
 const DESKTOP_CONFIG_SUBPATH = join(
   "Library",
@@ -93,6 +94,73 @@ describe("parseManageArgs", () => {
 })
 
 describe("manage mcp command", () => {
+  it.each([
+    false,
+    true,
+  ])("adds and replaces remote JSON/TOML entries (project=%s)", async (project) => {
+    const home = await makeTempHome()
+    const cwd = await makeTempHome()
+    const base = project ? cwd : home
+    const targets = ["--cursor", "--agy", "--codex"]
+    const scope = project ? ["--project"] : []
+    const args = ["mcp", "add", "remote", ...targets, ...scope]
+    expect(
+      (
+        await runManage(
+          [...args, "--command", "bun", "--arg", "old", "--env", "OLD=yes"],
+          home,
+          cwd
+        )
+      ).exitCode
+    ).toBe(0)
+    const url = "https://example.com/mcp?region=eu"
+    expect((await runManage([...args, "--url", url], home, cwd)).exitCode).toBe(0)
+    const paths = [
+      [join(base, ".cursor", "mcp.json"), "url"],
+      [join(base, ".codex", "config.toml"), "url"],
+      [
+        project
+          ? join(base, ".agents", "mcp_config.json")
+          : join(base, ".gemini", "config", "mcp_config.json"),
+        "serverUrl",
+      ],
+    ]
+    for (const [path, key] of paths) {
+      expect((await readMcpFile(path!)).mcpServers?.remote).toEqual({ [key!]: url })
+    }
+    expect((await runManage(["mcp", "validate", ...targets, ...scope], home, cwd)).exitCode).toBe(0)
+    expect((await runManage(["mcp", "list", ...targets, ...scope], home, cwd)).stdout).toContain(
+      url
+    )
+    expect((await runManage([...args, "--command", "bun"], home, cwd)).exitCode).toBe(0)
+    for (const [path] of paths)
+      expect((await readMcpFile(path!)).mcpServers?.remote).toEqual({ command: "bun" })
+  })
+
+  it.each([
+    [],
+    ["--url"],
+    ["--url", "relative/path"],
+    ["--url", "https://"],
+    ["--url", "file:///etc/hosts"],
+    ["--url", "https://example.com/mcp", "--command", "bun"],
+    ["--url", "https://example.com/mcp", "--arg", "ignored"],
+    ["--url", "https://example.com/mcp", "--env", "IGNORED=yes"],
+  ])("rejects invalid transports before changing any files: %j", async (...transport) => {
+    const home = await makeTempHome()
+    const path = join(home, ".cursor", "mcp.json")
+    await mkdir(join(home, ".cursor"), { recursive: true })
+    const original = '{"mcpServers":{"keep":{"command":"bun"}}}\n'
+    await Bun.write(path, original)
+    const result = await runManage(
+      ["mcp", "add", "remote", "--cursor", "--codex", ...transport],
+      home
+    )
+    expect(result.exitCode).toBe(1)
+    expect(await Bun.file(path).text()).toBe(original)
+    expect(await Bun.file(join(home, ".codex", "config.toml")).exists()).toBe(false)
+  })
+
   it("adds and lists MCP servers for cursor", async () => {
     const home = await makeTempHome()
     const add = await runManage(
