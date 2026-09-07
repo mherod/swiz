@@ -97,11 +97,42 @@ export async function writeMcpFile(path: string, value: McpFileData): Promise<vo
   await writeWithBackup(path, text)
 }
 
+/** Keep enabled defaults and client startup tuning out of shared connection definitions. */
+export function normalizeMcpLocalOptions(server: McpServerDef): McpServerDef {
+  const normalized = { ...server }
+  if (normalized.disabled === false) delete normalized.disabled
+  if (normalized.enabled === true) delete normalized.enabled
+  if (
+    typeof normalized.startup_timeout_sec === "number" &&
+    Number.isFinite(normalized.startup_timeout_sec) &&
+    normalized.startup_timeout_sec > 0
+  )
+    delete normalized.startup_timeout_sec
+  return normalized
+}
+
+export function isMcpServerDisabled(server: McpServerDef | undefined): boolean {
+  return server?.disabled === true || server?.enabled === false
+}
+
+/** Only retain the target's local settings; never mutate the shared source definition. */
+export function retainMcpLocalOptions(
+  server: McpServerDef,
+  existing: McpServerDef | undefined
+): McpServerDef {
+  const result = { ...server }
+  for (const key of ["enabled", "disabled", "startup_timeout_sec"]) {
+    if (existing && Object.hasOwn(existing, key)) result[key] = existing[key]
+  }
+  return result
+}
+
 export function assertPortableServers(servers: Record<string, McpServerDef>): void {
-  for (const [name, server] of Object.entries(servers)) {
-    if (!isRecord(server)) {
+  for (const [name, definition] of Object.entries(servers)) {
+    if (!isRecord(definition)) {
       throw new Error(`Server "${name}" is not an object`)
     }
+    const server = normalizeMcpLocalOptions(definition)
     const isRemote = server.url !== undefined || server.serverUrl !== undefined
     if (isRemote) {
       assertPortableRemoteServer(name, server)
@@ -173,7 +204,8 @@ export function portableServers(
 ): Record<string, McpServerDef> {
   assertPortableServers(servers)
   return Object.fromEntries(
-    Object.entries(servers).map(([name, server]) => {
+    Object.entries(servers).map(([name, definition]) => {
+      const server = normalizeMcpLocalOptions(definition)
       if (server.url !== undefined || server.serverUrl !== undefined) {
         const { url, serverUrl, ...rest } = server
         return [name, { url: (url ?? serverUrl) as string, ...rest }]

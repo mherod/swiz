@@ -114,6 +114,112 @@ describe("Antigravity MCP", () => {
 })
 
 describe("cross-agent synchronization", () => {
+  test("sync accepts enabled defaults, retains local flags and converges", async () => {
+    const home = await create()
+    const agy = join(home, ".gemini", "config", "mcp_config.json")
+    const codex = join(home, ".codex", "config.toml")
+    const cursor = join(home, ".cursor", "mcp.json")
+    const shadcn = { command: "npx", args: ["shadcn@latest", "mcp"] }
+    const remote = { url: "https://example.invalid/mcp" }
+    await write(agy, {
+      mcpServers: {
+        shadcn: { ...shadcn, disabled: false },
+        remote: { serverUrl: remote.url, disabled: false },
+      },
+    })
+    await write(
+      codex,
+      '[mcp_servers.shadcn]\ncommand = "npx"\nargs = ["shadcn@latest", "mcp"]\nenabled = true\nstartup_timeout_sec = 120\n'
+    )
+    const args = ["sync", "--agy", "--codex", "--cursor"]
+    const before = await Bun.file(agy).text()
+    expect((await run([...args, "--dry-run"], home)).exitCode).toBe(0)
+    expect(await Bun.file(agy).text()).toBe(before)
+    expect(await Bun.file(cursor).exists()).toBe(false)
+    expect((await run(args, home)).exitCode).toBe(0)
+    expect((await readMcpFile(agy)).mcpServers?.shadcn).toEqual({ ...shadcn, disabled: false })
+    expect((await readMcpFile(codex)).mcpServers?.shadcn).toEqual({
+      ...shadcn,
+      enabled: true,
+      startup_timeout_sec: 120,
+    })
+    expect((await readMcpFile(cursor)).mcpServers).toEqual({ shadcn, remote })
+    const after = await Promise.all([agy, codex, cursor].map((path) => Bun.file(path).text()))
+    expect((await run(args, home)).exitCode).toBe(0)
+    expect(await Promise.all([agy, codex, cursor].map((path) => Bun.file(path).text()))).toEqual(
+      after
+    )
+  })
+
+  test("directed merge retains target enablement while updating transport", async () => {
+    const home = await create()
+    const cursor = join(home, ".cursor", "mcp.json")
+    const agy = join(home, ".gemini", "config", "mcp_config.json")
+    const codex = join(home, ".codex", "config.toml")
+    await write(cursor, { mcpServers: { demo: command } })
+    await write(agy, { mcpServers: { demo: { command: "old", disabled: true } } })
+    await write(
+      codex,
+      '[mcp_servers.demo]\ncommand = "old"\nenabled = false\nstartup_timeout_sec = 120\n'
+    )
+    expect((await run(["merge", "--from", "cursor", "--agy", "--codex"], home)).exitCode).toBe(0)
+    expect((await readMcpFile(agy)).mcpServers?.demo).toEqual({ ...command, disabled: true })
+    expect((await readMcpFile(codex)).mcpServers?.demo).toEqual({
+      ...command,
+      enabled: false,
+      startup_timeout_sec: 120,
+    })
+    expect((await readMcpFile(cursor)).mcpServers?.demo).toEqual(command)
+  })
+
+  test.each([
+    { disabled: "false" },
+    { enabled: true, disabled: true },
+    { disabled: false, customOption: true },
+    { startup_timeout_sec: "120" },
+    { startup_timeout_sec: -1 },
+  ])("sync refuses to discard meaningful or invalid options: %j", async (options) => {
+    const home = await create()
+    const agy = join(home, ".gemini", "config", "mcp_config.json")
+    const cursor = join(home, ".cursor", "mcp.json")
+    await write(agy, { mcpServers: { demo: { ...command, ...options } } })
+    const before = await Bun.file(agy).text()
+    expect((await run(["sync", "--agy", "--cursor"], home)).exitCode).toBe(1)
+    expect(await Bun.file(agy).text()).toBe(before)
+    expect(await Bun.file(cursor).exists()).toBe(false)
+  })
+
+  test("sync retains disabled local servers without enabling or exporting them", async () => {
+    const home = await create()
+    const agy = join(home, ".gemini", "config", "mcp_config.json")
+    const codex = join(home, ".codex", "config.toml")
+    const cursor = join(home, ".cursor", "mcp.json")
+    await write(agy, {
+      mcpServers: {
+        shared: { ...command, disabled: true },
+        localOnly: { command: "local", disabled: true },
+      },
+    })
+    await write(
+      codex,
+      '[mcp_servers.computer-use]\ncommand = "./local-app"\ncwd = "."\nenabled = false\n[mcp_servers.shared]\ncommand = "active"\n'
+    )
+    const before = await Bun.file(agy).text()
+    const args = ["sync", "--agy", "--codex", "--cursor"]
+    const result = await run(args, home)
+    expect(result.exitCode).toBe(0)
+    expect(result.stderr).toContain('Keeping disabled MCP server "computer-use" local to Codex')
+    expect(await Bun.file(agy).text()).toBe(before)
+    expect((await readMcpFile(codex)).mcpServers?.["computer-use"]).toEqual({
+      command: "./local-app",
+      cwd: ".",
+      enabled: false,
+    })
+    expect((await readMcpFile(cursor)).mcpServers).toEqual({ shared: { command: "active" } })
+    expect((await run(args, home)).exitCode).toBe(0)
+    expect(await Bun.file(agy).text()).toBe(before)
+  })
+
   test.each([
     false,
     true,

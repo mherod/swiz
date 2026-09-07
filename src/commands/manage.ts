@@ -7,11 +7,14 @@ import { getHomeDirOrNull } from "../home.ts"
 import type { Command } from "../types.ts"
 import {
   filterPortableServers,
+  isMcpServerDisabled,
   type McpFileData,
   type McpServerDef,
+  normalizeMcpLocalOptions,
   portableServers,
   readMcpFile,
   renderMcpFile,
+  retainMcpLocalOptions,
   writeMcpFile,
 } from "./mcp-config.ts"
 
@@ -610,6 +613,15 @@ function validateAgentRemoteServer(
   }
 }
 
+function validateServerEnablement(name: string, server: McpServerDef, issues: string[]): void {
+  for (const key of ["enabled", "disabled"]) {
+    if (server[key] !== undefined && typeof server[key] !== "boolean")
+      issues.push(`Server "${name}" has invalid ${key} (must be boolean)`)
+  }
+  if (server.enabled !== undefined && server.disabled === server.enabled)
+    issues.push(`Server "${name}" has conflicting enabled and disabled settings`)
+}
+
 function validateAgentServer(
   agentId: AgentId,
   name: string,
@@ -620,6 +632,7 @@ function validateAgentServer(
     validateServerShape(name, server, issues)
     return
   }
+  validateServerEnablement(name, server, issues)
   const remoteKey = agentId === "antigravity" ? "serverUrl" : "url"
   if (Object.hasOwn(server, remoteKey)) {
     validateAgentRemoteServer(remoteKey, name, server, issues)
@@ -675,7 +688,17 @@ async function readMergeSources(
         throw new Error(`${agent.displayName} (${agent.resolvePath(base)}): ${issues.join("; ")}`)
       }
     }
-    sources.push(selectMergeDefinitions(rawServers, parsed, convert, agent, skipped))
+    const activeServers = Object.fromEntries(
+      Object.entries(rawServers).filter(([name, server]) => {
+        if (parsed.action !== "sync" || !isMcpServerDisabled(server)) return true
+        stderrLog(
+          "manage sync retains disabled servers in their owning agent configuration",
+          `Keeping disabled MCP server "${name}" local to ${agent.displayName}`
+        )
+        return false
+      })
+    )
+    sources.push(selectMergeDefinitions(activeServers, parsed, convert, agent, skipped))
   }
   for (const servers of sources) {
     for (const name of skipped) delete servers[name]
@@ -734,8 +757,12 @@ async function planAgentMerge(
   const servers = { ...(data.mcpServers ?? {}) }
   let addedCount = 0
   let updatedCount = 0
-  for (const [name, server] of Object.entries(sourceServers)) {
-    const translated = translateServerForAgent(server, id)
+  const mergeable = Object.entries(sourceServers).filter(
+    ([name]) => parsed.action !== "sync" || !isMcpServerDisabled(servers[name])
+  )
+  for (const [name, server] of mergeable) {
+    const existing = servers[name]
+    const translated = retainMcpLocalOptions(translateServerForAgent(server, id), existing)
     if (Object.hasOwn(servers, name) && mcpServersEqual(servers[name]!, translated)) continue
     if (Object.hasOwn(servers, name)) updatedCount++
     else addedCount++
@@ -793,16 +820,14 @@ const SWIZ_MCP_SERVER_NAME = "swiz"
 const SWIZ_MCP_SERVER_DEF: McpServerDef = { command: "swiz", args: ["mcp"] }
 
 export function canonicalizeMcpServer(server: McpServerDef): McpServerDef {
-  if (
-    server &&
-    typeof server === "object" &&
-    (Object.hasOwn(server, "url") || Object.hasOwn(server, "serverUrl"))
-  ) {
+  if (!server || typeof server !== "object") return server
+  server = normalizeMcpLocalOptions(server)
+  if (Object.hasOwn(server, "url") || Object.hasOwn(server, "serverUrl")) {
     const endpointUrl = (server.serverUrl ?? server.url) as string
     const { url: _u, serverUrl: _su, ...rest } = server
     return { url: endpointUrl, ...rest } as McpServerDef
   }
-  if (server && typeof server === "object" && server.type === "stdio") {
+  if (server.type === "stdio") {
     const { type: _type, ...rest } = server
     return rest as McpServerDef
   }
@@ -897,7 +922,10 @@ export const manageCommand: Command<ManageCommandOptions> = {
   description: "Manage shared swiz resources (MCP, etc.)",
   usage: "swiz manage mcp <list|show|add|remove|validate|merge|sync> [options]",
   options: [
-    { flags: "mcp sync", description: "Union installed agents; conflicts fail before writes" },
+    {
+      flags: "mcp sync",
+      description: "Sync enabled servers across agents; preserve disabled entries locally",
+    },
     { flags: "--dry-run", description: "Preview sync or merge without writes" },
     {
       flags: "--skip-non-portable",
