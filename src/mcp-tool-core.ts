@@ -20,6 +20,7 @@ import { z } from "zod"
 import { getHomeDirWithFallback } from "./home.ts"
 import { projectKeyFromCwd } from "./project-key.ts"
 import { createDefaultTaskStore } from "./task-roots.ts"
+import { discoverRelatedTaskAdvice } from "./tasks/task-discovery.ts"
 import { getTaskToolName } from "./tasks/task-governance-messages.ts"
 import {
   describeTaskChanges,
@@ -148,8 +149,9 @@ async function runTaskCreateTool(input: McpToolInput, cwd: string): Promise<McpT
     })
     const tasks = await readProjectTasksWithPrune(projectKey)
     const headline = `Created #${task.id} — ${truncateForLine(task.subject)}`
+    const advice = await discoverRelatedTaskAdvice(cwd, task)
     return {
-      ...textResult(renderTaskToolResult(headline, tasks, task.id)),
+      ...textResult(renderTaskToolResult(headline, tasks, task.id) + advice),
       structuredContent: { taskMutation: { changed: true } },
     }
   } catch (error) {
