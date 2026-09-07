@@ -8,7 +8,7 @@
     "swiz": "index.ts"
   },
   "scripts": {
-    "start": "bun run index.ts",
+    "start": "SWIZ_DIRECT=1 bun run index.ts",
     "test": "PATH=\"${npm_execpath%/*}:$PATH\" \"$npm_execpath\" test --parallel=4 --timeout=5000",
     "test:vitest": "vitest",
     "test:bun": "PATH=\"${npm_execpath%/*}:$PATH\" \"$npm_execpath\" test --parallel=4 --timeout=5000",
