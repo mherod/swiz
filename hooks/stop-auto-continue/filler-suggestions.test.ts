@@ -1,27 +1,22 @@
 import { describe, expect, test } from "bun:test"
-import { mkdtemp, writeFile } from "node:fs/promises"
-import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { spawnWithTimeout } from "../../src/utils/process-utils.ts"
+import { useTempDir } from "../../src/utils/test-utils.ts"
 import { buildFillerSuggestion } from "./filler-suggestions.ts"
 
+const { create } = useTempDir("filler-test-")
+
 async function makeTempGitRepo(): Promise<string> {
-  const dir = await mkdtemp(join(tmpdir(), "filler-test-"))
-  const run = (args: string[]) =>
-    Bun.spawn(["git", ...args], { cwd: dir, stdout: "pipe", stderr: "pipe" })
-  await run(["init"]).exited
-  await run(["config", "user.email", "test@test.com"]).exited
-  await run(["config", "user.name", "Test"]).exited
-  // Create initial commit so branch exists
-  await writeFile(join(dir, "README.md"), "init")
-  await run(["add", "."]).exited
-  await run(["commit", "-m", "init"]).exited
+  const dir = await create()
+  const result = await spawnWithTimeout(["git", "init"], { cwd: dir })
+  expect(result.exitCode).toBe(0)
   return dir
 }
 
 describe("buildFillerSuggestion", () => {
   test("returns commit suggestion for dirty worktree", async () => {
     const dir = await makeTempGitRepo()
-    await writeFile(join(dir, "dirty.ts"), "change")
+    await Bun.write(join(dir, "dirty.ts"), "change")
     const result = await buildFillerSuggestion({ cwd: dir })
     expect(result).toContain("uncommitted file(s)")
     expect(result).toContain("/commit")
@@ -62,7 +57,7 @@ describe("buildFillerSuggestion", () => {
   })
 
   test("returns empty for non-git directory", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "filler-nogit-"))
+    const dir = await create()
     const result = await buildFillerSuggestion({ cwd: dir })
     expect(result).toBe("")
   })
