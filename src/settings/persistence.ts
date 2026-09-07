@@ -8,6 +8,7 @@ import { getHomeDirOrNull } from "../home.ts"
 import { type FileHookDef, type HookGroup, isInlineHookDef } from "../hook-types.ts"
 import { CappedMap } from "../utils/capped-map.ts"
 import { getLockPathForFile, withFileLock } from "../utils/file-lock.ts"
+import { ensureProjectSettingsIgnored } from "./git-ignore"
 import { deriveDefaultsFromRegistry, deriveSchemaShape } from "./registry"
 import {
   ALL_STATUS_LINE_SEGMENTS,
@@ -550,6 +551,7 @@ export async function writeProjectSettings(
     }
   }
   const existing = source === undefined ? {} : parseProjectSettingsForWrite(source, path)
+  await ensureProjectSettingsIgnored(cwd)
   await mkdir(dirname(path), { recursive: true })
   if (source !== undefined) await Bun.write(`${path}.bak`, source)
   await Bun.write(path, JSON.stringify({ ...existing, ...updates }, null, 2))

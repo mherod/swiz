@@ -59,3 +59,5 @@ output.txt
 # Local scratch/exploration files
 scratch/
 *.pile
+/.swiz/config.json
+/.swiz/config.json.bak
