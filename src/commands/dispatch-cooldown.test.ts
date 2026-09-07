@@ -1,5 +1,8 @@
-import { describe, expect, test } from "bun:test"
+import { describe, expect, spyOn, test } from "bun:test"
 import { existsSync } from "node:fs"
+import * as debug from "../debug.ts"
+import { type HookEntry, runEntry } from "../dispatch/engine.ts"
+import * as filters from "../dispatch/filters.ts"
 import {
   extractCwd,
   hookCooldownPath,
@@ -176,5 +179,97 @@ describe("extractCwd", () => {
   test("returns empty string when cwd is null", () => {
     const payload = JSON.stringify({ cwd: null })
     expect(extractCwd(payload)).toBe("")
+  })
+})
+
+describe("missing-session cooldown diagnostics (#864)", () => {
+  test.each([
+    undefined,
+    "",
+    "   ",
+  ])("executes and logs once without reading or arming cooldown: %j", async (sessionId) => {
+    const cwd = uniqueCwd(`missing-${crypto.randomUUID()}`)
+    let executions = 0
+    const entry: HookEntry = {
+      matcher: undefined,
+      hook: {
+        hook: {
+          name: TEST_HOOK,
+          event: "stop",
+          cooldownSeconds: 60,
+          cooldownScope: "session",
+          cooldownMode: "always",
+          run: async () => {
+            executions++
+            return {}
+          },
+        },
+      },
+    }
+    const logs = spyOn(debug, "debugLog").mockImplementation(() => {})
+    const reads = spyOn(filters, "isWithinCooldown")
+    const writes = spyOn(filters, "markHookCooldown")
+    try {
+      const result = await runEntry(
+        entry,
+        JSON.stringify({
+          cwd,
+          session_id: sessionId,
+          tool_input: { command: "private-input" },
+          _env: { TOKEN: "private-env" },
+        }),
+        cwd
+      )
+      expect(result.execution.status).toBe("no-output")
+      expect(executions).toBe(1)
+      expect(reads).not.toHaveBeenCalled()
+      expect(writes).not.toHaveBeenCalled()
+      expect(existsSync(hookCooldownPath(TEST_HOOK, cwd))).toBe(false)
+      const diagnostics = logs.mock.calls
+        .flat()
+        .filter((line) => String(line).includes("cooldown-bypass"))
+      expect(diagnostics).toEqual([
+        `   cooldown-bypass ${JSON.stringify({ hook: TEST_HOOK, scope: "session", reason: "missing-session-id" })}`,
+      ])
+      expect(JSON.stringify(diagnostics)).not.toContain("private-")
+      expect(JSON.stringify(diagnostics)).not.toContain(cwd)
+    } finally {
+      logs.mockRestore()
+      reads.mockRestore()
+      writes.mockRestore()
+    }
+  })
+
+  test.each([
+    "session",
+    "repo",
+  ] as const)("retains %s cooldown checks without bypass diagnostics", async (scope) => {
+    const cwd = uniqueCwd(`control-${crypto.randomUUID()}`)
+    const sessionId = "valid-session"
+    await markHookCooldown(TEST_HOOK, cwd, scope === "session" ? sessionId : undefined)
+    const entry: HookEntry = {
+      matcher: undefined,
+      hook: {
+        hook: {
+          name: TEST_HOOK,
+          event: "stop",
+          cooldownSeconds: 60,
+          cooldownScope: scope,
+          run: async () => {
+            throw new Error("Cooldown should suppress this hook")
+          },
+        },
+      },
+    }
+    const logs = spyOn(debug, "debugLog").mockImplementation(() => {})
+    try {
+      const result = await runEntry(entry, JSON.stringify({ cwd, session_id: sessionId }), cwd)
+      expect(result.execution.skipReason).toBe("cooldown-active")
+      expect(logs.mock.calls.flat().some((line) => String(line).includes("cooldown-bypass"))).toBe(
+        false
+      )
+    } finally {
+      logs.mockRestore()
+    }
   })
 })

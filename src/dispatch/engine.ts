@@ -106,7 +106,17 @@ export function cooldownScopeFor(
 ): HookCooldownScope {
   if (getHookCooldownScope(hook) !== "session") return { cwd }
   const sessionId = extractPayloadSessionId(payloadStr)
-  return sessionId ? { cwd, sessionId } : { cwd, skipCooldown: true }
+  if (sessionId) return { cwd, sessionId }
+  if (getHookCooldownSeconds(hook)) {
+    log(
+      `   cooldown-bypass ${JSON.stringify({
+        hook: hookIdentifier(hook),
+        scope: "session",
+        reason: "missing-session-id",
+      })}`
+    )
+  }
+  return { cwd, skipCooldown: true }
 }
 
 function isHookAsync(hook: HookDef): boolean {
