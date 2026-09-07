@@ -10,7 +10,7 @@ export default tseslint.config(
     languageOptions: {
       parser: tseslint.parser,
       parserOptions: {
-        project: true,
+        project: "./tsconfig.json",
         tsconfigRootDir: import.meta.dirname,
       },
       globals: {
@@ -21,6 +21,10 @@ export default tseslint.config(
     },
     plugins: {
       "@typescript-eslint": tseslint.plugin,
+    },
+    settings: {
+      /** Invalidate all cached diagnostics when any TypeScript dependency changes. */
+      swizTypeFingerprint: process.env.SWIZ_ESLINT_TYPE_FINGERPRINT ?? "",
     },
     rules: {
       "@typescript-eslint/no-unused-vars": [
