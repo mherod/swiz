@@ -260,7 +260,7 @@ describe("replaceAgentHooksWithSwiz", () => {
     expect(cleaned).toContain("[hooks]\nThis is documentation")
     expect(cleaned).not.toContain("echo custom")
     expect(Bun.TOML.parse(cleaned)).toEqual({
-      model_instructions: "\n[hooks]\nThis is documentation, not a TOML table.\n",
+      model_instructions: (Bun.TOML.parse(input) as Record<string, unknown>).model_instructions,
       features: { hooks: true },
     })
   })
