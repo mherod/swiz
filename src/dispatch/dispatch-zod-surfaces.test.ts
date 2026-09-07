@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test"
+import * as upstream from "agent-hook-schemas/claude"
+import * as envelopes from "../schemas.ts"
 import { preCompactHookInputSchema, sessionHookInputSchema } from "../schemas.ts"
 import {
   assertNormalizedDispatchPayload,
@@ -13,13 +15,57 @@ const CLAUDE_PRECOMPACT_BASE = {
   hook_event_name: "PreCompact",
 }
 
+const optionalEnvelopes = [
+  [envelopes.sessionHookInputSchema, upstream.PreCompactInputSchema],
+  [envelopes.permissionRequestHookInputSchema, upstream.PermissionRequestInputSchema],
+  [envelopes.subagentStartHookInputSchema, upstream.SubagentStartInputSchema],
+  [envelopes.taskCreatedHookInputSchema, upstream.TaskCreatedInputSchema],
+  [envelopes.taskCompletedHookInputSchema, upstream.TaskCompletedInputSchema],
+  [envelopes.teammateIdleHookInputSchema, upstream.TeammateIdleInputSchema],
+  [envelopes.stopFailureHookInputSchema, upstream.StopFailureInputSchema],
+  [envelopes.instructionsLoadedHookInputSchema, upstream.InstructionsLoadedInputSchema],
+  [envelopes.configChangeHookInputSchema, upstream.ConfigChangeInputSchema],
+  [envelopes.cwdChangedHookInputSchema, upstream.CwdChangedInputSchema],
+  [envelopes.fileChangedHookInputSchema, upstream.FileChangedInputSchema],
+  [envelopes.worktreeCreateHookInputSchema, upstream.WorktreeCreateInputSchema],
+  [envelopes.worktreeRemoveHookInputSchema, upstream.WorktreeRemoveInputSchema],
+  [envelopes.postCompactHookInputSchema, upstream.PostCompactInputSchema],
+  [envelopes.elicitationHookInputSchema, upstream.ElicitationInputSchema],
+  [envelopes.elicitationResultHookInputSchema, upstream.ElicitationResultInputSchema],
+] as const
+
+describe("optional envelope null normalization", () => {
+  test("every known field treats null exactly like omission without mutating input", () => {
+    for (const [schema, source] of optionalEnvelopes) {
+      const fields = Object.fromEntries(Object.keys(source.shape).map((key) => [key, null]))
+      const extension = { nested: [null, { value: null }] }
+      const input = { ...fields, extension, future: null }
+      expect(schema.parse(input)).toEqual(schema.parse({ extension, future: null }))
+      expect(input).toEqual({ ...fields, extension, future: null })
+      expect(schema.parse({ session_id: "session" }).session_id).toBe("session")
+      expect(schema.safeParse({ session_id: 42 }).success).toBe(false)
+    }
+  })
+
+  test("the post-tool failure union branch normalizes null fields", () => {
+    const fields = Object.fromEntries(
+      Object.keys(upstream.PostToolUseFailureInputSchema.shape).map((key) => [key, null])
+    )
+    expect(envelopes.postToolUseHookInputSchema.parse(fields)).toEqual({})
+  })
+
+  test("nested field validation and unknown nested nulls remain intact", () => {
+    const schema = envelopes.permissionRequestHookInputSchema
+    expect(schema.parse({ tool_input: { value: null } }).tool_input).toEqual({ value: null })
+    expect(schema.safeParse({ tool_input: 42 }).success).toBe(false)
+  })
+})
+
 describe("preCompact dispatch payload", () => {
   test("accepts a null custom_instructions", () => {
     const payload = { ...CLAUDE_PRECOMPACT_BASE, trigger: "manual", custom_instructions: null }
 
-    // Control: the package-derived schema this route used to union over rejects the same
-    // payload, so the acceptance above is real tolerance and not a vacuous pass.
-    expect(sessionHookInputSchema.safeParse(payload).success).toBe(false)
+    expect(sessionHookInputSchema.parse(payload).custom_instructions).toBeUndefined()
     expect(preCompactHookInputSchema.safeParse(payload).success).toBe(true)
     expect(assertNormalizedDispatchPayload("preCompact", payload).session_id).toBe(
       CLAUDE_PRECOMPACT_BASE.session_id

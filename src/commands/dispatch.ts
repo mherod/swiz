@@ -36,7 +36,10 @@ import {
   withLogBuffer,
 } from "../dispatch"
 import { dispatchToolUseId, ensureDispatchId } from "../dispatch/dispatch-id.ts"
-import { scheduleIncomingDispatchCapture } from "../dispatch/incoming-capture.ts"
+import {
+  flushIncomingDispatchCaptures,
+  scheduleIncomingDispatchCapture,
+} from "../dispatch/incoming-capture.ts"
 import { normalizeStopDispatchResponseInPlace } from "../dispatch/stop-response.ts"
 import { getHomeDirOrNull } from "../home.ts"
 import { appendHookLog, type HookLogEntry } from "../hook-log.ts"
@@ -727,6 +730,7 @@ function writeDispatchFailureResponse(
 }
 
 async function handleDispatchCommandFailure(args: string[], err: unknown): Promise<void> {
+  await flushIncomingDispatchCaptures()
   const context = resolveDispatchFailureContext(args)
   const message = messageFromUnknownError(err)
   if (context.isReplay || context.canonicalEvent === "(missing-event)") {

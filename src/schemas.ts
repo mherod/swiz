@@ -132,10 +132,17 @@ export { ParseEditToolInput, ParseWriteToolInput, ToolInputCommand, ToolInputFil
  * Make all fields of a `z.looseObject` schema optional.
  * The upstream package marks some fields as required (`session_id`, `cwd`),
  * but swiz uses `.optional()` everywhere for resilient parsing — hooks must
- * tolerate missing fields rather than rejecting payloads.
+ * tolerate missing fields rather than rejecting payloads. Known envelope nulls mean absent;
+ * nested values and unknown extension fields retain their original meaning.
  */
 function allOptional<T extends z.ZodObject>(schema: T) {
-  return schema.partial().catchall(z.unknown())
+  const keys = new Set(Object.keys(schema.shape))
+  return z.preprocess((value) => {
+    if (!isJsonLikeRecord(value)) return value
+    return Object.fromEntries(
+      Object.entries(value).filter(([key, field]) => field !== null || !keys.has(key))
+    )
+  }, schema.partial().catchall(z.unknown()))
 }
 
 // ─── Primitive field schemas ──────────────────────────────────────────────────
@@ -667,9 +674,8 @@ export type SessionHookInput = z.infer<typeof sessionHookInputSchema>
  * Dispatch validation envelope for `preCompact` across every agent.
  *
  * DON'T narrow this back to `z.union([sessionHookInputSchema, geminiPreCompressInputSchema])`.
- * `allOptional()` produces `.optional()` (not `.nullish()`) fields and `PkgPreCompactInputSchema`
- * pins `trigger` to the `"manual" | "auto"` enum, so Claude sending
- * `custom_instructions: null` — or any future trigger value — failed the whole union with a
+ * `PkgPreCompactInputSchema` pins `trigger` to the `"manual" | "auto"` enum, so a
+ * future trigger value would fail the whole union with a
  * root-level `"Invalid input"` that named no field, and `/compact` reported
  * `Invalid dispatch payload for event "preCompact"`.
  */

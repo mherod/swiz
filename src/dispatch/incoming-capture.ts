@@ -51,6 +51,7 @@ interface IncomingCapturePruneState {
 const incomingCapturePruneStateByDir = new Map<string, IncomingCapturePruneState>()
 const jsonlAppendQueueByPath = new Map<string, Promise<void>>()
 const activeCapturePaths = new Set<string>()
+const pendingDispatchCaptures = new Set<Promise<void>>()
 const CAPTURE_DIRECTORY_MODE = 0o700
 const CAPTURE_FILE_MODE = 0o600
 const MAX_CAPTURE_STRING_LENGTH = 64 * 1024
@@ -445,9 +446,27 @@ export function scheduleIncomingDispatchCapture(
   args: IncomingDispatchCaptureArgs,
   dir: string = SWIZ_INCOMING_ROOT
 ): void {
-  void writeIncomingDispatchCapture(args, dir).catch((err) => {
+  const pending = writeIncomingDispatchCapture(args, dir).catch((err) => {
     debugLog("[incoming-capture] failed:", messageFromUnknownError(err))
   })
+  pendingDispatchCaptures.add(pending)
+  void pending.finally(() => pendingDispatchCaptures.delete(pending))
+}
+
+/** Failure-only CLI drain; capture I/O must never delay the fallback by more than one second. */
+export async function flushIncomingDispatchCaptures(): Promise<void> {
+  if (pendingDispatchCaptures.size === 0) return
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    await Promise.race([
+      Promise.allSettled([...pendingDispatchCaptures]),
+      new Promise<void>((resolve) => {
+        timer = setTimeout(resolve, 1_000)
+      }),
+    ])
+  } finally {
+    if (timer) clearTimeout(timer)
+  }
 }
 
 export function buildIncomingDispatchCaptureEnvelope(

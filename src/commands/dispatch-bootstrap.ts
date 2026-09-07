@@ -11,6 +11,7 @@
 import { appendFile } from "node:fs/promises"
 import { ensureDispatchId } from "../dispatch/dispatch-id.ts"
 import {
+  flushIncomingDispatchCaptures,
   scheduleIncomingDispatchCapture,
   shouldCaptureIncomingPayloads,
 } from "../dispatch/incoming-capture.ts"
@@ -323,6 +324,7 @@ export async function runThinDispatch(
     await executeLocalFallback(canonicalEvent, hookEventName, payload)
     process.exit(0)
   } catch (err) {
+    await flushIncomingDispatchCaptures()
     await failOpen(canonicalEvent, hookEventName, err)
   }
 }

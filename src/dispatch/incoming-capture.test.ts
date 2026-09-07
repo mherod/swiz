@@ -2,6 +2,7 @@ import { describe, expect, it } from "bun:test"
 import { mkdtemp, readdir, readFile, stat, utimes, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { neutralAgentEnv, useTempDir } from "../utils/test-utils.ts"
 import {
   appendPayloadToJsonl,
   buildIncomingCaptureFilename,
@@ -24,6 +25,86 @@ import {
   summarizeToolSearchForJsonl,
   writeIncomingDispatchCapture,
 } from "./incoming-capture.ts"
+
+const failureHomes = useTempDir("swiz-capture-failure-")
+
+describe("failure capture process lifetime", () => {
+  for (const entry of ["dispatch", "dispatch-bootstrap"]) {
+    for (const mode of ["delayed", "disabled", "stalled", "raw"]) {
+      it(`${entry}: ${mode} capture preserves the bounded failure exit`, async () => {
+        const home = await failureHomes.create()
+        const dir = join(home, "captures")
+        const entryPath = join(import.meta.dir, "..", "commands", `${entry}.ts`)
+        const pathsModule = join(import.meta.dir, "..", "temp-paths.ts")
+        const script = `
+          import { mock } from "bun:test";
+          const paths = await import(${JSON.stringify(pathsModule)});
+          const dir = ${JSON.stringify(dir)};
+          mock.module(${JSON.stringify(pathsModule)}, () => ({ ...paths, SWIZ_INCOMING_ROOT: dir }));
+          const write = Bun.write.bind(Bun);
+          const started = performance.now();
+          Bun.write = (path, ...args) => {
+            if (typeof path === "string" && path.startsWith(dir)) {
+              if (${JSON.stringify(mode)} === "stalled") return new Promise(() => {});
+              return Bun.sleep(250).then(() => write(path, ...args));
+            }
+            return write(path, ...args);
+          };
+          const entry = await import(${JSON.stringify(entryPath)});
+          await (${JSON.stringify(entry)} === "dispatch"
+            ? entry.dispatchCommand.run(["preCompact", "PreCompact"])
+            : entry.runThinDispatch(["preCompact", "PreCompact"]));
+          process.stderr.write("elapsed=" + (performance.now() - started));
+          process.exit(0);
+        `
+        const payload = JSON.stringify({
+          session_id: "capture-test",
+          cwd: home,
+          trigger: 42,
+          user_email: "fixture@example.com",
+        })
+        const proc = Bun.spawn([process.execPath, "-e", script], {
+          cwd: home,
+          env: neutralAgentEnv({
+            HOME: home,
+            SWIZ_NO_DAEMON: "1",
+            AI_TEST_NO_BACKEND: "1",
+            SWIZ_CAPTURE_INCOMING: mode === "disabled" ? "0" : "1",
+            SWIZ_CAPTURE_INCOMING_PAYLOADS: "1",
+            SWIZ_CAPTURE_INCOMING_RAW: mode === "raw" ? "1" : "0",
+          }),
+          stdin: "pipe",
+          stdout: "pipe",
+          stderr: "pipe",
+        })
+        await proc.stdin.write(payload)
+        await proc.stdin.end()
+        const [stdout, stderr] = await Promise.all([
+          new Response(proc.stdout).text(),
+          new Response(proc.stderr).text(),
+        ])
+        expect(await proc.exited, stderr).toBe(0)
+        expect(stdout).toContain("Invalid dispatch payload")
+        expect(stdout).toContain("trigger")
+        const files = await readdir(dir).catch(() => [])
+        if (mode === "disabled" || mode === "stalled") {
+          expect(files).toEqual([])
+        } else {
+          const envelopeFile = files.find((file) => !file.endsWith(".raw.json"))!
+          const envelope = await Bun.file(join(dir, envelopeFile)).json()
+          expect(envelope.incoming.trigger).toBe(42)
+          expect(envelope.incoming.user_email).toBe("[redacted]")
+          expect((await stat(dir)).mode & 0o777).toBe(0o700)
+          for (const file of files) expect((await stat(join(dir, file))).mode & 0o777).toBe(0o600)
+          const raw = files.find((file) => file.endsWith(".raw.json"))
+          if (mode === "raw") expect(await Bun.file(join(dir, raw!)).text()).toBe(payload)
+          else expect(raw).toBeUndefined()
+        }
+        expect(Number(stderr.match(/elapsed=([\d.]+)/)?.[1])).toBeLessThan(3_000)
+      }, 10_000)
+    }
+  }
+})
 
 describe("summarizeToolSearchForJsonl", () => {
   it("captures the query and matched tool names", () => {
