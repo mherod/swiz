@@ -1,7 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, spyOn } from "bun:test"
+import { appendFile } from "node:fs/promises"
+import { join } from "node:path"
 import { Window } from "happy-dom"
 import { act, Profiler } from "react"
 import { createRoot, type Root } from "react-dom/client"
+import { SessionDataCache, scopeRevisionToWindow } from "../../commands/daemon/session-data.ts"
+import { sessionUsageLine } from "../../commands/daemon/test-fixtures/session.ts"
+import { useTempDir } from "../../utils/test-utils.ts"
 import { Header } from "../components/header.tsx"
 import { ProjectIssuesPanel } from "../components/project-issues-panel.tsx"
 import * as browserUtils from "../components/session-browser-utils.ts"
@@ -24,6 +29,7 @@ const intervals = new Map<number, () => void>()
 const globals = new Map<string, PropertyDescriptor | undefined>()
 let restoreMocks: Array<() => void> = []
 let rowRenders: ReturnType<typeof spyOn<typeof browserUtils, "formatTime">>
+const transcriptHomes = useTempDir("swiz-dashboard-telemetry-")
 
 function Harness() {
   latest = useDashboardState()
@@ -168,6 +174,85 @@ afterEach(async () => {
 })
 
 describe("mounted dashboard polling", () => {
+  it("uses real cache revisions for telemetry, content, token removal and selection changes", async () => {
+    const home = await transcriptHomes.create()
+    const session = { path: join(home, "session.jsonl"), format: "codex-jsonl" as const }
+    const cache = new SessionDataCache()
+    const message = (text: string) =>
+      JSON.stringify({
+        type: "response_item",
+        timestamp: "2026-09-07T10:00:00Z",
+        payload: { type: "message", role: "assistant", content: [{ type: "output_text", text }] },
+      })
+    const publish = async () => {
+      const value = (await cache.get(session, home))!
+      expect(value).not.toBeNull()
+      payloads["/sessions/messages"] = {
+        messages: value.messages,
+        toolStats: value.toolStats,
+        tokenStats: value.tokenStats,
+        revision: scopeRevisionToWindow(value.contentRevision, 150),
+      }
+      return value
+    }
+    await Bun.write(session.path, `${message("Cache message")}\n${sessionUsageLine(10)}\n`)
+    const initial = await publish()
+    await tick()
+    const messages = latest.sessionMessages
+    const highlights = latest.newMessageKeys
+    const rows = rowRenders.mock.calls.length
+    await appendFile(session.path, `${sessionUsageLine(20)}\n`)
+    const telemetry = await publish()
+    expect(telemetry.contentRevision).toBe(initial.contentRevision)
+    expect(telemetry.messages).toBe(initial.messages)
+    await tick()
+    expect(latest.sessionTokenStats?.outputTokens).toBe(20)
+    expect(latest.sessionMessages).toBe(messages)
+    expect(latest.newMessageKeys).toBe(highlights)
+    expect(rowRenders.mock.calls.length).toBe(rows)
+    const unchangedRenders = renders
+    await publish()
+    await tick()
+    expect(renders).toBe(unchangedRenders)
+
+    await appendFile(session.path, `${message("Actual new text")}\n`)
+    expect((await publish()).contentRevision).not.toBe(initial.contentRevision)
+    await tick()
+    expect(container.textContent).toContain("Actual new text")
+    expect(rowRenders.mock.calls.length).toBeGreaterThan(rows)
+    await appendFile(
+      session.path,
+      `${JSON.stringify({
+        type: "response_item",
+        timestamp: "2026-09-07T10:01:00Z",
+        payload: {
+          type: "function_call",
+          name: "Read",
+          arguments: JSON.stringify({ file_path: "Actual.ts" }),
+        },
+      })}\n`
+    )
+    await publish()
+    await tick()
+    expect(container.textContent).toContain("Actual.ts")
+
+    await Bun.write(session.path, `${message("Cache message")}\n`)
+    await publish()
+    await tick()
+    expect(latest.sessionTokenStats).toBeNull()
+    for (const project of ["/project", "/other"]) {
+      session.path = join(home, `${project.slice(1)}.jsonl`)
+      await Bun.write(session.path, `${message(project)}\n${sessionUsageLine(30)}\n`)
+      await publish()
+      await act(async () => {
+        latest.handleSelectSession(project, project.slice(1))
+        await settle()
+      })
+      expect(latest.sessionTokenStats?.outputTokens).toBe(30)
+      expect(latest.sessionMessages[0]?.text).toBe(project)
+    }
+  })
+
   it.each([
     "settings",
     "issues",

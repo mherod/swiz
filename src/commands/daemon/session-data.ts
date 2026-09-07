@@ -129,26 +129,17 @@ function isCacheFresh(
 }
 
 /**
- * Opaque content revision for a parsed transcript.
- *
- * `mtimeMs` and `size` are the cache's own freshness key, so they already change on append,
- * deletion, reorder, and same-length edits (a rewrite bumps mtime even when the byte count is
- * unchanged). Message count and a hash of the last-message fingerprint are folded in to separate
- * two different edits that land in the same millisecond at the same size.
- *
- * The result carries no transcript text, session id, or file path — only digests and counters.
+ * Hash only the bounded rendered messages, after fallback timestamps are assigned.
+ * File metadata and token telemetry invalidate parsing but do not change rendered content.
+ * Every message field participates, including earlier edits, tools, ordering and window eviction.
  */
-export function computeContentRevision(input: {
-  mtimeMs: number
-  size: number
-  messageCount: number
-  lastMessageFingerprint?: string
-  lastToolCallFingerprint?: string
-}): string {
-  const digest = Bun.hash(
-    `${input.messageCount}\x00${input.lastMessageFingerprint ?? ""}\x00${input.lastToolCallFingerprint ?? ""}`
-  ).toString(36)
-  return `${input.mtimeMs.toString(36)}-${input.size.toString(36)}-${digest}`
+export function computeContentRevision(messages: readonly SessionMessage[]): string {
+  return Bun.hash(JSON.stringify(messages)).toString(36)
+}
+
+function stampMessageRevision(next: CachedSessionData, previous?: CachedSessionData): void {
+  next.contentRevision = computeContentRevision(next.messages)
+  if (previous?.contentRevision === next.contentRevision) next.messages = previous.messages
 }
 
 /**
@@ -435,15 +426,7 @@ export class SessionDataCache {
       next.format = session.format
       next.metadata = metadata
       next.size = size
-      // Stamped here, where `size` is finally known. The entry is rebuilt only when the freshness
-      // key changes, so this revision is stable exactly as long as the content is.
-      next.contentRevision = computeContentRevision({
-        mtimeMs,
-        size,
-        messageCount: next.messages.length,
-        lastMessageFingerprint: next.lastMessageFingerprint,
-        lastToolCallFingerprint: next.lastToolCallFingerprint,
-      })
+      stampMessageRevision(next, cached)
       next.retainedBytes =
         estimateRetainedBytes(next, Math.min(size, MAX_SESSION_PREVIEW_BYTES)) +
         (next.jsonl?.retainedBytes ?? 0)
