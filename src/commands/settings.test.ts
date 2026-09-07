@@ -722,6 +722,64 @@ describe("swiz settings", () => {
     expect(result.stdout).toContain("not in the disabled list")
   })
 
+  // Issue #894: `--session` was coerced to `"global"`, so disabling a hook for one session
+  // disabled it across every project — including when the session did not exist.
+  for (const action of ["disable-hook", "enable-hook"] as const) {
+    test(`${action} rejects explicit session scope and names supported scopes`, async () => {
+      const home = await createTempHome()
+      const result = await runSwiz(
+        ["settings", action, "stop-ship-checklist.ts", "--session", "does-not-exist"],
+        home
+      )
+      expect(result.exitCode).not.toBe(0)
+      const output = `${result.stdout}${result.stderr}`
+      expect(output).toContain(`${action} does not support --session scope`)
+      expect(output).toContain("Supported: global, project")
+    })
+
+    test(`${action} writes nothing when session scope is rejected`, async () => {
+      const home = await createTempHome()
+      const configPath = join(home, ".swiz", "settings.json")
+      const before = await readFile(configPath, "utf-8").catch(() => null)
+
+      await runSwiz(["settings", action, "stop-ship-checklist.ts", "--session", "abc"], home)
+
+      // Byte-for-byte: the rejection must precede any store call, so an absent file stays
+      // absent and an existing one is untouched (no rewrite, no backup churn).
+      const after = await readFile(configPath, "utf-8").catch(() => null)
+      expect(after).toBe(before)
+    })
+  }
+
+  test("session-scope rejection leaves an existing disabled-hook list intact", async () => {
+    const home = await createTempHome()
+    await runSwiz(["settings", "disable-hook", "stop-lint-staged.ts"], home)
+    const configPath = join(home, ".swiz", "settings.json")
+    const before = await readFile(configPath, "utf-8")
+
+    const result = await runSwiz(
+      ["settings", "disable-hook", "stop-ship-checklist.ts", "--session", "abc"],
+      home
+    )
+
+    expect(result.exitCode).not.toBe(0)
+    expect(await readFile(configPath, "utf-8")).toBe(before)
+    const json = JSON.parse(before) as { disabledHooks?: string[] }
+    expect(json.disabledHooks).toEqual(["stop-lint-staged.ts"])
+  })
+
+  test("control: explicit project scope still reaches the project hook list", async () => {
+    // Proves the guard rejects only session scope rather than every explicit scope.
+    const home = await createTempHome()
+    const projectDir = await createIsolatedGitProject(home)
+    const result = await runSwiz(
+      ["settings", "disable-hook", "stop-ship-checklist.ts", "--project", "--dir", projectDir],
+      home
+    )
+    expect(result.exitCode).toBe(0)
+    expect(result.stdout).toContain("Disabled hook: stop-ship-checklist.ts (project)")
+  })
+
   test("settings show includes disabled-hooks line when hooks are disabled", async () => {
     const home = await createTempHome()
     await runSwiz(["settings", "disable-hook", "stop-ship-checklist.ts"], home)

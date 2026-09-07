@@ -986,12 +986,31 @@ async function writeSettingToScope(
   return path
 }
 
+/** Hook lists exist only at global and project scope — see `src/settings/store.ts`. */
+const HOOK_MANAGEMENT_SCOPES = ["global", "project"] as const
+
+/**
+ * Resolve the scope for a hook-management command.
+ *
+ * Throws before any store call: a `--session` scope used to be coerced to `"global"`, so a user
+ * disabling one hook for one session silently disabled it across every project, even when the
+ * session did not exist (#894). An explicit scope must constrain the operation, not be replaced.
+ */
+function resolveHookScope(parsed: ParsedSettingsArgs, action: string): "global" | "project" {
+  if (parsed.scope === "session") {
+    throw new Error(
+      `${action} does not support --session scope. Supported: ${HOOK_MANAGEMENT_SCOPES.join(", ")}\n${usage()}`
+    )
+  }
+  return parsed.scope === "project" ? "project" : "global"
+}
+
 async function disableHook(parsed: ParsedSettingsArgs): Promise<void> {
   const filename = parsed.settingArg
   if (!filename)
     throw new Error(`Missing hook filename.\nUsage: swiz settings disable-hook <filename>`)
 
-  const scope = parsed.scope === "project" ? "project" : "global"
+  const scope = resolveHookScope(parsed, "disable-hook")
   const { path, alreadyDisabled } = await settingsStore.disableHook(
     scope,
     filename,
@@ -1010,7 +1029,7 @@ async function enableHook(parsed: ParsedSettingsArgs): Promise<void> {
   if (!filename)
     throw new Error(`Missing hook filename.\nUsage: swiz settings enable-hook <filename>`)
 
-  const scope = parsed.scope === "project" ? "project" : "global"
+  const scope = resolveHookScope(parsed, "enable-hook")
   const { path, wasEnabled } = await settingsStore.enableHook(scope, filename, parsed.targetDir)
   if (!wasEnabled) {
     console.log(`\n  ${filename} is not in the disabled list (${scope})\n`)
