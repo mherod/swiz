@@ -6,8 +6,6 @@ import {
   WorkerPool,
 } from "./worker-pool.ts"
 
-/** Exits quickly when speak is off / payload is empty (see speak-narrator.ts). */
-const FAST_ASYNC_HOOK = "speak-narrator.ts"
 const TEST_HOOK = "../src/dispatch/fixtures/worker-pool-hook.ts"
 
 describe("resolveWorkerPoolSize", () => {
@@ -26,15 +24,13 @@ describe("resolveWorkerPoolSize", () => {
 
 describe("WorkerPool", () => {
   it("drains when queued jobs exceed worker count", async () => {
-    const pool = new WorkerPool()
+    const pool = new WorkerPool({ size: 2 })
     try {
       await pool.initialize()
       const payload = "{}"
       const total = 16
       const t0 = performance.now()
-      await Promise.all(
-        Array.from({ length: total }, () => pool.runHook(FAST_ASYNC_HOOK, payload, 10))
-      )
+      await Promise.all(Array.from({ length: total }, () => pool.runHook(TEST_HOOK, payload, 10)))
       expect(performance.now() - t0).toBeLessThan(60_000)
     } finally {
       pool.terminate()
@@ -42,19 +38,24 @@ describe("WorkerPool", () => {
   }, 90_000)
 
   it("drains many concurrent runHook calls without lost or duplicate completions (#438)", async () => {
-    const pool = new WorkerPool()
+    const pool = new WorkerPool({ size: 2 })
     try {
       await pool.initialize()
-      const payload = "{}"
       const total = 100
+      const labels = Array.from({ length: total }, (_, index) => `job-${index}`)
       const results = await Promise.all(
-        Array.from({ length: total }, () => pool.runHook(FAST_ASYNC_HOOK, payload, 10))
+        labels.map((label) => pool.runHook(TEST_HOOK, JSON.stringify({ label }), 10))
       )
       expect(results).toHaveLength(total)
-      const ok = new Set(["success", "no-output"])
       for (const res of results) {
-        expect(ok.has(res.execution.status)).toBe(true)
+        expect(res.execution.status).toBe("ok")
       }
+      expect(results.map((result) => result.parsed?.systemMessage)).toEqual(labels)
+      expect(pool.getMetrics()).toMatchObject({
+        dispatchedJobs: total,
+        queueDepth: 0,
+        activeWorkers: 0,
+      })
     } finally {
       pool.terminate()
     }

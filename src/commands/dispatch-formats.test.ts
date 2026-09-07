@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 import { mkdir, unlink, utimes, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { hookCooldownPath } from "../dispatch/filters.ts"
+import { bundledHookManifest, hookIdentifier } from "../manifest.ts"
 import { getSessionTasksDir } from "../tasks/task-recovery.ts"
 import { neutralAgentEnv, useTempDir } from "../utils/test-utils.ts"
 
@@ -14,6 +15,7 @@ interface DispatchResult {
 }
 
 const _tmp = useTempDir()
+const INDEX_PATH = join(import.meta.dir, "../../index.ts")
 let dispatchQueue: Promise<void> = Promise.resolve()
 
 async function runDispatchSerialized<T>(run: () => Promise<T>): Promise<T> {
@@ -65,7 +67,8 @@ async function dispatch({
   homeDir: string
 }): Promise<DispatchResult> {
   return await runDispatchSerialized(async () => {
-    const proc = Bun.spawn(["bun", "run", "index.ts", "dispatch", event, hookEventName], {
+    const proc = Bun.spawn(["bun", "run", INDEX_PATH, "dispatch", event, hookEventName], {
+      cwd: typeof payload.cwd === "string" ? payload.cwd : homeDir,
       stdin: "pipe",
       stdout: "pipe",
       stderr: "pipe",
@@ -131,11 +134,16 @@ async function writeTask(
   )
 }
 
-async function enableAutoContinue(homeDir: string): Promise<void> {
+async function configureStopFormatHooks(homeDir: string): Promise<void> {
   const { getSwizSettingsPath, invalidateSettingsCache, readSwizSettings, writeSwizSettings } =
     await import("../settings.ts")
   const defaults = await readSwizSettings({ home: homeDir })
-  await writeSwizSettings({ ...defaults, autoContinue: true }, { home: homeDir })
+  /** Exercise the real Stop envelope with the git guard, excluding unrelated Stop checks. */
+  const disabledHooks = bundledHookManifest
+    .filter((group) => group.event === "stop")
+    .flatMap((group) => group.hooks.map(hookIdentifier))
+    .filter((name) => name !== "stop-git-status.ts")
+  await writeSwizSettings({ ...defaults, autoContinue: true, disabledHooks }, { home: homeDir })
   const settingsPath = getSwizSettingsPath(homeDir)
   if (settingsPath) invalidateSettingsCache(settingsPath)
 }
@@ -201,7 +209,7 @@ describe("dispatch output formats", () => {
 
   test("stop block uses top-level decision + reason", async () => {
     const homeDir = await _tmp.create("swiz-dispatch-home-")
-    await enableAutoContinue(homeDir)
+    await configureStopFormatHooks(homeDir)
     const repoDir = await _tmp.create("swiz-dispatch-repo-")
     const transcriptPath = join(repoDir, "transcript.jsonl")
     await writeFile(

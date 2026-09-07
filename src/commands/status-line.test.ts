@@ -6,7 +6,7 @@ import { join } from "node:path"
 import { projectKeyFromCwd } from "../project-key.ts"
 import { DEFAULT_SETTINGS } from "../settings.ts"
 import { findTaskStoreForSession } from "../task-roots.ts"
-import { acquireEnvLock, releaseEnvLockFn } from "../utils/test-utils.ts"
+import { acquireEnvLock, releaseEnvLockFn, useTempDir } from "../utils/test-utils.ts"
 import {
   buildSettingsFlags,
   buildTaskCountsFromTasks,
@@ -27,6 +27,8 @@ import {
   summarizeGitHubCiRuns,
   updateContextStats,
 } from "./status-line.ts"
+
+const tmp = useTempDir("swiz-status-line-")
 
 describe("warm session status snapshots", () => {
   it("resolves the provider once and captures skills and infractions together", async () => {
@@ -435,7 +437,24 @@ describe("renderStatusLineFromSnapshot", () => {
   })
 
   it("renders metrics when local settings include the segment", async () => {
-    const snapshot = await computeWarmStatusLineSnapshot(process.cwd(), "debug-session")
+    const home = await tmp.create()
+    const cwd = await tmp.create()
+    await Bun.write(
+      join(home, ".swiz", "settings.json"),
+      JSON.stringify({ statusLineSegments: ["metrics"] })
+    )
+    await acquireEnvLock()
+    const previousHome = process.env.HOME
+    let snapshot: Awaited<ReturnType<typeof computeWarmStatusLineSnapshot>>
+    try {
+      process.env.HOME = home
+      snapshot = await computeWarmStatusLineSnapshot(cwd, "debug-session")
+    } finally {
+      if (previousHome === undefined) delete process.env.HOME
+      else process.env.HOME = previousHome
+      releaseEnvLockFn()
+    }
+    expect(snapshot.activeSegments).toEqual(["metrics"])
     const out = renderStatusLineFromSnapshot({
       input: { model: { display_name: "claude-haiku" } },
       snapshot,
