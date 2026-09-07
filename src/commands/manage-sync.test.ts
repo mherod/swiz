@@ -117,6 +117,65 @@ describe("cross-agent synchronization", () => {
   test.each([
     false,
     true,
+  ])("skip mode preserves custom entries and same-name collisions: project=%s", async (project) => {
+    const home = await create()
+    const cwd = project ? join(home, "workspace") : home
+    const cursor = join(cwd, ".cursor", "mcp.json")
+    const codex = join(cwd, ".codex", "config.toml")
+    const custom = { url: "https://example.invalid/private-value", type: "sse" }
+    await write(cursor, { keep: true, mcpServers: { custom, shared: command } })
+    await write(
+      codex,
+      '[mcp_servers.custom]\ncommand = "local"\n[mcp_servers.extra]\ncommand = "extra"\n'
+    )
+    const before = await Promise.all([cursor, codex].map((path) => Bun.file(path).text()))
+    const args = ["sync", "--cursor", "--codex", ...(project ? ["--project"] : [])]
+    expect((await run(args, home, cwd)).exitCode).toBe(1)
+    const preview = await run([...args, "--skip-non-portable", "--dry-run"], home, cwd)
+    expect(preview.exitCode).toBe(0)
+    expect(preview.stderr).toContain('skipped non-portable MCP server "custom"')
+    expect(preview.stderr).not.toContain("private-value")
+    expect(await Promise.all([cursor, codex].map((path) => Bun.file(path).text()))).toEqual(before)
+    const result = await run([...args, "--skip-non-portable"], home, cwd)
+    expect(result.exitCode).toBe(0)
+    expect((await readMcpFile(cursor)).mcpServers).toEqual({
+      custom,
+      shared: command,
+      extra: { command: "extra" },
+    })
+    expect((await readMcpFile(codex)).mcpServers).toEqual({
+      custom: { command: "local" },
+      shared: command,
+      extra: { command: "extra" },
+    })
+    const after = await Promise.all([cursor, codex].map((path) => Bun.file(path).text()))
+    expect((await run([...args, "--skip-non-portable"], home, cwd)).exitCode).toBe(0)
+    expect(await Promise.all([cursor, codex].map((path) => Bun.file(path).text()))).toEqual(after)
+  })
+
+  test("skip mode retains strict malformed-input and portable-conflict validation", async () => {
+    const home = await create()
+    const cursor = join(home, ".cursor", "mcp.json")
+    const codex = join(home, ".codex", "config.toml")
+    for (const definition of [
+      { url: "invalid" },
+      { command: "bun", args: [1] },
+      { command: "one" },
+    ]) {
+      await write(cursor, { mcpServers: { demo: definition } })
+      await write(codex, '[mcp_servers.demo]\ncommand = "two"\n')
+      const before = await Bun.file(codex).text()
+      expect(
+        (await run(["sync", "--cursor", "--codex", "--skip-non-portable"], home)).exitCode
+      ).toBe(1)
+      expect(await Bun.file(codex).text()).toBe(before)
+    }
+    expect(() => parseManageArgs(["mcp", "list", "--skip-non-portable"])).toThrow("sync only")
+  })
+
+  test.each([
+    false,
+    true,
   ])("unions configured and detected targets, preserves unrelated settings and converges: project=%s", async (project) => {
     const home = await create()
     const cwd = project ? join(home, "workspace") : home

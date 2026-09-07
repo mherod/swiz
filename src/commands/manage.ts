@@ -6,6 +6,7 @@ import { stderrLog } from "../debug.ts"
 import { getHomeDirOrNull } from "../home.ts"
 import type { Command } from "../types.ts"
 import {
+  filterPortableServers,
   type McpFileData,
   type McpServerDef,
   portableServers,
@@ -42,6 +43,7 @@ interface ParsedManageArgs {
   project: boolean
   explicitTargets: boolean
   dryRun: boolean
+  skipNonPortable: boolean
 }
 
 const GLOBAL_AGENTS: AgentConfig[] = [
@@ -168,6 +170,7 @@ function usage(): string {
     "Examples:",
     "  swiz manage mcp list --agy",
     "  swiz manage mcp sync --dry-run",
+    "  swiz manage mcp sync --skip-non-portable",
     "  swiz manage mcp merge --from agy --codex",
     "  swiz manage mcp list",
     "  swiz manage mcp list --project",
@@ -200,6 +203,7 @@ interface ManageParseState {
   url?: string
   project: boolean
   dryRun: boolean
+  skipNonPortable: boolean
   actionArgs: string[]
   env: Record<string, string>
   selectedAgentFlags: Set<AgentId>
@@ -268,6 +272,10 @@ function consumeManageFlag(
     state.dryRun = true
     return 0
   }
+  if (token === "--skip-non-portable") {
+    state.skipNonPortable = true
+    return 0
+  }
   const byFlag = GLOBAL_AGENTS.find((a) => a.flag === (token === "--agy" ? "--antigravity" : token))
   if (byFlag) {
     state.selectedAgentFlags.add(byFlag.id)
@@ -326,6 +334,7 @@ export function parseManageArgs(args: string[]): ParsedManageArgs {
   const state: ManageParseState = {
     project: false,
     dryRun: false,
+    skipNonPortable: false,
     actionArgs: [],
     env: {},
     selectedAgentFlags: new Set(),
@@ -353,10 +362,13 @@ export function parseManageArgs(args: string[]): ParsedManageArgs {
     project: state.project,
     explicitTargets: state.selectedAgentFlags.size > 0,
     dryRun: state.dryRun,
+    skipNonPortable: state.skipNonPortable,
   }
 }
 
 function validateManageOptions(action: ManageAction, state: ManageParseState): void {
+  if (state.skipNonPortable && action !== "sync")
+    throw new Error("--skip-non-portable supports sync only")
   if (state.project && state.selectedAgentFlags.has("claude-desktop"))
     throw new Error("Claude Desktop has no project MCP configuration")
   if (action === "sync" && state.sourceAgentFlags.size)
@@ -650,6 +662,8 @@ async function readMergeSources(
     parsed.action === "sync" ||
     [...sourceIds, ...parsed.targetAgents].some((id) => id === "codex" || id === "antigravity")
   const sourceServers: Record<string, McpServerDef> = Object.create(null)
+  const skipped = new Set<string>()
+  const sources: Record<string, McpServerDef>[] = []
   for (const id of sourceIds) {
     const agent = getAgentConfig(id, parsed.project)
     const data = await readMcpFile(agent.resolvePath(base))
@@ -661,10 +675,30 @@ async function readMergeSources(
         throw new Error(`${agent.displayName} (${agent.resolvePath(base)}): ${issues.join("; ")}`)
       }
     }
-    const servers = convert ? portableServers(rawServers) : rawServers
+    sources.push(selectMergeDefinitions(rawServers, parsed, convert, agent, skipped))
+  }
+  for (const servers of sources) {
+    for (const name of skipped) delete servers[name]
     mergeSourceDefinitions(sourceServers, servers, parsed.action === "sync")
   }
   return sourceServers
+}
+
+function selectMergeDefinitions(
+  servers: Record<string, McpServerDef>,
+  parsed: ParsedManageArgs,
+  convert: boolean,
+  agent: AgentConfig,
+  skipped: Set<string>
+): Record<string, McpServerDef> {
+  if (!parsed.skipNonPortable) return convert ? portableServers(servers) : servers
+  return filterPortableServers(servers, (name) => {
+    skipped.add(name)
+    stderrLog(
+      "manage sync reports skipped non-portable definitions without exposing values",
+      `Warning: skipped non-portable MCP server "${name}" from ${agent.displayName}; existing definitions with this name will be preserved`
+    )
+  })
 }
 
 function mergeSourceDefinitions(
@@ -865,6 +899,10 @@ export const manageCommand: Command<ManageCommandOptions> = {
   options: [
     { flags: "mcp sync", description: "Union installed agents; conflicts fail before writes" },
     { flags: "--dry-run", description: "Preview sync or merge without writes" },
+    {
+      flags: "--skip-non-portable",
+      description: "Sync portable definitions while preserving incompatible entries",
+    },
     { flags: "mcp list", description: "List configured MCP servers across target agents" },
     { flags: "mcp show <name>", description: "Show a single MCP server definition" },
     {

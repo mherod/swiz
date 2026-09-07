@@ -183,3 +183,19 @@ export function portableServers(
     })
   )
 }
+
+/** Reuse strict portability checks while allowing callers to retain incompatible local entries. */
+export function filterPortableServers(
+  servers: Record<string, McpServerDef>,
+  onSkip: (name: string) => void
+): Record<string, McpServerDef> {
+  const selected: Record<string, McpServerDef> = Object.create(null)
+  for (const [name, server] of Object.entries(servers)) {
+    try {
+      Object.assign(selected, portableServers({ [name]: server }))
+    } catch {
+      onSkip(name)
+    }
+  }
+  return selected
+}
