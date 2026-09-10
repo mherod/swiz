@@ -2,8 +2,51 @@
 
 ## 2026-09-07
 
+### Features
+
+- **Remote MCP servers** — Added HTTP and HTTPS endpoints with
+  `swiz manage mcp add <name> --url <url>` for selected agents. (#878)
+- **MCP synchronisation** — Added `--skip-non-portable` to synchronise
+  compatible servers while preserving incompatible entries. Disabled servers
+  stayed local, and each agent retained its enablement and startup-timeout
+  settings. (#876, b6617240)
+- **Related tasks** — Creating a task surfaced relevant work from other
+  sessions in the same project, including recent completions. (#836)
+- **Shared project state** — Hook guidance identified which session changed
+  the project's workflow state, or reported an unknown source when attribution
+  was unavailable. (#848)
+
 ### Fixes
 
+- **Project settings** — Changing settings preserved unknown fields and
+  stopped before overwriting invalid or unreadable configuration and backups.
+  Project settings and their backups were also excluded from Git additions.
+  (#898, bfcb8f26)
+- **Numeric settings** — Rejected values outside each setting's supported
+  range before saving. JSON confirmations preserved numeric values, including
+  zero. (#895, #896)
+- **Scripted settings changes** — Accepted the literal value `help` with
+  `--json` instead of silently displaying help without saving it. (#897)
+- **Issue discussions** — Refreshed changed and stale comments, including
+  when explicitly requested with `swiz issue sync --force`. Failed refreshes
+  preserved the last complete discussion. (#861)
+- **Project quality checks** — Preserved the caller's directory and reported
+  the package-manager selection source. npm ownership took precedence over
+  conflicting pnpm configuration; requests without enough project context
+  stopped with a corrective message. (#901)
+- **Hook compatibility** — Accepted null values in optional event metadata
+  without discarding the event, while preserving nested and extension data.
+  (#822)
+- **Git commands** — Stopped treating Git's background file monitor as an
+  active index writer, avoiding unnecessary waits. (#845)
+- **Task creation** — Prevented duplicate-detection records from one task
+  store suppressing tasks in another store. (#830)
+- **Dashboard transcripts** — Kept unchanged messages stable when only usage
+  telemetry changed. (#818)
+- **Transcript cleanup** — Included Antigravity's nested transcript logs
+  when removing old entries and honoured the selected backup option. (#828)
+- **Local CLI startup** — Restored `bun run start` for running Swiz from its
+  checkout. (#817)
 - **Push wrapper** — Fixed HTTPS pushes failing when the desktop app supplied
   Git's helper location. Repository and index overrides stayed isolated.
   (#892)
