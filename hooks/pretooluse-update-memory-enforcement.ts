@@ -16,21 +16,25 @@ import { isGitRepoForHookPayload } from "../src/repository-capability.ts"
 import type { SwizHookOutput, SwizToolHook } from "../src/SwizHook.ts"
 import { preToolUseDeny, runSwizHookAsMain } from "../src/SwizHook.ts"
 import { type ToolHookInput, toolHookInputSchema } from "../src/schemas.ts"
+import {
+  resolveSkillFilePathForHookPayload,
+  resolveSkillRecencyOptions,
+} from "../src/skill-utils.ts"
 import { readSessionTasks } from "../src/tasks/task-recovery.ts"
 import { isEditTool, isNotebookTool, isWriteTool } from "../src/tool-matchers.ts"
+import { getSuccessfulToolCalls, toolLoadsSkill } from "../src/transcript-summary.ts"
 import {
   extractTextFromUnknownContent,
   isHookFeedback,
   stripQuotedText,
 } from "../src/transcript-utils.ts"
 import { hasFileInTree } from "../src/utils/file-utils.ts"
-import { extractToolBlocksFromEntry, resolveSessionLines } from "../src/utils/transcript.ts"
+import { resolveSessionLines } from "../src/utils/transcript.ts"
 
 const REMINDER_FRAGMENT =
   "record a DO or DON'T rule that proactively builds the required steps into your standard development workflow."
 const SELF_SENTINEL = "MEMORY CAPTURE ENFORCEMENT"
 const UPDATE_MEMORY_SKILL = GATE_REQUIRED_SKILLS.updateMemory.name
-const UPDATE_MEMORY_SKILL_PATH_FRAGMENT = `${UPDATE_MEMORY_SKILL}/SKILL.md`
 const MARKDOWN_FILE_RE = /(?:^|[\\/])[^\\/\n]+\.md$/i
 const APPLY_PATCH_MARKDOWN_RE = /^\*\*\* (?:Add|Update) File: .+\.md$/m
 const COOLDOWN_MS = 30 * 60 * 1000 // 30 minutes
@@ -56,13 +60,6 @@ function collectStrings(value: unknown, out: string[]): void {
   if (value && typeof value === "object") {
     for (const item of Object.values(value)) collectStrings(item, out)
   }
-}
-
-function toolReadsUpdateMemorySkill(toolName: string, toolInput: unknown): boolean {
-  if (!toolName) return false
-  const strings: string[] = []
-  collectStrings(toolInput, strings)
-  return strings.some((value) => value.includes(UPDATE_MEMORY_SKILL_PATH_FRAGMENT))
 }
 
 function isAutoMemoryPath(path: string): boolean {
@@ -132,44 +129,6 @@ async function hasActiveTask(sessionId: string | undefined): Promise<boolean> {
   return tasks.some((task) => task.status === "in_progress")
 }
 
-function updateStateFromToolUse(block: Record<string, any>, state: EnforcementState): void {
-  const name = String(block.name)
-  const input = block.input
-  if (!state.skillReadComplete && toolReadsUpdateMemorySkill(name, input)) {
-    state.skillReadComplete = true
-  }
-  if (!state.markdownWriteComplete && toolWritesMarkdown(name, input)) {
-    state.markdownWriteComplete = true
-  }
-}
-
-function processTranscriptEntry(line: string, state: EnforcementState): void {
-  for (const block of extractToolBlocksFromEntry(line)) {
-    updateStateFromToolUse(block, state)
-    if (state.skillReadComplete && state.markdownWriteComplete) return
-  }
-}
-
-function scanTranscript(lines: string[], startIndex: number): EnforcementState {
-  const state: EnforcementState = {
-    skillReadComplete: false,
-    markdownWriteComplete: false,
-  }
-
-  for (let i = startIndex + 1; i < lines.length; i++) {
-    const line = lines[i]
-    if (!line) continue
-    try {
-      processTranscriptEntry(line, state)
-      if (state.skillReadComplete && state.markdownWriteComplete) return state
-    } catch {
-      // Ignore malformed transcript lines.
-    }
-  }
-
-  return state
-}
-
 function isReminderTriggerEntry(line: string): boolean {
   let entry: Record<string, any>
   try {
@@ -204,13 +163,17 @@ function wasCompactedAfterTrigger(lines: string[], triggerIndex: number): boolea
   return lines.slice(triggerIndex + 1).some((l) => l.includes(POST_COMPACTION_MARKER))
 }
 
-function buildDenialReason(toolName: string, missingSkill: boolean): string {
+function buildDenialReason(
+  toolName: string,
+  missingSkill: boolean,
+  skillPath: string | null
+): string {
   if (missingSkill) {
     return (
       `${SELF_SENTINEL}: ${toolName} is BLOCKED until you finish the required memory follow-through from an earlier hook response.\n\n` +
       formatActionPlan(
         [
-          `Read the /${UPDATE_MEMORY_SKILL} skill by opening its SKILL.md.`,
+          `Read the /${UPDATE_MEMORY_SKILL} skill directly: ${skillPath ?? "open its installed SKILL.md"}. If advisory setup fails, read without executing setup; keep runtime policy and mandatory checks, and report unavailable analysis as unknown.`,
           "Write the resulting DO or DON'T rule into a project markdown file such as CLAUDE.md.",
         ],
         { header: "To resolve:" }
@@ -255,10 +218,15 @@ async function shouldSkipAfterTrigger(
 function isCurrentToolSatisfying(
   state: EnforcementState,
   toolName: string,
-  toolInput: unknown
+  toolInput: Record<string, any>,
+  skillPath: string | null
 ): boolean {
   if (state.skillReadComplete && state.markdownWriteComplete) return true
-  if (!state.skillReadComplete && toolReadsUpdateMemorySkill(toolName, toolInput)) return true
+  if (
+    !state.skillReadComplete &&
+    toolLoadsSkill(toolName, toolInput, UPDATE_MEMORY_SKILL, skillPath)
+  )
+    return true
   return !state.markdownWriteComplete && toolWritesMarkdown(toolName, toolInput)
 }
 
@@ -299,14 +267,22 @@ async function evaluatePendingMemoryReminder(
   pendingReminder: { lines: string[]; lastTriggerIndex: number },
   cwd: string,
   toolName: string,
-  toolInput: unknown
+  toolInput: Record<string, any>
 ): Promise<SwizHookOutput> {
   const { lines, lastTriggerIndex } = pendingReminder
   if (await shouldSkipAfterTrigger(lines, lastTriggerIndex, cwd, input.session_id)) return {}
 
-  const state = scanTranscript(lines, lastTriggerIndex)
-  if (isCurrentToolSatisfying(state, toolName, toolInput)) return {}
-  return preToolUseDeny(buildDenialReason(toolName, !state.skillReadComplete))
+  const skillPath = resolveSkillFilePathForHookPayload(UPDATE_MEMORY_SKILL, input, cwd)
+  const { recencyOptions } = await resolveSkillRecencyOptions(cwd)
+  const calls = getSuccessfulToolCalls(lines.slice(lastTriggerIndex + 1), input, recencyOptions)
+  const state: EnforcementState = {
+    skillReadComplete: calls.some((call) =>
+      toolLoadsSkill(call.name ?? "", call.input, UPDATE_MEMORY_SKILL, skillPath)
+    ),
+    markdownWriteComplete: calls.some((call) => toolWritesMarkdown(call.name ?? "", call.input)),
+  }
+  if (isCurrentToolSatisfying(state, toolName, toolInput, skillPath)) return {}
+  return preToolUseDeny(buildDenialReason(toolName, !state.skillReadComplete, skillPath))
 }
 
 export async function evaluatePretooluseUpdateMemoryEnforcement(

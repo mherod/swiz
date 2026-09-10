@@ -31,12 +31,14 @@ import {
 } from "../src/SwizHook.ts"
 import {
   formatSkillReferenceForAgent,
-  getRecentlyInvokedSkillsForCurrentSession,
+  resolveSkillFilePathForHookPayload,
   resolveSkillRecencyOptions,
   skillExistsForHookPayload,
 } from "../src/skill-utils.ts"
+import { getSuccessfulToolCalls, toolLoadsSkill } from "../src/transcript-summary.ts"
 import { isFileEditForPath } from "../src/utils/edit-projection.ts"
 import { formatActionPlan } from "../src/utils/inline-hook-helpers.ts"
+import { resolveSessionLines } from "../src/utils/transcript.ts"
 
 const UPDATE_MEMORY_SKILL = GATE_REQUIRED_SKILLS.updateMemory.name
 
@@ -47,13 +49,19 @@ function isMemoryFileEdit(input: Record<string, any>): boolean {
   return MEMORY_FILE_PATTERNS.some((pattern) => isFileEditForPath(input, pattern))
 }
 
-function buildDenyReason(ref: string, windowText: string): string {
+function buildDenyReason(ref: string, windowText: string, skillPath: string | null): string {
   return (
     `BLOCKED: editing a memory file requires the ${ref} skill to be used first.\n\n` +
     `The ${ref} skill has not been invoked recently (${windowText}).\n\n` +
-    formatActionPlan([`Invoke the ${ref} skill, then retry this edit.`], {
-      header: "To resolve:",
-    }) +
+    formatActionPlan(
+      [
+        `Invoke the ${ref} skill, then retry this edit.`,
+        `If advisory setup fails, read ${skillPath ?? "the installed update-memory/SKILL.md"} directly without running its setup, follow its instructions, then retry. Keep mandatory checks and runtime policy in force; report unavailable analysis as unknown.`,
+      ],
+      {
+        header: "To resolve:",
+      }
+    ) +
     `\nWhy this matters: memory files (CLAUDE.md, GEMINI.md, AGENTS.md, .cursorrules) are the ` +
     `project's instruction layer. The ${ref} skill decides what belongs in memory, keeps files ` +
     `focused, and records rules in the canonical format. Editing them directly skips these safeguards.`
@@ -65,7 +73,11 @@ function buildDenyReason(ref: string, windowText: string): string {
  * sent this payload. Defaults to the real filesystem-backed lookup; tests stub it
  * so they need not mutate process.cwd() (which races under concurrent test runs).
  */
-export type SkillInstalledFn = (skill: string, payload: Record<string, any>) => boolean
+export type SkillInstalledFn = (
+  skill: string,
+  payload: Record<string, any>,
+  cwd?: string
+) => boolean
 
 export async function evaluateClaudeMdUpdateMemoryGate(
   rawInput: Record<string, any>,
@@ -83,7 +95,7 @@ export async function evaluateClaudeMdUpdateMemoryGate(
 
   // Nothing to enforce when the skill is not installed for this agent. This also
   // skips agents without the Skill tool (skillExistsForHookPayload returns false).
-  if (!skillInstalled(UPDATE_MEMORY_SKILL, rawInput)) return {}
+  if (!skillInstalled(UPDATE_MEMORY_SKILL, rawInput, input.cwd)) return {}
 
   // No transcript to scan — fail open rather than block on missing evidence.
   const transcriptPath = input.transcript_path ?? ""
@@ -92,14 +104,25 @@ export async function evaluateClaudeMdUpdateMemoryGate(
   const cwd = input.cwd ?? process.cwd()
   const { recencyOptions, windowText } = await resolveSkillRecencyOptions(cwd)
 
-  const invokedSkills = await getRecentlyInvokedSkillsForCurrentSession(rawInput, recencyOptions)
+  const skillPath = resolveSkillFilePathForHookPayload(UPDATE_MEMORY_SKILL, rawInput, cwd)
+  const calls = getSuccessfulToolCalls(
+    await resolveSessionLines(rawInput),
+    rawInput,
+    recencyOptions
+  )
   const ref = formatSkillReferenceForAgent(UPDATE_MEMORY_SKILL)
 
-  if (invokedSkills.includes(UPDATE_MEMORY_SKILL)) {
-    return preToolUseAllow(`${ref} skill was invoked recently (${windowText}).`)
+  if (
+    calls.some((call) =>
+      toolLoadsSkill(call.name ?? "", call.input, UPDATE_MEMORY_SKILL, skillPath)
+    )
+  ) {
+    return preToolUseAllow(
+      `${ref} skill was successfully invoked or read recently (${windowText}).`
+    )
   }
 
-  return preToolUseDeny(buildDenyReason(ref, windowText))
+  return preToolUseDeny(buildDenyReason(ref, windowText, skillPath))
 }
 
 const pretooluseClaudeMdUpdateMemoryGate: SwizHook = {

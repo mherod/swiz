@@ -19,7 +19,17 @@ function assistantLine(content: unknown[], timestampMs = Date.now() - 1000): str
 }
 
 const skillInvocationLine = (skill: string): string =>
-  assistantLine([{ type: "tool_use", name: "Skill", input: { skill } }])
+  [
+    assistantLine([{ type: "tool_use", id: "skill", name: "Skill", input: { skill } }]),
+    JSON.stringify({
+      type: "user",
+      message: {
+        content: [
+          { type: "tool_result", tool_use_id: "skill", content: "Skill instructions loaded" },
+        ],
+      },
+    }),
+  ].join("\n")
 
 const decisionOf = (result: Record<string, any>): string | undefined =>
   result?.hookSpecificOutput?.permissionDecision
@@ -37,7 +47,7 @@ function claudeMdEditPayload(
     transcript_path: "fake-transcript.json",
     cwd: "/repo",
     _agent: "claude",
-    _transcriptSummary: summaryFromLines(sessionLines),
+    _transcriptSummary: summaryFromLines(sessionLines.flatMap((line) => line.split("\n"))),
   }
 }
 
@@ -75,6 +85,33 @@ describe("pretooluse-claude-md-update-memory-gate", () => {
   it("blocks a CLAUDE.md edit when the session has no skill invocations", async () => {
     const result = await evaluateClaudeMdUpdateMemoryGate(claudeMdEditPayload([]), skillInstalled)
     expect(decisionOf(result)).toBe("deny")
+  })
+
+  it("rejects a failed update-memory setup and offers a direct file fallback", async () => {
+    const result = await evaluateClaudeMdUpdateMemoryGate(
+      claudeMdEditPayload([
+        assistantLine([
+          { type: "tool_use", id: "setup", name: "Skill", input: { skill: "update-memory" } },
+        ]),
+        JSON.stringify({
+          type: "user",
+          message: {
+            content: [
+              {
+                type: "tool_result",
+                tool_use_id: "setup",
+                is_error: true,
+                content: "Advisory setup exited 127: runtime unavailable",
+              },
+            ],
+          },
+        }),
+      ]),
+      skillInstalled
+    )
+    expect(decisionOf(result)).toBe("deny")
+    expect(reasonOf(result)).toContain("SKILL.md")
+    expect(reasonOf(result)).toContain("directly")
   })
 
   it("matches nested CLAUDE.md files, not just the project root", async () => {

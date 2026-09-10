@@ -5,9 +5,12 @@ import { writeFile } from "node:fs/promises"
 setDefaultTimeout(30_000)
 
 import { join } from "node:path"
+import { withGitClient } from "../src/git/client.ts"
+import { MockGitClient } from "../src/git/mock-client.ts"
+import { resolveSkillFilePathForHookPayload } from "../src/skill-utils.ts"
 import { getSessionTasksDir } from "../src/tasks/task-recovery.ts"
 import {
-  createEnforcementProjectDir,
+  createEnforcementProjectDir as createEnforcementFixture,
   type HookResult,
   runHookInProcess,
   useTempDir,
@@ -19,6 +22,15 @@ const REMINDER_FRAGMENT =
 const SELF_SENTINEL = "MEMORY CAPTURE ENFORCEMENT"
 
 const { create: createTempDir } = useTempDir("swiz-update-memory-")
+const repositories = new Set<string>()
+
+async function createEnforcementProjectDir(makeDir: () => Promise<string>): Promise<string> {
+  const dir = await withGitClient(new MockGitClient(() => ""), () =>
+    createEnforcementFixture(makeDir)
+  )
+  repositories.add(dir)
+  return dir
+}
 
 async function createTranscript(dir: string, lines: unknown[]): Promise<string> {
   const path = join(dir, "transcript.jsonl")
@@ -30,7 +42,10 @@ async function runHook(
   stdinPayload: Record<string, any>,
   extraEnv?: Record<string, string>
 ): Promise<HookResult> {
-  return await runHookInProcess(HOOK, stdinPayload, { env: extraEnv })
+  const git = new MockGitClient(() =>
+    repositories.has(stdinPayload.cwd) ? ".git\n" : { exitCode: 1 }
+  )
+  return await withGitClient(git, () => runHookInProcess(HOOK, stdinPayload, { env: extraEnv }))
 }
 
 function hookFeedback(text: string): Record<string, any> {
@@ -42,13 +57,21 @@ function hookFeedback(text: string): Record<string, any> {
   }
 }
 
-function toolUse(name: string, input: Record<string, any>): Record<string, any> {
-  return {
-    type: "assistant",
-    message: {
-      content: [{ type: "tool_use", name, input }],
+function toolUse(name: string, input: Record<string, any>): Record<string, any>[] {
+  const id = crypto.randomUUID()
+  return [
+    {
+      timestamp: new Date().toISOString(),
+      type: "assistant",
+      message: {
+        content: [{ type: "tool_use", id, name, input }],
+      },
     },
-  }
+    {
+      type: "user",
+      message: { content: [{ type: "tool_result", tool_use_id: id, content: "Success" }] },
+    },
+  ]
 }
 
 describe("pretooluse-update-memory-enforcement", () => {
@@ -96,7 +119,11 @@ describe("pretooluse-update-memory-enforcement", () => {
     const dir = await createTempDir()
     const transcript = await createTranscript(dir, [
       hookFeedback(`Use the /update-memory skill to ${REMINDER_FRAGMENT}`),
-      toolUse("Read", { file_path: "/Users/test/.codex/skills/update-memory/SKILL.md" }),
+      ...toolUse("Read", {
+        file_path:
+          resolveSkillFilePathForHookPayload("update-memory", {}, dir) ??
+          "/missing/update-memory/SKILL.md",
+      }),
     ])
 
     const result = await runHook({
@@ -113,8 +140,12 @@ describe("pretooluse-update-memory-enforcement", () => {
     const dir = await createTempDir()
     const transcript = await createTranscript(dir, [
       hookFeedback(`Use the /update-memory skill to ${REMINDER_FRAGMENT}`),
-      toolUse("Read", { file_path: "/Users/test/.codex/skills/update-memory/SKILL.md" }),
-      toolUse("Write", {
+      ...toolUse("Read", {
+        file_path:
+          resolveSkillFilePathForHookPayload("update-memory", {}, dir) ??
+          "/missing/update-memory/SKILL.md",
+      }),
+      ...toolUse("Write", {
         file_path: "CLAUDE.md",
         content: "DO: update memory immediately.\n",
       }),
@@ -134,8 +165,12 @@ describe("pretooluse-update-memory-enforcement", () => {
     const dir = await createEnforcementProjectDir(createTempDir)
     const transcript = await createTranscript(dir, [
       hookFeedback(`Use the /update-memory skill to ${REMINDER_FRAGMENT}`),
-      toolUse("Read", { file_path: "/Users/test/.codex/skills/update-memory/SKILL.md" }),
-      toolUse("Write", {
+      ...toolUse("Read", {
+        file_path:
+          resolveSkillFilePathForHookPayload("update-memory", {}, dir) ??
+          "/missing/update-memory/SKILL.md",
+      }),
+      ...toolUse("Write", {
         file_path: "CLAUDE.md",
         content: "DO: update memory immediately.\n",
       }),
@@ -204,7 +239,11 @@ describe("pretooluse-update-memory-enforcement", () => {
     const dir = await createTempDir()
     const transcript = await createTranscript(dir, [
       hookFeedback(`Use the /update-memory skill to ${REMINDER_FRAGMENT}`),
-      toolUse("Read", { file_path: "/Users/test/.codex/skills/update-memory/SKILL.md" }),
+      ...toolUse("Read", {
+        file_path:
+          resolveSkillFilePathForHookPayload("update-memory", {}, dir) ??
+          "/missing/update-memory/SKILL.md",
+      }),
       hookFeedback(
         `${SELF_SENTINEL}: still pending. Use the /update-memory skill to ${REMINDER_FRAGMENT}`
       ),
@@ -447,7 +486,7 @@ describe("pretooluse-update-memory-enforcement", () => {
       const transcript = await createTranscript(dir, [
         hookFeedback(`Use the /update-memory skill to ${REMINDER_FRAGMENT}`),
         // Previous markdown write satisfies step 2 but skill not yet read
-        toolUse("Write", { file_path: "CLAUDE.md", content: "DO: something.\n" }),
+        ...toolUse("Write", { file_path: "CLAUDE.md", content: "DO: something.\n" }),
       ])
 
       const result = await runHook({
@@ -469,7 +508,7 @@ describe("pretooluse-update-memory-enforcement", () => {
       const transcript = await createTranscript(dir, [
         hookFeedback(`Use the /update-memory skill to ${REMINDER_FRAGMENT}`),
         // Auto-memory write in transcript — should NOT satisfy markdownWriteComplete
-        toolUse("Write", {
+        ...toolUse("Write", {
           file_path: `/Users/test/.claude/projects/test-proj/memory/feedback.md`,
           content: "---\nname: feedback\nmetadata:\n  type: feedback\n---\nSome lesson.",
         }),
@@ -510,9 +549,7 @@ describe("pretooluse-update-memory-enforcement", () => {
 
     test("skips enforcement when cwd is a git repo but has no CLAUDE.md in the tree", async () => {
       const repoDir = await createTempDir()
-      // Init a git repo with no CLAUDE.md
-      const init = Bun.spawn(["git", "init"], { cwd: repoDir, stdout: "pipe", stderr: "pipe" })
-      await init.exited
+      repositories.add(repoDir)
 
       const transcript = await createTranscript(repoDir, [
         hookFeedback(`Use the /update-memory skill to ${REMINDER_FRAGMENT}`),

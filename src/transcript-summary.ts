@@ -249,6 +249,7 @@ export async function readCurrentSessionLines(transcriptPath: string): Promise<s
  * facts that hooks need. Returns a TranscriptSummary.
  */
 interface ToolBlock {
+  id?: string
   type?: string
   name?: string
   input?: {
@@ -265,6 +266,7 @@ interface ToolBlock {
 }
 
 interface CodexFunctionCallPayload {
+  call_id?: string
   type?: string
   name?: string
   arguments?: string | ToolBlock["input"]
@@ -304,6 +306,7 @@ function extractCodexToolBlock(entry: ParsedToolEntry | undefined): ToolBlock[] 
   return [
     {
       type: "tool_use",
+      id: payload.call_id,
       name: payload.name,
       input: parseCodexFunctionCallInput(rawInput, payload.name),
     },
@@ -315,6 +318,121 @@ function parseAssistantToolBlocks(line: string): ToolBlock[] {
   if (entry?.type !== "assistant") return extractCodexToolBlock(entry)
   const content = entry.message?.content
   return Array.isArray(content) ? content : []
+}
+
+interface ToolResultEntry {
+  type?: string
+  sessionId?: string
+  session_id?: string
+  cwd?: string
+  message?: {
+    content?: Array<{ type?: string; tool_use_id?: string; is_error?: boolean; content?: unknown }>
+  }
+  payload?: { type?: string; call_id?: string; output?: unknown; cwd?: string; id?: string }
+}
+
+function successfulResultOutput(output: unknown): boolean {
+  const text = typeof output === "string" ? output : JSON.stringify(output ?? "")
+  return !/(?:"isError"\s*:\s*true|"exit_code"\s*:\s*[1-9]\d*|(?:Exit code:|Process exited with code)\s*[1-9]\d*|^Error:|^Error running tool)/im.test(
+    text
+  )
+}
+
+function resultStates(entry: ToolResultEntry): Array<[string, boolean]> {
+  if (entry.type === "user" && Array.isArray(entry.message?.content)) {
+    return entry.message.content
+      .filter((block) => block.type === "tool_result" && typeof block.tool_use_id === "string")
+      .map((block) => [block.tool_use_id!, block.is_error !== true])
+  }
+  const payload = entry.payload
+  if (
+    entry.type === "response_item" &&
+    payload?.call_id &&
+    (payload.type === "function_call_output" || payload.type === "custom_tool_call_output")
+  ) {
+    return [[payload.call_id, successfulResultOutput(payload.output)]]
+  }
+  return []
+}
+
+function scopedEvidenceLines(
+  lines: string[],
+  source: { session_id?: string; cwd?: string }
+): string[] {
+  let contextCwd: string | undefined
+  let contextSession: string | undefined
+  return extractSessionLines(lines.join("\n")).filter((line) => {
+    const entry = tryParseJsonLine(line) as ToolResultEntry | undefined
+    if (!entry) return false
+    if (entry.type === "turn_context") contextCwd = entry.payload?.cwd
+    if (entry.type === "session_meta") contextSession = entry.payload?.id
+    return matchesEvidenceScope(entry, source, { cwd: contextCwd, session_id: contextSession })
+  })
+}
+
+function matchesEvidenceScope(
+  entry: ToolResultEntry,
+  source: { session_id?: string; cwd?: string },
+  context: { session_id?: string; cwd?: string }
+): boolean {
+  const sessionId = entry.sessionId ?? entry.session_id ?? context.session_id
+  const cwd = entry.cwd ?? context.cwd
+  if (source.session_id && sessionId && sessionId !== source.session_id) return false
+  return !(source.cwd && cwd && cwd !== source.cwd)
+}
+
+/** Completed calls only: failed or missing results never prove a prerequisite. */
+export function getSuccessfulToolCalls(
+  lines: string[],
+  source: { session_id?: string; cwd?: string } = {},
+  options: CurrentSessionUsageRecencyOptions = {}
+): ToolBlock[] {
+  const calls = new Map<string, { block: ToolBlock; event: CurrentSessionUsageEvent }>()
+  const results = new Map<string, boolean>()
+  let turnIndex = 0
+  for (const line of scopedEvidenceLines(lines, source)) {
+    const entry = tryParseJsonLine(line) as ToolResultEntry
+    if (isUserTurnEntry(entry)) turnIndex++
+    for (const block of parseAssistantToolBlocks(line)) {
+      if (block.type !== "tool_use" || !block.id) continue
+      calls.set(block.id, {
+        block,
+        event: { kind: "tool", value: block.id, turnIndex, timestamp: extractTimestamp(line) },
+      })
+    }
+    for (const [id, success] of resultStates(entry)) {
+      if (calls.has(id)) results.set(id, success)
+    }
+  }
+  const recentIds = new Set(
+    filterRecentUsageEvents(
+      [...calls.values()].map(({ event }) => event),
+      turnIndex,
+      options
+    ).map((event) => event.value)
+  )
+  return [...calls.entries()]
+    .filter(([id]) => results.get(id) === true && recentIds.has(id))
+    .map(([, { block }]) => block)
+}
+
+/** Match native invocation or an actual read of the resolved skill file. */
+export function toolLoadsSkill(
+  name: string,
+  input: ToolBlock["input"],
+  skillName: string,
+  skillFilePath: string | null
+): boolean {
+  if (name === "Skill") return extractSkillNameFromToolInput(input) === skillName
+  if (!skillFilePath) return false
+  if (READ_TOOLS.has(name)) return extractFileReadTargetPaths(input ?? {}).includes(skillFilePath)
+  if (!extractDirectSkillReadInvocations({ input }, name).includes(skillName)) return false
+  const text = skillReadCommandText(input)
+  return text.split(/[\s"'`]+/).includes(skillFilePath)
+}
+
+function skillReadCommandText(input: ToolBlock["input"]): string {
+  return input?.command ?? input?.cmd ?? input?.code ?? input?.input ?? ""
 }
 
 export interface SummaryAccumulator {
