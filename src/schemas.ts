@@ -135,14 +135,21 @@ export { ParseEditToolInput, ParseWriteToolInput, ToolInputCommand, ToolInputFil
  * tolerate missing fields rather than rejecting payloads. Known envelope nulls mean absent;
  * nested values and unknown extension fields retain their original meaning.
  */
-function allOptional<T extends z.ZodObject>(schema: T) {
+function allOptional<Shape extends z.core.$ZodLooseShape>(schema: { readonly shape: Shape }) {
   const keys = new Set(Object.keys(schema.shape))
+  // `agent-hook-schemas` resolves its own nested copy of zod, so its `ZodObject`
+  // is a structurally distinct type from ours even on a compatible version — zod
+  // 4.5 added `exactPartial`, which the nested 4.3 copy lacks. The two copies
+  // interoperate fine at runtime (same major, same internal protocol), so accept
+  // the schema by shape and re-type it here rather than rebuilding it, which
+  // would drop the object-level refinements the package defines.
+  const objectSchema = schema as z.ZodObject<Shape, z.core.$strip>
   return z.preprocess((value) => {
     if (!isJsonLikeRecord(value)) return value
     return Object.fromEntries(
       Object.entries(value).filter(([key, field]) => field !== null || !keys.has(key))
     )
-  }, schema.partial().catchall(z.unknown()))
+  }, objectSchema.partial().catchall(z.unknown()))
 }
 
 // ─── Primitive field schemas ──────────────────────────────────────────────────
