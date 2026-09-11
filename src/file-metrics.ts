@@ -23,7 +23,11 @@ async function readTextContent(path: string): Promise<string | null> {
   return file.text()
 }
 
-function countContentStats(content: string): { words: number; lines: number; chars: number } {
+export function countContentStats(content: string): {
+  words: number
+  lines: number
+  chars: number
+} {
   if (content.length === 0) return { words: 0, lines: 0, chars: 0 }
   let lines = 0
   let words = 0

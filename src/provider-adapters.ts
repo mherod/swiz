@@ -5,6 +5,7 @@ import type { AgentSettingsId } from "./agent-paths.ts"
 import type { AgentDef } from "./agents.ts"
 import { getHomeDir } from "./home.ts"
 import { projectKeyFromCwd } from "./project-key.ts"
+import { projectMemorySources, resolveProjectMemory } from "./project-memory.ts"
 
 type ProviderAgentId = AgentSettingsId
 export type TranscriptProviderId = ProviderAgentId | "antigravity"
@@ -390,11 +391,28 @@ function resolveProviderId(agent: AgentDef | string): ProviderAgentId | null {
 
 export function getProviderAdapter(agent: AgentDef | string): ProviderAdapter | null {
   const id = resolveProviderId(agent)
-  return id ? PROVIDER_ADAPTERS[id] : null
+  if (!id) return null
+  const adapter = PROVIDER_ADAPTERS[id]
+  return {
+    ...adapter,
+    async getMemorySources(projectDir: string) {
+      const location = await resolveProjectMemory(projectDir)
+      const existing = await adapter.getMemorySources(projectDir)
+      if (!location) return existing
+      const sources = await projectMemorySources(location)
+      const paths = new Set(sources.map((source) => source.path))
+      return [
+        ...sources,
+        ...existing.filter(
+          (source) => !paths.has(source.path) && !source.label.startsWith("Project memory")
+        ),
+      ]
+    },
+  }
 }
 
 export function listProviderAdapters(): ProviderAdapter[] {
-  return Object.values(PROVIDER_ADAPTERS)
+  return Object.keys(PROVIDER_ADAPTERS).map((id) => getProviderAdapter(id)!)
 }
 
 export function getTranscriptProvidersForAgent(

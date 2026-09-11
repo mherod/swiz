@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test"
+import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { collectUnknownOptionWarnings } from "./cli.ts"
+import { memoryCommand } from "./commands/memory.ts"
 
 // PROCESS_CONTRACT_TEST: verifies command resolution, stderr, and exit codes at the CLI boundary.
 const INDEX_PATH = join(process.cwd(), "index.ts")
@@ -41,6 +43,27 @@ describe("CLI command suggestions", () => {
 })
 
 describe("CLI flag suggestions", () => {
+  test("accepts migration flags registered by the memory command", () => {
+    expect(
+      collectUnknownOptionWarnings(
+        "memory",
+        ["migrate", "--manifest", "/tmp/private-plan.json", "--apply"],
+        memoryCommand.options
+      )
+    ).toEqual([])
+  })
+
+  test("routes registered migration flags to the memory command", async () => {
+    const manifest = join(tmpdir(), `swiz-memory-manifest-${Date.now()}.json`)
+    await Bun.write(
+      manifest,
+      JSON.stringify({ version: 1, hostPolicyResolved: true, lookupVerified: false, records: [] })
+    )
+    const result = await runSwiz(["memory", "migrate", "--manifest", manifest])
+    expect(result.exitCode).toBe(0)
+    expect(result.stdout).toContain('"mode": "plan"')
+  })
+
   test("suggests --fix for --fx on doctor", () => {
     const warnings = collectUnknownOptionWarnings(
       "doctor",

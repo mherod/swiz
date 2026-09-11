@@ -39,11 +39,10 @@ export function substituteArgs(content: string, positionalArgs: string[]): strin
   if (positionalArgs.length === 0) return content
   let result = content
   // $ARGUMENTS → full space-joined remaining args
-  result = result.replace(/\$ARGUMENTS\b/g, positionalArgs.join(" "))
+  result = result.replace(/\$ARGUMENTS\b/g, () => positionalArgs.join(" "))
   // $0, $1, … → individual positional args (empty string if out of range)
   for (let i = 0; i < positionalArgs.length; i++) {
-    const escaped = positionalArgs[i]!.replace(/[$&`\\]/g, "\\$&")
-    result = result.replace(new RegExp(`\\$${i}\\b`, "g"), escaped)
+    result = result.replace(new RegExp(`\\$${i}\\b`, "g"), () => positionalArgs[i] ?? "")
   }
   return result
 }

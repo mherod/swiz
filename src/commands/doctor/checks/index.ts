@@ -3,6 +3,7 @@ import { agentBinaryAndSettingsCheck } from "./agent-binary-and-settings.ts"
 import { agentConfigSyncCheck } from "./agent-config-sync.ts"
 import { bunRuntimeCheck } from "./bun-runtime.ts"
 import { codexHookSourcesCheck } from "./codex-hook-sources.ts"
+import { codexMemoryCheck } from "./codex-memory.ts"
 import { configScriptsCheck } from "./config-scripts.ts"
 import { daemonLaunchAgentEnvCheck } from "./daemon-launch-agent-env.ts"
 import { gateRequiredSkillsCheck } from "./gate-required-skills.ts"
@@ -32,6 +33,7 @@ export const DIAGNOSTIC_CHECKS: DiagnosticCheck[] = [
   shellShimCheck,
   agentConfigSyncCheck,
   codexHookSourcesCheck,
+  codexMemoryCheck,
   gateRequiredSkillsCheck,
   skillConflictsCheck,
   invalidSkillEntriesCheck,
