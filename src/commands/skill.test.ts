@@ -42,13 +42,13 @@ describe("parseFrontmatterField", () => {
 
   test("extracts field with quoted value", () => {
     const content = '---\nglobs: "*.ts, *.tsx"\n---\n'
-    expect(parseFrontmatterField(content, "globs")).toBe('"*.ts, *.tsx"')
+    expect(parseFrontmatterField(content, "globs")).toBe("*.ts, *.tsx")
   })
 
   test("extracts first matching field when multiple fields exist", () => {
     const content = '---\ndescription: First\nglobs: "*.ts"\ntags: testing\n---\n'
     expect(parseFrontmatterField(content, "description")).toBe("First")
-    expect(parseFrontmatterField(content, "globs")).toBe('"*.ts"')
+    expect(parseFrontmatterField(content, "globs")).toBe("*.ts")
     expect(parseFrontmatterField(content, "tags")).toBe("testing")
   })
 

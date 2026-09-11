@@ -104,6 +104,17 @@ describe("querySkills", () => {
     ).toMatchObject({ content: "first second / first / second\n" })
   })
 
+  test("replaces positional args without replacement token expansion", async () => {
+    const deps = fixtures([commit], "$0 $1 $ARGUMENTS\n")
+    expect(
+      await querySkills(
+        { action: "read", name: "commit", args: ["hello $& world", "hello $' world"] },
+        "/project",
+        deps
+      )
+    ).toMatchObject({ content: "hello $& world hello $' world hello $& world hello $' world\n" })
+  })
+
   test.each([
     "missing",
     "comm",

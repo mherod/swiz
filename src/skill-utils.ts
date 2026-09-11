@@ -2,6 +2,7 @@ import { existsSync, statSync } from "node:fs"
 import { readdir, stat } from "node:fs/promises"
 import { basename, dirname, join, resolve } from "node:path"
 import { orderBy, uniq } from "lodash-es"
+import { parse as parseYaml } from "yaml"
 import {
   agentHasTaskToolsForHookPayload,
   detectCurrentAgentFromHookPayload,
@@ -116,16 +117,19 @@ export const SKILL_PRECEDENCE = [...SKILL_DIRS]
 // they appear directly under a skill root (e.g. stray bun install artefacts).
 const NON_SKILL_DIR_NAMES = new Set(["node_modules"])
 const AGENTS_ROOT_NON_SKILL_DIR_NAMES = new Set(["skills"])
+const DISABLED_SKILL_DIR_SUFFIX = ".disabled-by-swiz-"
 
 /** Return true when a directory entry should be scanned as a skill candidate. */
+// eslint-disable-next-line complexity -- explicit defensive handling for directory metadata and symlink checks.
 export function isSkillCandidateDir(entry: import("node:fs").Dirent, skillRoot?: string): boolean {
-  if (entry.name.startsWith(".")) return false
-  if (NON_SKILL_DIR_NAMES.has(entry.name)) return false
-  if (
-    skillRoot !== undefined &&
-    basename(resolve(skillRoot)) === ".agents" &&
-    AGENTS_ROOT_NON_SKILL_DIR_NAMES.has(entry.name)
-  ) {
+  const shouldIgnore =
+    entry.name.startsWith(".") ||
+    NON_SKILL_DIR_NAMES.has(entry.name) ||
+    entry.name.includes(DISABLED_SKILL_DIR_SUFFIX) ||
+    (skillRoot !== undefined &&
+      basename(resolve(skillRoot)) === ".agents" &&
+      AGENTS_ROOT_NON_SKILL_DIR_NAMES.has(entry.name))
+  if (shouldIgnore) {
     return false
   }
   if (entry.isDirectory()) return true
@@ -258,9 +262,52 @@ export function skillAdvice(skill: string, withSkill: string, withoutSkill: stri
 
 // ─── Frontmatter parsing ─────────────────────────────────────────────────────
 
+type FrontmatterScalarValue = string | number | boolean | null
+type FrontmatterValue =
+  | FrontmatterScalarValue
+  | FrontmatterValue[]
+  | { [key: string]: FrontmatterValue }
+type FrontmatterMap = { [key: string]: FrontmatterValue }
+
+// eslint-disable-next-line complexity -- intentional fallback branches preserve legacy frontmatter edge-cases.
 export function parseFrontmatterField(content: string, field: string): string | null {
-  const match = content.match(new RegExp(`^---[\\s\\S]*?^${field}:\\s*(.+)$[\\s\\S]*?^---`, "m"))
-  return match?.[1]?.trim() ?? null
+  const match = content.match(/^---\s*\r?\n([\s\S]*?)\r?\n---(?:[ \t]*\r?\n|$)/)
+  if (!match?.[1]) return null
+
+  const frontmatterBlock = match[1]!
+  let parsedFrontmatter: FrontmatterMap
+  try {
+    const parsed = parseYaml(frontmatterBlock)
+    if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
+      parsedFrontmatter = parsed as FrontmatterMap
+    } else {
+      parsedFrontmatter = {}
+    }
+  } catch {
+    return parseFrontmatterLineFallback(frontmatterBlock, field)
+  }
+
+  if (!Object.hasOwn(parsedFrontmatter, field)) {
+    return parseFrontmatterLineFallback(frontmatterBlock, field)
+  }
+
+  const rawValue = parsedFrontmatter[field]
+  if (rawValue === undefined || rawValue === null) return null
+  if (typeof rawValue === "string") return stripQuotes(rawValue).trim()
+  return stripQuotes(String(rawValue)).trim()
+}
+
+function parseFrontmatterLineFallback(frontmatter: string, field: string): string | null {
+  const fieldPrefix = `${field}:`
+  const line = frontmatter
+    .split(/\r?\n/)
+    .find((current) => current.trimStart().startsWith(fieldPrefix))
+
+  if (!line) return null
+  const colonIdx = line.indexOf(":")
+  if (colonIdx === -1) return null
+  const raw = line.slice(colonIdx + 1).trim()
+  return raw ? stripQuotes(raw) : null
 }
 
 export function stripFrontmatter(content: string): string {
@@ -1021,6 +1068,13 @@ export async function findSkills(cwd?: string): Promise<SkillInfo[]> {
   const skills: SkillInfo[] = []
   const seen = new Set<string>()
   const skillDirs = getSkillDirs(cwd)
+  const localSkillDirs = new Set(
+    [
+      join(cwd ?? resolveSpawnCwd(), ".skills"),
+      ...getProjectAgentsSkillDirs(cwd ?? process.cwd()),
+      ...getProjectAgentsSkillDirs(resolveSpawnCwd()),
+    ].map((path) => resolve(path))
+  )
 
   for (const dir of skillDirs) {
     let entries: import("node:fs").Dirent[]
@@ -1048,7 +1102,7 @@ export async function findSkills(cwd?: string): Promise<SkillInfo[]> {
       skills.push({
         name,
         description,
-        source: dir === skillDirs[0] ? "local" : "global",
+        source: localSkillDirs.has(resolve(dir)) ? "local" : "global",
         path: skillPath,
       })
       seen.add(name)

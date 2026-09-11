@@ -15,6 +15,7 @@ import {
   extractReferencedToolsFromSkillText,
   extractStepsFromSkill,
   filterQualitySteps,
+  findSkills,
   formatCurrentSessionUsageWindow,
   formatSkillReferenceForAgent,
   getAgentsSkillDir,
@@ -134,6 +135,29 @@ describe("isSkillCandidateDir", () => {
       process.env.HOME = fakeHome
       expect(isSkillCandidateDir(entry, agentsRoot)).toBe(false)
       expect(isSkillCandidateDir(entry, join(fakeHome, ".claude", "skills"))).toBe(true)
+    } finally {
+      if (originalHome === undefined) delete process.env.HOME
+      else process.env.HOME = originalHome
+      releaseEnvLockFn()
+    }
+  })
+
+  test("ignores directories disabled by Swiz", async () => {
+    const fakeHome = await createTempDir()
+    const agentsRoot = join(fakeHome, ".agents", "skills")
+    const disabled = join(agentsRoot, "old.disabled-by-swiz-20260327050830")
+    await mkdir(disabled, { recursive: true })
+    const entries = await readdir(agentsRoot, { withFileTypes: true })
+    const disabledEntry = entries.find(
+      (entry) => entry.name === "old.disabled-by-swiz-20260327050830"
+    )
+    expect(disabledEntry).toBeDefined()
+
+    const originalHome = process.env.HOME
+    await acquireEnvLock()
+    try {
+      process.env.HOME = fakeHome
+      expect(isSkillCandidateDir(disabledEntry!, agentsRoot)).toBe(false)
     } finally {
       if (originalHome === undefined) delete process.env.HOME
       else process.env.HOME = originalHome
@@ -323,6 +347,26 @@ describe("parseFrontmatterField", () => {
     )
   })
 
+  test("extracts multiline folded block scalar fields", () => {
+    const content =
+      "---\ndescription: >-\n  PostgreSQL management is critical.\n  Keep indexing predictable.\n---\nBody\n"
+    expect(parseFrontmatterField(content, "description")).toBe(
+      "PostgreSQL management is critical. Keep indexing predictable."
+    )
+  })
+
+  test("extracts multiline literal block scalar fields", () => {
+    const content = "---\ndescription: |\n  line one\n  line two\n---\nBody\n"
+    expect(parseFrontmatterField(content, "description")).toBe("line one\nline two")
+  })
+
+  test("strips surrounding quotes around scalar values", () => {
+    expect(parseFrontmatterField('---\ndescription: "quoted text"\n---\n', "description")).toBe(
+      "quoted text"
+    )
+    expect(parseFrontmatterField("---\nglobs: '\"*.ts\"'\n---\n", "globs")).toBe("*.ts")
+  })
+
   test("returns null when field is absent", () => {
     expect(parseFrontmatterField("---\nauthor: Alice\n---\n", "description")).toBeNull()
   })
@@ -338,7 +382,70 @@ describe("parseFrontmatterField", () => {
   test("extracts multiple different fields from the same content", () => {
     const content = "---\ndescription: My skill\nglobs: '*.ts'\n---\n"
     expect(parseFrontmatterField(content, "description")).toBe("My skill")
-    expect(parseFrontmatterField(content, "globs")).toBe("'*.ts'")
+    expect(parseFrontmatterField(content, "globs")).toBe("*.ts")
+  })
+})
+
+describe("findSkills", () => {
+  test("marks project .agents/skills as local", async () => {
+    const fakeHome = await createTempDir()
+    const fakeProject = await createTempDir()
+
+    const localDir = join(fakeProject, ".agents", "skills", "project-skill")
+    await mkdir(localDir, { recursive: true })
+    await writeFile(join(localDir, "SKILL.md"), "---\ndescription: Project skill\n---\n")
+
+    const globalDir = join(fakeHome, ".codex", "skills", "project-skill")
+    await mkdir(globalDir, { recursive: true })
+    await writeFile(join(globalDir, "SKILL.md"), "---\ndescription: Global replacement\n---\n")
+
+    const originalHome = process.env.HOME
+    await acquireEnvLock()
+    try {
+      process.env.HOME = fakeHome
+      const result = await findSkills(fakeProject)
+      const projectSkill = result.find((skill) => skill.name === "project-skill")
+      expect(projectSkill).toEqual({
+        name: "project-skill",
+        description: "Project skill",
+        source: "local",
+        path: join(localDir, "SKILL.md"),
+      })
+    } finally {
+      if (originalHome === undefined) delete process.env.HOME
+      else process.env.HOME = originalHome
+      releaseEnvLockFn()
+      clearSkillCache()
+    }
+  })
+
+  test("ignores disabled-by-swiz skill directories", async () => {
+    const fakeHome = await createTempDir()
+    const fakeProject = await createTempDir()
+
+    const disabled = join(fakeProject, ".skills", "old.disabled-by-swiz-20260327050830")
+    await mkdir(disabled, { recursive: true })
+    await writeFile(join(disabled, "SKILL.md"), "---\ndescription: disabled\n---\n")
+
+    const live = join(fakeProject, ".skills", "live-skill")
+    await mkdir(live, { recursive: true })
+    await writeFile(join(live, "SKILL.md"), "---\ndescription: live\n---\n")
+
+    const originalHome = process.env.HOME
+    await acquireEnvLock()
+    try {
+      process.env.HOME = fakeHome
+      const skills = await findSkills(fakeProject)
+      expect(skills.some((skill) => skill.name === "old.disabled-by-swiz-20260327050830")).toBe(
+        false
+      )
+      expect(skills.some((skill) => skill.name === "live-skill")).toBe(true)
+    } finally {
+      if (originalHome === undefined) delete process.env.HOME
+      else process.env.HOME = originalHome
+      releaseEnvLockFn()
+      clearSkillCache()
+    }
   })
 })
 
