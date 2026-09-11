@@ -134,9 +134,10 @@ describe("pretooluse-no-npm (pnpm project)", () => {
       expect(result.decision).toBe("allow")
     })
 
-    test("bun install also passes through (plausible alternative)", async () => {
+    test("bun install remains subject to pnpm package ownership", async () => {
       const result = await runHook("bun install")
-      expect(result.decision).toBe("allow")
+      expect(result.decision).toBe("deny")
+      expect(result.reason).toContain("Use pnpm for dependency operations")
     })
   })
 

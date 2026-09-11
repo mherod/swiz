@@ -25,7 +25,8 @@ import {
   skillExistsForHookPayload,
 } from "../src/skill-utils.ts"
 import { isShellTool } from "../src/tool-matchers.ts"
-import { detectPackageManager } from "../src/utils/package-detection.ts"
+import { packagePolicyContext, resolvePackagePolicyCwd } from "../src/utils/bun-command-policy.ts"
+import { detectPackageManagerDetails } from "../src/utils/package-detection.ts"
 import {
   findGitCommitAttribution,
   hasGhFlag,
@@ -405,7 +406,7 @@ function buildGitRules(payload: Record<string, unknown>): Rule[] {
   ]
 }
 
-function buildRuntimeRules(pm: string | null, runtime: "bun" | "node"): Rule[] {
+function buildRuntimeRules(pm: string | null, runtime: "bun" | "node", context: string): Rule[] {
   const rules: Rule[] = [
     {
       match: (c) => PYTHON_CMD_RE.test(c),
@@ -413,28 +414,29 @@ function buildRuntimeRules(pm: string | null, runtime: "bun" | "node"): Rule[] {
         `Do not use \`python\` or \`python3\`. The system Python version is unreliable across environments.\n\nUse \`${runtime}\` instead — it ships a consistent runtime:\n` +
         (runtime === "bun"
           ? "  • bun script.ts       — run a TypeScript or JavaScript file\n  • bun -e 'code here'  — evaluate an inline expression"
-          : "  • node script.js      — run a JavaScript file\n  • npx ts-node file.ts — run TypeScript (with ts-node)"),
+          : "  • node script.js      — run a JavaScript file\n  • bun script.ts       — run a TypeScript file with Bun") +
+        `\n\n${context}`,
     },
   ]
   if (pm === "bun") {
     rules.push({
       match: (c: string) => NODE_TS_NODE_CMD_RE.test(c),
       message:
-        "Do not use `node` or `ts-node`. This project uses bun.\n\nbun is the project-standard runtime — native TypeScript, faster startup:\n  • bun script.ts       — run a TypeScript or JavaScript file\n  • bun -e 'code here'  — evaluate an inline expression\n  • bun run <script>    — run a package.json script\n  • bun test            — run tests",
+        "Do not use `node` or `ts-node`. This project uses bun.\n\nUse the Bun runtime:\n  • bun script.ts       — run a TypeScript or JavaScript file\n  • bun -e 'code here'  — evaluate an inline expression\n\n" +
+        context,
     })
   }
   return rules
 }
 
-function buildRules(
-  pm: string | null,
-  runtime: "bun" | "node",
-  payload: Record<string, unknown>
-): Rule[] {
+async function buildRules(payload: Record<string, unknown>, cwd: string): Promise<Rule[]> {
+  const detection = await detectPackageManagerDetails(cwd)
+  const pm = detection?.packageManager ?? null
+  const runtime = pm === "bun" ? "bun" : "node"
   return [
     ...buildShellToolRules(payload),
     ...buildGitRules(payload),
-    ...buildRuntimeRules(pm, runtime),
+    ...buildRuntimeRules(pm, runtime, packagePolicyContext(detection, cwd)),
   ]
 }
 
@@ -842,7 +844,7 @@ function parseHookInput(input: Record<string, any>): {
   return {
     command: ((input?.tool_input as Record<string, any>)?.command as string) ?? "",
     transcriptPath: (input?.transcript_path as string) ?? "",
-    cwd: (input?.cwd as string) ?? process.cwd(),
+    cwd: resolvePackagePolicyCwd(input),
   }
 }
 
@@ -864,15 +866,10 @@ function commandRulesOutput(
 }
 
 export async function evaluatePretooluseBannedCommands(input: unknown): Promise<SwizHookOutput> {
-  const PM = await detectPackageManager()
-  const RUNTIME: "bun" | "node" = PM === "bun" ? "bun" : "node"
-
   const parsed = toolHookInputSchema.parse(input)
   if (!isShellTool(parsed.tool_name ?? "")) return {}
-
-  const RULES = buildRules(PM, RUNTIME, parsed as Record<string, unknown>)
-
   const { command, transcriptPath, cwd } = parseHookInput(parsed as Record<string, any>)
+  const RULES = await buildRules(parsed as Record<string, unknown>, cwd)
   const strippedCommand = stripQuotedShellStrings(command, { preserveQuotePairs: true })
 
   const stashRetirementBlock = await requirePruneBranchesForStashRetirement(

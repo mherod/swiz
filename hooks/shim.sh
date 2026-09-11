@@ -28,6 +28,15 @@ builtin unalias \
   _swiz_pm_guard _swiz_has_function _swiz_chain_existing _swiz_run_git _swiz_run_gh \
   2>/dev/null || true
 
+# Keep Bun intent classification identical to PreToolUse. The installed shim is
+# sourced from the checkout, so resolve its shared policy relative to this file.
+if [[ -n "${ZSH_VERSION:-}" ]]; then
+  _SWIZ_SHIM_SOURCE="${(%):-%x}"
+else
+  _SWIZ_SHIM_SOURCE="${BASH_SOURCE[0]}"
+fi
+_SWIZ_BUN_POLICY="${_SWIZ_SHIM_SOURCE%/*}/../src/utils/bun-command-policy.ts"
+
 # ── Dependency check ──────────────────────────────────────────────────────────
 # swiz hooks and the shim redirect commands to bun. The shim is sourced from
 # .zshenv before a login shell reaches .zprofile, so recover the standard Bun
@@ -602,6 +611,19 @@ emacs() {
 
 _swiz_pm_guard() {
   local invoked="$1"; shift
+
+  if [[ "$invoked" == "bun" && -f "$_SWIZ_BUN_POLICY" ]]; then
+    local policy_reason
+    if policy_reason="$(command bun "$_SWIZ_BUN_POLICY" "$PWD" "$@" 2>/dev/null)"; then
+      case "$policy_reason" in
+        allow) return 1 ;;
+        deny:*)
+          _swiz_guard bun "the project's package manager" "${policy_reason#deny:}" "$@"
+          return $?
+          ;;
+      esac
+    fi
+  fi
 
   # Explicitly global administration does not inspect or mutate this project's
   # dependency graph, so the cwd's package-manager policy does not apply.

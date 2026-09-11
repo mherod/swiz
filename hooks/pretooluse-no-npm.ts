@@ -17,6 +17,10 @@ import {
 } from "../src/SwizHook.ts"
 import type { ShellHookInput } from "../src/schemas.ts"
 import { isShellTool } from "../src/tool-matchers.ts"
+import {
+  evaluateBunCommandPolicy,
+  resolvePackagePolicyCwd,
+} from "../src/utils/bun-command-policy.ts"
 import { detectPackageManagerDetails, type PackageManager } from "../src/utils/package-detection.ts"
 import { splitShellSegments, tokenizeShellSegment } from "../src/utils/shell-patterns.ts"
 
@@ -144,6 +148,7 @@ interface ParsedInvocation {
   invoked: string
   subcmd: string
   rest: string
+  args: string[]
 }
 
 function packageManagerTokenIndex(tokens: string[]): number | null {
@@ -165,6 +170,7 @@ function parseSegment(segment: string): ParsedInvocation | null {
     invoked: tokens[invokedIndex]!.toLowerCase(),
     subcmd: tokens[invokedIndex + 1]?.toLowerCase() ?? "",
     rest: tokens.slice(invokedIndex + 2).join(" "),
+    args: tokens.slice(invokedIndex + 1),
   }
 }
 
@@ -199,11 +205,6 @@ function buildImplausibleDeny(parsed: ParsedInvocation, pm: PackageManager): Swi
   return buildDeny(`${invoked} ${subcmd}`, `${pm} ${subcmd}`, pm)
 }
 
-function resolveCwd(input: ShellHookInput): string | undefined {
-  if (input.cwd) return input.cwd
-  return typeof input.tool_input?.cwd === "string" ? input.tool_input.cwd : undefined
-}
-
 function buildAcceptedInvocation(
   parsed: ParsedInvocation,
   pm: PackageManager,
@@ -216,25 +217,54 @@ function buildAcceptedInvocation(
   )
 }
 
-async function evaluate(input: ShellHookInput) {
-  if (!isShellTool(input.tool_name ?? "")) return {}
+async function evaluateBunInvocations(
+  invocations: ParsedInvocation[],
+  cwd: string
+): Promise<
+  { output: SwizHookOutput; denied: true } | { output: SwizHookOutput | null; denied: false }
+> {
+  let output: SwizHookOutput | null = null
+  for (const invocation of invocations) {
+    if (invocation.invoked !== "bun") continue
+    const policy = await evaluateBunCommandPolicy(invocation.args, cwd)
+    if (policy.denial) return { output: preToolUseDeny(policy.denial), denied: true }
+    output = preToolUseAllow(
+      `${policy.intent === "runtime" ? "Bun runtime selected by explicit invocation" : "Bun package operation accepted"}. ${policy.context}`
+    )
+  }
+  return { output, denied: false }
+}
 
-  const command: string = input.tool_input?.command ?? ""
-  const invocations = parseInvocations(command)
-  if (invocations.length === 0) return {}
-
-  const detection = await detectPackageManagerDetails(resolveCwd(input))
-  if (!detection) return {}
+async function evaluatePackageInvocations(
+  invocations: ParsedInvocation[],
+  cwd: string,
+  bunOutput: SwizHookOutput | null
+): Promise<SwizHookOutput> {
+  const detection = await detectPackageManagerDetails(cwd)
+  if (!detection) return bunOutput ?? {}
   const { packageManager: pm, signals } = detection
   const implausible = invocations.find((parsed) =>
     isImplausibleInvocation(parsed.invoked, pm, signals)
   )
 
   if (!implausible) {
-    return buildAcceptedInvocation(invocations[0]!, pm, signals)
+    return bunOutput ?? buildAcceptedInvocation(invocations[0]!, pm, signals)
   }
 
   return buildImplausibleDeny(implausible, pm)
+}
+
+async function evaluate(input: ShellHookInput): Promise<SwizHookOutput> {
+  if (!isShellTool(input.tool_name ?? "")) return {}
+
+  const command: string = input.tool_input?.command ?? ""
+  const invocations = parseInvocations(command)
+  if (invocations.length === 0) return {}
+
+  const cwd = resolvePackagePolicyCwd(input)
+  const bun = await evaluateBunInvocations(invocations, cwd)
+  if (bun.denied) return bun.output
+  return await evaluatePackageInvocations(invocations, cwd, bun.output)
 }
 
 const pretoolusNoNpm: SwizShellHook = {

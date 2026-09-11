@@ -1,6 +1,9 @@
 import { describe, expect, test } from "bun:test"
 import { mkdir } from "node:fs/promises"
 import { join, resolve } from "node:path"
+import { evaluatePretooluseBannedCommands } from "../../hooks/pretooluse-banned-commands.ts"
+import noNpmHook from "../../hooks/pretooluse-no-npm.ts"
+import { quotePosixShellArg } from "../utils/shell-patterns.ts"
 import { useTempDir } from "../utils/test-utils.ts"
 import {
   ensureShimInstallation,
@@ -73,13 +76,13 @@ async function createShimCommandStub(
 async function runSourcedShim(
   cwd: string,
   command: string,
-  env: Record<string, string> = {}
+  env: Record<string, string> = {},
+  shell = ZSH_PATH ?? "zsh"
 ): Promise<{ exitCode: number; stdout: string; stderr: string }> {
-  return await runShell(
-    ZSH_PATH ?? "zsh",
-    ["-f", "-c", 'source "$1"; eval "$2"', "swiz", SHIM_PATH, command],
-    { cwd, env: { SWIZ_SHIM: "strict", ...env } }
-  )
+  return await runShell(shell, ["-f", "-c", 'source "$1"; eval "$2"', "swiz", SHIM_PATH, command], {
+    cwd,
+    env: { SWIZ_SHIM: "strict", ...env },
+  })
 }
 
 async function createMockGitProject(suffix: string) {
@@ -90,6 +93,167 @@ async function createMockGitProject(suffix: string) {
 }
 
 describe("shell shim runtime", () => {
+  for (const pm of ["npm", "pnpm"] as const) {
+    for (const shellPath of ["/bin/bash", ...(ZSH_PATH ? [ZSH_PATH] : [])]) {
+      test(`${pm}/${shellPath} ownership permits Bun runtime commands in both guard layers`, async () => {
+        const project = await tmp.create(`swiz-bun-runtime-${pm}-`)
+        const bunProject = await tmp.create("swiz-bun-owner-")
+        await Bun.write(
+          join(bunProject, "package.json"),
+          JSON.stringify({ packageManager: "bun@1.3.14" })
+        )
+        await Bun.write(
+          join(project, "package.json"),
+          JSON.stringify({
+            packageManager: `${pm}@11.0.0`,
+            scripts: { build: "echo build", lint: "echo lint", "helper.ts": "echo package-script" },
+          })
+        )
+        await Bun.write(join(project, pm === "npm" ? "package-lock.json" : "pnpm-lock.yaml"), "")
+        await Bun.write(join(project, "helper.ts"), "console.log('runtime')\n")
+        await Bun.write(join(project, "helper with spaces.ts"), "console.log('runtime')\n")
+        await Bun.write(join(project, "Library/LaunchAgents/com.swiz.daemon.plist"), "fixture")
+        const binDir = await createShimCommandStub(
+          project,
+          "bun",
+          [
+            "#!/bin/sh",
+            'case "$1" in',
+            '  */bun-command-policy.ts) exec "$SWIZ_TEST_BUN" "$@" ;;',
+            '  -e) case "$2" in *"const supported = new Set"*) exec "$SWIZ_TEST_BUN" "$@" ;; esac ;;',
+            "esac",
+            'printf "%s\\n" "$@"',
+            "",
+          ].join("\n")
+        )
+        const env = {
+          HOME: project,
+          ZDOTDIR: project,
+          BASH_ENV: "",
+          SWIZ_BYPASS: "",
+          SWIZ_TEST_BUN: process.execPath,
+          PATH: `${binDir}:${process.env.PATH}`,
+        }
+        const runtimeCases = [
+          ["helper.ts"],
+          ["./helper with spaces.ts", "install", "--cwd", "not a directory"],
+          [join(project, "helper with spaces.ts"), "two words"],
+          ["run", "./helper with spaces.ts"],
+          ["--hot", "./helper.ts"],
+          ["--cwd", project, "./helper.ts"],
+          ["run", "--cwd", project, "./helper with spaces.ts"],
+          ["-e", "console.log('install --global')"],
+          ["--eval=console.log('ok')"],
+          ["--print", "1 + 1"],
+          ["--version"],
+          ["--revision"],
+          ["test", "--reporter=dots"],
+        ]
+        for (const args of runtimeCases) {
+          const command = ["bun", ...args].map(quotePosixShellArg).join(" ")
+          const shell = await runSourcedShim(project, command, env, shellPath)
+          expect(shell.exitCode, `${pm}: ${command}: ${shell.stderr}`).toBe(0)
+          expect(shell.stdout).toBe(`${args.join("\n")}\n`)
+          const payload = { cwd: project, tool_name: "Bash", tool_input: { command } }
+          const packageResult = await noNpmHook.run(payload)
+          const packageJson = JSON.stringify(packageResult)
+          expect(packageResult).toMatchObject({
+            hookSpecificOutput: {
+              permissionDecision: "allow",
+              permissionDecisionReason: expect.stringContaining("Bun runtime"),
+            },
+          })
+          expect(packageJson).toContain(`Target cwd: ${project}`)
+          expect(packageJson).toContain(`${pm} from packageManager`)
+          expect(await evaluatePretooluseBannedCommands(payload)).toEqual({})
+        }
+        for (const args of [
+          ["install"],
+          ["add", "lodash"],
+          ["remove", "lodash"],
+          ["run", "build"],
+          ["run", "helper.ts"],
+          ["run", "build", "--cwd", bunProject],
+          ["run", "add", "--global"],
+          ["lint", "--cwd", bunProject],
+          ["install", "--", "--global"],
+          ["--cwd", project, "install"],
+          ["install", "--cwd", project],
+          ["build"],
+        ]) {
+          const command = ["bun", ...args].map(quotePosixShellArg).join(" ")
+          const shell = await runSourcedShim(project, command, env, shellPath)
+          expect(shell.exitCode, command).toBe(1)
+          expect(shell.stdout).toBe("")
+          expect(shell.stderr).toContain("packageManager")
+          expect(shell.stderr).toContain(project)
+          const result = await noNpmHook.run({
+            cwd: project,
+            tool_name: "Bash",
+            tool_input: { command },
+          })
+          expect(result).toMatchObject({ hookSpecificOutput: { permissionDecision: "deny" } })
+        }
+        // A daemon handling multiple projects must not inherit this test process's Bun policy.
+        expect(
+          await evaluatePretooluseBannedCommands({
+            cwd: project,
+            tool_name: "Bash",
+            tool_input: { command: "node helper.js" },
+          })
+        ).toEqual({})
+        const nodeInBun = await evaluatePretooluseBannedCommands({
+          cwd: bunProject,
+          tool_name: "Bash",
+          tool_input: { command: "node helper.js" },
+        })
+        expect(nodeInBun).toMatchObject({
+          hookSpecificOutput: {
+            permissionDecision: "deny",
+            permissionDecisionReason: expect.stringContaining(bunProject),
+          },
+        })
+        expect(
+          await evaluatePretooluseBannedCommands({
+            cwd: project,
+            tool_name: "Bash",
+            tool_input: { command: "node helper.js" },
+          })
+        ).toEqual({})
+        const targetCommand = ["bun", "--cwd", project, "install"].map(quotePosixShellArg).join(" ")
+        const targeted = await runSourcedShim(bunProject, targetCommand, env, shellPath)
+        expect(targeted.exitCode).toBe(1)
+        expect(targeted.stderr).toContain(`Target cwd: ${project}`)
+        expect(
+          await noNpmHook.run({
+            cwd: bunProject,
+            tool_name: "Bash",
+            tool_input: { command: targetCommand },
+          })
+        ).toMatchObject({ hookSpecificOutput: { permissionDecision: "deny" } })
+        for (const cwdField of ["cwd", "workdir"]) {
+          const toolInput = { [cwdField]: project, command: "bun install" }
+          const packageResult = await noNpmHook.run({
+            cwd: bunProject,
+            tool_name: "Bash",
+            tool_input: toolInput,
+          })
+          expect(JSON.stringify(packageResult)).toContain(`Target cwd: ${project}`)
+          expect(packageResult).toMatchObject({
+            hookSpecificOutput: { permissionDecision: "deny" },
+          })
+          expect(
+            await evaluatePretooluseBannedCommands({
+              cwd: bunProject,
+              tool_name: "Bash",
+              tool_input: { ...toolInput, command: "node helper.js" },
+            })
+          ).toEqual({})
+        }
+      })
+    }
+  }
+
   testWithZsh(
     "keeps walk-up detector output clean across multiple parent directories",
     async () => {
