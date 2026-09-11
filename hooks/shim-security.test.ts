@@ -1,18 +1,45 @@
 import { describe, expect, test } from "bun:test"
-import { mkdir, mkdtemp, realpath, rm } from "node:fs/promises"
-import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { $ } from "bun"
+import { useTempDir } from "../src/utils/test-utils.ts"
 
 const SHIM_PATH = join(import.meta.dir, "shim.sh")
+const tmp = useTempDir("swiz-shim-security-")
 
 async function runShim(
   command: string,
-  opts: { cwd?: string; env?: Record<string, string> } = {}
+  opts: { stagedFile?: string; matchesHome?: boolean } = {}
 ): Promise<{
   exitCode: number
   stderr: string
   stdout: string
+  gitCalls: string
 }> {
+  const cwd = await tmp.create()
+  const gitLog = join(cwd, "git-calls")
+  await Bun.write(gitLog, "")
+  const mocks = {
+    git: `#!/bin/sh
+printf '%s\\n' "$*" >> "$GIT_CALL_LOG"
+case "$*" in
+  'rev-parse --is-inside-work-tree') [ -n "$STAGED_FILE" ] ;;
+  'diff --cached --name-only --diff-filter=ACMR') printf '%s\\n' "$STAGED_FILE" ;;
+  'diff --cached --name-only --diff-filter=ACMR -z') printf '%s\\0' "$STAGED_FILE" ;;
+  "grep --cached -F -l -z -e $HOME -- $STAGED_FILE")
+    [ "$MATCHES_HOME" = 1 ] || exit 1
+    printf '%s\\0' "$STAGED_FILE" ;;
+  *) echo "Unexpected Git invocation: $*" >&2; exit 97 ;;
+esac
+`,
+    // Linux normally provides command only as a shell builtin.
+    command: "#!/bin/sh\nexit 127\n",
+    bun: "#!/bin/sh\nexit 0\n",
+    swiz: "#!/bin/sh\nexit 0\n",
+  }
+  for (const [name, script] of Object.entries(mocks)) {
+    await Bun.write(join(cwd, name), script)
+    await $`chmod 755 ${join(cwd, name)}`
+  }
   const script = [
     "git() { printf 'git:%s\\n' \"$*\"; }",
     "gh() { printf 'gh:%s\\n' \"$*\"; }",
@@ -20,9 +47,16 @@ async function runShim(
     "SWIZ_SHIM=strict",
     command,
   ].join("\n")
-  const proc = Bun.spawn(["bash", "-c", script], {
-    cwd: opts.cwd ?? import.meta.dir,
-    env: { ...process.env, HOME: "/tmp", ...opts.env },
+  const proc = Bun.spawn(["/bin/bash", "-c", script], {
+    cwd,
+    env: {
+      ...process.env,
+      HOME: join(cwd, "home"),
+      PATH: `${cwd}:/usr/bin:/bin`,
+      GIT_CALL_LOG: gitLog,
+      STAGED_FILE: opts.stagedFile ?? "",
+      MATCHES_HOME: opts.matchesHome ? "1" : "0",
+    },
     stdout: "pipe",
     stderr: "pipe",
   })
@@ -31,7 +65,7 @@ async function runShim(
     new Response(proc.stderr).text(),
     proc.exited,
   ])
-  return { exitCode, stderr, stdout }
+  return { exitCode, stderr, stdout, gitCalls: await Bun.file(gitLog).text() }
 }
 
 describe("shell shim Git and GitHub security", () => {
@@ -106,48 +140,26 @@ describe("shell shim Git and GitHub security", () => {
     expect(result.stderr).toContain("shared checkout")
   })
 
-  test("blocks git commit when staged files contain absolute home directory path", async () => {
-    const tmpDir = await realpath(await mkdtemp(join(tmpdir(), "swiz-shim-home-test-")))
-    const mockHome = join(tmpDir, "home", "user")
-    await mkdir(mockHome, { recursive: true })
-    const repoDir = join(tmpDir, "repo")
-    await mkdir(repoDir, { recursive: true })
-
-    await Bun.spawn(["git", "init"], { cwd: repoDir }).exited
-    await Bun.write(join(repoDir, "bad.txt"), `config_dir = "${mockHome}/.config"\n`)
-    await Bun.spawn(["git", "add", "bad.txt"], { cwd: repoDir }).exited
-
+  test.each(["bad.txt", "bad file.txt"])("blocks staged home paths in %s", async (stagedFile) => {
     const result = await runShim("git commit -m 'test'", {
-      cwd: repoDir,
-      env: { HOME: mockHome },
+      stagedFile,
+      matchesHome: true,
     })
 
     expect(result.exitCode).toBe(1)
     expect(result.stderr).toContain("staged file content contains your absolute home directory")
-    expect(result.stderr).toContain("bad.txt")
-
-    await rm(tmpDir, { recursive: true, force: true })
+    expect(result.stderr).toContain(stagedFile)
+    expect(result.gitCalls).toContain("grep --cached -F -l -z -e ")
   })
 
   test("allows git commit when staged files use relative home paths", async () => {
-    const tmpDir = await realpath(await mkdtemp(join(tmpdir(), "swiz-shim-home-test-")))
-    const mockHome = join(tmpDir, "home", "user")
-    await mkdir(mockHome, { recursive: true })
-    const repoDir = join(tmpDir, "repo")
-    await mkdir(repoDir, { recursive: true })
-
-    await Bun.spawn(["git", "init"], { cwd: repoDir }).exited
-    await Bun.write(join(repoDir, "good.txt"), `config_dir = "~/.config"\n`)
-    await Bun.spawn(["git", "add", "good.txt"], { cwd: repoDir }).exited
-
     const result = await runShim("git commit -m 'test'", {
-      cwd: repoDir,
-      env: { HOME: mockHome },
+      stagedFile: "good.txt",
     })
 
     expect(result.exitCode).toBe(0)
     expect(result.stdout).toContain("git:commit -m test")
 
-    await rm(tmpDir, { recursive: true, force: true })
+    expect(result.gitCalls).toContain("grep --cached -F -l -z -e ")
   })
 })
