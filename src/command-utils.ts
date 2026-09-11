@@ -62,6 +62,8 @@ export type NonCanonicalGitInvocationKind =
   | "command-wrapper"
   | "nested-shell"
   | "shell-substitution"
+  | "isolated-keyring-prefix"
+  | "unsafe-environment"
 
 export interface NonCanonicalGitInvocation {
   kind: NonCanonicalGitInvocationKind
@@ -265,7 +267,44 @@ function assignmentGitUsage(tokens: string[]): NonCanonicalGitInvocation | null 
   const assignmentCount = leadingAssignmentCount(tokens)
   if (assignmentCount === 0) return null
   const gitToken = firstGitToken(tokens, assignmentCount)
+  if (assignmentCount === 1 && tokens[0]?.startsWith("GNUPGHOME=") && tokens[1] === "git") {
+    const parsed = parseGitInvocationTokens(tokens.slice(1).join(" "))
+    if (parsed?.subcommand === "verify-commit") {
+      return { kind: "isolated-keyring-prefix", invocation: gitToken! }
+    }
+  }
   return gitToken ? { kind: "command-wrapper", invocation: gitToken } : null
+}
+
+/** Explicit overrides must not become a bypass merely by moving them into export. */
+const UNSAFE_GIT_ENVIRONMENT_RE =
+  /^(?:GIT_(?:CONFIG.*|EXEC_PATH|SSH.*|ASKPASS|PROXY_COMMAND|EXTERNAL_DIFF|PAGER|EDITOR|SEQUENCE_EDITOR|DIR|WORK_TREE|INDEX_FILE|OBJECT_DIRECTORY|ALTERNATE_OBJECT_DIRECTORIES)|(?:LD|DYLD)_.*|PATH|HOME|SHELL|BASH_ENV|ENV|BUN_OPTIONS|NODE_OPTIONS)$/
+
+function unsafeEnvironmentAssignment(tokens: string[]): string | null {
+  const assignments =
+    tokens[0] === "export" ? tokens.slice(1) : tokens.slice(0, leadingAssignmentCount(tokens))
+  const unsafe = assignments.find((token) => UNSAFE_GIT_ENVIRONMENT_RE.test(token.split("=")[0]!))
+  return unsafe?.split("=")[0] ?? null
+}
+
+function findUnsafeGitEnvironment(
+  command: string,
+  inherited: string | null = null,
+  depth = 0
+): NonCanonicalGitInvocation | null {
+  if (depth > MAX_GIT_INVOCATION_DEPTH) return null
+  let unsafe = inherited
+  for (const segment of splitShellSegments(command)) {
+    unsafe ??= unsafeEnvironmentAssignment(tokenizeShellSegment(segment))
+    for (const body of extractExecutableSubcommands(segment)) {
+      const nested = findUnsafeGitEnvironment(body, unsafe, depth + 1)
+      if (nested) return nested
+    }
+    if (unsafe && collectSegmentGitUsage(segment, depth)) {
+      return { kind: "unsafe-environment", invocation: unsafe }
+    }
+  }
+  return null
 }
 
 function groupedGitUsage(firstToken: string): NonCanonicalGitInvocation | null {
@@ -350,7 +389,10 @@ function collectGitInvocations(command: string, depth: number): GitInvocation[] 
  * substitutions are rejected so downstream Git hooks see one stable grammar.
  */
 export function findNonCanonicalGitInvocation(command: string): NonCanonicalGitInvocation | null {
-  const usages = collectGitInvocations(normalizeCommand(command).normalize("NFKC"), 0)
+  const normalized = normalizeCommand(command).normalize("NFKC")
+  const unsafe = findUnsafeGitEnvironment(normalized)
+  if (unsafe) return unsafe
+  const usages = collectGitInvocations(normalized, 0)
   return (
     usages.find((usage): usage is NonCanonicalGitInvocation => usage.kind !== "canonical") ?? null
   )

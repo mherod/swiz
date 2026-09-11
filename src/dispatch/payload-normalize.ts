@@ -18,6 +18,7 @@
  * `swiz dispatch` can inject `process.cwd()` from the launcher (the real project directory).
  */
 import { unset } from "lodash-es"
+import { isShellTool } from "../tool-matchers.ts"
 
 function normalizeSessionId(payload: Record<string, any>): void {
   const sid = payload.session_id
@@ -56,6 +57,15 @@ export function normalizeAgentHookPayload(payload: Record<string, any>): void {
   normalizeSessionId(payload)
   normalizeCwd(payload)
   normalizeCursorShellCommandShape(payload)
+  normalizeShellCommandInput(payload)
+}
+
+/** Codex exec_command calls the command `cmd`; hooks consume `command`. */
+function normalizeShellCommandInput(payload: Record<string, any>): void {
+  if (!isShellTool(payload.tool_name ?? "")) return
+  const input = payload.tool_input
+  if (!input || typeof input !== "object" || Array.isArray(input)) return
+  if (typeof input.cmd === "string") input.command = input.cmd
 }
 
 /** True for Cursor's top-level config dir (`…/.cursor`), not workspace metadata under `projects/`. */

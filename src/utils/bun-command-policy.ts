@@ -156,15 +156,6 @@ function isGlobalBunOperation(args: string[], entry: string): boolean {
   return entry === "pm" && flags[flags.indexOf("pm") + 1] === "bin"
 }
 
-export function resolvePackagePolicyCwd(input: {
-  cwd?: string | null
-  tool_input?: Record<string, unknown> | null
-}): string {
-  const base = input.cwd || process.cwd()
-  const target = input.tool_input?.workdir ?? input.tool_input?.cwd
-  return typeof target === "string" && target ? resolve(base, target) : resolve(base)
-}
-
 export function packagePolicyContext(
   detection: PackageManagerDetection | null,
   cwd: string

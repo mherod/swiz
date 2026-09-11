@@ -13,6 +13,8 @@
 import { homedir } from "node:os"
 import { isAbsolute, join, resolve } from "node:path"
 import { detectCurrentAgentFromHookPayload } from "../src/agent-paths.ts"
+import { resolveShellCwd } from "../src/cwd.ts"
+import { getHomeDirWithFallback } from "../src/home.ts"
 import {
   preToolUseAllowWithContext,
   preToolUseDeny,
@@ -21,18 +23,19 @@ import {
 } from "../src/SwizHook.ts"
 import { isFileEditTool, isShellTool } from "../src/tool-matchers.ts"
 import { buildIssueGuidance, isSettingDisableCommand } from "../src/utils/inline-hook-helpers.ts"
+import { splitShellSegments, tokenizeShellSegment } from "../src/utils/shell-patterns.ts"
 import {
   buildProtectedTaskStorageDenyReason,
   isAllowedMarkdownShellReadCommand,
   isAllowedSharedSkillShellCommand,
   isAllowedTrashMoveCommand,
   isCodexHomePath,
+  isConfiguredSkillPath,
   isHiddenTopLevelHomePath,
   isPathWithin,
   isProtectedTaskStoragePath,
   isSafeReadOnlyShellCommand,
   isSessionToolResultsPath,
-  isSharedAgentsSkillPath,
   resolveCanonical,
   SAFE_READ_ONLY_INSPECTION_HINT,
 } from "./sandbox-path-utils.ts"
@@ -134,7 +137,8 @@ async function resolveNormalizedShellPath(
 ): Promise<string | null> {
   if (isAbsolute(value) || value.startsWith("/")) return await resolveCanonical(value)
   if (value.startsWith("~")) return await resolveCanonical(join(homeDir, value.slice(2)))
-  if (value.startsWith(".") || value === "") return await resolveCanonical(resolve(cwd, value))
+  if (value.startsWith(".") || value.includes("/") || /\.[\w]+$/.test(value) || value === "")
+    return await resolveCanonical(resolve(cwd, value))
   return null
 }
 
@@ -155,7 +159,8 @@ async function isHiddenHomePathInCommand(
   rawPath: string,
   cwd: string,
   homeDir: string,
-  allowCodexHome: boolean
+  allowCodexHome: boolean,
+  sessionCwd = cwd
 ): Promise<boolean> {
   const resolved = await normalizeShellPath(rawPath, cwd, homeDir)
   if (!resolved) return false
@@ -165,7 +170,7 @@ async function isHiddenHomePathInCommand(
   if (allowCodexHome && isCodexHomePath(resolved, homeDir)) return false
   if (!isHiddenTopLevelHomePath(resolved, homeDir)) return false
 
-  const normalizedCwd = cwd.replace(/\\/g, "/")
+  const normalizedCwd = sessionCwd.replace(/\\/g, "/")
   const normalizedHome = homeDir.replace(/\\/g, "/").replace(/\/$/, "")
   const normalizedResolved = resolved.replace(/\\/g, "/")
   const hiddenRoot = `${normalizedHome}/${normalizedResolved.slice(normalizedHome.length + 1).split("/")[0]}`
@@ -175,7 +180,7 @@ async function isHiddenHomePathInCommand(
 
 function collectShellPathCandidates(command: string, hasPathBuilder: boolean): Set<string> {
   const candidates = new Set<string>([
-    ...(command.match(/[^\s]+/g) ?? []),
+    ...splitShellSegments(command).flatMap(tokenizeShellSegment),
     ...Array.from(command.matchAll(COMMAND_SUBST_SWIZ_RE)).map((match) => match[0]!),
     ...Array.from(command.matchAll(BACKTICK_SUBST_SWIZ_RE)).map((match) => match[0]!),
   ])
@@ -197,6 +202,7 @@ function candidateValues(rawToken: string): string[] {
 interface ShellPathContext {
   command: string
   cwd: string
+  sessionCwd: string
   homeDir: string
   allowCodexHome: boolean
   hasHomeReference: boolean
@@ -210,9 +216,7 @@ async function allowedHiddenHomeCandidate(
 ): Promise<boolean> {
   if (await isAllowedTrashMoveCommand(ctx.command, ctx.cwd, ctx.homeDir)) return true
   if (!resolvedCandidate) return false
-  const isSharedSkill =
-    isSharedAgentsSkillPath(candidate, ctx.homeDir) ||
-    isSharedAgentsSkillPath(resolvedCandidate, ctx.homeDir)
+  const isSharedSkill = await isConfiguredSkillPath(resolvedCandidate, ctx.homeDir)
   return isSharedSkill && isAllowedSharedSkillShellCommand(ctx.command, candidate)
 }
 
@@ -231,7 +235,8 @@ async function classifyDirectShellCandidate(
     candidate,
     ctx.cwd,
     ctx.homeDir,
-    ctx.allowCodexHome
+    ctx.allowCodexHome,
+    ctx.sessionCwd
   )
   if (!isTaskStorage && !isHiddenHome) return { matched: false, blocked: null }
 
@@ -268,9 +273,10 @@ async function classifyShellCandidate(
 async function shouldBlockShellCommand(
   command: string,
   cwd: string,
-  allowCodexHome: boolean
+  allowCodexHome: boolean,
+  sessionCwd: string
 ): Promise<BlockedShellPath | null> {
-  const homeDir = homedir()
+  const homeDir = getHomeDirWithFallback(homedir())
   if (!homeDir || !command) return null
   const canonicalHomeDir = await resolveCanonical(homeDir)
   const canonicalCwd = await resolveCanonical(cwd)
@@ -278,25 +284,63 @@ async function shouldBlockShellCommand(
   const context: ShellPathContext = {
     command,
     cwd: canonicalCwd,
+    sessionCwd: await resolveCanonical(sessionCwd),
     homeDir: canonicalHomeDir,
     allowCodexHome,
     hasHomeReference: HOME_REFERENCE_RE.test(command),
     hasPathBuilder,
   }
-  const seen = new Set<string>()
+  const blocked = await classifyCommandPaths(context)
+  if (blocked) return blocked
 
-  for (const rawToken of collectShellPathCandidates(command, hasPathBuilder)) {
+  // Bare filenames (e.g. `tee config`) also inherit the explicit hidden cwd.
+  // Permit only inspected reads or direct skill execution in that directory.
+  if (
+    await isHiddenHomePathInCommand(
+      canonicalCwd,
+      canonicalCwd,
+      canonicalHomeDir,
+      allowCodexHome,
+      context.sessionCwd
+    )
+  ) {
+    if (!(await isAllowedHiddenCwdCommand(context)))
+      return { kind: "hidden-home", path: canonicalCwd }
+  }
+  return null
+}
+
+async function classifyCommandPaths(ctx: ShellPathContext): Promise<BlockedShellPath | null> {
+  const seen = new Set<string>()
+  for (const rawToken of collectShellPathCandidates(ctx.command, ctx.hasPathBuilder)) {
     for (const candidate of candidateValues(rawToken)) {
       if (seen.has(candidate)) continue
       seen.add(candidate)
-      if (!candidate.includes("/") && !candidate.startsWith("~") && !candidate.startsWith("."))
-        continue
-      const blocked = await classifyShellCandidate(candidate, context)
+      const blocked = await classifyShellCandidate(candidate, ctx)
       if (blocked) return blocked
     }
   }
-
   return null
+}
+
+async function isAllowedHiddenCwdCommand(ctx: ShellPathContext): Promise<boolean> {
+  for (const segment of splitShellSegments(ctx.command)) {
+    if (isSafeReadOnlyShellCommand(segment)) continue
+    let helper = false
+    for (const token of collectShellPathCandidates(segment, false)) {
+      const resolved = await normalizeShellPath(token, ctx.cwd, ctx.homeDir)
+      if (
+        resolved &&
+        (await isConfiguredSkillPath(resolved, ctx.homeDir)) &&
+        isAllowedSharedSkillShellCommand(segment, token)
+      ) {
+        helper = true
+        break
+      }
+    }
+    if (!helper) return false
+  }
+  return true
 }
 
 function buildSafeReadOnlyAllowMessage(blockedPath: string): string {
@@ -356,7 +400,11 @@ function settingMutationBlock(command: string) {
   )
 }
 
-function blockedShellOutput(blocked: BlockedShellPath, command: string) {
+function blockedShellOutput(
+  blocked: BlockedShellPath,
+  command: string,
+  policy: ReturnType<typeof resolveShellCwd>
+) {
   if (blocked.kind === "task-storage") {
     return preToolUseDeny(buildProtectedTaskStorageDenyReason(blocked.path))
   }
@@ -385,7 +433,11 @@ function blockedShellOutput(blocked: BlockedShellPath, command: string) {
       "",
       `Attempted path: ${blocked.path}.`,
       "",
-      "Use shell commands only on paths inside the current dispatch cwd unless that cwd is itself the hidden home path.",
+      `Effective command cwd: ${policy.cwd} (source: ${policy.source}). Session access boundary: ${policy.sessionCwd}.`,
+      "Changing tool workdir resolves relative paths there; it does not grant hidden-home write access.",
+      "To run the signing helper, keep workdir at the target repository and invoke the script directly:",
+      "  bun <configured-skill-root>/commit/scripts/check-gpg-signing.mjs preflight",
+      "Use the installed skill root. Package-manager wrappers and eval imports are not supported helper execution forms; pnpm exec may change the process cwd.",
       "",
       SAFE_READ_ONLY_INSPECTION_HINT,
     ].join("\n")
@@ -400,8 +452,14 @@ async function evaluateShellSandbox(
   const command = (toolInput?.command ?? "").normalize("NFKC")
   const mutationBlock = settingMutationBlock(command)
   if (mutationBlock) return mutationBlock
-  const blocked = await shouldBlockShellCommand(command, input.cwd ?? process.cwd(), allowCodexHome)
-  return blocked ? blockedShellOutput(blocked, command) : null
+  const policy = resolveShellCwd(input)
+  const blocked = await shouldBlockShellCommand(
+    command,
+    policy.cwd,
+    allowCodexHome,
+    policy.sessionCwd
+  )
+  return blocked ? blockedShellOutput(blocked, command, policy) : null
 }
 
 function evaluateFileSandbox(toolInput: Record<string, string> | undefined) {

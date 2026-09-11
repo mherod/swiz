@@ -10,6 +10,7 @@ import {
   findNonCanonicalGitInvocation,
   type NonCanonicalGitInvocation,
 } from "../src/command-utils.ts"
+import { resolveShellCwd } from "../src/cwd.ts"
 import {
   preToolUseAllow,
   preToolUseDeny,
@@ -25,7 +26,7 @@ import {
   skillExistsForHookPayload,
 } from "../src/skill-utils.ts"
 import { isShellTool } from "../src/tool-matchers.ts"
-import { packagePolicyContext, resolvePackagePolicyCwd } from "../src/utils/bun-command-policy.ts"
+import { packagePolicyContext } from "../src/utils/bun-command-policy.ts"
 import { detectPackageManagerDetails } from "../src/utils/package-detection.ts"
 import {
   findGitCommitAttribution,
@@ -465,6 +466,16 @@ function checkBunTestReporter(command: string): SwizHookOutput | null {
 }
 
 function buildNonCanonicalGitMessage(invocation: NonCanonicalGitInvocation): string {
+  if (invocation.kind === "unsafe-environment") {
+    return `Git environment override ${invocation.invocation} can replace executable or repository configuration. Remove the override and invoke Git directly; exporting it is also blocked.`
+  }
+  if (invocation.kind === "isolated-keyring-prefix") {
+    return (
+      "Inline environment prefixes hide Git from command-profile checks. For isolated public-key verification, export only GNUPGHOME and keep Git at the command boundary:\n\n" +
+      "  export GNUPGHOME=/tmp/<isolated-public-keyring>\n  git verify-commit --raw <sha>\n\n" +
+      "Substitute the existing isolated keyring directory and commit SHA. Keep any required -c gpg.format or -c gpg.openpgp.program options on the direct git command. Do not export executable or Git configuration overrides."
+    )
+  }
   const context =
     invocation.kind === "nested-shell"
       ? "Git was invoked through a nested shell."
@@ -844,7 +855,7 @@ function parseHookInput(input: Record<string, any>): {
   return {
     command: ((input?.tool_input as Record<string, any>)?.command as string) ?? "",
     transcriptPath: (input?.transcript_path as string) ?? "",
-    cwd: resolvePackagePolicyCwd(input),
+    cwd: resolveShellCwd(input).cwd,
   }
 }
 

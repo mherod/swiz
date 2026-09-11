@@ -2,6 +2,8 @@ import { lstat, realpath } from "node:fs/promises"
 import { basename, dirname, join as joinPath, resolve } from "node:path"
 import { normalizeCommand, stripHeredocs } from "../src/command-utils.ts"
 import { expandHomeVars, getHomeDirOrNull } from "../src/home.ts"
+import { getAllProviderSkillDirs } from "../src/provider-utils.ts"
+import { getAgentsSkillDir } from "../src/skill-utils.ts"
 import { isMarkdownPath } from "../src/tool-matchers.ts"
 import {
   splitShellSegments,
@@ -345,13 +347,16 @@ function isAllowedSkillPathStage(tokens: string[], pathIndexes: number[]): boole
   const commandIndex = commandTokenIndex(tokens)
   const commandName = tokens[commandIndex] ?? ""
   if (!commandName || pathIndexes.length !== 1) return false
+  if (tokens.slice(0, commandIndex).some((token) => token.includes("="))) return false
 
   const pathIndex = pathIndexes[0]!
   if (pathIndex === commandIndex) return true
 
   if (SKILL_SCRIPT_RUNNERS.has(commandName)) {
     return tokens.slice(commandIndex + 1, pathIndex).every((token) => {
-      return token === "run" || token.startsWith("-")
+      return commandName === "bun"
+        ? ["run", "--", "--no-install", "--no-env-file"].includes(token)
+        : ["--", "-e", "-u", "-eu"].includes(token)
     })
   }
 
@@ -376,6 +381,7 @@ export function isAllowedSharedSkillShellCommand(command: string, skillPath: str
   let matched = false
   for (const segment of splitShellSegments(normalized)) {
     const tokens = tokenizeShellSegment(segment)
+    if (["export", "env", "source", ".", "eval"].includes(tokens[0] ?? "")) return false
     const pathIndexes = tokens.flatMap((token, index) =>
       tokenReferencesPath(token, skillPath) ? [index] : []
     )
@@ -386,16 +392,13 @@ export function isAllowedSharedSkillShellCommand(command: string, skillPath: str
   return matched
 }
 
-export function isSharedAgentsSkillPath(target: string, homeDir: string): boolean {
-  const normalizedHome = homeDir.replace(/\\/g, "/").replace(/\/$/, "")
-  const normalizedTarget = normalizeShellPathToken(target)
-    .replace(/^~(?=\/|$)/, normalizedHome)
-    .replace(/^\$HOME(?=\/|$)/, normalizedHome)
-    .replace(/^\$\{HOME\}(?=\/|$)/, normalizedHome)
-    .replace(/\\/g, "/")
-    .replace(/\/$/, "")
-  const sharedSkillRoot = `${normalizedHome}/.agents/skills`
-  return normalizedTarget === sharedSkillRoot || normalizedTarget.startsWith(`${sharedSkillRoot}/`)
+export async function isConfiguredSkillPath(target: string, homeDir: string): Promise<boolean> {
+  const roots = [getAgentsSkillDir(homeDir), ...getAllProviderSkillDirs()]
+  for (const root of roots) {
+    const canonicalRoot = await resolveCanonical(root)
+    if (target !== canonicalRoot && isPathWithin(canonicalRoot, target)) return true
+  }
+  return false
 }
 
 export async function resolveCanonical(p: string): Promise<string> {

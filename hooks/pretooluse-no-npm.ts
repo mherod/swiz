@@ -8,6 +8,7 @@
  */
 
 import { extractExecutableSubcommands } from "../src/command-utils.ts"
+import { resolveShellCwd } from "../src/cwd.ts"
 import {
   preToolUseAllow,
   preToolUseDeny,
@@ -17,10 +18,7 @@ import {
 } from "../src/SwizHook.ts"
 import type { ShellHookInput } from "../src/schemas.ts"
 import { isShellTool } from "../src/tool-matchers.ts"
-import {
-  evaluateBunCommandPolicy,
-  resolvePackagePolicyCwd,
-} from "../src/utils/bun-command-policy.ts"
+import { evaluateBunCommandPolicy } from "../src/utils/bun-command-policy.ts"
 import { detectPackageManagerDetails, type PackageManager } from "../src/utils/package-detection.ts"
 import { splitShellSegments, tokenizeShellSegment } from "../src/utils/shell-patterns.ts"
 
@@ -261,7 +259,7 @@ async function evaluate(input: ShellHookInput): Promise<SwizHookOutput> {
   const invocations = parseInvocations(command)
   if (invocations.length === 0) return {}
 
-  const cwd = resolvePackagePolicyCwd(input)
+  const { cwd } = resolveShellCwd(input)
   const bun = await evaluateBunInvocations(invocations, cwd)
   if (bun.denied) return bun.output
   return await evaluatePackageInvocations(invocations, cwd, bun.output)

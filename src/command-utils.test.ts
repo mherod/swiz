@@ -119,4 +119,30 @@ describe("findNonCanonicalGitInvocation", () => {
     expect(findNonCanonicalGitInvocation(`/bin/zsh -lc 'echo "git status"'`)).toBeNull()
     expect(findNonCanonicalGitInvocation("echo '`git status`'")).toBeNull()
   })
+
+  test("environment policy ignores quoted examples and ordinary inspection variables", () => {
+    expect(findNonCanonicalGitInvocation("git status; export PATH=/new/path")).toBeNull()
+    expect(
+      findNonCanonicalGitInvocation("echo 'export GIT_EXEC_PATH=example'; git status")
+    ).toBeNull()
+    expect(findNonCanonicalGitInvocation("export GIT_OPTIONAL_LOCKS=0; git status")).toBeNull()
+    expect(
+      findNonCanonicalGitInvocation("export GNUPGHOME=/tmp/keyring; git verify-commit --raw abc123")
+    ).toBeNull()
+    expect(
+      findNonCanonicalGitInvocation("export GIT_CONFIG_COUNT=1; git verify-commit --raw abc123")
+        ?.kind
+    ).toBe("unsafe-environment")
+  })
+
+  test("unsafe exported environment also applies inside read-only Git substitutions", () => {
+    expect(
+      findNonCanonicalGitInvocation("export GIT_EXTERNAL_DIFF=/tmp/injected; result=$(git diff)")
+        ?.kind
+    ).toBe("unsafe-environment")
+    expect(
+      findNonCanonicalGitInvocation("result=$(export GIT_EXEC_PATH=/tmp/injected; git status)")
+        ?.kind
+    ).toBe("unsafe-environment")
+  })
 })
