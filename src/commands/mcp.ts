@@ -12,6 +12,7 @@ import {
 } from "../mcp-tool-core.ts"
 import { projectKeyFromCwd } from "../project-key.ts"
 import { readSwizSettings } from "../settings.ts"
+import { skillQueryInputSchema, skillQueryResultSchema } from "../skill-query.ts"
 import {
   summarizeTasks,
   TASK_GOVERNANCE_HINTS,
@@ -753,6 +754,29 @@ function registerTaskListTool(server: McpToolServer, cwd: string): void {
   )
 }
 
+export function registerSkillQueryTool(server: McpToolServer, cwd: string): void {
+  server.registerTool(
+    "SkillQuery",
+    {
+      title: "Query skills",
+      description:
+        "Index, search, look up or read available skills using swiz skill discovery and precedence. " +
+        "No arguments lists the first 50 skills; query filters names/descriptions; name reads a skill; " +
+        "action=lookup returns metadata only. Reads preserve inline shell commands as text and never execute setup. " +
+        "Results are scoped to this MCP server's project directory.",
+      inputSchema: skillQueryInputSchema,
+      outputSchema: { skillQuery: skillQueryResultSchema },
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+    },
+    (input: McpToolInput) => executeMcpTool("SkillQuery", input, cwd)
+  )
+}
+
 async function serve(): Promise<void> {
   const { McpServer } = await import("@modelcontextprotocol/sdk/server/mcp.js")
   const { StdioServerTransport } = await import("@modelcontextprotocol/sdk/server/stdio.js")
@@ -777,6 +801,8 @@ async function serve(): Promise<void> {
 
   registerTaskListTool(server, cwd)
 
+  registerSkillQueryTool(server, cwd)
+
   const transport = new StdioServerTransport()
   await server.connect(transport)
   activeServer = server as unknown as typeof activeServer
@@ -791,8 +817,8 @@ async function serve(): Promise<void> {
   }
 
   const enabledFeatures = mcpChannels
-    ? "channel + permission + reply + task-tools"
-    : "reply + task-tools"
+    ? "channel + permission + reply + task-tools + skill-query"
+    : "reply + task-tools + skill-query"
   process.stderr.write(
     `swiz mcp server ready (${SERVER_NAME} ${SERVER_VERSION}) — ${enabledFeatures} enabled\n`
   )

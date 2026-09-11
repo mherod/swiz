@@ -19,6 +19,12 @@ import { isDeepStrictEqual } from "node:util"
 import { z } from "zod"
 import { getHomeDirWithFallback } from "./home.ts"
 import { projectKeyFromCwd } from "./project-key.ts"
+import {
+  querySkills,
+  renderSkillQuery,
+  type SkillQueryResult,
+  skillQueryResultSchema,
+} from "./skill-query.ts"
 import { createDefaultTaskStore } from "./task-roots.ts"
 import { discoverRelatedTaskAdvice } from "./tasks/task-discovery.ts"
 import { getTaskToolName } from "./tasks/task-governance-messages.ts"
@@ -51,10 +57,16 @@ export interface McpToolTextContent {
 export interface McpToolResult {
   content: McpToolTextContent[]
   isError?: boolean
-  structuredContent?: { taskMutation: { changed: boolean } }
+  structuredContent?: { taskMutation?: { changed: boolean }; skillQuery?: SkillQueryResult }
 }
 
-export const MCP_TOOL_NAMES = ["reply", "TaskCreate", "TaskUpdate", "TaskList"] as const
+export const MCP_TOOL_NAMES = [
+  "reply",
+  "TaskCreate",
+  "TaskUpdate",
+  "TaskList",
+  "SkillQuery",
+] as const
 export const mcpToolNameSchema = z.enum(MCP_TOOL_NAMES)
 export type McpToolName = z.infer<typeof mcpToolNameSchema>
 
@@ -65,7 +77,12 @@ export type McpToolInput = z.infer<typeof mcpToolInputSchema>
 export const mcpToolResultSchema = z.object({
   content: z.array(z.object({ type: z.literal("text"), text: z.string() })),
   isError: z.boolean().optional(),
-  structuredContent: z.object({ taskMutation: z.object({ changed: z.boolean() }) }).optional(),
+  structuredContent: z
+    .object({
+      taskMutation: z.object({ changed: z.boolean() }).optional(),
+      skillQuery: skillQueryResultSchema.optional(),
+    })
+    .optional(),
 })
 
 function textResult(text: string): McpToolResult {
@@ -355,6 +372,15 @@ async function runTaskListTool(cwd: string): Promise<McpToolResult> {
   }
 }
 
+async function runSkillQueryTool(input: McpToolInput, cwd: string): Promise<McpToolResult> {
+  try {
+    const result = await querySkills(input, cwd)
+    return { ...textResult(renderSkillQuery(result)), structuredContent: { skillQuery: result } }
+  } catch (error) {
+    return errorResult(`SkillQuery failed: ${messageFromUnknownError(error)}`)
+  }
+}
+
 // ─── Entry point ────────────────────────────────────────────────────────────
 
 /** Execute one MCP tool call. Shared by the daemon route and the stdio fallback. */
@@ -372,5 +398,7 @@ export async function runMcpTool(
       return runTaskUpdateTool(input, cwd)
     case "TaskList":
       return runTaskListTool(cwd)
+    case "SkillQuery":
+      return runSkillQueryTool(input, cwd)
   }
 }

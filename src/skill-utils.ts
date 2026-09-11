@@ -998,7 +998,7 @@ export function filterQualitySteps(steps: SkillStep[]): SkillStep[] {
 
 // ─── Skill listing (async) ───────────────────────────────────────────────────
 
-interface SkillInfo {
+export interface SkillInfo {
   name: string
   description: string
   source: "local" | "global"
@@ -1017,10 +1017,10 @@ export interface SkillConflict {
   overridden: SkillConflictEntry[]
 }
 
-export async function findSkills(): Promise<SkillInfo[]> {
+export async function findSkills(cwd?: string): Promise<SkillInfo[]> {
   const skills: SkillInfo[] = []
   const seen = new Set<string>()
-  const skillDirs = getSkillDirs()
+  const skillDirs = getSkillDirs(cwd)
 
   for (const dir of skillDirs) {
     let entries: import("node:fs").Dirent[]
