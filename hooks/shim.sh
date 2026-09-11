@@ -1043,7 +1043,7 @@ git() {
         staged_files="$(command git diff --cached --name-only --diff-filter=ACMR 2>/dev/null)"
         if [[ -n "$staged_files" ]]; then
           local home_matches
-          home_matches="$(command git diff --cached --name-only --diff-filter=ACMR -z 2>/dev/null | command xargs -0 command git grep --cached -F -l -z -e "$home_path" -- 2>/dev/null | tr '\0' '\n' | command grep -v '^$')"
+          home_matches="$(command git diff --cached --name-only --diff-filter=ACMR -z 2>/dev/null | command xargs -0 git grep --cached -F -l -z -e "$home_path" -- 2>/dev/null | tr '\0' '\n' | command grep -v '^$')"
           if [[ -n "$home_matches" ]]; then
             printf 'swiz: BLOCKED: staged file content contains your absolute home directory.\n\n' >&2
             printf 'Affected staged files:\n' >&2
