@@ -5,6 +5,7 @@ import { detectInstalledAgents } from "../agents.ts"
 import { stderrLog } from "../debug.ts"
 import { getHomeDirOrNull } from "../home.ts"
 import type { Command } from "../types.ts"
+import { manageHooks } from "./manage-hooks.ts"
 import {
   filterPortableServers,
   isMcpServerDisabled,
@@ -170,6 +171,7 @@ function agentList(project: boolean): AgentConfig[] {
 function usage(): string {
   return [
     "Usage: swiz manage mcp <list|show|add|remove|validate|merge|sync> [options]",
+    "       swiz manage hooks <validate|repair> --codex [--project] [--dry-run]",
     "Examples:",
     "  swiz manage mcp list --agy",
     "  swiz manage mcp sync --dry-run",
@@ -920,8 +922,17 @@ async function runManageAction(
 export const manageCommand: Command<ManageCommandOptions> = {
   name: "manage",
   description: "Manage shared swiz resources (MCP, etc.)",
-  usage: "swiz manage mcp <list|show|add|remove|validate|merge|sync> [options]",
+  usage:
+    "swiz manage mcp <list|show|add|remove|validate|merge|sync> [options] | swiz manage hooks <validate|repair> --codex [--project] [--dry-run]",
   options: [
+    {
+      flags: "hooks validate --codex",
+      description: "Detect conflicting Codex hook configuration sources",
+    },
+    {
+      flags: "hooks repair --codex",
+      description: "Consolidate hook definitions into hooks.json with backups; supports --dry-run",
+    },
     {
       flags: "mcp sync",
       description: "Sync enabled servers across agents; preserve disabled entries locally",
@@ -962,6 +973,10 @@ export const manageCommand: Command<ManageCommandOptions> = {
     },
   ],
   async run(args, options = {}) {
+    if (args[0] === "hooks") {
+      console.log(await manageHooks(args.slice(1), options))
+      return
+    }
     const parsed = parseManageArgs(args)
     const home = options.home ?? getHomeDirOrNull()
     if (!home) throw new Error("HOME is not set; cannot manage MCP configuration.")

@@ -1,3 +1,18 @@
+import type { z } from "zod"
+
+/** Serialize JSON-compatible values for a TOML assignment. Reparse the complete document before writing. */
+export function renderTomlValue(value: z.input<z.ZodUnknown>): string {
+  if (typeof value === "string" || typeof value === "boolean") return JSON.stringify(value)
+  if (typeof value === "number" && Number.isFinite(value)) return String(value)
+  if (Array.isArray(value)) return `[${value.map(renderTomlValue).join(", ")}]`
+  if (value && typeof value === "object" && Object.getPrototypeOf(value) === Object.prototype) {
+    return `{ ${Object.entries(value)
+      .map(([key, val]) => `${JSON.stringify(key)} = ${renderTomlValue(val)}`)
+      .join(", ")} }`
+  }
+  throw new Error("Unsupported value for TOML; configuration was not written")
+}
+
 function tomlTablePath(line: string): string | null {
   const trimmed = line.trim()
   const arrayTable = trimmed.match(/^\[\[(.*?)\]\]\s*(?:#.*)?$/)

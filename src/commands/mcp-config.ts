@@ -1,7 +1,7 @@
 import { mkdir } from "node:fs/promises"
 import { dirname } from "node:path"
 import { isDeepStrictEqual } from "node:util"
-import { stripTomlRoot } from "../utils/toml.ts"
+import { renderTomlValue, stripTomlRoot } from "../utils/toml.ts"
 import { writeWithBackup } from "./install/file-helpers.ts"
 
 export interface McpServerDef {
@@ -42,19 +42,6 @@ export async function readMcpFile(path: string): Promise<McpFileData> {
   return { ...data, mcpServers: servers as McpFileData["mcpServers"], [originalText]: text }
 }
 
-/** Emit only JSON-compatible MCP values; Bun reparses the complete document before writing. */
-function tomlValue(value: unknown): string {
-  if (typeof value === "string" || typeof value === "boolean") return JSON.stringify(value)
-  if (typeof value === "number" && Number.isFinite(value)) return String(value)
-  if (Array.isArray(value)) return `[${value.map(tomlValue).join(", ")}]`
-  if (isRecord(value) && Object.getPrototypeOf(value) === Object.prototype) {
-    return `{ ${Object.entries(value)
-      .map(([key, val]) => `${JSON.stringify(key)} = ${tomlValue(val)}`)
-      .join(", ")} }`
-  }
-  throw new Error("Unsupported MCP value for TOML; configuration was not written")
-}
-
 export function renderMcpFile(path: string, value: McpFileData): string {
   if (!path.endsWith(".toml")) return `${JSON.stringify(value, null, 2)}\n`
   try {
@@ -72,7 +59,7 @@ function renderCodexMcp(value: McpFileData): string {
   const tables = Object.entries(servers).map(
     ([name, server]) =>
       `[mcp_servers.${JSON.stringify(name)}]\n${Object.entries(server)
-        .map(([key, val]) => `${JSON.stringify(key)} = ${tomlValue(val)}`)
+        .map(([key, val]) => `${JSON.stringify(key)} = ${renderTomlValue(val)}`)
         .join("\n")}`
   )
   const result = `${kept.trimEnd()}\n\n${tables.join("\n\n")}\n`

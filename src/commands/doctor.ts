@@ -1,5 +1,6 @@
 import { join } from "node:path"
 import { BOLD, DIM, GREEN, RED, RESET, YELLOW } from "../ansi.ts"
+import { repairCodexHookSources } from "../codex-hook-config.ts"
 import { debugLog, stderrLog } from "../debug.ts"
 import { SWIZ_ROOT } from "../swiz-hook-commands.ts"
 import type { Command } from "../types.ts"
@@ -7,6 +8,7 @@ import { isDaemonReady } from "./daemon/daemon-admin.ts"
 import { type AggressiveHookReplacement, replaceAgentHooksWithSwiz } from "./doctor/aggressive.ts"
 import { type AutoFixContext, runDoctorChecks } from "./doctor/check-runner.ts"
 import { DIAGNOSTIC_CHECKS } from "./doctor/checks"
+import { codexHookCheckName, codexHookDirectories } from "./doctor/checks/codex-hook-sources.ts"
 import {
   findMissingConfigScriptPaths,
   fixMissingConfigScripts,
@@ -123,7 +125,25 @@ async function fixInvalidSkills(entries: InvalidSkillEntry[]): Promise<void> {
   }
 }
 
+async function fixCodexHookSources(results: CheckResult[]): Promise<void> {
+  for (const directory of codexHookDirectories()) {
+    if (
+      !results.some(
+        (result) => result.name === codexHookCheckName(directory) && result.status === "warn"
+      )
+    )
+      continue
+    const repaired = await repairCodexHookSources(directory)
+    if (repaired.changed) {
+      console.log(
+        `  ${GREEN}✓${RESET} Consolidated ${repaired.moved} Codex hook handler(s) into ${join(directory, "hooks.json")}; .bak backups saved. Reload Codex; moved hooks may need trust approval.\n`
+      )
+    }
+  }
+}
+
 interface AutoFixDependencies {
+  fixCodexHookSources: typeof fixCodexHookSources
   fixStaleConfigs: typeof fixStaleConfigs
   replaceAgentHooksWithSwiz: typeof replaceAgentHooksWithSwiz
   autoCleanup: typeof autoCleanup
@@ -245,6 +265,7 @@ async function applyDoctorFixes(
   ctx: AutoFixContext,
   dependencies: AutoFixDependencies
 ): Promise<void> {
+  await dependencies.fixCodexHookSources(ctx.results)
   if (!ctx.aggressive) await dependencies.fixStaleConfigs(ctx.results)
   await fixMissingConfigs()
   await fixAndReportSkillConflicts(ctx)
@@ -256,6 +277,9 @@ async function applyDoctorFixes(
 
 function reportAvailableFixes(ctx: AutoFixContext): void {
   const fixables = [
+    ctx.results.some((r) => r.name.startsWith("Codex hook sources (") && r.status === "warn")
+      ? "conflicting Codex hook sources"
+      : null,
     hasStaleConfigWarnings(ctx.results) ? "stale configs" : null,
     ctx.invalidSkillEntries.length > 0 ? "invalid skill entries" : null,
     ctx.pluginCacheInfos.length > 0 ? "stale plugin cache" : null,
@@ -290,6 +314,7 @@ async function notifyDaemon(jsonOutput: boolean): Promise<void> {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 export interface DoctorCommandOptions {
+  fixCodexHookSources?: typeof fixCodexHookSources
   allChecks?: DiagnosticCheck[]
   autoCleanup?: typeof autoCleanup
   fixStaleConfigs?: typeof fixStaleConfigs
@@ -303,7 +328,10 @@ export const doctorCommand: Command<DoctorCommandOptions> = {
   usage:
     "swiz doctor [--fix] [--aggressive] [--verbose] | swiz doctor clean [--older-than <time>] [--dry-run]",
   options: [
-    { flags: "--fix", description: "Auto-fix stale agent configs by running swiz install" },
+    {
+      flags: "--fix",
+      description: "Repair conflicting Codex hook sources and stale agent configs with backups",
+    },
     {
       flags: "--aggressive",
       description: "Replace writable hook layers with swiz hooks and report retained sources",
@@ -333,6 +361,7 @@ export const doctorCommand: Command<DoctorCommandOptions> = {
         allChecks: options?.allChecks ?? DIAGNOSTIC_CHECKS,
         handleAutoFixes: (context) =>
           handleAutoFixes(context, {
+            fixCodexHookSources: options?.fixCodexHookSources ?? fixCodexHookSources,
             fixStaleConfigs: options?.fixStaleConfigs ?? fixStaleConfigs,
             replaceAgentHooksWithSwiz:
               options?.replaceAgentHooksWithSwiz ?? replaceAgentHooksWithSwiz,
