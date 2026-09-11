@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { mkdir } from "node:fs/promises"
 import { join, resolve } from "node:path"
-import { makeTempGitRepo, useTempDir } from "../utils/test-utils.ts"
+import { useTempDir } from "../utils/test-utils.ts"
 import {
   ensureShimInstallation,
   inspectShimInstallation,
@@ -82,7 +82,71 @@ async function runSourcedShim(
   )
 }
 
+async function createMockGitProject(suffix: string) {
+  const repo = await tmp.create(`swiz-shim-${suffix}-`)
+  const binDir = await createShimCommandStub(repo, "git", "#!/bin/sh\nexit 0\n")
+  await Bun.write(join(repo, "Library/LaunchAgents/com.swiz.daemon.plist"), "fixture")
+  return { repo, env: { HOME: repo, PATH: `${binDir}:${process.env.PATH}`, SWIZ_SHIM: "strict" } }
+}
+
 describe("shell shim runtime", () => {
+  testWithZsh(
+    "keeps walk-up detector output clean across multiple parent directories",
+    async () => {
+      const project = await tmp.create("swiz-shim-pm-walkup-")
+      const child = join(project, "nested", "child")
+      await mkdir(child, { recursive: true })
+      await Bun.write(join(project, "bun.lock"), "")
+      const binDir = await createShimCommandStub(
+        project,
+        "bun",
+        '#!/bin/sh\nprintf "mock-bun:%s\\n" "$*"\n'
+      )
+      const env = { PATH: `${binDir}:${process.env.PATH}`, HOME: project }
+      await Bun.write(join(project, "Library/LaunchAgents/com.swiz.daemon.plist"), "fixture")
+
+      const detected = await runSourcedShim(child, '_swiz_detect_pm "$PWD"', env)
+      expect(detected.exitCode).toBe(0)
+      expect(detected.stdout).toBe("bun\n")
+      const version = await runSourcedShim(child, "bun --version", env)
+      expect(version.exitCode).toBe(0)
+      expect(version.stdout).toBe("mock-bun:--version\n")
+      expect(version.stderr).toBe("")
+    }
+  )
+
+  testWithZsh(
+    "keeps project lookup and repeated Git options free of local declarations",
+    async () => {
+      const project = await createTrunkShimProject({ enabled: false })
+      const child = join(project, "nested", "child")
+      await mkdir(child, { recursive: true })
+      const binDir = await createShimCommandStub(
+        project,
+        "git",
+        '#!/bin/sh\nprintf "git:%s\\n" "$*"\n'
+      )
+      await Bun.write(join(project, "Library/LaunchAgents/com.swiz.daemon.plist"), "fixture")
+      const env = { PATH: `${binDir}:${process.env.PATH}`, HOME: project }
+      const detected = await runSourcedShim(child, `_swiz_project_dir '${child}'`, env)
+      expect(detected.stdout).toBe(`${project}\n`)
+      const git = await runSourcedShim(project, "git -C. -C. status", env)
+      expect(git.exitCode).toBe(0)
+      expect(git.stdout).toBe("git:-C. -C. status\n")
+
+      await createShimCommandStub(project, "find", "#!/bin/sh\nexit 0\n")
+      await Bun.write(join(project, "first.txt"), "first")
+      await Bun.write(join(project, "second.txt"), "second")
+      const added = await runSourcedShim(
+        project,
+        '_swiz_get_setting() { [[ "$1" == "largeFileSizeBlockKb" ]] && printf "1024\\n"; }; git add first.txt second.txt',
+        env
+      )
+      expect(added.exitCode).toBe(0)
+      expect(added.stdout).toBe("git:add first.txt second.txt\n")
+    }
+  )
+
   async function runPackageManagerGuard(cwd: string, invoked: string, args: string[] = []) {
     return await runShell(
       ZSH_PATH ?? "zsh",
@@ -489,11 +553,11 @@ describe("shell shim runtime", () => {
   })
 
   testWithZsh("git wrapper runs under zsh and still blocks an unsafe force push", async () => {
-    const repo = await makeTempGitRepo(tmp, { suffix: "-zsh" })
+    const { repo, env } = await createMockGitProject("zsh")
     const status = await runShell(
       ZSH_PATH ?? "zsh",
       ["-f", "-c", 'source "$1"; git -C "$2" status --short', "swiz", SHIM_PATH, repo],
-      { cwd: repo, env: { SWIZ_SHIM: "strict" } }
+      { cwd: repo, env }
     )
     expect(status.exitCode).toBe(0)
     expect(status.stderr).not.toContain("bad substitution")
@@ -501,7 +565,7 @@ describe("shell shim runtime", () => {
     const forcePush = await runShell(
       ZSH_PATH ?? "zsh",
       ["-f", "-c", 'source "$1"; git push --force origin main', "swiz", SHIM_PATH],
-      { cwd: repo, env: { SWIZ_SHIM: "strict" } }
+      { cwd: repo, env }
     )
     expect(forcePush.exitCode).toBe(1)
     expect(forcePush.stderr).toContain("git push --force is blocked")
@@ -533,7 +597,7 @@ describe("shell shim runtime", () => {
   testWithZsh(
     "allows git restore on empty or missing files while blocking populated files",
     async () => {
-      const repo = await makeTempGitRepo(tmp, { suffix: "-restore" })
+      const { repo, env } = await createMockGitProject("restore")
       const emptyFile = join(repo, "empty.txt")
       const populatedFile = join(repo, "populated.txt")
       await Bun.write(emptyFile, "")
@@ -542,21 +606,21 @@ describe("shell shim runtime", () => {
       const emptyResult = await runShell(
         ZSH_PATH ?? "zsh",
         ["-f", "-c", 'source "$1"; git restore empty.txt', "swiz", SHIM_PATH],
-        { cwd: repo, env: { SWIZ_SHIM: "strict" } }
+        { cwd: repo, env }
       )
       expect(emptyResult.stderr).not.toContain("Do not use `git restore`")
 
       const missingResult = await runShell(
         ZSH_PATH ?? "zsh",
         ["-f", "-c", 'source "$1"; git restore non-existent.txt', "swiz", SHIM_PATH],
-        { cwd: repo, env: { SWIZ_SHIM: "strict" } }
+        { cwd: repo, env }
       )
       expect(missingResult.stderr).not.toContain("Do not use `git restore`")
 
       const populatedResult = await runShell(
         ZSH_PATH ?? "zsh",
         ["-f", "-c", 'source "$1"; git restore populated.txt', "swiz", SHIM_PATH],
-        { cwd: repo, env: { SWIZ_SHIM: "strict" } }
+        { cwd: repo, env }
       )
       expect(populatedResult.exitCode).toBe(1)
       expect(populatedResult.stderr).toContain("swiz: Do not use `git restore`")
@@ -564,14 +628,14 @@ describe("shell shim runtime", () => {
   )
 
   test("does not remove an existing Git index lock", async () => {
-    const repo = await makeTempGitRepo(tmp, { suffix: "-lock" })
+    const { repo, env } = await createMockGitProject("lock")
     const lockPath = join(repo, ".git", "index.lock")
     await Bun.write(lockPath, "owned elsewhere\n")
 
     const result = await runShell(
       "/bin/bash",
       ["-c", 'source "$1"; git status --short', "swiz", SHIM_PATH],
-      { cwd: repo, env: { SWIZ_SHIM: "strict" } }
+      { cwd: repo, env }
     )
     expect(result.exitCode).toBe(0)
     expect(await Bun.file(lockPath).exists()).toBe(true)

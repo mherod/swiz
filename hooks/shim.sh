@@ -185,12 +185,13 @@ _swiz_is_global_pm_operation() {
 
 _swiz_detect_pm() {
   local dir="${1:-$PWD}"
+  local declared parent
+  local has_bun has_pnpm has_yarn has_npm
   while true; do
-    local declared
     declared="$(_swiz_declared_pm "$dir")"
     [[ -n "$declared" ]] && { echo "$declared"; return; }
 
-    local has_bun=0 has_pnpm=0 has_yarn=0 has_npm=0
+    has_bun=0 has_pnpm=0 has_yarn=0 has_npm=0
     [[ -f "$dir/bun.lockb" || -f "$dir/bun.lock" ]] && has_bun=1
     [[ -f "$dir/pnpm-lock.yaml" || -f "$dir/shrinkwrap.yaml" ]] && has_pnpm=1
     [[ -f "$dir/yarn.lock" || -f "$dir/.pnp.cjs" || -f "$dir/.pnp.js" ]] && has_yarn=1
@@ -205,7 +206,6 @@ _swiz_detect_pm() {
     (( has_pnpm == 1 )) && { echo "pnpm"; return; }
     (( has_yarn == 1 )) && { echo "yarn"; return; }
     (( has_npm == 1 )) && { echo "npm"; return; }
-    local parent
     parent="$(command dirname "$dir")"
     [[ "$parent" == "$dir" ]] && break
     dir="$parent"
@@ -263,13 +263,13 @@ _swiz_project_dir() {
     *) dir="$PWD/$dir" ;;
   esac
   local fallback="$dir"
+  local parent
 
   while true; do
     if [[ -f "$dir/.swiz/config.json" || -f "$dir/.swiz/state.json" ]]; then
       echo "$dir"
       return 0
     fi
-    local parent
     parent="$(command dirname "$dir")"
     [[ "$parent" == "$dir" ]] && break
     dir="$parent"
@@ -773,6 +773,7 @@ git() {
   local git_context_dir="$PWD"
   local git_cmd=""
   local arg
+  local inline_git_context
   local skip_global_value=false
   local capture_git_context=false
   local git_cmd_args=()
@@ -795,7 +796,6 @@ git() {
           skip_global_value=true
           ;;
         -C?*)
-          local inline_git_context
           inline_git_context="${arg#-C}"
           case "$inline_git_context" in
             /*) git_context_dir="$inline_git_context" ;;
@@ -996,10 +996,10 @@ git() {
     block_kb="$(_swiz_get_setting "largeFileSizeBlockKb")"
     if [[ -n "$block_kb" && "$block_kb" -gt 0 ]]; then
       local block_bytes=$((block_kb * 1024))
+      local oversized
       for arg in "${git_cmd_args[@]}"; do
         [[ "$arg" == -* ]] && continue
         if [[ -e "$arg" ]]; then
-          local oversized
           oversized="$(command find "$arg" -type f -size +${block_bytes}c -print -quit 2>/dev/null)"
           if [[ -n "$oversized" ]]; then
              printf 'swiz: git add is blocked. File exceeds large-file-size-block-kb (%s KB).\n' "$block_kb" >&2
