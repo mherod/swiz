@@ -12,6 +12,7 @@ import { getUnpushedCommitCount } from "../src/git-helpers.ts"
 import { isGitRepoForHookPayload } from "../src/repository-capability.ts"
 import { runSwizHookAsMain, type SwizHookOutput, type SwizStopHook } from "../src/SwizHook.ts"
 import { type StopHookInput, stopHookInputSchema } from "../src/schemas.ts"
+import { getEffectiveSwizSettings, readProjectSettings, readSwizSettings } from "../src/settings.ts"
 import {
   type CurrentSessionUsageRecencyOptions,
   formatCurrentSessionUsageWindow,
@@ -22,6 +23,7 @@ import {
   resolveSkillFilePathForHookPayload,
   resolveSkillRecencyOptions,
 } from "../src/skill-utils.ts"
+import { stopActionId } from "../src/stop-actions.ts"
 import { isIncompleteTaskStatus, readTasks } from "../src/tasks/task-repository.ts"
 import {
   type CurrentSessionUsageEvent,
@@ -46,7 +48,7 @@ interface RequiredStopSkillRule {
   actionHeader(skillReference: string): string
   actionPlan(skillReference: string, ctx: RequiredStopSkillContext): ActionPlanItem[]
   why(skillReference: string): string
-  /** When true, bypass the recency gate if no git commit/push occurred since the skill last ran. */
+  /** Defaults to true. Current incomplete delivery/task outcomes can opt out. */
   bypassIfNoNewCommits?: boolean
 }
 
@@ -176,6 +178,20 @@ async function countIncompleteSessionTasks(input: StopHookInput): Promise<number
   return tasks.filter((task) => isIncompleteTaskStatus(task.status)).length
 }
 
+async function isIssueContinuationEnabled({
+  input,
+  cwd,
+}: RequiredStopSkillContext): Promise<boolean> {
+  const settings =
+    (input._effectiveSettings as ReturnType<typeof getEffectiveSwizSettings> | undefined) ??
+    getEffectiveSwizSettings(
+      await readSwizSettings(),
+      input.session_id,
+      await readProjectSettings(cwd)
+    )
+  return settings.autoContinue === true && (await isGitRepoForHookPayload(input, cwd))
+}
+
 async function isEndOfDayApplicable(ctx: RequiredStopSkillContext): Promise<boolean> {
   const effectiveSettings = (ctx.input as Record<string, unknown>)._effectiveSettings
   if (isRecord(effectiveSettings) && effectiveSettings.enforceEndOfDay === false) {
@@ -209,6 +225,7 @@ async function isEndOfDayApplicable(ctx: RequiredStopSkillContext): Promise<bool
 const REQUIRED_STOP_SKILLS: readonly RequiredStopSkillRule[] = [
   {
     skill: GATE_REQUIRED_SKILLS.endOfDay.name,
+    bypassIfNoNewCommits: false,
     applies: isEndOfDayApplicable,
     blockedLine: (skillReference) =>
       `BLOCKED: session handoff incomplete and ${skillReference} has not been run.`,
@@ -231,7 +248,7 @@ const REQUIRED_STOP_SKILLS: readonly RequiredStopSkillRule[] = [
   },
   {
     skill: GATE_REQUIRED_SKILLS.farmOutIssues.name,
-    applies: ({ cwd, input }) => isGitRepoForHookPayload(input, cwd),
+    applies: isIssueContinuationEnabled,
     blockedLine: (skillReference) =>
       `BLOCKED: The ${skillReference} skill has not been invoked recently.`,
     actionHeader: (skillReference) => `The ${skillReference} skill has not been invoked recently:`,
@@ -244,6 +261,8 @@ const REQUIRED_STOP_SKILLS: readonly RequiredStopSkillRule[] = [
   },
   {
     skill: GATE_REQUIRED_SKILLS.continueWithTasks.name,
+    bypassIfNoNewCommits: false,
+    applies: async ({ input }) => (await countIncompleteSessionTasks(input)) > 0,
     blockedLine: (skillReference) =>
       `BLOCKED: stop requires the ${skillReference} skill to be used first.`,
     actionHeader: (skillReference) => `The ${skillReference} skill has not been invoked recently:`,
@@ -284,7 +303,7 @@ async function canBypassMissingSkill(
   rule: RequiredStopSkillRule,
   input: StopHookInput
 ): Promise<boolean> {
-  if (!rule.bypassIfNoNewCommits) return false
+  if (rule.bypassIfNoNewCommits === false) return false
   const events = await getAllCurrentSessionUsageEvents(input)
   return Boolean(events && noNewCommitsSinceSkillInvocation(rule.skill, events))
 }
@@ -331,16 +350,27 @@ export async function evaluateStopRequiredSkills(input: StopHookInput): Promise<
     )
     debugRequiredSkills(`Blocking on missing skill: ${rule.skill}`)
     const compactionReset = await hasPreCompactionSkill(parsed.transcript_path, rule.skill)
-    return blockStopObj(
-      buildMissingSkillReason(rule, {
-        skillReference,
-        invokedSkills,
-        ctx,
-        skillFile: { name: rule.skill, path: skillPath },
-        options: recencyOptions,
-        compactionReset,
-      })
-    )
+    const reason = buildMissingSkillReason(rule, {
+      skillReference,
+      invokedSkills,
+      ctx,
+      skillFile: { name: rule.skill, path: skillPath },
+      options: recencyOptions,
+      compactionReset,
+    })
+    return {
+      ...blockStopObj(reason),
+      _stopActions: [
+        {
+          id: stopActionId(cwd, "skill", rule.skill),
+          kind: "handoff",
+          title: `Complete the ${rule.skill} step`,
+          reason: rule.blockedLine(skillReference).replace(/^BLOCKED:\s*/, ""),
+          instruction: `Run ${skillReference}. If native invocation is unavailable, read ${skillPath}.`,
+          doneWhen: "The skill's required outcomes are evidenced; reassess remaining session work.",
+        },
+      ],
+    }
   }
 
   return {}

@@ -185,6 +185,7 @@ export async function resolveGitContext(input: StopHookInput): Promise<GitContex
     pushCooldownMinutes: effective.pushCooldownMinutes,
     defaultBranch,
     trunkMode,
+    strictNoDirectMain: effective.strictNoDirectMain,
     ownership,
   }
 }

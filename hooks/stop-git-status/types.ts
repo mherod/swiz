@@ -7,6 +7,7 @@
  * - GitWorkflowCollectResult: Result union for composition with stop-ship-checklist
  */
 
+import type { StopAction } from "../../src/stop-actions.ts"
 import type { GitStatusV2 } from "../../src/utils/git-utils.ts"
 import type { SessionFileOwnershipResult } from "../../src/utils/session-file-ownership.ts"
 
@@ -25,6 +26,7 @@ export interface GitContext {
   pushCooldownMinutes: number
   defaultBranch: string
   trunkMode: boolean
+  strictNoDirectMain?: boolean
   /** Query certainty and the three dirty-file attribution buckets. */
   ownership: SessionFileOwnershipResult
 }
@@ -43,4 +45,5 @@ export type GitWorkflowCollectResult =
       cwd: string
       taskSubject: string
       taskDesc: string
+      action?: StopAction
     }

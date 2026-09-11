@@ -3,9 +3,10 @@ import { mergeActionPlanIntoTasks } from "../../src/action-plan.ts"
 import type { SwizHookOutput } from "../../src/SwizHook.ts"
 import { type StopHookInput, stopHookInputSchema } from "../../src/schemas.ts"
 import { readProjectState } from "../../src/settings.ts"
+import { stopActionPlan, withStopAction } from "../../src/stop-actions.ts"
 import { getDefaultBranch } from "../../src/utils/git-utils.ts"
 import { blockStopObj } from "../../src/utils/hook-response.ts"
-import { buildStopPlanSteps, formatStopReason } from "./action-plan.ts"
+import { buildIssueStopAction, buildStopPlanSteps, formatStopReason } from "./action-plan.ts"
 import {
   buildStopContext,
   gatherStopContext,
@@ -35,15 +36,20 @@ export async function collectPersonalRepoIssuesStopParsed(
   parsed: StopHookInput
 ): Promise<PersonalRepoIssuesCollect | null> {
   try {
-    // Parallelize: resolveRepoContext + settings import (independent)
-    const [ctx, settingsModule] = await Promise.all([
-      resolveRepoContext(parsed),
-      import("../../src/settings.ts"),
-    ])
+    const { getEffectiveSwizSettings, readSwizSettings, readProjectSettings } = await import(
+      "../../src/settings.ts"
+    )
+    const settings =
+      (parsed._effectiveSettings as ReturnType<typeof getEffectiveSwizSettings> | undefined) ??
+      getEffectiveSwizSettings(
+        await readSwizSettings(),
+        parsed.session_id,
+        await readProjectSettings(parsed.cwd ?? process.cwd())
+      )
+    // Repository ownership alone is not permission to start another backlog item.
+    if (!settings.autoContinue) return null
+    const ctx = await resolveRepoContext(parsed)
     if (!ctx) return null
-
-    const { getEffectiveSwizSettings, readSwizSettings } = settingsModule
-    const settings = getEffectiveSwizSettings(await readSwizSettings(), ctx.sessionId)
     const strictNoDirectMain = settings.strictNoDirectMain
 
     // Parallelize: project state + issue gathering + default branch (independent)
@@ -96,16 +102,18 @@ async function runPersonalRepoIssuesBody(
 
     const { stopCtx, planSteps, sessionId, cwd, shouldMergeTasks, shouldUpdateCooldown } = collected
     const reason = formatStopReason(planSteps, stopCtx)
+    const action = buildIssueStopAction(stopCtx)
 
     if (sessionId && shouldMergeTasks) {
-      await (dependencies.mergeTasks ?? mergeActionPlanIntoTasks)(planSteps, sessionId, cwd)
+      const nextPlan = stopActionPlan(action, planSteps)
+      await (dependencies.mergeTasks ?? mergeActionPlanIntoTasks)(nextPlan, sessionId, cwd)
     }
 
     if (shouldUpdateCooldown) {
       await (dependencies.updateCooldown ?? updateCooldown)(sessionId, cwd)
     }
 
-    return blockStopObj(reason)
+    return withStopAction(blockStopObj(reason), action)
   } catch {
     return {}
   }

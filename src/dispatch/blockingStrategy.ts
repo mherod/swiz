@@ -1,12 +1,13 @@
 import { merge } from "lodash-es"
 import { type HookGroup, hookIdentifier } from "../hook-types.ts"
 import type { HookOutput } from "../schemas.ts"
+import { readStopActions, type StopFinding, selectStopAction } from "../stop-actions.ts"
 import { mergeHookSpecificOutputClone } from "../utils/hook-specific-output.ts"
 import { orderHookContexts } from "./context-order.ts"
 import { coerceDispatchAgentEnvelopeInPlace } from "./dispatch-zod-surfaces.ts"
 import { extractContext, type HookExecution, isBlock, log, writeResponse } from "./engine.ts"
 import type { EnrichedDispatchPayload } from "./execute.ts"
-import { compileStopReasons, normalizeStopDispatchResponseInPlace } from "./stop-response.ts"
+import { normalizeStopDispatchResponseInPlace } from "./stop-response.ts"
 import {
   type HookExecutionStrategy,
   type HookStrategyContext,
@@ -61,35 +62,6 @@ function trimRepeatedStopPreamble(reason: string): string {
   const text = reason.trim()
   if (!text.startsWith(STOP_SHIP_CHECKLIST_PREAMBLE)) return text
   return text.slice(STOP_SHIP_CHECKLIST_PREAMBLE.length).trimStart()
-}
-
-function friendlyStopHookName(file: string): string {
-  const base = file.split(/[\\/]/).pop()?.replace(/\.ts$/, "") ?? file
-  return base.replace(/^stop-/, "").replace(/-/g, " ")
-}
-
-function formatAggregatedStopReason(blocks: Array<{ file: string; reason: string }>): string {
-  const seen = new Set<string>()
-  const sections: string[] = []
-
-  for (const block of blocks) {
-    const body = trimRepeatedStopPreamble(stripRepeatedStopFooter(block.reason))
-    const dedupeKey = normalizedContextText(body)
-    if (!body || seen.has(dedupeKey)) continue
-    seen.add(dedupeKey)
-    sections.push(`### ${friendlyStopHookName(block.file)}\n${body}`)
-  }
-
-  if (sections.length === 0) return ACTION_REQUIRED_FOOTER
-  if (sections.length === 1) return `${sections[0]}\n\n${ACTION_REQUIRED_FOOTER}`
-
-  return [
-    `Stop is blocked by ${sections.length} checks. Resolve them in the order shown.`,
-    "",
-    sections.join("\n\n---\n\n"),
-    "",
-    ACTION_REQUIRED_FOOTER,
-  ].join("\n")
 }
 
 async function resolveAutoSteerEnabled(
@@ -279,10 +251,19 @@ export function processBlockingResults(
   applyMergedContextToResponse(finalResponse, contexts, hookEventName)
 }
 
+function stopResultReason(resp: Record<string, any>): string {
+  const reason = [resp.reason, resp.stopReason, extractContext(resp)].find(
+    (value) => typeof value === "string" && value.trim()
+  )
+  return trimRepeatedStopPreamble(
+    stripRepeatedStopFooter(reason || "Resolve the blocking finding before stopping.")
+  )
+}
+
 function processSingleStopResult(
   execution: HookExecution,
   resp: Record<string, any> | null,
-  blockReasons: Array<{ file: string; reason: string }>,
+  blockReasons: StopFinding[],
   contexts: string[]
 ): void {
   if (execution.status === "skipped" || execution.status === "aborted") return
@@ -290,34 +271,38 @@ function processSingleStopResult(
   if (resp && isBlock(resp)) {
     log(`   ✗ BLOCK from ${execution.file}`)
     execution.status = "block"
-    const reason = (resp as { reason?: string }).reason
-    if (reason) blockReasons.push({ file: execution.file, reason })
+    blockReasons.push({
+      file: execution.file,
+      reason: stopResultReason(resp),
+      actions: readStopActions(resp._stopActions),
+      humanRequired: resp.resolution === "human-required",
+    })
+    // Preserve complete diagnostics in the existing hook execution log, not in the prompt.
+    execution.stdoutSnippet = JSON.stringify(resp)
   } else {
     log(`   ✓ ${execution.file} (${resp ? "ok" : "no output"})`)
   }
 
-  if (resp) {
+  if (resp && !isBlock(resp)) {
     const ctx = extractContext(resp)
     if (ctx) contexts.push(ctx)
   }
 }
 
-function applyAggregatedBlockReasons(
-  finalResponse: HookOutput,
-  blockReasons: Array<{ file: string; reason: string }>
-): void {
-  if (blockReasons.length === 0) return
+function applyAggregatedBlockReasons(finalResponse: HookOutput, blockReasons: StopFinding[]): void {
+  const selected = selectStopAction(blockReasons)
+  if (!selected) return
   finalResponse.decision = "block"
-  finalResponse.reason = formatAggregatedStopReason(blockReasons)
-  log(`   result: ${blockReasons.length} block(s) aggregated`)
+  finalResponse.reason = selected.reason
+  finalResponse.systemMessage = selected.reason
+  if (selected.humanRequired) finalResponse.resolution = "human-required"
+  log(`   result: selected next action from ${blockReasons.length} blocking finding(s)`)
 }
 
 /**
  * Process stop hook results by aggregating ALL blocking reasons into one
- * combined response. Unlike {@link processBlockingResults} which forwards
- * only the first block, this collects every block reason so the agent sees
- * the full picture — including guidance from slower hooks that would
- * previously have been aborted.
+ * decision. All findings remain in execution diagnostics; the agent receives
+ * one prioritized action and re-evaluates after completing it.
  *
  * Exported for unit tests.
  */
@@ -327,7 +312,7 @@ export function processAggregatedStopResults(
   finalResponse: HookOutput,
   hookEventName: string
 ): void {
-  const blockReasons: Array<{ file: string; reason: string }> = []
+  const blockReasons: StopFinding[] = []
   const contexts: string[] = []
 
   for (const { execution, parsed: resp } of results) {
@@ -436,10 +421,8 @@ async function finalizeStopBlock(
   response: Record<string, any>,
   enrichedPayloadStr: string
 ): Promise<void> {
-  const rawReason = (response as { reason?: string }).reason ?? ""
-  if (rawReason) {
-    response.reason = await compileStopReasons(rawReason)
-  }
+  // Selection is deterministic; a language model must not reorder or weaken it.
+  if (response.resolution === "human-required") return
   await tryAutoSteerStopBlock(response, enrichedPayloadStr)
 }
 

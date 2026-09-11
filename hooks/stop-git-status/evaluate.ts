@@ -9,6 +9,7 @@ import { formatActionPlan } from "../../src/action-plan.ts"
 import { git } from "../../src/git-helpers.ts"
 import type { SwizHookOutput } from "../../src/SwizHook.ts"
 import type { StopHookInput } from "../../src/schemas.ts"
+import { withStopAction } from "../../src/stop-actions.ts"
 import { blockStopObj } from "../../src/utils/hook-response.ts"
 import {
   appendSessionFileOwnershipContext,
@@ -19,6 +20,7 @@ import { createSessionTask } from "../../src/utils/session-task-io.ts"
 import { buildGitWorkflowSections } from "./action-plan.ts"
 import { detectBackgroundPush } from "./background-push-detector.ts"
 import { resolveGitContext } from "./context.ts"
+import { buildGitStopAction } from "./next-action.ts"
 import { isPushCooldownActive, markPushPrompted } from "./push-cooldown-validator.ts"
 import { buildTaskDesc, describeRemoteState, selectTaskSubject } from "./remote-state-validator.ts"
 import type { GitContext, GitWorkflowCollectResult } from "./types.ts"
@@ -216,6 +218,7 @@ async function collectGitWorkflowStopAfterDetachedCheck(
     cwd,
     taskSubject,
     taskDesc,
+    action: buildGitStopAction(ctx),
   }
 }
 
@@ -261,5 +264,5 @@ export async function evaluateStopGitStatus(input: StopHookInput): Promise<SwizH
     r.taskDesc,
     r.cwd
   )
-  return blockStopObj(r.summary + formatActionPlan(r.steps))
+  return withStopAction(blockStopObj(r.summary + formatActionPlan(r.steps)), r.action)
 }

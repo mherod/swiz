@@ -23,6 +23,7 @@
  */
 
 import { ensureDispatchId } from "./dispatch/dispatch-id.ts"
+import { stripInternalDispatchFields } from "./dispatch/dispatch-wire.ts"
 import {
   shouldCaptureIncomingPayloads,
   writeIncomingDispatchCapture,
@@ -151,7 +152,8 @@ async function injectEffectiveSettingsIfMissing(input: Record<string, any>): Pro
 async function emitHookOutputIfNonEmpty(output: SwizHookOutput): Promise<void> {
   if (!hasNonEmptyHookOutput(output)) return
   const { exitWithHookObject } = await import("./utils/hook-response.ts")
-  exitWithHookObject(output)
+  // Action metadata belongs to inline dispatch; standalone agents receive the legacy reason.
+  exitWithHookObject(stripInternalDispatchFields(output))
 }
 
 /**

@@ -3,11 +3,29 @@ import { mkdir, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { AGENTS } from "../src/agents.ts"
 import { GATE_REQUIRED_SKILLS } from "../src/gate-required-skills.ts"
-import { runHookInProcess, useTempDir } from "../src/utils/test-utils.ts"
+import { withGitClient } from "../src/git/client.ts"
+import { MockGitClient } from "../src/git/mock-client.ts"
+import { runHookInProcess as runHookOriginal, useTempDir } from "../src/utils/test-utils.ts"
 
 const HOOK = "hooks/stop-required-skills.ts"
 
 const tmp = useTempDir("swiz-stop-required-skills-")
+const repositories = new Map<string, number>()
+const mockGit = new MockGitClient((args, { cwd }) => {
+  if (!cwd || !repositories.has(cwd)) return { exitCode: 1 }
+  if (args[0] === "rev-parse" && args.includes("--show-toplevel")) return cwd
+  if (args[0] === "rev-parse" && args.includes("--git-dir")) return ".git"
+  if (args[0] === "rev-parse" && args.includes("--is-inside-work-tree")) return "true"
+  if (args[0] === "rev-parse" && args.includes("@{upstream}")) {
+    return repositories.get(cwd) ? "origin/main" : { exitCode: 1 }
+  }
+  if (args[0] === "rev-list") return String(repositories.get(cwd))
+  if (args[0] === "rev-parse" && args[1] === "HEAD") return "local"
+  return { exitCode: 1 }
+})
+function runHookInProcess(...args: Parameters<typeof runHookOriginal>) {
+  return withGitClient(mockGit, () => runHookOriginal(...args))
+}
 
 interface HookResult {
   exitCode: number | null
@@ -39,6 +57,10 @@ async function runHookWithInput(
       session_id: "test-session",
       transcript_path: transcriptPath,
       ...extraInput,
+      _effectiveSettings: {
+        autoContinue: true,
+        ...((extraInput._effectiveSettings as Record<string, unknown>) ?? {}),
+      },
     },
     { cwd, env }
   )
@@ -48,24 +70,8 @@ async function runHook(cwd: string, transcriptPath: string): Promise<HookResult>
   return await runHookWithInput(cwd, transcriptPath)
 }
 
-async function initGitRepo(dir: string): Promise<void> {
-  const proc = Bun.spawn(["git", "init"], {
-    cwd: dir,
-    stdout: "pipe",
-    stderr: "pipe",
-  })
-  await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()])
-  await proc.exited
-  const branchProc = Bun.spawn(["git", "branch", "-M", "main"], {
-    cwd: dir,
-    stdout: "pipe",
-    stderr: "pipe",
-  })
-  await Promise.all([
-    new Response(branchProc.stdout).text(),
-    new Response(branchProc.stderr).text(),
-  ])
-  await branchProc.exited
+function initGitRepo(dir: string): void {
+  repositories.set(dir, 0)
 }
 
 async function createSkill(dir: string, name: string, heading: string): Promise<void> {
@@ -130,6 +136,16 @@ const ALL_REQUIRED_SKILLS = [
 ]
 
 describe("stop-required-skills", () => {
+  test("does not require backlog delegation without continuation opt-in", async () => {
+    const dir = await tmp.create()
+    await initGitRepo(dir)
+    for (const s of ALL_REQUIRED_SKILLS) await createSkill(dir, s, s)
+    const transcriptPath = await createTranscript(dir, ["reflect-on-session-mistakes"])
+    const result = await runHookWithInput(dir, transcriptPath, {
+      _effectiveSettings: { autoContinue: false },
+    })
+    expect(result.decision).toBeUndefined()
+  })
   test("blocks on the first missing required skill by priority", async () => {
     const dir = await tmp.create()
     await initGitRepo(dir)
@@ -184,7 +200,7 @@ describe("stop-required-skills", () => {
     expect(result.decision).toBeUndefined()
   })
 
-  test("treats required skills older than twenty minutes as missing", async () => {
+  test("does not repeat completed skill checks solely because twenty minutes elapsed", async () => {
     const dir = await tmp.create()
     await initGitRepo(dir)
     for (const s of ALL_REQUIRED_SKILLS) await createSkill(dir, s, s)
@@ -192,38 +208,11 @@ describe("stop-required-skills", () => {
 
     const result = await runHook(dir, transcriptPath)
     expect(result.exitCode).toBe(0)
-    expect(result.decision).toBe("block")
-    // farm-out-issues is bypassed (no new commits since it ran); next blocking rule fires
-    expect(result.reason).toContain("continue-with-tasks")
-    expect(result.reason).toContain("last 30 turns and last 20 minutes")
+    expect(result.decision).toBeUndefined()
   })
 
-  async function runGitCmd(cwd: string, args: string[]): Promise<void> {
-    const proc = Bun.spawn(["git", ...args], { cwd, stdout: "pipe", stderr: "pipe" })
-    await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()])
-    await proc.exited
-  }
-
-  async function initGitRepoWithUnpushedCommit(dir: string): Promise<void> {
-    await initGitRepo(dir)
-    await runGitCmd(dir, ["config", "user.email", "you@example.com"])
-    await runGitCmd(dir, ["config", "user.name", "Your Name"])
-    await runGitCmd(dir, ["commit", "--allow-empty", "-m", "initial"])
-
-    // Add a remote and an upstream branch
-    const remoteDir = await tmp.create()
-    const proc = Bun.spawn(["git", "init", "--bare"], {
-      cwd: remoteDir,
-      stdout: "pipe",
-      stderr: "pipe",
-    })
-    await proc.exited
-    await runGitCmd(dir, ["remote", "add", "origin", remoteDir])
-    await runGitCmd(dir, ["push", "-u", "origin", "HEAD:main"])
-    await runGitCmd(dir, ["branch", "--set-upstream-to=origin/main", "main"])
-
-    // Add one unpushed commit
-    await runGitCmd(dir, ["commit", "--allow-empty", "-m", "unpushed"])
+  function initGitRepoWithUnpushedCommit(dir: string): void {
+    repositories.set(dir, 1)
   }
 
   describe("end-of-day rule", () => {
@@ -414,7 +403,7 @@ describe("stop-required-skills", () => {
       expect(result.decision).toBe("block")
       // farm-out-issues bypassed; next rule fires
       expect(result.reason).not.toContain("farm-out-issues")
-      expect(result.reason).toContain("continue-with-tasks")
+      expect(result.reason).toContain("reflect-on-session-mistakes")
     })
 
     test("does not bypass farm-out-issues gate when a git push happened after last invocation", async () => {

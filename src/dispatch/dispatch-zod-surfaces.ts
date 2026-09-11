@@ -3,7 +3,7 @@
  * enriched hook payload, and merged agent-visible responses.
  */
 
-import { merge, omit, unset } from "lodash-es"
+import { merge, unset } from "lodash-es"
 import { z } from "zod"
 import { debugLog } from "../debug.ts"
 import {
@@ -171,7 +171,7 @@ export function coerceDispatchAgentEnvelopeInPlace(
     return
   }
 
-  const agent = omit(response, ["hookExecutions"]) as Record<string, any>
+  const agent = stripInternalDispatchFields(response)
   const compatibleAgent = agentId
     ? sanitizeHookOutputForAgent(agent, agentId)
     : sanitizeHookOutputForCurrentAgent(agent)

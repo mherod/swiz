@@ -1,22 +1,34 @@
 import { describe, expect, test } from "bun:test"
-import { join } from "node:path"
-import { spawnWithTimeout } from "../../src/utils/process-utils.ts"
+import { withGitClient } from "../../src/git/client.ts"
+import { MockGitClient } from "../../src/git/mock-client.ts"
 import { useTempDir } from "../../src/utils/test-utils.ts"
-import { buildFillerSuggestion } from "./filler-suggestions.ts"
+import { buildFillerSuggestion as buildOriginalSuggestion } from "./filler-suggestions.ts"
 
 const { create } = useTempDir("filler-test-")
+const repositories = new Set<string>()
+const dirtyRepositories = new Set<string>()
+const git = new MockGitClient((args, { cwd }) => {
+  if (!cwd || !repositories.has(cwd)) return { exitCode: 1 }
+  if (args[0] === "rev-parse" && args.includes("--git-dir")) return ".git"
+  if (args[0] === "rev-parse" && args.includes("--is-inside-work-tree")) return "true"
+  if (args[0] === "status") return dirtyRepositories.has(cwd) ? "?? dirty.ts" : ""
+  if (args[0] === "branch") return "main"
+  return { exitCode: 1 }
+})
+function buildFillerSuggestion(...args: Parameters<typeof buildOriginalSuggestion>) {
+  return withGitClient(git, () => buildOriginalSuggestion(...args))
+}
 
 async function makeTempGitRepo(): Promise<string> {
   const dir = await create()
-  const result = await spawnWithTimeout(["git", "init"], { cwd: dir })
-  expect(result.exitCode).toBe(0)
+  repositories.add(dir)
   return dir
 }
 
 describe("buildFillerSuggestion", () => {
   test("returns commit suggestion for dirty worktree", async () => {
     const dir = await makeTempGitRepo()
-    await Bun.write(join(dir, "dirty.ts"), "change")
+    dirtyRepositories.add(dir)
     const result = await buildFillerSuggestion({ cwd: dir })
     expect(result).toContain("uncommitted file(s)")
     expect(result).toContain("/commit")

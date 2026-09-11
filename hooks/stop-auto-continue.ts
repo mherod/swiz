@@ -14,13 +14,12 @@ import type { SwizHookOutput, SwizStopHook } from "../src/SwizHook.ts"
 import { runSwizHookAsMain } from "../src/SwizHook.ts"
 import { type StopHookInput, stopHookInputSchema } from "../src/schemas.ts"
 import {
-  type AmbitionMode,
   getEffectiveSwizSettings,
   readProjectSettings,
   readProjectState,
   readSwizSettings,
 } from "../src/settings.ts"
-import { skillAdvice } from "../src/skill-utils.ts"
+import { stopActionId } from "../src/stop-actions.ts"
 import { blockStopObj } from "../src/utils/hook-response.ts"
 import { checkChangelogStaleness } from "./stop-auto-continue/changelog-staleness.ts"
 import { checkReviewingState } from "./stop-auto-continue/reviewing-state.ts"
@@ -31,16 +30,6 @@ import {
 import { getActionableIssues } from "./stop-personal-repo-issues.ts"
 
 const DEDUP_MAX_SEEN = 2 // Allow stop after suggestion seen this many times
-
-const WORKFLOW_FINDING =
-  "Collaboration/workflow policy finding detected. Report the violation and enforce the gate; do not prescribe project-specific implementation details."
-
-interface AgentResponse {
-  processCritique: string
-  productCritique: string
-  next: string
-  reflections: string[]
-}
 
 // ─── Workflow suggestion filter ──────────────────────────────────────────────
 
@@ -93,42 +82,6 @@ export function isWorkflowSuggestion(
   })
 }
 
-function normalizeCreativeIssueDescription(next: string): string {
-  const compact = next.replace(/\s+/g, " ").trim()
-  const body = compact.replace(/^Create issue:\s*/i, "").trim()
-  const seed = body || "Deliver a roadmap-level user-facing capability gap closure"
-  const parts = [`Create issue: ${seed}`]
-
-  if (!/user-facing gap:/i.test(seed)) {
-    parts.push("user-facing gap: state the concrete capability users cannot currently access")
-  }
-  if (!/\bscope:/i.test(seed)) {
-    parts.push("scope: list concrete code changes across affected modules")
-  }
-  if (!/\bacceptance:/i.test(seed) && !/\bverification:/i.test(seed)) {
-    parts.push("acceptance: define observable pass/fail behavior checks")
-  }
-
-  return parts.join("; ")
-}
-
-function normalizeReflectiveNextStep(reflections: string[]): string {
-  const top = reflections[0]?.trim()
-  if (!top) return ""
-
-  const doMatch = top.match(/^DO:\s*(.+)$/i)
-  if (doMatch?.[1]) {
-    return `Apply this confirmed reflection immediately in code: ${doMatch[1].trim()}`
-  }
-
-  const dontMatch = top.match(/^DON['’]T:\s*(.+)$/i)
-  if (dontMatch?.[1]) {
-    return `Avoid this confirmed anti-pattern in the next code change: ${dontMatch[1].trim()}`
-  }
-
-  return `Apply this confirmed reflection immediately in code: ${top}`
-}
-
 // ─── Issue refinement detection ──────────────────────────────────────────────
 
 /**
@@ -154,20 +107,8 @@ async function checkRefinementNeeds(cwd: string, input: StopHookInput): Promise<
 
   if (refinementIssues.length === 0) return ""
 
-  const issueRefs = refinementIssues
-    .slice(0, 5)
-    .map((i) => `#${i.number}`)
-    .join(", ")
-  const extra = refinementIssues.length > 5 ? ` (and ${refinementIssues.length - 5} more)` : ""
-
-  return (
-    `${refinementIssues.length} open issue(s) need refinement before implementation: ${issueRefs}${extra}. ` +
-    skillAdvice(
-      "refine-issue",
-      "Use /refine-issue to refine and label them before working on implementation.",
-      "Refine issues by adding type, readiness, and priority labels before implementing. If you created the issue, edit the body to add proposals instead of commenting."
-    )
-  )
+  const next = refinementIssues[0]!
+  return `Refine issue #${next.number}. Read its full body and comments, then use /refine-issue ${next.number} to record type, readiness and priority before implementation.`
 }
 
 // ─── Termination helper ─────────────────────────────────────────────────────
@@ -226,66 +167,6 @@ function terminate(action: "skip" | "block", ...args: string[]): never {
   throw new AutoContinueExit(blockStopObj(reason))
 }
 
-// ─── LLM fallback ───────────────────────────────────────────────────────────
-
-const LLM_FALLBACK_MODEL = "google/gemini-3-flash-preview"
-const LLM_FALLBACK_TRANSCRIPT_TAIL = 40 // lines of transcript context
-
-const LLM_FALLBACK_PROMPT = `You're the developer's session guard. They tried to stop their coding session but no obvious next step was found by the automated checks.
-
-Read the tail of their session transcript below and suggest ONE concrete, actionable next step. Be specific — name files, commands, or tasks. Talk like a sharp colleague: direct, no hedging, no "consider" or "you may want to." Just say what to do.
-
-Even if the session looks complete, suggest something useful — a follow-up improvement, a test to add, documentation to update, or a related issue to look at. There is always something.
-
-Transcript (last ${LLM_FALLBACK_TRANSCRIPT_TAIL} lines):
-`
-
-async function generateLlmFallbackSuggestion(_sessionId: string): Promise<string | null> {
-  try {
-    // Resolve transcript path from session
-    const { projectKeyFromCwd } = await import("../src/transcript-utils.ts")
-    const { readTranscriptLines } = await import("../src/transcript-extract.ts")
-    const { createOpenRouter } = await import("@openrouter/ai-sdk-provider")
-    const { generateText } = await import("ai")
-
-    if (!process.env.OPENROUTER_API_KEY) return null
-
-    // Find transcript — try enriched payload path first, fall back to session-based lookup
-    const cwd = process.cwd()
-    const projectKey = projectKeyFromCwd(cwd)
-    const homedir = getHomeDirOrNull()
-    if (!homedir || !projectKey) return null
-
-    const transcriptGlob = `${homedir}/.claude/projects/${projectKey}/.*.jsonl`
-    const { readdir } = await import("node:fs/promises")
-    const { join, dirname } = await import("node:path")
-
-    const projectDir = dirname(transcriptGlob)
-    const files = await readdir(projectDir).catch(() => [] as string[])
-    const jsonlFiles = files.filter((f) => f.endsWith(".jsonl") && f.startsWith("."))
-    if (jsonlFiles.length === 0) return null
-
-    // Pick the most recent transcript file
-    const sorted = jsonlFiles.sort()
-    const transcriptPath = join(projectDir, sorted[sorted.length - 1]!)
-
-    const lines = await readTranscriptLines(transcriptPath)
-    if (lines.length === 0) return null
-
-    const tail = lines.slice(-LLM_FALLBACK_TRANSCRIPT_TAIL).join("\n")
-    const prompt = LLM_FALLBACK_PROMPT + tail
-
-    const provider = createOpenRouter({ apiKey: process.env.OPENROUTER_API_KEY })
-    const model = provider.languageModel(LLM_FALLBACK_MODEL)
-    const { text } = await generateText({ model, prompt })
-    const trimmed = text.trim()
-
-    return trimmed || null
-  } catch {
-    return null
-  }
-}
-
 // ─── Main helpers ────────────────────────────────────────────────────────────
 
 function parseStopInput(hookRaw: unknown): { input: StopHookInput; cwd: string } {
@@ -297,68 +178,6 @@ function parseStopInput(hookRaw: unknown): { input: StopHookInput; cwd: string }
     console.error("[stop-auto-continue] stopHookInputSchema parse failed:", JSON.stringify(issues))
     terminate("block", "Auto-continue received malformed stop-hook input.")
   }
-}
-
-function postProcessResponse(
-  response: AgentResponse,
-  ambitionMode: AmbitionMode,
-  projectState: string | null
-): AgentResponse {
-  const result = { ...response }
-
-  if (ambitionMode === "reflective") {
-    const reflectiveNext = normalizeReflectiveNextStep(result.reflections)
-    if (reflectiveNext) result.next = reflectiveNext
-  }
-
-  const isReviewing = projectState === "reviewing" || projectState === "addressing-feedback"
-  if (result.next && isWorkflowSuggestion(result.next, { skipPrPattern: isReviewing })) {
-    const truncated = result.next.slice(0, 120).replace(/\s+/g, " ").trim()
-    const ellipsis = result.next.length > 120 ? "…" : ""
-    result.next = `${WORKFLOW_FINDING} [Filtered suggestion: "${truncated}${ellipsis}"]`
-  }
-
-  if (ambitionMode === "creative" && result.next) {
-    result.next = normalizeCreativeIssueDescription(result.next)
-  }
-
-  return result
-}
-
-function buildFinalMessage(
-  response: AgentResponse,
-  refinementStatus: string,
-  critiquesEnabled: boolean
-): string {
-  const parts: string[] = []
-
-  // Lead with the actionable next step — most important info first
-  const nextStep = response.next || refinementStatus
-  parts.push(`New task: ${nextStep}`)
-
-  // Critiques as supporting context
-  if (critiquesEnabled) {
-    const critiques: string[] = []
-    if (response.processCritique) {
-      critiques.push(response.processCritique)
-    }
-    if (response.productCritique) {
-      critiques.push(response.productCritique)
-    }
-    if (critiques.length > 0) {
-      parts.push("")
-      parts.push("── Session review ──")
-      parts.push(...critiques)
-    }
-  }
-
-  // Refinement note (only if it wasn't already used as the next step)
-  if (refinementStatus && response.next) {
-    parts.push("")
-    parts.push(`Note: ${refinementStatus}`)
-  }
-
-  return parts.join("\n")
 }
 
 // ─── Main ───────────────────────────────────────────────────────────────────
@@ -387,11 +206,9 @@ async function validateMainInputsAndSettings(
 async function generateDeterministicResponse(
   cwd: string,
   input: StopHookInput,
-  effective: ReturnType<typeof getEffectiveSwizSettings>,
   projectState: string | null
 ): Promise<{
-  response: AgentResponse
-  refinementStatus: string | null
+  next: string
 }> {
   const reviewingDirective = await checkReviewingState(cwd, projectState, input)
   if (reviewingDirective) terminate("block", reviewingDirective)
@@ -404,41 +221,19 @@ async function generateDeterministicResponse(
     checkChangelogStaleness(cwd, input),
   ])
 
-  const next = filler || changelogStatus || refinementStatus || ""
-  const response = postProcessResponse(
-    { processCritique: "", productCritique: "", next, reflections: [] },
-    effective.ambitionMode,
-    projectState
-  )
-
-  return { response, refinementStatus }
+  return { next: filler || changelogStatus || refinementStatus || "" }
 }
 
-async function validateResponseAndChecks(
-  response: AgentResponse,
-  refinementStatus: string | null,
-  sessionId: string
-): Promise<void> {
-  if (!response.next && !refinementStatus) {
-    const llmSuggestion = await generateLlmFallbackSuggestion(sessionId)
-    if (llmSuggestion) {
-      response.next = llmSuggestion
-    } else {
-      response.next =
-        "could not identify a specific next step. Review the session transcript and continue with the smallest unfinished task."
-    }
+async function validateResponseAndChecks(next: string, sessionId: string): Promise<void> {
+  if (!next) {
+    terminate("skip", "NO_NEXT_ACTION", "No concrete unfinished action was found.")
   }
 
   // Dedup: allow stop if the same suggestion repeats.
-  if (sessionId && response.next) {
-    const keyCount = await recordSuggestionAndGetCount(sessionId, response.next)
+  if (sessionId && next) {
+    const keyCount = await recordSuggestionAndGetCount(sessionId, next)
     if (keyCount >= DEDUP_MAX_SEEN) {
-      const key = response.next
-        .normalize("NFKC")
-        .toLowerCase()
-        .replace(/\s+/g, " ")
-        .trim()
-        .slice(0, 120)
+      const key = next.normalize("NFKC").toLowerCase().replace(/\s+/g, " ").trim().slice(0, 120)
       terminate(
         "skip",
         "SUGGESTION_DEDUP",
@@ -460,25 +255,24 @@ async function runStopAutoContinueMain(hookRaw: Record<string, any>): Promise<vo
   }
 
   const { input, cwd } = parseStopInput(hookRaw)
-  const { effective } = await validateMainInputsAndSettings(hookRaw, cwd)
+  await validateMainInputsAndSettings(hookRaw, cwd)
 
   const projectState = await readProjectState(cwd)
-  const { response, refinementStatus } = await generateDeterministicResponse(
-    cwd,
-    input,
-    effective,
-    projectState
-  )
-
-  await validateResponseAndChecks(response, refinementStatus, input.session_id ?? "")
-
-  const finalMessage = buildFinalMessage(
-    response,
-    refinementStatus ?? "",
-    effective.critiquesEnabled ?? false
-  )
-
-  terminate("block", finalMessage)
+  const { next } = await generateDeterministicResponse(cwd, input, projectState)
+  await validateResponseAndChecks(next, input.session_id ?? "")
+  throw new AutoContinueExit({
+    ...blockStopObj(`Next: ${next}`),
+    _stopActions: [
+      {
+        id: stopActionId(cwd, "continuation", next),
+        kind: "continuation",
+        title: next,
+        reason: "Auto-continue is enabled and current session checks found unfinished work.",
+        instruction: "Complete this action and record its result.",
+        doneWhen: "This action's result is verified or a concrete blocker is recorded.",
+      },
+    ],
+  })
 }
 
 export async function evaluateStopAutoContinue(input: StopHookInput): Promise<SwizHookOutput> {

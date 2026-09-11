@@ -8,6 +8,7 @@
  */
 
 import type { ActionPlanItem } from "../../src/action-plan.ts"
+import type { StopAction } from "../../src/stop-actions.ts"
 
 /**
  * Workflow gates that can be independently enabled/disabled.
@@ -25,6 +26,7 @@ export interface WorkflowStep {
   kind: "git" | "ci" | "issues"
   summary: string
   planSteps: ActionPlanItem[]
+  action?: StopAction
 }
 
 /**

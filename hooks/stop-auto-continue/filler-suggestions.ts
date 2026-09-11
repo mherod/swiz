@@ -44,9 +44,11 @@ async function getGitState(cwd: string, input: object): Promise<GitState | null>
   }
 }
 
-async function getIncompleteTasks(sessionId: string): Promise<number> {
+async function getNextIncompleteTask(sessionId: string): Promise<string> {
   const tasks = await readSessionTasks(sessionId)
-  return tasks.filter((t) => t.status === "pending" || t.status === "in_progress").length
+  const next =
+    tasks.find((t) => t.status === "in_progress") ?? tasks.find((t) => t.status === "pending")
+  return next ? `Resume task #${next.id}: ${next.subject}.` : ""
 }
 
 function suggestFromGitState(gitState: GitState | null): string {
@@ -84,8 +86,8 @@ export async function buildFillerSuggestion(ctx: FillerContext): Promise<string>
   if (gitSuggestion) return gitSuggestion
 
   if (sessionId) {
-    const incomplete = await getIncompleteTasks(sessionId)
-    if (incomplete > 0) return `Complete ${incomplete} remaining task(s) before stopping.`
+    const next = await getNextIncompleteTask(sessionId)
+    if (next) return next
   }
 
   return suggestFromEditedFiles(editedFiles)

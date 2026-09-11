@@ -5,10 +5,37 @@ import {
   normaliseLabel,
 } from "../../src/issue-refinement.ts"
 import { skillExistsForHookPayload } from "../../src/skill-utils.ts"
+import { type StopAction, stopActionId } from "../../src/stop-actions.ts"
 import { getTaskToolName } from "../../src/tasks/task-governance-messages.ts"
 import { MAX_SHOWN_ISSUES, REVIEWABLE_BLOCK_NORM } from "./constants.ts"
 import { planSectionOrderForProjectState, statePriorityHint } from "./project-state.ts"
 import type { StopContext, StopSection } from "./types.ts"
+
+/** Select one issue using the existing readiness/priority order, never the whole backlog. */
+export function buildIssueStopAction(ctx: StopContext): StopAction | undefined {
+  for (const section of planSectionOrderForProjectState(ctx.projectState)) {
+    const issues =
+      section === "readyIssues"
+        ? ctx.sortedIssues
+        : section === "refinement"
+          ? ctx.sortedRefinement
+          : ctx.blockedIssues
+    const issue = issues[0]
+    if (!issue) continue
+    const refine = section !== "readyIssues"
+    return {
+      id: stopActionId(ctx.cwd, refine ? "refine-issue" : "work-on-issue", String(issue.number)),
+      kind: "issue",
+      title: `${refine ? "Review" : "Work on"} issue #${issue.number}`,
+      reason: issue.title,
+      instruction: `Run /${refine ? "refine-issue" : "work-on-issue"} ${issue.number}. Read the full body and comments; check blockers and existing work before implementation.`,
+      doneWhen: refine
+        ? "Readiness and the next owned action are evidenced."
+        : "The selected issue has verified delivery or an evidenced blocker and owner.",
+    }
+  }
+  return undefined
+}
 
 function buildRefinementSteps(
   ctx: StopContext,

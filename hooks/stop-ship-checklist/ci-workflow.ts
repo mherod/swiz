@@ -10,6 +10,7 @@ import { getRepoSlug, ghJsonViaDaemon as ghJson } from "../../src/git-helpers.ts
 import { getIssueStore, getIssueStoreReader } from "../../src/issue-store.ts"
 import type { StopHookInput } from "../../src/schemas.ts"
 import { skillExistsForHookPayload } from "../../src/skill-utils.ts"
+import { stopActionId } from "../../src/stop-actions.ts"
 import { resolveCurrentFeatureBranch } from "../../src/utils/git-utils.ts"
 
 import type { WorkflowStep } from "./types.ts"
@@ -145,6 +146,15 @@ function buildFailingResult(
   return {
     kind: "ci",
     summary,
+    action: {
+      id: stopActionId(String(payload.cwd ?? ""), "ci", branch),
+      kind: "verify",
+      title: `Resolve failing CI on ${branch}`,
+      reason: `Failing checks: ${names}.`,
+      instruction:
+        "Inspect failure logs with /ci-status or gh run view <run-id> --log-failed, then fix the failing checks.",
+      doneWhen: "The required checks pass, or an allowed, owned exception is evidenced.",
+    },
     planSteps: [
       "Preferred: fix CI before stopping:",
       fixSubSteps,
@@ -176,6 +186,15 @@ function buildActiveResult(
   return {
     kind: "ci",
     summary,
+    action: {
+      id: stopActionId(String(payload.cwd ?? ""), "ci", branch),
+      kind: "verify",
+      title: `Verify CI on ${branch}`,
+      reason: `Checks are still running: ${names}.`,
+      instruction:
+        "Check the current run with /ci-status or gh run view <run-id> --json status,conclusion,jobs; record its result when complete.",
+      doneWhen: "The required CI outcomes are verified.",
+    },
     planSteps: ["Wait for CI to complete, then check results:", waitSubSteps],
   }
 }

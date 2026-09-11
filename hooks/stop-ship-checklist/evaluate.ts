@@ -8,10 +8,12 @@
 import { mergeActionPlanIntoTasks } from "../../src/action-plan.ts"
 import type { SwizHookOutput } from "../../src/SwizHook.ts"
 import type { StopHookInput } from "../../src/schemas.ts"
+import { stopActionPriority } from "../../src/stop-actions.ts"
 import { blockStopObj } from "../../src/utils/hook-response.ts"
 import { completeSessionTask, createSessionTask } from "../../src/utils/session-task-io.ts"
 import type { GitWorkflowCollectResult } from "../stop-git-status/types.ts"
 import { collectGitWorkflowStop, markPushPrompted } from "../stop-git-status.ts"
+import { buildIssueStopAction } from "../stop-personal-repo-issues/action-plan.ts"
 import { updateCooldown } from "../stop-personal-repo-issues/cooldown.ts"
 import { collectPersonalRepoIssuesStopParsed } from "../stop-personal-repo-issues/evaluate.ts"
 import { formatStopMessage } from "./action-plan.ts"
@@ -22,9 +24,17 @@ import type { ShipChecklistResult, WorkflowStep } from "./types.ts"
 const SHIP_CHECKLIST_TASK_SUBJECT = "Complete ship checklist before stopping"
 const SHIP_CHECKLIST_COMPLETION_EVIDENCE = "note:ship checklist passed"
 
+function nextChecklistStep(steps: WorkflowStep[]): WorkflowStep | undefined {
+  return steps.toSorted(
+    (a, b) =>
+      stopActionPriority(a.action) - stopActionPriority(b.action) ||
+      (a.action?.id ?? "").localeCompare(b.action?.id ?? "")
+  )[0]
+}
+
 function collectGitStep(result: GitWorkflowCollectResult | null): WorkflowStep | null {
   if (result?.kind === "block") {
-    return { kind: "git", summary: result.summary, planSteps: result.steps }
+    return { kind: "git", summary: result.summary, planSteps: result.steps, action: result.action }
   }
   if (result?.kind === "hookOutput" && "reason" in result.output) {
     return { kind: "git", summary: result.output.reason, planSteps: [result.output.reason] }
@@ -46,9 +56,13 @@ async function mergeChecklistStepsIntoTasks(
   cwd: string
 ): Promise<void> {
   const mergeIssueSteps = await isProjectAffiliated(sessionId, cwd)
-  for (const step of steps) {
+  const next = nextChecklistStep(steps)
+  for (const step of next ? [next] : []) {
     if (step.kind === "issues" && !mergeIssueSteps) continue
-    await mergeActionPlanIntoTasks(step.planSteps, sessionId, cwd)
+    const plan = step.action
+      ? [step.action.title, [step.action.instruction, step.action.doneWhen]]
+      : step.planSteps
+    await mergeActionPlanIntoTasks(plan, sessionId, cwd)
   }
 }
 
@@ -61,15 +75,15 @@ export async function prepareBlockingChecklistTasks(
     sessionId,
     "stop-ship-checklist-task-created",
     SHIP_CHECKLIST_TASK_SUBJECT,
-    "Follow the action plan above to resolve all blocking issues, CI failures, and uncommitted changes.",
+    "Complete the selected action, then reassess the remaining checklist findings.",
     cwd
   )
   await mergeChecklistStepsIntoTasks(result.steps, sessionId, cwd)
 
-  if (result.steps.some((step) => step.kind === "issues")) {
+  if (nextChecklistStep(result.steps)?.kind === "issues") {
     await updateCooldown(sessionId, cwd)
   }
-  if (result.steps.some((step) => step.kind === "git")) {
+  if (nextChecklistStep(result.steps)?.kind === "git") {
     await markPushPrompted(sessionId)
   }
 }
@@ -109,6 +123,7 @@ export async function collectShipChecklistStopParsed(
       kind: "issues",
       summary: "Found unresolved issues that need attention.",
       planSteps: issuesResult.planSteps,
+      action: buildIssueStopAction(issuesResult.stopCtx),
     })
   }
 
@@ -139,7 +154,12 @@ export async function evaluateStopShipChecklist(input: StopHookInput): Promise<S
       await prepareBlockingChecklistTasks(result, sessionId, cwd)
     }
 
-    return blockStopObj(message)
+    // Never hide an unmigrated workflow's recovery constraints behind a compact action.
+    const actions = result.steps.flatMap((step) => (step.action ? [step.action] : []))
+    return {
+      ...blockStopObj(message),
+      ...(actions.length === result.steps.length ? { _stopActions: actions } : {}),
+    }
   } catch {
     // Fail-open: any unhandled errors don't block stop
     return {}

@@ -895,7 +895,7 @@ describe("preparePreToolHints", () => {
 })
 
 describe("BlockingStrategy stop aggregation", () => {
-  it("formats aggregated stop blocks with one footer and named sections", () => {
+  it("selects one legacy finding and retains every full diagnostic", () => {
     const footer =
       "You must act on this now. Do not try to stop again without completing the required action."
     const results = [
@@ -928,13 +928,14 @@ describe("BlockingStrategy stop aggregation", () => {
 
     const reason = finalResponse.reason as string
     expect(finalResponse.decision).toBe("block")
-    expect(reason).toContain("Stop is blocked by 2 checks.")
-    expect(reason).toContain("### ship checklist")
-    expect(reason).toContain("### quality checks")
+    expect(reason).toBe("### Repository\nCommit and push work.")
+    expect(executions).toHaveLength(2)
+    expect(executions.every((execution) => execution.status === "block")).toBe(true)
+    expect(executions[1]?.stdoutSnippet).toContain("Quality checks failed.")
     expect(reason).not.toContain(
       "You cannot stop until everything below is resolved. Follow the single action plan in order.\n\n### Repository"
     )
-    expect(reason.match(/You must act on this now/g)).toHaveLength(1)
+    expect(reason).not.toContain(footer)
   })
 
   it("stop events must NOT abort on first block — they aggregate all responses", () => {
