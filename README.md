@@ -897,16 +897,6 @@ swiz model opus                            # set the default model (user setting
 swiz model --project sonnet                # set a per-project default
 ```
 
-### `swiz compact-memory`
-
-Reduce a memory file's word count (`CLAUDE.md`, `MEMORY.md`, `GEMINI.md`, `AGENTS.md`, `.cursorrules`) to lower per-session context overhead, respecting the configured word cap.
-
-```bash
-swiz compact-memory CLAUDE.md                       # compact to the resolved word cap
-swiz compact-memory CLAUDE.md --threshold 4500     # explicit word cap
-swiz compact-memory CLAUDE.md --dry-run            # preview removals without writing
-```
-
 ### `swiz plugins`
 
 Manage Claude plugins in `~/.claude/plugins`.

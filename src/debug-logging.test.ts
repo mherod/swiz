@@ -72,7 +72,6 @@ const STDOUT_ALLOWLIST = new Set([
   "src/commands/ci-wait.ts",
   // cross-repo-issue — prints filed issue URL and location to user
   "src/commands/cross-repo-issue.ts",
-  "src/commands/compact.ts",
   "src/commands/continue.ts",
   // daemon — prints LaunchAgent install/uninstall status and server URL
   "src/commands/daemon.ts",

@@ -1,8 +1,16 @@
-import { describe, expect, test } from "bun:test"
+import { afterEach, describe, expect, mock, spyOn, test } from "bun:test"
 import { mkdir, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { indexPath, loadIndex, saveIndex } from "./stop-memory-size.ts"
+import * as home from "../src/home.ts"
+import { USE_COMPACT_MEMORY_SKILL } from "../src/memory-compaction-guidance.ts"
+import * as repository from "../src/repository-capability.ts"
+import { stopHookOutputSchema } from "../src/schemas.ts"
+import * as skills from "../src/skill-utils.ts"
+import * as memorySize from "./posttooluse-memory-size.ts"
+import { evaluateStopMemorySize, indexPath, loadIndex, saveIndex } from "./stop-memory-size.ts"
+
+afterEach(() => mock.restore())
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -18,6 +26,37 @@ async function withTmpDir(fn: (dir: string) => Promise<void>): Promise<void> {
     await rm(dir, { recursive: true, force: true })
   }
 }
+
+describe("stop guidance", () => {
+  for (const installed of [true, false]) {
+    test(`preserves compaction rules with the Skill ${installed ? "installed" : "missing"}`, () =>
+      withTmpDir(async (cwd) => {
+        spyOn(repository, "isGitRepoForHookPayload").mockResolvedValue(true)
+        spyOn(home, "getHomeDirWithFallback").mockReturnValue(cwd)
+        spyOn(memorySize, "resolveThresholds").mockResolvedValue({
+          lineThreshold: 450,
+          wordThreshold: 2,
+        })
+        spyOn(skills, "skillAdvice").mockImplementation((_skill, withSkill, withoutSkill) =>
+          installed ? `${withSkill}\n\n${withoutSkill}` : withoutSkill
+        )
+        const filePath = join(cwd, "MEMORY.md")
+        await Bun.write(filePath, "Keep these technical details.\n")
+
+        const output = stopHookOutputSchema.parse(
+          await evaluateStopMemorySize({ cwd, session_id: "memory-guidance" })
+        )
+        expect(output.decision).toBe("block")
+        expect(output.reason).toContain(filePath)
+        expect(output.reason).toContain("4 words (threshold: 2)")
+        expect(output.reason).toContain("Compact each file manually:")
+        expect(output.reason).toContain("Preserve all technical specifics:")
+        expect(output.reason).toContain("`wc -l <file>` and `wc -w <file>`")
+        expect(output.reason).not.toContain("swiz ")
+        expect(output.reason?.includes(USE_COMPACT_MEMORY_SKILL)).toBe(installed)
+      }))
+  }
+})
 
 // ── indexPath ─────────────────────────────────────────────────────────────────
 

@@ -96,6 +96,7 @@ for (const file of changedFiles) {
   if (file.includes("node_modules/")) continue
 
   if (file.endsWith(".test.ts") || file.endsWith(".test.tsx") || file.endsWith(".spec.ts")) {
+    if (!existsSync(file)) continue
     testFiles.add(file)
     directlyChangedTests.add(file)
     continue
@@ -143,7 +144,6 @@ const SKIP_PATTERNS = [
   "stop-personal-repo-issues-e2e",
   "stop-secret-scanner",
   "commands/state.test",
-  "commands/compact.test",
   "commands/doctor.test",
   "positive-path-integration",
   "commands/manage.test",

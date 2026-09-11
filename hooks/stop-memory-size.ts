@@ -185,14 +185,10 @@ function buildMemoryViolationReason(
   wordThreshold: number
 ): string {
   const summary = violations.map((v) => `  ${v.filePath}: ${v.violations.join(", ")}`).join("\n")
-  const perFileCommands = violations
-    .map((v) => `  swiz ${COMPACT_MEMORY_SKILL_ID} ${v.filePath}`)
-    .join("\n")
-
   const compactAdvice = skillAdvice(
     COMPACT_MEMORY_SKILL_ID,
-    `${USE_COMPACT_MEMORY_SKILL} or run these commands directly:\n${perFileCommands}`,
-    `${manualCompactionFallback("each file")}\n\nOr run:\n${perFileCommands}`
+    `${USE_COMPACT_MEMORY_SKILL} to reduce each file below thresholds.`,
+    manualCompactionFallback("each file")
   )
 
   const steps = [

@@ -5,7 +5,7 @@
 import type { ActionPlanItem } from "./action-plan.ts"
 
 // ---------------------------------------------------------------------------
-// Slash command / CLI identifier (user-facing)
+// Skill identifiers (user-facing)
 // ---------------------------------------------------------------------------
 
 /** Slash command shown to agents (Claude Code / Cursor style). */
@@ -17,7 +17,7 @@ export const COMPACT_MEMORY_SLASH = "/compact-memory" as const
  */
 export const USE_COMPACT_MEMORY_SKILL = `Use the ${COMPACT_MEMORY_SLASH} skill`
 
-/** Skill id for `skillAdvice()` and `swiz` subcommand name (no leading slash). */
+/** Skill id for `skillAdvice()` (no leading slash). */
 export const COMPACT_MEMORY_SKILL_ID = "compact-memory" as const
 
 // ---------------------------------------------------------------------------
