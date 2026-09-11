@@ -993,13 +993,14 @@ describe("dispatch execute integration", () => {
 
   describe("manifestProvider", () => {
     it("uses cached manifest provider instead of loading from disk", async () => {
+      const project = await tempDirs.create()
       let providerCalled = false
       let providerCwd = ""
       const req: DispatchRequest = {
         canonicalEvent: "preToolUse",
         hookEventName: "PreToolUse",
         payloadStr: JSON.stringify({
-          cwd: process.cwd(),
+          cwd: project,
           session_id: "test-session",
           tool_name: "Bash",
           tool_input: { command: "echo hello" },
@@ -1009,10 +1010,12 @@ describe("dispatch execute integration", () => {
           providerCwd = cwd
           return [] // Return empty manifest — no hooks match
         },
+        repositoryCapabilityProvider: async () => repositoryCapability({ canonicalRoot: project }),
+        replayPendingMutations: async () => {},
       }
       const result = await executeDispatch(req)
       expect(providerCalled).toBe(true)
-      expect(providerCwd).toBe(process.cwd())
+      expect(providerCwd).toBe(project)
       expect(result.response).toEqual({})
     })
 

@@ -28,6 +28,7 @@ async function createEnforcementProjectDir(makeDir: () => Promise<string>): Prom
   const dir = await withGitClient(new MockGitClient(() => ""), () =>
     createEnforcementFixture(makeDir)
   )
+  await Bun.write(join(dir, ".skills/update-memory/SKILL.md"), "# Update memory\nRecord a rule.\n")
   repositories.add(dir)
   return dir
 }
