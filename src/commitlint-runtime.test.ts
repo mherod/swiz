@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
-import { chmod, mkdir, symlink } from "node:fs/promises"
+import { mkdir } from "node:fs/promises"
 import { join } from "node:path"
+import { $ } from "bun"
 import { parse } from "yaml"
 import { useTempDir } from "./utils/test-utils.ts"
 
@@ -17,9 +18,9 @@ async function runCommitHook(message: string) {
     join(cwd, "commitlint.config.cjs"),
     await Bun.file(join(projectRoot, "commitlint.config.cjs")).text()
   )
-  await symlink(join(projectRoot, "node_modules"), join(cwd, "node_modules"))
-  await symlink(process.execPath, join(cwd, "bunx"))
-  await symlink(process.execPath, join(cwd, "bun"))
+  await $`ln -s ${join(projectRoot, "node_modules")} ${join(cwd, "node_modules")}`
+  await $`ln -s ${process.execPath} ${join(cwd, "bunx")}`
+  await $`ln -s ${process.execPath} ${join(cwd, "bun")}`
   const mocks = {
     swiz: "#!/bin/sh\ncat >/dev/null\n",
     node: "#!/bin/sh\necho 'Unexpected external invocation: node' >&2\nexit 97\n",
@@ -27,7 +28,7 @@ async function runCommitHook(message: string) {
   }
   for (const [name, script] of Object.entries(mocks)) {
     await Bun.write(join(cwd, name), script)
-    await chmod(join(cwd, name), 0o755)
+    await $`chmod 755 ${join(cwd, name)}`
   }
   const proc = Bun.spawn(["/bin/sh", "-c", command], {
     cwd,

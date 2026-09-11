@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
-import { chmod } from "node:fs/promises"
 import { join } from "node:path"
+import { $ } from "bun"
 import { useTempDir } from "../src/utils/test-utils.ts"
 
 const SHIM_PATH = join(import.meta.dir, "shim.sh")
@@ -38,7 +38,7 @@ esac
   }
   for (const [name, script] of Object.entries(mocks)) {
     await Bun.write(join(cwd, name), script)
-    await chmod(join(cwd, name), 0o755)
+    await $`chmod 755 ${join(cwd, name)}`
   }
   const script = [
     "git() { printf 'git:%s\\n' \"$*\"; }",
