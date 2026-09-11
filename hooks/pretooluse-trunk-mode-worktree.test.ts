@@ -17,7 +17,10 @@ describe("evaluatePretooluseTrunkModeWorktree", () => {
     try {
       const swizDir = join(tempDir, ".swiz")
       await mkdir(swizDir, { recursive: true })
-      await writeFile(join(swizDir, "config.json"), JSON.stringify({ trunkMode: true }))
+      await writeFile(
+        join(swizDir, "config.json"),
+        JSON.stringify({ trunkMode: true, defaultBranch: "trunk" })
+      )
 
       const result = await evaluatePretooluseTrunkModeWorktree(
         makeInput("EnterWorktree", true, tempDir)
@@ -34,14 +37,39 @@ describe("evaluatePretooluseTrunkModeWorktree", () => {
       ).hookSpecificOutput
       const reason = hookSpecificOutput?.permissionDecisionReason ?? ""
       expect(reason).toContain("git worktree")
-      expect(reason).toContain("git switch main")
+      expect(reason).toContain("git switch trunk")
       expect(reason).toContain("git switch <existing-branch>")
       expect(reason).toContain("git worktree add <path> <existing-branch>")
       expect(reason).toContain("refs/remotes/origin/<existing-PR-branch>")
       expect(reason).not.toContain("Worktrees remain disabled")
-      if ("systemMessage" in result) {
-        expect(result.systemMessage).toContain("Trunk mode")
-      }
+      expect(reason).toContain("git push origin trunk")
+      expect(reason).toContain("Preserve unrelated or peer work before switching")
+      expect(reason).toContain("Do not create a feature branch or a new PR")
+      expect(result).toMatchObject({
+        systemMessage: expect.stringContaining(
+          "implement, verify, commit and push new work directly on trunk"
+        ),
+      })
+    } finally {
+      await destroyTempDir(tempDir)
+    }
+  })
+
+  it("asks for default-branch resolution instead of guessing main", async () => {
+    const tempDir = await createTempDir()
+    try {
+      await mkdir(join(tempDir, ".swiz"), { recursive: true })
+      await writeFile(join(tempDir, ".swiz/config.json"), JSON.stringify({ trunkMode: true }))
+      const result = await evaluatePretooluseTrunkModeWorktree(
+        makeInput("EnterWorktree", true, tempDir)
+      )
+      expect(result).toMatchObject({
+        systemMessage: expect.stringContaining("directly on the default branch"),
+      })
+      expect(JSON.stringify(result)).toContain(
+        "Resolve <default-branch> from project settings or origin/HEAD first"
+      )
+      expect(JSON.stringify(result)).not.toContain("git switch main")
     } finally {
       await destroyTempDir(tempDir)
     }

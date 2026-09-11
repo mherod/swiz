@@ -120,6 +120,11 @@ describe("pretooluse-trunk-mode-branch-gate", () => {
       expect(reason).toContain("No branch was created")
       expect(reason).toContain("git switch main")
       expect(reason).toContain("git switch <existing-branch>")
+      expect(reason).toContain("git push origin main")
+      expect(reason).toContain("Preserve unrelated or peer work before switching")
+      expect(result.parsed?.systemMessage).toContain(
+        "implement, verify, commit and push new work directly on main"
+      )
     } finally {
       await cleanupRepo(repo)
     }
@@ -352,6 +357,8 @@ describe("pretooluse-trunk-mode-branch-gate", () => {
       expect(reason).toContain("git switch main")
       expect(reason).toContain("git push origin main")
       expect(reason).toContain("gh pr merge <number>")
+      expect(result.parsed?.systemMessage).toContain("Do not create a branch or PR")
+      expect(reason).toContain("For an existing PR, update its branch and PR")
     } finally {
       await cleanupRepo(repo)
     }

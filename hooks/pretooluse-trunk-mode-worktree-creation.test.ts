@@ -4,6 +4,7 @@ import { MockGitClient } from "../src/git/mock-client.ts"
 import { evaluatePretooluseTrunkModeWorktreeCreation } from "./pretooluse-trunk-mode-worktree-creation.ts"
 
 interface HookResult {
+  systemMessage?: string
   hookSpecificOutput?: {
     permissionDecision?: string
     permissionDecisionReason?: string
@@ -40,6 +41,7 @@ async function runHook(
     client?: MockGitClient
     settingsCwds?: string[]
     trunkRepos?: string[]
+    defaultBranch?: string
   } = {}
 ): Promise<HookResult> {
   const cwd = CWD
@@ -56,7 +58,7 @@ async function runHook(
           readProjectSettings: (target) => {
             options.settingsCwds?.push(target)
             return Promise.resolve({
-              defaultBranch: "main",
+              defaultBranch: options.defaultBranch ?? "main",
               trunkMode: options.trunkRepos
                 ? options.trunkRepos.includes(target)
                 : (options.trunkMode ?? true),
@@ -102,6 +104,18 @@ describe("pretooluse-trunk-mode-worktree-creation", () => {
       expect(reason).toContain("git switch <existing-branch>")
       expect(reason).toContain("git worktree add <path> <existing-branch>")
       expect(reason).toContain("refs/remotes/origin/<existing-PR-branch>")
+      expect(reason).toContain("commit on `main`")
+      expect(reason).toContain("git push origin main")
+      expect(reason).toContain("Do not create a feature branch or a new PR")
+      expect(reason).toContain("Preserve unrelated or peer work before switching")
+      expect(reason).toContain("For an existing PR, update its branch and PR")
+      expect(reason).toContain("Do not leave unpublished commits on a detached HEAD")
+      expect(result.systemMessage).toContain(
+        "implement, verify, commit and push new work directly on main"
+      )
+      expect(result.systemMessage).toContain(
+        "Existing branches/worktrees are for recovery or existing PR work"
+      )
     })
   }
 
@@ -157,7 +171,7 @@ describe("pretooluse-trunk-mode-worktree-creation", () => {
         trunkRepos: ["/test/trunk"],
       }
     )
-    expect(settingsCwds).toEqual(["/test/free", "/test/trunk"])
+    expect([...new Set(settingsCwds)]).toEqual(["/test/free", "/test/trunk"])
     expect(result.hookSpecificOutput?.permissionDecision).toBe("deny")
   })
 
@@ -168,6 +182,18 @@ describe("pretooluse-trunk-mode-worktree-creation", () => {
         trunkRepos: [CWD],
       })
     ).toEqual({})
+  })
+
+  test("names the target repository's configured default branch in both output channels", async () => {
+    const result = await runHook("git -C ../other worktree add -b feature ../review", {
+      client: mockGit([], "/test/other"),
+      defaultBranch: "trunk",
+    })
+    expect(result.systemMessage).toContain("directly on trunk")
+    const reason = result.hookSpecificOutput?.permissionDecisionReason ?? ""
+    expect(reason).toContain("git push origin trunk")
+    expect(reason).not.toContain("git push origin main")
+    expect(reason).toContain("preserve any git -C options")
   })
 
   test("denies refs missing from the target repo without attempting mutations", async () => {

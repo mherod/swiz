@@ -9,13 +9,14 @@
  */
 
 import {
-  preToolUseDeny,
+  preToolUseDenyWithSystemMessage,
   runSwizHookAsMain,
   type SwizHookOutput,
   type SwizToolHook,
 } from "../src/SwizHook.ts"
 import { toolHookInputSchema } from "../src/schemas.ts"
 import { readProjectSettings } from "../src/settings.ts"
+import { trunkModeGuidance } from "../src/utils/trunk-mode-guidance.ts"
 
 export async function evaluatePretooluseTrunkModeWorktree(input: unknown): Promise<SwizHookOutput> {
   const hookInput = toolHookInputSchema.parse(input)
@@ -26,19 +27,14 @@ export async function evaluatePretooluseTrunkModeWorktree(input: unknown): Promi
   const cwd: string = hookInput.cwd ?? process.cwd()
   const project = await readProjectSettings(cwd)
   if (!project?.trunkMode) return {}
-  const defaultBranch = project.defaultBranch ?? "main"
+  const guidance = trunkModeGuidance(project.defaultBranch)
 
-  return preToolUseDeny(
+  return preToolUseDenyWithSystemMessage(
     `Trunk mode kept work in the current working directory; no git worktree was entered.\n\n` +
-      `Continue on trunk:\n` +
-      `  git switch ${defaultBranch}\n\n` +
-      `If another system moved the repository, use the existing-branch recovery escape hatch:\n` +
-      `  git switch <existing-branch>\n\n` +
-      `For an existing PR branch, create a checkout without creating a branch:\n` +
-      `  git worktree add <path> <existing-branch>\n` +
-      `For a fetched remote PR head:\n` +
-      `  git worktree add --detach <path> refs/remotes/origin/<existing-PR-branch>\n\n` +
-      `EnterWorktree remains blocked because it creates a branch implicitly.`
+      guidance.workflow +
+      `\n\n` +
+      `EnterWorktree remains blocked because it creates a branch implicitly.`,
+    guidance.summary
   )
 }
 

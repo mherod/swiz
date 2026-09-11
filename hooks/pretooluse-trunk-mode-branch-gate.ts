@@ -13,6 +13,7 @@ import { ghJsonViaDaemon as ghJson, isGitRepo } from "../src/git-helpers.ts"
 import { isGitRepoForHookPayload } from "../src/repository-capability.ts"
 import {
   preToolUseDeny,
+  preToolUseDenyWithSystemMessage,
   runSwizHookAsMain,
   type SwizHookOutput,
   type SwizToolHook,
@@ -33,17 +34,17 @@ import {
   getDefaultBranch,
 } from "../src/utils/git-utils.ts"
 import { parseGitInvocationTokens, splitShellSegments } from "../src/utils/shell-patterns.ts"
+import { trunkModeGuidance } from "../src/utils/trunk-mode-guidance.ts"
 
 function denyPrCreateWhenTrunk(command: string, defaultBranch: string): SwizHookOutput | null {
   if (!GH_PR_CREATE_RE.test(command)) return null
-  return preToolUseDeny(
+  const guidance = trunkModeGuidance(defaultBranch)
+  return preToolUseDenyWithSystemMessage(
     `Trunk mode kept the repository on its direct-delivery path; no pull request was created.\n\n` +
-      `New work lands directly on \`${defaultBranch}\` in this project. Continue with:\n` +
-      `  1. Return to trunk: git switch ${defaultBranch}\n` +
-      `  2. Commit the completed change on \`${defaultBranch}\`\n` +
-      `  3. Push it: git push origin ${defaultBranch}\n\n` +
-      `If you meant to finish a pull request that already exists, merge it instead:\n` +
-      `  gh pr merge <number>`
+      guidance.workflow +
+      `\n\n` +
+      `Finish an existing PR when ready: gh pr merge <number>`,
+    guidance.summary
   )
 }
 
@@ -130,16 +131,15 @@ function denyBranchChangesWhenTrunk(
 ): SwizHookOutput | null {
   for (const change of changes) {
     const target = change.target ? `\n\nAttempted branch: \`${change.target}\`` : ""
-    return preToolUseDeny(
+    const guidance = trunkModeGuidance(defaultBranch)
+    return preToolUseDenyWithSystemMessage(
       `Trunk mode left branch state unchanged. No branch was created, copied, renamed, or reset.` +
         target +
-        `\n\nContinue on trunk:\n` +
-        `  git switch ${defaultBranch}\n\n` +
-        `If another system moved the repository, switching to a branch that already exists is the recovery escape hatch:\n` +
-        `  git switch <existing-branch>\n\n` +
-        `For a fetched remote PR head without creating a local tracking branch:\n` +
-        `  git worktree add --detach <path> refs/remotes/origin/<existing-PR-branch>\n\n` +
-        `The attempted branch ${change.kind} operation was not applied.`
+        `\n\n` +
+        guidance.workflow +
+        `\n\n` +
+        `The attempted branch ${change.kind} operation was not applied.`,
+      guidance.summary
     )
   }
   return null
