@@ -41,7 +41,7 @@
         "bun-plugin-tailwind": "^0.1.2",
         "eslint": "^10.0.3",
         "globals": "^17.4.0",
-        "happy-dom": "^20.12.0",
+        "happy-dom": "^20.13.2",
         "lefthook": "^2.1.1",
         "lint-staged": "^16.2.7",
         "typescript-eslint": "^8.57.0",
@@ -988,7 +988,7 @@
 
     "gtoken": ["gtoken@7.1.0", "", { "dependencies": { "gaxios": "^6.0.0", "jws": "^4.0.0" } }, "sha512-pCcEwRi+TKpMlxAQObHDQ56KawURgyAf6jtIY046fJ5tIv3zDe/LEIubckAO8fj6JnAxLdmWkUfNyulQ2iKdEw=="],
 
-    "happy-dom": ["happy-dom@20.12.0", "", { "dependencies": { "@types/node": ">=20.0.0", "@types/whatwg-mimetype": "^3.0.2", "@types/ws": "^8.18.1", "buffer-image-size": "^0.6.4", "entities": "^7.0.1", "whatwg-mimetype": "^3.0.0", "ws": "^8.21.0" } }, "sha512-7uMYJu2SEwwL8vVcKp0C0lnt6d2LSGGe+T+oY79PiCJNNSgFpbxW8n5KuzpDQvrU4mt+fYiK1+Jy7Z2v39YR6g=="],
+    "happy-dom": ["happy-dom@20.13.2", "", { "dependencies": { "@types/node": ">=20.0.0", "@types/whatwg-mimetype": "^3.0.2", "@types/ws": "^8.18.1", "buffer-image-size": "^0.6.4", "entities": "^7.0.1", "whatwg-mimetype": "^3.0.0", "ws": "^8.21.0" } }, "sha512-VC9HoEaT3Jf3K/1g/GjMYGAZCCg+ULgGVcXJlAeSzdTj8mIoPJRp14KVclP5gpUcF/kauuaVB2ri2/WxXbl4vg=="],
 
     "has-flag": ["has-flag@4.0.0", "", {}, "sha512-EykJT/Q1KjTWctppgIAgfSO0tKVuZUjhgMr17kqTumMl6Afv3EISleU7qZUzoXDFTAHTDC4NOoG/ZxU3EvlMPQ=="],
 
