@@ -1,5 +1,4 @@
 import { dirname } from "node:path"
-import { transformWithEsbuild } from "vite"
 import { defineConfig } from "vitest/config"
 
 export default defineConfig({
@@ -9,13 +8,34 @@ export default defineConfig({
       enforce: "pre",
       async transform(code, id) {
         if (!/import\.meta\.(dir|path)\b/.test(code) || id.includes("/node_modules/")) return null
-        const result = await transformWithEsbuild(code, id, {
+        const result = await Bun.build({
+          entrypoints: [id],
+          root: dirname(id),
+          target: "bun",
+          external: ["*"],
+          sourcemap: "external",
           define: {
             "import.meta.dir": JSON.stringify(dirname(id)),
             "import.meta.path": JSON.stringify(id),
           },
+          plugins: [
+            {
+              name: "vitest-module-source",
+              setup(build) {
+                build.onLoad({ filter: /.*/ }, () => ({ contents: code, loader: "tsx" }))
+              },
+            },
+          ],
         })
-        return { code: result.code, map: JSON.stringify(result.map) }
+        const output = result.outputs.find((artifact) => artifact.kind === "entry-point")
+        if (!output) throw new Error(`Bun metadata transform produced no module for ${id}`)
+        const map = output.sourcemap ? JSON.parse(await output.sourcemap.text()) : null
+        // The transform has one source; anchor coverage to its original absolute path.
+        if (map) map.sources = [id]
+        return {
+          code: await output.text(),
+          map: map ? JSON.stringify(map) : null,
+        }
       },
     },
   ],
