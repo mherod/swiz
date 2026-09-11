@@ -2,16 +2,22 @@
 // PreToolUse hook: once a hook response instructs the agent to record an
 // update-memory DO/DON'T rule, block normal work until the transcript shows:
 //   1. The update-memory skill was read
-//   2. A markdown file write was performed
-// Cooldown: if any CLAUDE.md (or MEMORY.md) in the project tree was modified
+//   2. A repository memory write was performed
+// Cooldown: if repository memory was modified
 // within COOLDOWN_MS, skip enforcement — the agent is actively maintaining memory.
 
 import { stat } from "node:fs/promises"
-import { dirname, join } from "node:path"
+import { resolve } from "node:path"
 import { formatActionPlan } from "../src/action-plan.ts"
 import { GATE_REQUIRED_SKILLS } from "../src/gate-required-skills.ts"
 import { getHomeDirOrNull } from "../src/home.ts"
-import { projectKeyFromCwd } from "../src/project-key.ts"
+import {
+  isProjectMemoryPath,
+  PROJECT_MEMORY_GUIDANCE,
+  type ProjectMemoryLocation,
+  projectMemorySources,
+  resolveProjectMemory,
+} from "../src/project-memory.ts"
 import { isGitRepoForHookPayload } from "../src/repository-capability.ts"
 import type { SwizHookOutput, SwizToolHook } from "../src/SwizHook.ts"
 import { preToolUseDeny, runSwizHookAsMain } from "../src/SwizHook.ts"
@@ -21,64 +27,63 @@ import {
   resolveSkillRecencyOptions,
 } from "../src/skill-utils.ts"
 import { readSessionTasks } from "../src/tasks/task-recovery.ts"
-import { isEditTool, isNotebookTool, isWriteTool } from "../src/tool-matchers.ts"
+import {
+  extractFileEditTargetPaths,
+  isEditTool,
+  isNotebookTool,
+  isShellTool,
+  isWriteTool,
+} from "../src/tool-matchers.ts"
 import { getSuccessfulToolCalls, toolLoadsSkill } from "../src/transcript-summary.ts"
 import {
   extractTextFromUnknownContent,
   isHookFeedback,
   stripQuotedText,
 } from "../src/transcript-utils.ts"
-import { hasFileInTree } from "../src/utils/file-utils.ts"
 import { resolveSessionLines } from "../src/utils/transcript.ts"
 
 const REMINDER_FRAGMENT =
   "record a DO or DON'T rule that proactively builds the required steps into your standard development workflow."
 const SELF_SENTINEL = "MEMORY CAPTURE ENFORCEMENT"
 const UPDATE_MEMORY_SKILL = GATE_REQUIRED_SKILLS.updateMemory.name
-const MARKDOWN_FILE_RE = /(?:^|[\\/])[^\\/\n]+\.md$/i
-const APPLY_PATCH_MARKDOWN_RE = /^\*\*\* (?:Add|Update) File: .+\.md$/m
 const COOLDOWN_MS = 30 * 60 * 1000 // 30 minutes
 // Matches individual auto-memory entries under ~/.claude/projects/<key>/memory/<slug>.md.
 // These are written by the built-in auto-memory system, not the /update-memory skill,
 // so enforcement must neither block nor treat them as satisfying the enforcement requirement.
 const AUTO_MEMORY_PATH_RE = /[/\\]\.claude[/\\]projects[/\\][^/\\]+[/\\]memory[/\\][^/\\]+\.md$/i
+const CODEX_MEMORY_PATH_RE = /[/\\]\.codex[/\\]memories[/\\].+\.md$/i
 
 interface EnforcementState {
   skillReadComplete: boolean
   markdownWriteComplete: boolean
 }
 
-function collectStrings(value: unknown, out: string[]): void {
-  if (typeof value === "string") {
-    out.push(value)
-    return
-  }
-  if (Array.isArray(value)) {
-    for (const item of value) collectStrings(item, out)
-    return
-  }
-  if (value && typeof value === "object") {
-    for (const item of Object.values(value)) collectStrings(item, out)
-  }
+interface ToolSatisfactionContext {
+  skillPath: string | null
+  cwd: string
+  location: ProjectMemoryLocation
+}
+
+function editPaths(value: unknown): string[] {
+  if (typeof value === "string") return extractFileEditTargetPaths({ command: value })
+  return value && typeof value === "object" ? extractFileEditTargetPaths(value) : []
 }
 
 function isAutoMemoryPath(path: string): boolean {
-  return AUTO_MEMORY_PATH_RE.test(path.trim())
+  return AUTO_MEMORY_PATH_RE.test(path.trim()) || CODEX_MEMORY_PATH_RE.test(path.trim())
 }
 
-function toolWritesMarkdown(toolName: string, toolInput: unknown): boolean {
+function toolWritesMarkdown(
+  toolName: string,
+  toolInput: unknown,
+  cwd: string,
+  location: ProjectMemoryLocation
+): boolean {
   if (!isEditTool(toolName) && !isWriteTool(toolName) && !isNotebookTool(toolName)) {
     return false
   }
 
-  const strings: string[] = []
-  collectStrings(toolInput, strings)
-
-  return strings.some(
-    (value) =>
-      !isAutoMemoryPath(value) &&
-      (MARKDOWN_FILE_RE.test(value.trim()) || APPLY_PATCH_MARKDOWN_RE.test(value))
-  )
+  return editPaths(toolInput).some((path) => isProjectMemoryPath(resolve(cwd, path), location))
 }
 
 /**
@@ -87,23 +92,9 @@ function toolWritesMarkdown(toolName: string, toolInput: unknown): boolean {
  * is already actively maintaining memory.
  */
 async function isMemoryRecentlyUpdated(cwd: string): Promise<boolean> {
-  const candidates: string[] = []
-
-  let dir = cwd
-  while (true) {
-    candidates.push(join(dir, "CLAUDE.md"))
-    const parent = dirname(dir)
-    if (parent === dir) break
-    dir = parent
-  }
-
-  const home = getHomeDirOrNull()
-  if (home) {
-    const encodedCwd = projectKeyFromCwd(cwd)
-    candidates.push(join(home, ".claude", "projects", encodedCwd, "memory", "MEMORY.md"))
-    candidates.push(join(home, ".claude", "MEMORY.md"))
-  }
-
+  const location = await resolveProjectMemory(cwd)
+  if (!location) return false
+  const candidates = (await projectMemorySources(location)).map((source) => source.path)
   const now = Date.now()
   for (const p of candidates) {
     try {
@@ -174,7 +165,7 @@ function buildDenialReason(
       formatActionPlan(
         [
           `Read the /${UPDATE_MEMORY_SKILL} skill directly: ${skillPath ?? "open its installed SKILL.md"}. If advisory setup fails, read without executing setup; keep runtime policy and mandatory checks, and report unavailable analysis as unknown.`,
-          "Write the resulting DO or DON'T rule into a project markdown file such as CLAUDE.md.",
+          PROJECT_MEMORY_GUIDANCE,
         ],
         { header: "To resolve:" }
       ) +
@@ -184,10 +175,7 @@ function buildDenialReason(
   }
   return (
     `${SELF_SENTINEL}: ${toolName} is BLOCKED until you record the required workflow rule in a markdown file.\n\n` +
-    formatActionPlan(
-      ["Write the DO or DON'T rule into a project markdown file such as CLAUDE.md."],
-      { header: "To resolve:" }
-    ) +
+    formatActionPlan([PROJECT_MEMORY_GUIDANCE], { header: "To resolve:" }) +
     `\nThis gate clears automatically once the transcript shows that markdown write after the original reminder.` +
     `\n\nYou must act on this now. Do not try to stop again without completing the required action.`
   )
@@ -201,7 +189,8 @@ async function shouldSkipEnforcement(
 ): Promise<boolean> {
   if (!transcriptPath || !toolName) return true
   if (!(await isGitRepoForHookPayload(input, cwd))) return true
-  return !(await hasFileInTree(cwd, "CLAUDE.md"))
+  const location = await resolveProjectMemory(cwd)
+  return !location || !(await Bun.file(location.rules).exists())
 }
 
 async function shouldSkipAfterTrigger(
@@ -219,15 +208,18 @@ function isCurrentToolSatisfying(
   state: EnforcementState,
   toolName: string,
   toolInput: Record<string, any>,
-  skillPath: string | null
+  context: ToolSatisfactionContext
 ): boolean {
   if (state.skillReadComplete && state.markdownWriteComplete) return true
   if (
     !state.skillReadComplete &&
-    toolLoadsSkill(toolName, toolInput, UPDATE_MEMORY_SKILL, skillPath)
+    toolLoadsSkill(toolName, toolInput, UPDATE_MEMORY_SKILL, context.skillPath)
   )
     return true
-  return !state.markdownWriteComplete && toolWritesMarkdown(toolName, toolInput)
+  return (
+    !state.markdownWriteComplete &&
+    toolWritesMarkdown(toolName, toolInput, context.cwd, context.location)
+  )
 }
 
 function parseToolHookInput(raw: Record<string, any>): ToolHookInput | null {
@@ -257,9 +249,21 @@ async function getPendingReminderLines(
 
 function isAutoMemoryEdit(toolName: string, toolInput: unknown): boolean {
   if (!isWriteTool(toolName) && !isEditTool(toolName)) return false
-  const strings: string[] = []
-  collectStrings(toolInput, strings)
-  return strings.some((value) => isAutoMemoryPath(value))
+  const paths = editPaths(toolInput)
+  return paths.length > 0 && paths.every(isAutoMemoryPath)
+}
+
+function isReadOnlyDoctorTool(toolName: string, toolInput: unknown): boolean {
+  if (!isShellTool(toolName) || typeof toolInput !== "object" || toolInput === null) return false
+  const input = toolInput as { command?: unknown }
+  return (
+    typeof input.command === "string" &&
+    ["swiz doctor", "swiz doctor --verbose"].includes(input.command)
+  )
+}
+
+function shouldSkipCurrentTool(toolName: string, toolInput: Record<string, any>): boolean {
+  return isReadOnlyDoctorTool(toolName, toolInput) || isAutoMemoryEdit(toolName, toolInput)
 }
 
 async function evaluatePendingMemoryReminder(
@@ -271,6 +275,8 @@ async function evaluatePendingMemoryReminder(
 ): Promise<SwizHookOutput> {
   const { lines, lastTriggerIndex } = pendingReminder
   if (await shouldSkipAfterTrigger(lines, lastTriggerIndex, cwd, input.session_id)) return {}
+  const location = await resolveProjectMemory(cwd)
+  if (!location) return {}
 
   const skillPath = resolveSkillFilePathForHookPayload(UPDATE_MEMORY_SKILL, input, cwd)
   const { recencyOptions } = await resolveSkillRecencyOptions(cwd)
@@ -279,9 +285,18 @@ async function evaluatePendingMemoryReminder(
     skillReadComplete: calls.some((call) =>
       toolLoadsSkill(call.name ?? "", call.input, UPDATE_MEMORY_SKILL, skillPath)
     ),
-    markdownWriteComplete: calls.some((call) => toolWritesMarkdown(call.name ?? "", call.input)),
+    markdownWriteComplete: calls.some((call) =>
+      toolWritesMarkdown(call.name ?? "", call.input, cwd, location)
+    ),
   }
-  if (isCurrentToolSatisfying(state, toolName, toolInput, skillPath)) return {}
+  if (
+    isCurrentToolSatisfying(state, toolName, toolInput, {
+      skillPath,
+      cwd,
+      location,
+    })
+  )
+    return {}
   return preToolUseDeny(buildDenialReason(toolName, !state.skillReadComplete, skillPath))
 }
 
@@ -295,11 +310,9 @@ export async function evaluatePretooluseUpdateMemoryEnforcement(
   const toolName = input.tool_name ?? ""
   const toolInput = input.tool_input ?? {}
   const cwd = input.cwd ?? process.cwd()
-
-  // Auto-memory entries written by the built-in memory system are exempt from
-  // enforcement — they are distinct from /update-memory skill rule writes and must
-  // not be blocked or used to satisfy the skill-read/markdown-write requirements.
-  if (isAutoMemoryEdit(toolName, toolInput)) return {}
+  // The recommended read-only diagnostic and built-in memory writes stay exempt
+  // while this gate is active.
+  if (shouldSkipCurrentTool(toolName, toolInput)) return {}
 
   const pendingReminder = await getPendingReminderLines(
     input as Record<string, unknown>,

@@ -1,5 +1,5 @@
 import { describe, expect, setDefaultTimeout, test } from "bun:test"
-import { writeFile } from "node:fs/promises"
+import { mkdir, writeFile } from "node:fs/promises"
 
 // Subprocess tests need extra headroom under concurrent test suite load
 setDefaultTimeout(30_000)
@@ -28,6 +28,7 @@ async function createEnforcementProjectDir(makeDir: () => Promise<string>): Prom
   const dir = await withGitClient(new MockGitClient(() => ""), () =>
     createEnforcementFixture(makeDir)
   )
+  await mkdir(join(dir, ".git"))
   await Bun.write(join(dir, ".skills/update-memory/SKILL.md"), "# Update memory\nRecord a rule.\n")
   repositories.add(dir)
   return dir
@@ -76,6 +77,81 @@ function toolUse(name: string, input: Record<string, any>): Record<string, any>[
 }
 
 describe("pretooluse-update-memory-enforcement", () => {
+  test.each([
+    "README.md",
+    "../external.md",
+    "/Users/test/.codex/memories/extensions/ad_hoc/notes/update.md",
+  ])("does not credit an unrelated or external Markdown write: %s", async (path) => {
+    const dir = await createEnforcementProjectDir(createTempDir)
+    const transcript = await createTranscript(dir, [
+      hookFeedback(REMINDER_FRAGMENT),
+      ...toolUse("Read", {
+        file_path: resolveSkillFilePathForHookPayload("update-memory", {}, dir)!,
+      }),
+      ...toolUse("Write", { file_path: path, content: "CLAUDE.md" }),
+    ])
+    const result = await runHook({
+      cwd: dir,
+      transcript_path: transcript,
+      tool_name: "Edit",
+      tool_input: { file_path: "src/app.ts", new_string: "x" },
+    })
+    expect(result.json?.hookSpecificOutput?.permissionDecision).toBe("deny")
+  })
+
+  test.each([
+    "CLAUDE.md",
+    ".swiz/memory/lesson.md",
+  ])("credits repository memory: %s", async (path) => {
+    const dir = await createEnforcementProjectDir(createTempDir)
+    const transcript = await createTranscript(dir, [
+      hookFeedback(REMINDER_FRAGMENT),
+      ...toolUse("Read", {
+        file_path: resolveSkillFilePathForHookPayload("update-memory", {}, dir)!,
+      }),
+      ...toolUse("Write", { file_path: path, content: "DO: verify before delivery." }),
+    ])
+    const result = await runHook({
+      cwd: dir,
+      transcript_path: transcript,
+      tool_name: "Edit",
+      tool_input: { file_path: "src/app.ts", new_string: "x" },
+    })
+    expect(result.stdout).toBe("")
+  })
+
+  test("does not use external memory mtime as completion evidence", async () => {
+    const dir = await createEnforcementProjectDir(createTempDir)
+    const home = await createTempDir()
+    await Bun.write(join(home, ".claude/MEMORY.md"), "Recent external memory")
+    const transcript = await createTranscript(dir, [hookFeedback(REMINDER_FRAGMENT)])
+    const result = await runHook(
+      {
+        cwd: dir,
+        transcript_path: transcript,
+        tool_name: "Edit",
+        tool_input: { file_path: "src/app.ts" },
+      },
+      { HOME: home }
+    )
+    expect(result.json?.hookSpecificOutput?.permissionDecision).toBe("deny")
+  })
+
+  test("permits host-owned Codex memory writes without crediting project completion", async () => {
+    const dir = await createEnforcementProjectDir(createTempDir)
+    const transcript = await createTranscript(dir, [hookFeedback(REMINDER_FRAGMENT)])
+    const result = await runHook({
+      cwd: dir,
+      transcript_path: transcript,
+      tool_name: "Write",
+      tool_input: {
+        file_path: "/Users/test/.codex/memories/extensions/ad_hoc/notes/update.md",
+        content: "Host-owned",
+      },
+    })
+    expect(result.stdout).toBe("")
+  })
+
   test("denies normal work until the update-memory skill is read", async () => {
     // createEnforcementProjectDir(createTempDir) gives a git repo + CLAUDE.md with an old mtime so the
     // cooldown does not fire and enforcement runs as expected.

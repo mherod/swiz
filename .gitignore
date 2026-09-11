@@ -11,7 +11,7 @@ package-lock.json
 .claude/agent-memory/
 
 # Agent memory files (written to project root by Claude Code auto-memory)
-memory/
+/memory/
 
 # output
 out
