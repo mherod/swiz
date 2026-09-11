@@ -36,6 +36,9 @@ describe("evaluatePretooluseTrunkModeWorktree", () => {
       expect(reason).toContain("git worktree")
       expect(reason).toContain("git switch main")
       expect(reason).toContain("git switch <existing-branch>")
+      expect(reason).toContain("git worktree add <path> <existing-branch>")
+      expect(reason).toContain("refs/remotes/origin/<existing-PR-branch>")
+      expect(reason).not.toContain("Worktrees remain disabled")
       if ("systemMessage" in result) {
         expect(result.systemMessage).toContain("Trunk mode")
       }

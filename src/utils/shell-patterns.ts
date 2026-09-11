@@ -251,6 +251,7 @@ interface _TokState {
   tokens: string[]
   token: string
   quote: '"' | "'" | null
+  started: boolean
 }
 
 function _procQuoted(state: _TokState, ch: string): void {
@@ -261,12 +262,14 @@ function _procQuoted(state: _TokState, ch: string): void {
 function _procUnquoted(state: _TokState, ch: string, seg: string, i: number): number {
   if (ch === '"' || ch === "'") {
     state.quote = ch
+    state.started = true
   } else if (ch === "\\" && i + 1 < seg.length) {
     state.token += seg[++i]!
   } else if (ch === " " || ch === "\t") {
-    if (state.token) {
+    if (state.started || state.token) {
       state.tokens.push(state.token)
       state.token = ""
+      state.started = false
     }
   } else {
     state.token += ch
@@ -275,13 +278,13 @@ function _procUnquoted(state: _TokState, ch: string, seg: string, i: number): nu
 }
 
 function _tokenize(segment: string): string[] {
-  const state: _TokState = { tokens: [], token: "", quote: null }
+  const state: _TokState = { tokens: [], token: "", quote: null, started: false }
   for (let i = 0; i < segment.length; i++) {
     const ch = segment[i]!
     if (state.quote) _procQuoted(state, ch)
     else i = _procUnquoted(state, ch, segment, i)
   }
-  if (state.token) state.tokens.push(state.token)
+  if (state.started || state.token) state.tokens.push(state.token)
   return state.tokens
 }
 
@@ -299,6 +302,7 @@ function _skipGitOpts(tokens: string[], i: number): number {
 }
 
 interface _ParsedGitInvocation {
+  globalArgs: string[]
   subcommand: string
   args: string[]
 }
@@ -317,10 +321,15 @@ function _parseGitInvocation(segment: string): _ParsedGitInvocation | null {
   const subcommandIndex = _skipGitOpts(tokens, gitIndex + 1)
   const subcommand = tokens[subcommandIndex]
   if (!subcommand) return null
-  return { subcommand, args: tokens.slice(subcommandIndex + 1) }
+  return {
+    globalArgs: tokens.slice(gitIndex + 1, subcommandIndex),
+    subcommand,
+    args: tokens.slice(subcommandIndex + 1),
+  }
 }
 
 export interface ParsedGitInvocationTokens {
+  globalArgs: string[]
   subcommand: string
   args: string[]
 }

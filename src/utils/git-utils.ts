@@ -15,6 +15,8 @@ import { SWIZ_CMD_RE } from "./inline-hook-helpers.ts"
 import {
   GIT_GLOBAL_OPTS,
   gitSubcommandRe,
+  type ParsedGitInvocationTokens,
+  parseGitInvocationTokens,
   shellStatementCommandRe,
   shellTokenCommandRe,
   splitShellSegments,
@@ -612,8 +614,6 @@ export interface GitBranchChange {
   target: string | null
 }
 
-const GIT_GLOBAL_VALUE_OPTIONS = new Set(["-C", "-c", "--git-dir", "--work-tree", "--namespace"])
-
 const SAFE_BRANCH_LONG_OPTIONS = new Set([
   "--all",
   "--color",
@@ -637,30 +637,10 @@ const SAFE_BRANCH_LONG_OPTIONS = new Set([
   "--unset-upstream",
 ])
 
-interface ParsedGitCommand {
-  subcommand: string
-  args: string[]
-}
-
-function parseGitCommand(segment: string): ParsedGitCommand | null {
-  const tokens = tokenizeShellSegment(segment)
-  if (tokens[0] !== "git") return null
-
-  let index = 1
-  while (index < tokens.length && tokens[index]!.startsWith("-")) {
-    const option = tokens[index]!
-    index++
-    if (GIT_GLOBAL_VALUE_OPTIONS.has(option) && !option.includes("=")) index++
-  }
-
-  const subcommand = tokens[index]
-  if (!subcommand) return null
-  return { subcommand, args: tokens.slice(index + 1) }
-}
-
 function flagTarget(args: string[], shortFlag: string, longFlag: string): string | null {
   for (let index = 0; index < args.length; index++) {
     const arg = args[index]!
+    if (arg === "--") break
     if (arg === shortFlag || arg === longFlag) return args[index + 1] ?? null
     if (arg.startsWith(`${longFlag}=`)) return arg.slice(longFlag.length + 1) || null
     if (arg.startsWith(shortFlag) && arg.length > shortFlag.length) {
@@ -670,8 +650,9 @@ function flagTarget(args: string[], shortFlag: string, longFlag: string): string
   return null
 }
 
-function checkoutOrSwitchChange(command: ParsedGitCommand): GitBranchChange | null {
-  const { subcommand, args } = command
+function checkoutOrSwitchChange(command: ParsedGitInvocationTokens): GitBranchChange | null {
+  const { subcommand } = command
+  const args = command.args.map((arg) => arg.replace(/^-[qfdl]+(?=[bBcC])/, "-"))
   if (subcommand === "checkout") {
     const orphan = flagTarget(args, "--orphan", "--orphan")
     if (orphan) return { kind: "orphan", target: orphan }
@@ -775,7 +756,7 @@ export function collectGitBranchChanges(command: string): GitBranchChange[] {
   const changes: GitBranchChange[] = []
 
   for (const segment of splitShellSegments(command)) {
-    const parsed = parseGitCommand(segment)
+    const parsed = parseGitInvocationTokens(segment)
     if (!parsed) continue
 
     const checkoutSwitch = checkoutOrSwitchChange(parsed)

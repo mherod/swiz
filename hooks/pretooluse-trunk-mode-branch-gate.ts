@@ -21,21 +21,18 @@ import { shellHookInputSchema } from "../src/schemas.ts"
 import { readProjectSettings, readProjectState } from "../src/settings.ts"
 import { isShellTool } from "../src/tool-matchers.ts"
 import {
+  checkoutCreatesImplicitBranch,
+  resolveGitRepository,
+  resolveTrunkGitRepository,
+} from "../src/utils/git-checkout.ts"
+import {
   collectGitBranchChanges,
   GH_PR_CHECKOUT_RE,
   GH_PR_CREATE_RE,
   type GitBranchChange,
   getDefaultBranch,
 } from "../src/utils/git-utils.ts"
-
-function isTrunkModeRelevantShellCommand(
-  command: string,
-  branchChanges: GitBranchChange[]
-): boolean {
-  return (
-    branchChanges.length > 0 || GH_PR_CHECKOUT_RE.test(command) || GH_PR_CREATE_RE.test(command)
-  )
-}
+import { parseGitInvocationTokens, splitShellSegments } from "../src/utils/shell-patterns.ts"
 
 function denyPrCreateWhenTrunk(command: string, defaultBranch: string): SwizHookOutput | null {
   if (!GH_PR_CREATE_RE.test(command)) return null
@@ -64,6 +61,7 @@ export interface TrunkModeBranchGateRuntime {
   readProjectState(cwd: string): Promise<string | null>
   getDefaultBranch(cwd: string): Promise<string>
   hasOpenPullRequests(cwd: string): Promise<boolean>
+  resolveRepository: typeof resolveGitRepository
 }
 
 export interface TrunkModeBranchGateOptions {
@@ -77,6 +75,7 @@ const defaultRuntime: TrunkModeBranchGateRuntime = {
   readProjectState,
   getDefaultBranch,
   hasOpenPullRequests: queryOpenPullRequests,
+  resolveRepository: resolveGitRepository,
 }
 
 async function denyPrCheckoutWhenTrunk(
@@ -138,6 +137,8 @@ function denyBranchChangesWhenTrunk(
         `  git switch ${defaultBranch}\n\n` +
         `If another system moved the repository, switching to a branch that already exists is the recovery escape hatch:\n` +
         `  git switch <existing-branch>\n\n` +
+        `For a fetched remote PR head without creating a local tracking branch:\n` +
+        `  git worktree add --detach <path> refs/remotes/origin/<existing-PR-branch>\n\n` +
         `The attempted branch ${change.kind} operation was not applied.`
     )
   }
@@ -163,18 +164,17 @@ function resolveTrunkShellRequest(input: unknown): TrunkShellRequest {
 
 async function shouldEnforceTrunkMode(
   request: TrunkShellRequest,
-  branchChanges: GitBranchChange[],
   runtime: TrunkModeBranchGateRuntime
 ): Promise<boolean> {
   if (!isShellTool(request.toolName)) return false
-  if (!isTrunkModeRelevantShellCommand(request.command, branchChanges)) return false
+  if (!GH_PR_CHECKOUT_RE.test(request.command) && !GH_PR_CREATE_RE.test(request.command))
+    return false
   if (!(await isGitRepoForHookPayload(request.input, request.cwd, runtime.isGitRepo))) return false
   return (await runtime.readProjectSettings(request.cwd))?.trunkMode === true
 }
 
 async function selectTrunkModeDenial(
   request: TrunkShellRequest,
-  branchChanges: GitBranchChange[],
   defaultBranch: string,
   projectState: string | null,
   runtime: TrunkModeBranchGateRuntime
@@ -182,14 +182,13 @@ async function selectTrunkModeDenial(
   const prCreate = denyPrCreateWhenTrunk(request.command, defaultBranch)
   if (prCreate) return prCreate
 
-  const prCheckout = await denyPrCheckoutWhenTrunk(
+  return await denyPrCheckoutWhenTrunk(
     request.command,
     defaultBranch,
     request.cwd,
     projectState,
     runtime
   )
-  return prCheckout ?? denyBranchChangesWhenTrunk(branchChanges, defaultBranch)
 }
 
 export async function evaluatePretooluseTrunkModeBranchGate(
@@ -198,17 +197,34 @@ export async function evaluatePretooluseTrunkModeBranchGate(
 ): Promise<SwizHookOutput> {
   const runtime = { ...defaultRuntime, ...options.runtime }
   const request = resolveTrunkShellRequest(input)
-  const branchChanges = collectGitBranchChanges(request.command).filter(
-    (change) => change.kind !== "worktree-add"
-  )
-  if (!(await shouldEnforceTrunkMode(request, branchChanges, runtime))) return {}
+  if (!isShellTool(request.toolName)) return {}
+  const gitDenial = await evaluateGitBranchChanges(request, runtime)
+  if (gitDenial) return gitDenial
+  if (!(await shouldEnforceTrunkMode(request, runtime))) return {}
 
   const projectState = await runtime.readProjectState(request.cwd)
   const defaultBranch = await runtime.getDefaultBranch(request.cwd)
-  return (
-    (await selectTrunkModeDenial(request, branchChanges, defaultBranch, projectState, runtime)) ??
-    {}
-  )
+  return (await selectTrunkModeDenial(request, defaultBranch, projectState, runtime)) ?? {}
+}
+
+async function evaluateGitBranchChanges(
+  request: TrunkShellRequest,
+  runtime: TrunkModeBranchGateRuntime
+): Promise<SwizHookOutput | null> {
+  for (const segment of splitShellSegments(request.command)) {
+    const invocation = parseGitInvocationTokens(segment)
+    if (!invocation || !["branch", "checkout", "switch"].includes(invocation.subcommand)) continue
+    const cwd = await resolveTrunkGitRepository(invocation, request.cwd, runtime)
+    if (!cwd) continue
+    const changes = collectGitBranchChanges(segment)
+    if (changes.length === 0 && (await checkoutCreatesImplicitBranch(invocation, request.cwd))) {
+      changes.push({ kind: "create", target: null })
+    }
+    if (changes.length > 0) {
+      return denyBranchChangesWhenTrunk(changes, await runtime.getDefaultBranch(cwd))
+    }
+  }
+  return null
 }
 
 const pretooluseTrunkModeBranchGate: SwizToolHook = {

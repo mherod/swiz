@@ -1,4 +1,7 @@
 import { describe, expect, test } from "bun:test"
+import { resolve } from "node:path"
+import { withGitClient } from "../src/git/client.ts"
+import { MockGitClient } from "../src/git/mock-client.ts"
 import { evaluatePretooluseTrunkModeBranchGate } from "./pretooluse-trunk-mode-branch-gate.ts"
 
 const trunkModeRepos = new Set<string>()
@@ -37,27 +40,38 @@ async function runHook(
   toolName = "Bash",
   envOverrides: Record<string, string | undefined> = {}
 ): Promise<{ raw: string; parsed: Record<string, any> | null; decision?: string }> {
-  const output = await evaluatePretooluseTrunkModeBranchGate(
-    {
-      tool_name: toolName,
-      tool_input: { command, cwd },
-      cwd,
-    },
-    {
-      runtime: {
-        isGitRepo: () => Promise.resolve(true),
-        readProjectSettings: (repo) =>
-          Promise.resolve(trunkModeRepos.has(repo) ? { trunkMode: true } : null),
-        readProjectState: (repo) => Promise.resolve(projectStates.get(repo) ?? null),
-        getDefaultBranch: () => Promise.resolve("main"),
-        hasOpenPullRequests: () => {
-          const mockBin = [...openPrCounts.keys()].find((path) =>
-            envOverrides.PATH?.startsWith(`${path}:`)
-          )
-          return Promise.resolve(mockBin ? (openPrCounts.get(mockBin) ?? 0) > 0 : false)
-        },
-      },
+  const client = new MockGitClient((args, options) => {
+    if (args.includes("--show-toplevel")) {
+      const repoIndex = args.indexOf("-C")
+      return repoIndex >= 0 ? resolve(options.cwd ?? "", args[repoIndex + 1]!) : (options.cwd ?? "")
     }
+    if (args.includes("for-each-ref")) return "refs/remotes/origin/feat/remote-only\n"
+    if (args.at(-1) === "feat/remote-only^{commit}") return { exitCode: 1 }
+    return "abc123"
+  })
+  const output = await withGitClient(client, () =>
+    evaluatePretooluseTrunkModeBranchGate(
+      {
+        tool_name: toolName,
+        tool_input: { command, cwd },
+        cwd,
+      },
+      {
+        runtime: {
+          isGitRepo: () => Promise.resolve(true),
+          readProjectSettings: (repo) =>
+            Promise.resolve(trunkModeRepos.has(repo) ? { trunkMode: true } : null),
+          readProjectState: (repo) => Promise.resolve(projectStates.get(repo) ?? null),
+          getDefaultBranch: () => Promise.resolve("main"),
+          hasOpenPullRequests: () => {
+            const mockBin = [...openPrCounts.keys()].find((path) =>
+              envOverrides.PATH?.startsWith(`${path}:`)
+            )
+            return Promise.resolve(mockBin ? (openPrCounts.get(mockBin) ?? 0) > 0 : false)
+          },
+        },
+      }
+    )
   )
   const parsed = Object.keys(output).length > 0 ? (output as Record<string, any>) : null
   const raw = parsed ? JSON.stringify(parsed) : ""
@@ -173,6 +187,16 @@ describe("pretooluse-trunk-mode-branch-gate", () => {
     "git branch -m main feat/renamed",
     "git branch --move main feat/renamed-long",
     "git branch --force feat/force-updated main",
+    "git switch feat/remote-only",
+    "git checkout feat/remote-only",
+    "git switch --track origin/feat/remote-only",
+    "git checkout -t origin/feat/remote-only",
+    "git switch -- feat/remote-only",
+    "git switch --no-guess --guess feat/remote-only",
+    "git checkout -qb feat/new",
+    "git checkout -qBfeat/existing",
+    "git switch -qc feat/new",
+    "git switch -qCfeat/existing",
   ]) {
     test(`blocks branch creation or reshaping with ${command}`, async () => {
       const repo = await createTestRepo("https://github.com/mherod/repo.git")
@@ -195,6 +219,9 @@ describe("pretooluse-trunk-mode-branch-gate", () => {
     "git branch -d feat/merged",
     "git branch --delete feat/merged",
     "git worktree remove /tmp/swiz-old-worktree",
+    "git checkout -- feat/remote-only",
+    "git switch --no-guess feat/remote-only",
+    "git switch --detach origin/feat/remote-only",
   ]) {
     test(`allows cleanup toward trunk compliance with ${command}`, async () => {
       const repo = await createTestRepo("https://github.com/mherod/repo.git")
@@ -216,6 +243,23 @@ describe("pretooluse-trunk-mode-branch-gate", () => {
       expect(result.decision).toBe("deny")
     } finally {
       await cleanupRepo(repo)
+    }
+  })
+
+  test("enforces branch creation policy in the repository selected by git -C", async () => {
+    const source = await createTestRepo("")
+    const target = await createTestRepo("")
+    await enableTrunkMode(target)
+    try {
+      expect((await runHook(source, `git -C '${target}' switch -c feat/new`)).decision).toBe("deny")
+      expect((await runHook(target, `git -C '${source}' switch -c feat/new`)).parsed).toBeNull()
+      expect((await runHook(source, `git -C '${target}' switch feat/remote-only`)).decision).toBe(
+        "deny"
+      )
+      expect((await runHook(source, `git -C '${target}' switch feat/existing`)).parsed).toBeNull()
+    } finally {
+      await cleanupRepo(source)
+      await cleanupRepo(target)
     }
   })
 

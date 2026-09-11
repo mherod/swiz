@@ -1,14 +1,13 @@
 #!/usr/bin/env bun
 
 /**
- * PreToolUse hook: Block `git worktree add` when project trunk mode is enabled.
+ * PreToolUse hook: Permit verified existing-ref worktrees in trunk mode.
  * Read-only and cleanup worktree commands remain available.
  *
  * Dual-mode: SwizToolHook + runSwizHookAsMain.
  */
 
 import { isGitRepo } from "../src/git-helpers.ts"
-import { isGitRepoForHookPayload } from "../src/repository-capability.ts"
 import {
   preToolUseDeny,
   runSwizHookAsMain,
@@ -18,7 +17,13 @@ import {
 import { shellHookInputSchema } from "../src/schemas.ts"
 import { readProjectSettings } from "../src/settings.ts"
 import { isShellTool } from "../src/tool-matchers.ts"
-import { collectGitBranchChanges } from "../src/utils/git-utils.ts"
+import {
+  gitCheckoutRefExists,
+  resolveGitRepository,
+  resolveTrunkGitRepository,
+  worktreeCheckoutRef,
+} from "../src/utils/git-checkout.ts"
+import { parseGitInvocationTokens, splitShellSegments } from "../src/utils/shell-patterns.ts"
 
 interface TrunkModeWorktreeCreationSettings {
   defaultBranch?: string
@@ -28,6 +33,8 @@ interface TrunkModeWorktreeCreationSettings {
 export interface TrunkModeWorktreeCreationRuntime {
   isGitRepo(cwd: string): Promise<boolean>
   readProjectSettings(cwd: string): Promise<TrunkModeWorktreeCreationSettings | null>
+  resolveRepository: typeof resolveGitRepository
+  refExists: typeof gitCheckoutRefExists
 }
 
 export interface TrunkModeWorktreeCreationOptions {
@@ -37,17 +44,14 @@ export interface TrunkModeWorktreeCreationOptions {
 const defaultRuntime: TrunkModeWorktreeCreationRuntime = {
   isGitRepo,
   readProjectSettings,
+  resolveRepository: resolveGitRepository,
+  refExists: gitCheckoutRefExists,
 }
 
 interface WorktreeCreationRequest {
   command: string
   cwd: string
-  input: Record<string, unknown>
   toolName: string
-}
-
-function requestsWorktreeCreation(command: string): boolean {
-  return collectGitBranchChanges(command).some((change) => change.kind === "worktree-add")
 }
 
 function resolveWorktreeCreationRequest(input: unknown): WorktreeCreationRequest {
@@ -55,22 +59,8 @@ function resolveWorktreeCreationRequest(input: unknown): WorktreeCreationRequest
   return {
     command: String(hookInput.tool_input?.command ?? "").normalize("NFKC"),
     cwd: hookInput.cwd ?? process.cwd(),
-    input: hookInput as Record<string, unknown>,
     toolName: hookInput.tool_name ?? "",
   }
-}
-
-function isWorktreeCreationRequest(request: WorktreeCreationRequest): boolean {
-  return isShellTool(request.toolName) && requestsWorktreeCreation(request.command)
-}
-
-async function resolveTrunkModeSettings(
-  request: WorktreeCreationRequest,
-  runtime: TrunkModeWorktreeCreationRuntime
-): Promise<TrunkModeWorktreeCreationSettings | null> {
-  if (!(await isGitRepoForHookPayload(request.input, request.cwd, runtime.isGitRepo))) return null
-  const project = await runtime.readProjectSettings(request.cwd)
-  return project?.trunkMode ? project : null
 }
 
 export async function evaluatePretooluseTrunkModeWorktreeCreation(
@@ -79,19 +69,26 @@ export async function evaluatePretooluseTrunkModeWorktreeCreation(
 ): Promise<SwizHookOutput> {
   const runtime = { ...defaultRuntime, ...options.runtime }
   const request = resolveWorktreeCreationRequest(input)
-  if (!isWorktreeCreationRequest(request)) return {}
-
-  const project = await resolveTrunkModeSettings(request, runtime)
-  if (!project) return {}
-  const defaultBranch = project.defaultBranch ?? "main"
-
-  return preToolUseDeny(
-    `Trunk mode kept work in the current working directory; no git worktree was created.\n\n` +
-      `Continue on trunk:\n` +
-      `  git switch ${defaultBranch}\n\n` +
-      `Existing worktrees can still be inspected or removed with \`git worktree list\` and ` +
-      `\`git worktree remove <path>\`.`
-  )
+  if (!isShellTool(request.toolName)) return {}
+  for (const segment of splitShellSegments(request.command)) {
+    const invocation = parseGitInvocationTokens(segment)
+    if (invocation?.subcommand !== "worktree" || invocation.args[0] !== "add") continue
+    if (!(await resolveTrunkGitRepository(invocation, request.cwd, runtime))) continue
+    const ref = worktreeCheckoutRef(invocation.args.slice(1))
+    if (ref && (await runtime.refExists(invocation, request.cwd, ref))) continue
+    return preToolUseDeny(
+      `Trunk mode requires an explicit, verified existing ref; no git worktree was created.\n\n` +
+        `Reuse an existing local branch without creating or resetting it:\n` +
+        `  git worktree add <path> <existing-branch>\n` +
+        `  git switch <existing-branch>\n\n` +
+        `For a fetched remote PR head, use a detached checkout:\n` +
+        `  git worktree add --detach <path> refs/remotes/origin/<existing-PR-branch>\n\n` +
+        `Run these commands in the target repository (preserve any git -C options). ` +
+        `New/tracking/orphan branches, resets, forced worktrees and implicit ref guessing remain blocked. ` +
+        `Git's dirty-checkout and branch-ownership protections still apply.`
+    )
+  }
+  return {}
 }
 
 const pretooluseTrunkModeWorktreeCreation: SwizToolHook = {
