@@ -3,6 +3,10 @@ import stopLifecycleTasks from "../../../hooks/stop-lifecycle-tasks.ts"
 import type { HookGroup } from "../../manifest.ts"
 import type { SwizHook } from "../../SwizHook.ts"
 import { TaskStateCache } from "../../tasks/task-state-cache.ts"
+import {
+  buildConcurrentFileEditGuidance,
+  buildConcurrentWorkGuidance,
+} from "../../utils/concurrent-work-guidance.ts"
 import { resolveSessionLines } from "../../utils/transcript.ts"
 import { CappedMap } from "./cache/capped-map.ts"
 import { LastUserMessageCache } from "./cache/last-user-message-cache.ts"
@@ -13,6 +17,7 @@ import {
   type DispatchRoutesContext,
   handleDispatchActive,
   handleDispatchRoute,
+  maybeSuppressDuplicateAllowMessage,
   prepareLifecycleTaskDispatch,
   reapStaleDispatches,
 } from "./dispatch-routes.ts"
@@ -453,6 +458,7 @@ describe("handleDispatchRoute", () => {
           cwd: process.cwd(),
           tool_name: "Bash",
           tool_input: { command: "echo ok" },
+          session_id: "dispatch-route-dedupe",
           _env: { CODEX_THREAD_ID: "dispatch-route-dedupe" },
         }),
       })
@@ -461,10 +467,137 @@ describe("handleDispatchRoute", () => {
     const second = await handleDispatchRoute(request(), url, ctx).then((response) =>
       response.json()
     )
+    // The first captured call can add session-age context on the next dispatch.
+    // Once that context stabilizes, the following call must stay quiet too.
+    const third = await handleDispatchRoute(request(), url, ctx).then((response) => response.json())
 
     expect(first.systemMessage).toContain("Repeated daemon hint")
-    expect(second.systemMessage).toBeUndefined()
-    expect(second.hookSpecificOutput?.additionalContext).toBeUndefined()
+    if (second.systemMessage !== undefined) expect(second.systemMessage).toContain("Session phase:")
+    expect(third.systemMessage).toBeUndefined()
+    expect(third.hookSpecificOutput?.additionalContext).toBeUndefined()
+  })
+})
+
+describe("advisory recurrence", () => {
+  const payload = { cwd: "/repo", session_id: "session-a", tool_name: "Edit" }
+  const context = () => ({ recentHookAllowMessages: new CappedMap<string, string>(128) })
+  const allow = (text: string): Record<string, any> => ({
+    systemMessage: text,
+    hookSpecificOutput: {
+      hookEventName: "PreToolUse",
+      permissionDecision: "allow",
+      additionalContext: text,
+      updatedInput: { preserved: true },
+    },
+  })
+  const suppress = (
+    ctx: ReturnType<typeof context>,
+    response: Record<string, any>,
+    input: Record<string, unknown> = payload,
+    event = "preToolUse"
+  ) => {
+    maybeSuppressDuplicateAllowMessage(ctx, input, event, event, response)
+    return response
+  }
+
+  test("suppresses identical advice across sequential tools without changing the decision or input", () => {
+    const ctx = context()
+    expect(suppress(ctx, allow("Re-read src/shared.ts.")).systemMessage).toBeDefined()
+    const repeated = suppress(ctx, allow("Re-read src/shared.ts."), {
+      ...payload,
+      tool_name: "Write",
+    })
+    expect(repeated.systemMessage).toBeUndefined()
+    expect(repeated.hookSpecificOutput.additionalContext).toBeUndefined()
+    expect(repeated.hookSpecificOutput.permissionDecision).toBe("allow")
+    expect(repeated.hookSpecificOutput.updatedInput).toEqual({ preserved: true })
+    expect(suppress(ctx, allow("Re-read src/other.ts.")).systemMessage).toContain("src/other.ts")
+  })
+
+  test("strips standing advice across events while keeping changed status in both output fields", () => {
+    const ctx = context()
+    const guidance = buildConcurrentWorkGuidance()
+    const first = suppress(ctx, allow(`One peer file.\n${guidance}`))
+    expect(first.systemMessage).toContain(guidance)
+    expect(first.hookSpecificOutput.additionalContext).toContain(guidance)
+    const changed = suppress(ctx, allow(`Two peer files.\n${guidance}`), payload, "postToolUse")
+    expect(changed.systemMessage).toBe("Two peer files.")
+    expect(changed.hookSpecificOutput.additionalContext).toBe("Two peer files.")
+  })
+
+  test("new peer edits are visible while identical overlap warnings stay quiet", () => {
+    const ctx = context()
+    const first = buildConcurrentFileEditGuidance("src/shared.ts", "2026-09-11T12:00:00.000Z")
+    suppress(ctx, allow(first))
+    expect(suppress(ctx, allow(first)).systemMessage).toBeUndefined()
+    const changed = buildConcurrentFileEditGuidance("src/shared.ts", "2026-09-11T12:01:00.000Z")
+    const result = suppress(ctx, allow(changed))
+    expect(result.systemMessage).toContain("12:01:00")
+    expect(result.systemMessage).toContain("Re-read src/shared.ts immediately before editing")
+    expect(result.systemMessage).not.toContain("Don't panic")
+  })
+
+  test("does not share guidance history between projects or sessions", () => {
+    const ctx = context()
+    const guidance = buildConcurrentWorkGuidance()
+    suppress(ctx, allow(guidance))
+    for (const input of [
+      { ...payload, cwd: "/other" },
+      { ...payload, session_id: "session-b" },
+    ]) {
+      expect(suppress(ctx, allow(guidance), input).systemMessage).toBe(guidance)
+    }
+  })
+
+  test("does not suppress when project or session identity is missing", () => {
+    const ctx = context()
+    for (const input of [{ cwd: "/repo" }, { session_id: "session-a" }, {}]) {
+      for (let i = 0; i < 2; i++) {
+        expect(suppress(ctx, allow("Guidance"), input).systemMessage).toBe("Guidance")
+      }
+    }
+    expect(ctx.recentHookAllowMessages.size).toBe(0)
+  })
+
+  test("preserves every deny, ask, error and stop response, including its remedy", () => {
+    const ctx = context()
+    const text = `Resolve the conflict.\n${buildConcurrentWorkGuidance()}`
+    suppress(ctx, allow(text))
+    for (const response of [
+      { ...allow(text), decision: "block" },
+      { ...allow(text), continue: false },
+      { ...allow(text), error: "Hook failed" },
+      { ...allow(text), ok: false },
+      { ...allow(text), isError: true },
+      {
+        ...allow(text),
+        hookSpecificOutput: { ...allow(text).hookSpecificOutput, permissionDecision: "deny" },
+      },
+      {
+        ...allow(text),
+        hookSpecificOutput: { ...allow(text).hookSpecificOutput, permissionDecision: "ask" },
+      },
+    ]) {
+      for (let i = 0; i < 2; i++) {
+        const copy = structuredClone(response)
+        expect(suppress(ctx, copy)).toEqual(response)
+      }
+    }
+    for (const event of ["stop", "subagentStop"]) {
+      for (let i = 0; i < 2; i++)
+        expect(suppress(ctx, allow(text), payload, event)).toEqual(allow(text))
+    }
+  })
+
+  test("refreshes advice on session start and compaction without clearing another session", () => {
+    const ctx = context()
+    const guidance = buildConcurrentWorkGuidance()
+    const other = { ...payload, session_id: "session-b" }
+    suppress(ctx, allow(guidance))
+    suppress(ctx, allow(guidance), other)
+    suppress(ctx, {}, { ...payload, source: "compact" }, "sessionStart")
+    expect(suppress(ctx, allow(guidance)).systemMessage).toBe(guidance)
+    expect(suppress(ctx, allow(guidance), other).systemMessage).toBeUndefined()
   })
 })
 

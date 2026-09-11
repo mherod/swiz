@@ -30,9 +30,12 @@ async function runDriver(): Promise<DriverResult> {
   const cwd = join(home, "project")
   const corePath = join(process.cwd(), "src", "mcp-tool-core.ts")
   const taskRootsPath = join(process.cwd(), "src", "task-roots.ts")
+  const discoveryPath = join(process.cwd(), "src", "tasks", "task-discovery.ts")
   const script = `
+    import { mock } from "bun:test"
     import { mkdir } from "node:fs/promises"
-    import { runMcpTool } from ${JSON.stringify(corePath)}
+    mock.module(${JSON.stringify(discoveryPath)}, () => ({ discoverRelatedTaskAdvice: async () => "" }))
+    const { runMcpTool } = await import(${JSON.stringify(corePath)})
     import { createDefaultTaskStore } from ${JSON.stringify(taskRootsPath)}
     const cwd = ${JSON.stringify(cwd)}
     await mkdir(cwd, { recursive: true })
@@ -141,7 +144,7 @@ describe("runTaskUpdateTool id normalization (issue #846)", () => {
 })
 
 describe("MCP task governance hints", () => {
-  test("appends one governance footer to create, update, populated list and empty list results", async () => {
+  test("keeps sequential create, update and list results focused on the current queue", async () => {
     const result = await runDriver()
 
     for (const output of [
@@ -150,12 +153,7 @@ describe("MCP task governance hints", () => {
       result.listedText,
       result.emptyListedText,
     ]) {
-      expect(output.match(/^Task governance:/gm)).toHaveLength(1)
-      const footer = output.slice(output.indexOf("Task governance:"))
-      expect(footer).toContain("one action per subject")
-      expect(footer).toContain("in_progress")
-      expect(footer).toMatch(/evidence in description/)
-      expect(footer).toContain("parent session")
+      expect(output).not.toContain("Task governance:")
     }
 
     expect(result.createdText).toStartWith(`Created #${result.createdId}`)

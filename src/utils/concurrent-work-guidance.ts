@@ -19,24 +19,17 @@ export function buildConcurrentWorkGuidance(): string {
 }
 
 export function buildConcurrentWaitGuidance(operation: string): string {
-  return [
-    `ℹ ${operation}`,
-    buildConcurrentWorkGuidance(),
-    "Changes that appear in the shared directory while this command runs are not, by themselves, a failure or conflict.",
-  ].join("\n")
+  return `ℹ ${operation}`
 }
 
 export function containsConcurrentWorkGuidance(text: string): boolean {
   return text.includes(CONCURRENT_WORK_REASSURANCE)
 }
 
-export function buildConcurrentFileEditGuidance(
-  displayPath: string,
-  ageDescription: string
-): string {
+export function buildConcurrentFileEditGuidance(displayPath: string, editedAt: string): string {
   return [
     CONCURRENT_WORK_REASSURANCE,
-    `Another agent touched ${displayPath} ${ageDescription} ago. This exact-file overlap needs one calm check, not a change of plan.`,
+    `Another agent touched ${displayPath} at ${editedAt}. This exact-file overlap needs one calm check, not a change of plan.`,
     `Re-read ${displayPath} immediately before editing, preserve the changes already there, and apply only your task-scoped change.`,
     "Do not stash, revert, restore, reset, clean, delete, or overwrite the other session's work. If the edits do not conflict, continue normally. If they do conflict, integrate both intents instead of discarding either one.",
   ].join("\n")

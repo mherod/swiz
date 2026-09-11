@@ -51,8 +51,8 @@ export const MAX_CYCLE_IDS = 4
 /** In-progress work older than this is called out as possibly abandoned. */
 export const STALE_IN_PROGRESS_MS = 2 * 60 * 60 * 1000
 
-/** Advisory reminders shared by MCP clients, including agents without task hooks. */
-const TASK_GOVERNANCE_HINTS = [
+/** Standing instructions sent when an MCP client connects, not after every task call. */
+export const TASK_GOVERNANCE_HINTS = [
   "Task governance:",
   "- Plan real work with TaskCreate: one action per subject; update an existing task instead of duplicating it.",
   "- Use TaskUpdate to mark work in_progress before implementation; keep status, description and blockers current.",
@@ -234,13 +234,13 @@ export function renderTaskBoard(tasks: readonly Task[], highlightId?: string): s
   return lines.join("\n")
 }
 
-/** A tool response: confirmation, the board, and concise task governance reminders. */
+/** A tool response contains the result and current queue; standing rules live in MCP instructions. */
 export function renderTaskToolResult(
   headline: string,
   tasks: readonly Task[],
   highlightId?: string
 ): string {
-  return `${headline}\n\n${renderTaskBoard(tasks, highlightId)}\n\n${TASK_GOVERNANCE_HINTS}`
+  return `${headline}\n\n${renderTaskBoard(tasks, highlightId)}`
 }
 
 /** Human-readable list of the fields a TaskUpdate actually changed. */

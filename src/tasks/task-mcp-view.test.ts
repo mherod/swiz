@@ -307,25 +307,20 @@ describe("renderTaskToolResult", () => {
     expect(text).toContain("READY (1)")
   })
 
-  it("includes governance even when the queue is healthy", () => {
+  it("keeps healthy queue results free of standing governance instructions", () => {
     const tasks = [task("a1", "in_progress"), task("a2", "pending")]
     const text = renderTaskToolResult("Task queue for this project.", tasks)
 
     expect(taskQueueHint(tasks)).toBeNull()
-    expect(text).toContain("\n\nTask governance:\n")
-    expect(text).toContain("one action per subject")
-    expect(text).toContain("mark work in_progress before implementation")
-    expect(text).toContain("concrete evidence in description")
-    expect(text).toContain("parent session using task tools")
-    expect(text).toContain("refresh TaskList after compaction")
-    expect(text.indexOf("Task governance:")).toBeGreaterThan(text.indexOf("Totals:"))
+    expect(text).not.toContain("Task governance:")
+    expect(text).toContain("Totals:")
   })
 
-  it("keeps governance bounded for large task queues", () => {
+  it("keeps large task queues bounded without repeating governance", () => {
     const tasks = Array.from({ length: 500 }, (_, i) => task(`t${i}`, "pending"))
     const text = renderTaskToolResult("Task queue for this project.", tasks)
 
-    expect(text.match(/Task governance:/g)).toHaveLength(1)
+    expect(text).not.toContain("Task governance:")
     expect(text.split("\n").length).toBeLessThan(30)
   })
 })

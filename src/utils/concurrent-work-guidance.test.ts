@@ -22,9 +22,9 @@ describe("concurrent work guidance", () => {
   })
 
   test("limits special handling to an exact-file overlap", () => {
-    const guidance = buildConcurrentFileEditGuidance("src/shared.ts", "6m")
+    const guidance = buildConcurrentFileEditGuidance("src/shared.ts", "2026-09-11T12:00:00.000Z")
 
-    expect(guidance).toContain("Another agent touched src/shared.ts 6m ago")
+    expect(guidance).toContain("Another agent touched src/shared.ts at 2026-09-11T12:00:00.000Z")
     expect(guidance).toContain("exact-file overlap")
     expect(guidance).toContain("not a change of plan")
     expect(guidance).toContain("Re-read src/shared.ts immediately before editing")
@@ -37,13 +37,9 @@ describe("concurrent work guidance", () => {
     expect(await humaniseText(guidance)).toBe(guidance)
   })
 
-  test("keeps wait flows calm when the shared directory moves", () => {
+  test("keeps wait output to the operation instead of repeating checkout advice", () => {
     const guidance = buildConcurrentWaitGuidance("Waiting for authoritative CI results.")
 
-    expect(guidance).toContain("Waiting for authoritative CI results.")
-    expect(guidance).toContain("Don't panic. Continue as you were.")
-    expect(guidance).toContain("Stay focused on your own task. It's going to be fine.")
-    expect(guidance).toContain("Do not stash, revert, restore, reset, clean")
-    expect(guidance).toContain("not, by themselves, a failure or conflict")
+    expect(guidance).toBe("ℹ Waiting for authoritative CI results.")
   })
 })

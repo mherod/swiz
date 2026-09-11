@@ -12,6 +12,15 @@ Enforcement intensity scales with the agent's deviation from expected behavior. 
 
 ## The 4-Tier Model
 
+### Recurrence policy
+
+- Deliver standing rules at session setup. MCP task governance belongs in server initialization instructions; task results contain the confirmation, current queue, and actionable queue hints.
+- Suppress unchanged non-blocking messages across sequential tool names within the same project and session. Separate known standing advice from changing facts so a new file list does not repeat the shared-checkout rules.
+- Use the recorded edit timestamp for concurrent-file warnings. Time passing alone must not retrigger the same warning; a newer edit or different file must remain visible.
+- Always retain blocking remedies, permission questions, errors, and Stop/SubagentStop messages. Suppression affects presentation, never the decision or updated tool input.
+- Never share suppression history when session or project identity is missing. SessionStart (including compaction/resume) and SessionEnd clear the matching history. The daemon keeps a bounded in-memory cache; a restart or eviction can show advice again. Standalone fallback stays verbose rather than risking lost guidance.
+- Push and CI wait commands report operation progress. Shared-checkout advice belongs with confirmed peer edits, rather than every wait invocation.
+
 | Tier | Name | Blocking? | Events | Purpose |
 |------|------|-----------|--------|---------|
 | 1 | Ambient Context | No | SessionStart, UserPromptSubmit, PostToolUse | Neutral guidance without blocking |

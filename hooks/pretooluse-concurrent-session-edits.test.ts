@@ -60,13 +60,13 @@ describe("displayPathFor", () => {
 
 describe("formatConcurrentEditContext", () => {
   test("leads with reassurance and gives exact-file instructions", () => {
-    const context = formatConcurrentEditContext("src/shared.ts", 6 * 60_000)
+    const context = formatConcurrentEditContext("src/shared.ts", NOW - 6 * 60_000)
     expect(context.startsWith("Concurrent changes in a shared directory are normal.")).toBe(true)
     expect(context).toContain("Don't panic.")
     expect(context).toContain("Continue as you were.")
     expect(context).toContain("Stay focused on your own task.")
     expect(context).toContain("It's going to be fine.")
-    expect(context).toContain("6m ago")
+    expect(context).toContain(new Date(NOW - 6 * 60_000).toISOString())
     expect(context).toContain("Re-read src/shared.ts immediately before editing")
     expect(context).toContain("Do not stash")
   })
@@ -93,9 +93,21 @@ describe("evaluatePretooluseConcurrentSessionEdits", () => {
     const output = await evaluatePretooluseConcurrentSessionEdits(editInput(), NOW)
     expect(decisionOf(output)).toBe("allow")
     expect(contextOf(output)).toContain("src/shared.ts")
-    expect(contextOf(output)).toContain("6m ago")
+    expect(contextOf(output)).toContain(new Date(NOW - 6 * 60_000).toISOString())
     expect(contextOf(output)).toContain("Don't panic")
     expect(contextOf(output)).toContain("continue normally")
+    // Elapsed time alone must not retrigger identical overlap advice.
+    const later = await evaluatePretooluseConcurrentSessionEdits(editInput(), NOW + 60_000)
+    expect(contextOf(later)).toBe(contextOf(output))
+    store.recordSessionEdit(
+      projectKeyFromCwd("/repo"),
+      "session-theirs",
+      "/repo/src/shared.ts",
+      NOW
+    )
+    const changed = await evaluatePretooluseConcurrentSessionEdits(editInput(), NOW + 60_000)
+    expect(contextOf(changed)).not.toBe(contextOf(output))
+    expect(contextOf(changed)).toContain(new Date(NOW).toISOString())
   })
 
   test("checks every file in a multi-file apply_patch", async () => {

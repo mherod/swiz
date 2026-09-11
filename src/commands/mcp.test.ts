@@ -167,6 +167,18 @@ describe("executeMcpTool", () => {
 })
 
 describe("MCP channel setting helpers", () => {
+  it("provides standing task rules at connection time with or without channels", () => {
+    for (const channels of [false, true]) {
+      const instructions = buildMcpInstructions(channels)
+      expect(instructions.match(/Task governance:/g)).toHaveLength(1)
+      expect(instructions).toContain("one action per subject")
+      expect(instructions).toContain("mark work in_progress before implementation")
+      expect(instructions).toContain("concrete evidence in description")
+      expect(instructions).toContain("parent session using task tools")
+      expect(instructions).toContain("refresh TaskList after compaction")
+    }
+  })
+
   it("omits channel capabilities when MCP channels are disabled", () => {
     expect(buildMcpCapabilities(false)).toEqual({ tools: {} })
     expect(buildMcpInstructions(false)).not.toContain("<channel")

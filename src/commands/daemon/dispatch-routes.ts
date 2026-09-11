@@ -33,6 +33,10 @@ import { createTaskStoreForHookPayload } from "../../task-roots.ts"
 import { sessionDirPath } from "../../tasks/task-store-path.ts"
 import { isAnyProviderTaskCreateTool, isAnyProviderTaskUpdateTool } from "../../tool-matchers.ts"
 import type { CurrentSessionToolUsage } from "../../transcript-summary.ts"
+import {
+  CONCURRENT_WORK_BOUNDARY,
+  CONCURRENT_WORK_REASSURANCE,
+} from "../../utils/concurrent-work-guidance.ts"
 import type { WarmStatusLineSnapshot } from "../status-line.ts"
 import type { CappedMap } from "./cache/capped-map.ts"
 import {
@@ -201,36 +205,80 @@ function stripDuplicateAllowMessage(response: Record<string, any>): void {
   }
 }
 
-function dedupeHookAllowMessageKey(
-  payload: Record<string, unknown> | null,
-  canonicalEvent: string,
-  hookEventName: string
-): string {
-  const sessionId = typeof payload?.session_id === "string" ? payload.session_id : "none"
-  const cwd = typeof payload?.cwd === "string" ? payload.cwd : "none"
-  const toolName =
-    typeof payload?.tool_name === "string"
-      ? payload.tool_name
-      : typeof payload?.toolName === "string"
-        ? payload.toolName
-        : "none"
-  return `${canonicalEvent}|${hookEventName}|${cwd}|${sessionId}|${toolName}`
+/** Strip only known standing advice; changing file lists and specific remedies stay intact. */
+function suppressStandingAdvice(
+  cache: Map<string, string>,
+  scope: string,
+  response: Record<string, any>
+): void {
+  const fields = [
+    [response, "systemMessage"],
+    [response.hookSpecificOutput, "additionalContext"],
+  ] as const
+  for (const guidance of [CONCURRENT_WORK_REASSURANCE, CONCURRENT_WORK_BOUNDARY]) {
+    const key = `${scope}|guidance|${guidance}`
+    const seen = cache.get(key) !== undefined
+    let found = false
+    for (const [output, field] of fields) {
+      const text = output?.[field]
+      if (typeof text !== "string" || !text.includes(guidance)) continue
+      found = true
+      if (!seen) continue
+      const remaining = text
+        .replaceAll(guidance, "")
+        .replace(/\n{3,}/g, "\n\n")
+        .trim()
+      if (remaining) output[field] = remaining
+      else delete output[field]
+    }
+    if (found) cache.set(key, guidance)
+  }
 }
 
-function maybeSuppressDuplicateAllowMessage(
-  ctx: DispatchRoutesContext,
+function mustPreserveHookMessage(canonicalEvent: string, response: Record<string, any>): boolean {
+  const permission = response.hookSpecificOutput?.permissionDecision
+  return (
+    isStopLikeDispatchEvent(canonicalEvent) ||
+    isBlock(response) ||
+    permission === "deny" ||
+    permission === "ask" ||
+    Boolean(response.error) ||
+    response.ok === false ||
+    response.isError === true
+  )
+}
+
+function hookGuidanceScope(payload: Record<string, unknown> | null): string | null {
+  const sessionId = nonBlankString(payload?.session_id ?? payload?.sessionId)
+  const cwd = nonBlankString(payload?.cwd)
+  // Unknown identities must never share an advisory cache entry.
+  return sessionId && cwd ? JSON.stringify([cwd, sessionId]) : null
+}
+
+function resetSessionGuidance(cache: Map<string, string>, scope: string): void {
+  for (const key of cache.keys()) {
+    if (key.startsWith(`${scope}|`)) cache.delete(key)
+  }
+}
+
+export function maybeSuppressDuplicateAllowMessage(
+  ctx: Pick<DispatchRoutesContext, "recentHookAllowMessages">,
   payload: Record<string, unknown> | null,
   canonicalEvent: string,
   hookEventName: string,
   response: Record<string, any>
 ): void {
-  if (isStopLikeDispatchEvent(canonicalEvent)) return
-  if (isBlock(response)) return
+  if (mustPreserveHookMessage(canonicalEvent, response)) return
+  const scope = hookGuidanceScope(payload)
+  if (!scope) return
+  if (canonicalEvent === "sessionStart" || canonicalEvent === "sessionEnd") {
+    resetSessionGuidance(ctx.recentHookAllowMessages, scope)
+  }
 
   const message = extractHookAllowMessage(response)
   if (message === null) return
 
-  const key = dedupeHookAllowMessageKey(payload, canonicalEvent, hookEventName)
+  const key = `${scope}|message|${canonicalEvent}|${hookEventName}`
   const last = ctx.recentHookAllowMessages.get(key)
   if (last === message) {
     stripDuplicateAllowMessage(response)
@@ -238,6 +286,7 @@ function maybeSuppressDuplicateAllowMessage(
   }
 
   ctx.recentHookAllowMessages.set(key, message)
+  suppressStandingAdvice(ctx.recentHookAllowMessages, scope, response)
 }
 
 function createDispatchLifecycleHandler(

@@ -12,7 +12,11 @@ import {
 } from "../mcp-tool-core.ts"
 import { projectKeyFromCwd } from "../project-key.ts"
 import { readSwizSettings } from "../settings.ts"
-import { summarizeTasks, type TaskListSummary } from "../tasks/task-mcp-view.ts"
+import {
+  summarizeTasks,
+  TASK_GOVERNANCE_HINTS,
+  type TaskListSummary,
+} from "../tasks/task-mcp-view.ts"
 import {
   SWIZ_MCP_CHANNEL_DRAIN_INTERVAL_MS,
   swizMcpChannelHeartbeatPath,
@@ -54,7 +58,10 @@ const BASE_INSTRUCTIONS = [
 ]
 
 export function buildMcpInstructions(mcpChannels: boolean): string {
-  return [...(mcpChannels ? CHANNEL_INSTRUCTIONS : []), ...BASE_INSTRUCTIONS].join(" ")
+  const instructions = [...(mcpChannels ? CHANNEL_INSTRUCTIONS : []), ...BASE_INSTRUCTIONS].join(
+    " "
+  )
+  return `${instructions}\n\n${TASK_GOVERNANCE_HINTS}`
 }
 
 type McpServerCapabilities = {

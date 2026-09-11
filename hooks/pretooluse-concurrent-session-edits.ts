@@ -6,7 +6,6 @@
 // The point is to re-read before writing and to stay inside your own change.
 
 import { relative, resolve } from "node:path"
-import { formatDuration } from "../src/format-duration.ts"
 import {
   preToolUseAllowWithContext,
   runSwizHookAsMain,
@@ -27,8 +26,9 @@ export function displayPathFor(cwd: string, filePath: string): string {
   return rel && !rel.startsWith("..") ? rel : filePath
 }
 
-export function formatConcurrentEditContext(displayPath: string, ageMs: number): string {
-  return buildConcurrentFileEditGuidance(displayPath, formatDuration(ageMs))
+export function formatConcurrentEditContext(displayPath: string, updatedAt: number): string {
+  // A stable timestamp lets dispatch suppress the same overlap until a newer edit arrives.
+  return buildConcurrentFileEditGuidance(displayPath, new Date(updatedAt).toISOString())
 }
 
 interface ConcurrentEditContext {
@@ -96,7 +96,7 @@ export async function evaluatePretooluseConcurrentSessionEdits(
 
   const context = formatConcurrentEditContext(
     displayPathFor(editContext.cwd, latest.filePath),
-    Math.max(0, nowMs - latest.updatedAt)
+    latest.updatedAt
   )
   return preToolUseAllowWithContext("Concurrent work is normal — continue your task", context, {
     rephrase: false,
