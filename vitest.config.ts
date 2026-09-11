@@ -7,14 +7,15 @@ export default defineConfig({
     {
       name: "bun-import-meta",
       enforce: "pre",
-      transform(code, id) {
+      async transform(code, id) {
         if (!/import\.meta\.(dir|path)\b/.test(code) || id.includes("/node_modules/")) return null
-        return transformWithEsbuild(code, id, {
+        const result = await transformWithEsbuild(code, id, {
           define: {
             "import.meta.dir": JSON.stringify(dirname(id)),
             "import.meta.path": JSON.stringify(id),
           },
         })
+        return { code: result.code, map: JSON.stringify(result.map) }
       },
     },
   ],
