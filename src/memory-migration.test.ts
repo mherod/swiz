@@ -61,6 +61,13 @@ describe("repository memory migration", () => {
     expect(index).toContain(plan.records[0]!.sha256)
     expect(index).not.toContain(source)
     expect(await Bun.file(join(repository, "AGENTS.md")).text()).toContain(".swiz/memory/MEMORY.md")
+    expect(await Bun.file(join(repository, ".cursorrules")).text()).toContain(
+      ".swiz/memory/MEMORY.md"
+    )
+    expect(await Bun.file(join(repository, "GEMINI.md")).text()).toContain(".swiz/memory/MEMORY.md")
+    expect(await Bun.file(join(repository, ".gemini/GEMINI.md")).text()).toContain(
+      "../.swiz/memory/MEMORY.md"
+    )
     expect((await outcome(plan, "verify")).status).toBe("copied")
   })
 
@@ -198,6 +205,22 @@ describe("repository memory migration", () => {
     expect((await outcome(plan)).status).toBe("copied")
   })
 
+  test("rejects unmigrated reference-style Markdown links", async () => {
+    const { plan } = await fixture()
+    plan.records[0]!.targets[0]!.content =
+      "See [memory][source].\n\n[source]: ../../../external/note.md"
+    expect((await outcome(plan)).status).toBe("failed")
+  })
+
+  test("preserves existing leading whitespace when appending lookup guidance", async () => {
+    const { plan, repository } = await fixture()
+    await Bun.write(join(repository, "CLAUDE.md"), "    indented content\n")
+    expect((await outcome(plan)).status).toBe("copied")
+    expect(await Bun.file(join(repository, "CLAUDE.md")).text()).toStartWith(
+      "    indented content\n"
+    )
+  })
+
   test("provider readback uses repository memory for every agent", async () => {
     const { plan, repository } = await fixture()
     await outcome(plan)
@@ -224,5 +247,14 @@ describe("repository memory migration", () => {
     await expect(
       runMemoryMigration(["--source", join(directory, "external"), "--manifest", manifest])
     ).rejects.toThrow("already exists")
+  })
+
+  test("rejects manifests inside a destination repository", async () => {
+    const { plan, repository } = await fixture()
+    const manifest = join(repository, "private-plan.json")
+    await Bun.write(manifest, JSON.stringify(plan))
+    await expect(runMemoryMigration(["--manifest", manifest, "--apply"])).rejects.toThrow(
+      "outside a Git repository"
+    )
   })
 })

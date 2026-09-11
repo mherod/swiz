@@ -372,6 +372,10 @@ export const memoryCommand: Command = {
     { flags: "--cursor", description: "Force Cursor agent" },
     { flags: "--gemini", description: "Force Gemini CLI agent" },
     { flags: "--codex", description: "Force Codex CLI agent" },
+    { flags: "migrate --manifest <path>", description: "Use a private migration manifest" },
+    { flags: "--source <directory>", description: "Inventory an external memory directory" },
+    { flags: "--apply", description: "Apply a reviewed memory migration" },
+    { flags: "--verify", description: "Verify a memory migration" },
   ],
   async run(args: string[]) {
     if (args[0] === "migrate") {

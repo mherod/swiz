@@ -130,6 +130,21 @@ function lookupWrites(location: ProjectMemoryLocation): MemoryWrite[] {
         "Read [CLAUDE.md](CLAUDE.md) and [project memory](.swiz/memory/MEMORY.md) for repository guidance.",
       append: true,
     },
+    {
+      path: join(location.root, ".cursorrules"),
+      content: "Read [project memory](.swiz/memory/MEMORY.md) for repository guidance.",
+      append: true,
+    },
+    {
+      path: join(location.root, "GEMINI.md"),
+      content: "Read [project memory](.swiz/memory/MEMORY.md) for repository guidance.",
+      append: true,
+    },
+    {
+      path: join(location.root, ".gemini", "GEMINI.md"),
+      content: "Read [project memory](../.swiz/memory/MEMORY.md) for repository guidance.",
+      append: true,
+    },
   ]
 }
 
@@ -164,7 +179,11 @@ async function prepareTarget(
 }
 
 async function verifyReferences(content: string, destination: string, root: string): Promise<void> {
-  for (const match of content.matchAll(/\]\((?:<([^>]+)>|([^\s)]+))(?:\s+"[^"]*")?\)/g)) {
+  const references = [
+    ...content.matchAll(/\]\((?:<([^>]+)>|([^\s)]+))(?:\s+"[^"]*")?\)/g),
+    ...content.matchAll(/^\s{0,3}\[[^\]]+\]:\s*(?:<([^>]+)>|([^\s]+))/gm),
+  ]
+  for (const match of references) {
     const href = match[1] ?? match[2] ?? ""
     if (/^(?:https?:\/\/|#)/i.test(href)) continue
     if (/^(?:[a-z]+:|\/|~)/i.test(href))
@@ -200,7 +219,7 @@ async function stageWrites(writes: MemoryWrite[]): Promise<Map<string, string>> 
       )
     staged.set(
       write.path,
-      write.append ? `${current.trimEnd()}\n\n${write.content}\n`.trimStart() : write.content
+      write.append ? `${current.trimEnd()}\n\n${write.content}\n` : write.content
     )
   }
   return staged

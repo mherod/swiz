@@ -6,6 +6,7 @@ import {
   migrateMemories,
 } from "../memory-migration.ts"
 import { type ValidateMemoryWrite, validateMigrationWrite } from "../memory-migration-validation.ts"
+import { resolveProjectMemory } from "../project-memory.ts"
 
 type MigrationMode = "plan" | "apply" | "verify"
 interface ParsedMigrationArgs {
@@ -52,11 +53,20 @@ function parseMigrationArgs(args: string[]): ParsedMigrationArgs {
   return { source, manifest, mode }
 }
 
+async function assertPrivateManifestPath(manifest: string): Promise<void> {
+  if (await resolveProjectMemory(manifest)) {
+    throw new Error(
+      "Manifest must be outside a Git repository because it contains private source paths"
+    )
+  }
+}
+
 export async function runMemoryMigration(
   args: string[],
   validate: ValidateMemoryWrite = validateMigrationWrite
 ): Promise<string> {
   const { source, manifest, mode } = parseMigrationArgs(args)
+  await assertPrivateManifestPath(manifest)
   if (source) {
     if (await Bun.file(manifest).exists())
       throw new Error("Manifest already exists; use a new path to preserve reviewed mappings")
