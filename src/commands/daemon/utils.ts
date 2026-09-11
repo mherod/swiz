@@ -9,10 +9,12 @@ import type { SessionMessage, SessionTaskSummary, ToolCallSummary } from "./type
 export type { SessionMessage, SessionTaskSummary, ToolCallSummary } from "./types.ts"
 
 import { projectKeyFromCwd } from "../../project-key.ts"
+import { extractSkillQueryNames } from "../../skill-query-usage.ts"
 import {
   extractPathValuesFromToolInput,
   extractSkillNameFromCapturedSkillDetail,
   extractSkillNameFromToolInput,
+  extractSkillNamesFromCodexExecCode,
   extractSkillNamesFromPathValues,
   extractSkillNamesFromShellSkillUsageCommand,
   formatSkillToolInputDetail,
@@ -86,6 +88,8 @@ export interface CapturedToolCall {
   name: string
   detail: string
   timestamp: string
+  /** Full-input evidence retained independently of truncated display details. */
+  skillInvocations?: string[]
   divergence?: DivergenceEvidence
 }
 
@@ -132,6 +136,7 @@ const capturedToolCallSchema = z.object({
   name: z.string(),
   detail: z.string(),
   timestamp: z.string(),
+  skillInvocations: z.array(z.string()).optional(),
   divergence: divergenceEvidenceSchema.optional(),
 })
 
@@ -250,10 +255,12 @@ function buildCapturedToolCall(
   toolInput: Record<string, any> | undefined,
   nowMs: number
 ): CapturedToolCall {
+  const skillInvocations = extractSkillQueryNames(toolName, toolInput)
   return {
     name: toolName,
     detail: summarizeToolInput(toolInput, toolName),
     timestamp: new Date(nowMs).toISOString(),
+    ...(skillInvocations.length > 0 ? { skillInvocations } : {}),
   }
 }
 
@@ -320,21 +327,25 @@ export function mergeCapturedToolCalls(...sources: CapturedToolCall[][]): Captur
     : merged
 }
 
+function capturedSkillInvocations(call: CapturedToolCall): string[] {
+  if (call.name !== "Skill") return call.skillInvocations ?? []
+  const skill = extractSkillNameFromCapturedSkillDetail(call.detail)
+  return skill ? [skill] : []
+}
+
 function usageEventsFromCapturedCalls(calls: CapturedToolCall[]): CurrentSessionUsageEvent[] {
   const events: CurrentSessionUsageEvent[] = []
   for (let index = 0; index < calls.length; index++) {
     const call = calls[index]!
     events.push({ kind: "tool", value: call.name, turnIndex: index, timestamp: call.timestamp })
-    if (call.name === "Skill") {
-      const skill = extractSkillNameFromCapturedSkillDetail(call.detail)
-      if (skill)
-        events.push({
-          kind: "skill",
-          value: skill,
-          turnIndex: index,
-          timestamp: call.timestamp,
-          source: "agent",
-        })
+    for (const skill of capturedSkillInvocations(call)) {
+      events.push({
+        kind: "skill",
+        value: skill,
+        turnIndex: index,
+        timestamp: call.timestamp,
+        source: "agent",
+      })
     }
     if (READ_TOOLS.has(call.name) && call.detail) {
       events.push({
@@ -371,9 +382,8 @@ function accumulateCapturedCallDetails(calls: CapturedToolCall[]): {
   const readFiles: string[] = []
   const writtenFiles: string[] = []
   for (const call of calls) {
-    if (call.name === "Skill") {
-      appendUnique(skillInvocations, extractSkillNameFromCapturedSkillDetail(call.detail))
-    } else if (READ_TOOLS.has(call.name)) {
+    for (const skill of capturedSkillInvocations(call)) appendUnique(skillInvocations, skill)
+    if (READ_TOOLS.has(call.name)) {
       appendUnique(readFiles, call.detail)
     } else if (isFileEditTool(call.name)) {
       appendUnique(writtenFiles, call.detail)
@@ -530,6 +540,9 @@ function extractDirectSkillNamesFromTool(
   toolInput: Record<string, any> | undefined
 ): string[] {
   if (!toolInput) return []
+  if (toolName === "exec" || toolName === "functions.exec") {
+    return extractSkillNamesFromCodexExecCode(toolInput.code ?? toolInput.input ?? "")
+  }
   if (READ_TOOLS.has(toolName)) {
     return extractSkillNamesFromPathValues(extractPathValuesFromToolInput(toolInput))
   }
@@ -537,7 +550,7 @@ function extractDirectSkillNamesFromTool(
     const cmd = (toolInput.command ?? toolInput.cmd ?? "") as string
     return extractSkillNamesFromShellSkillUsageCommand(cmd)
   }
-  return []
+  return extractSkillQueryNames(toolName, toolInput)
 }
 
 function captureSkillInvocations(

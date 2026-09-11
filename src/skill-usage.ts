@@ -6,6 +6,7 @@
  * opening the skill file directly.
  */
 
+import { extractSkillNamesFromCodexSkillQueryCode } from "./skill-query-usage.ts"
 import { splitShellSegments } from "./utils/shell-patterns.ts"
 
 interface SkillUsageToolInput {
@@ -145,7 +146,7 @@ function decodeCodexCommandString(raw: string, quote: '"' | "'" | "`"): string {
 
 /** Extract skill usage from the JavaScript body of Codex's `exec` custom tool wrapper. */
 export function extractSkillNamesFromCodexExecCode(code: string): string[] {
-  const skills: string[] = []
+  const skills = extractSkillNamesFromCodexSkillQueryCode(code)
   for (const call of code.matchAll(CODEX_EXEC_COMMAND_CALL_RE)) {
     const field = call[1]?.match(CODEX_COMMAND_FIELD_RE)
     if (!field) continue

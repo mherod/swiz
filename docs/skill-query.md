@@ -16,3 +16,5 @@ The tool uses the same skill discovery and name precedence as `swiz skill`, scop
 Index responses include `total`, `offset`, `limit` and `nextOffset` (`null` at the end). `limit` accepts 1–200. `query`, `offset` and `limit` apply to `list`; `args` and `noFrontMatter` apply to `read`.
 
 Reading behaves like `swiz skill <name> --raw`: inline shell commands remain text and setup commands never execute. Positional arguments use the CLI's `$ARGUMENTS`, `$0`, `$1`, … substitution. Skill invocation, command expansion, conversion, syncing and transfer are outside this tool's read-only scope. Unknown names and invalid arguments return MCP tool errors.
+
+Content reads count toward recently used skills, using the same turn and time windows as native `Skill` calls and direct `SKILL.md` reads. Index searches and metadata-only lookups do not count. This includes literal `SkillQuery` calls nested inside Codex `exec` wrappers and daemon-captured calls recovered after a restart. As with native calls, recency records the read invocation; gates that require successful completion also check its tool result.

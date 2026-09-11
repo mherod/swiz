@@ -5,6 +5,7 @@
 // as `_transcriptSummary`. Extracted from hooks/hook-utils.ts (issue #84).
 
 import { normalizeCommand } from "./command-utils.ts"
+import { extractSkillNameFromSkillQuery, extractSkillQueryNames } from "./skill-query-usage.ts"
 import {
   extractPathValuesFromToolInput,
   extractSkillNameFromSlashPrompt,
@@ -253,6 +254,11 @@ interface ToolBlock {
   type?: string
   name?: string
   input?: {
+    name?: string
+    action?: string
+    query?: string
+    limit?: number
+    offset?: number
     command?: string
     cmd?: string
     patch?: string
@@ -424,6 +430,7 @@ export function toolLoadsSkill(
   skillFilePath: string | null
 ): boolean {
   if (name === "Skill") return extractSkillNameFromToolInput(input) === skillName
+  if (extractSkillQueryNames(name, input).includes(skillName)) return true
   if (!skillFilePath) return false
   if (READ_TOOLS.has(name)) return extractFileReadTargetPaths(input ?? {}).includes(skillFilePath)
   if (!extractDirectSkillReadInvocations({ input }, name).includes(skillName)) return false
@@ -475,6 +482,8 @@ function accumulateShellCommand(block: ToolBlock, name: string, acc: SummaryAccu
 }
 
 function extractDirectSkillReadInvocations(block: ToolBlock, name: string): string[] {
+  const queriedSkill = extractSkillNameFromSkillQuery(name, block.input)
+  if (queriedSkill) return [queriedSkill]
   if (READ_TOOLS.has(name)) {
     return extractSkillNamesFromPathValues(extractPathValuesFromToolInput(block.input))
   }
