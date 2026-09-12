@@ -36,6 +36,7 @@
 import { agentHasTaskListToolForHookPayload } from "../src/agent-paths.ts"
 import { GATE_REQUIRED_SKILLS } from "../src/gate-required-skills.ts"
 import { checkGitIdentity } from "../src/git-identity.ts"
+import { READINESS_GUIDANCE } from "../src/issue-refinement.ts"
 import {
   preToolUseAllow,
   preToolUseDeny,
@@ -225,7 +226,7 @@ const SKILL_DENY_CONFIGS: Record<
     planStep: `Invoke the ${ref} skill before modifying issue labels.`,
     whyMatters:
       `the ${ref} skill validates label changes against issue state. ` +
-      `Modifying labels directly skips these safeguards.`,
+      `Modifying labels directly skips these safeguards. ${READINESS_GUIDANCE}`,
   }),
   [GATE_REQUIRED_SKILLS.workOnIssue.name]: (ref) => ({
     action: "assigning yourself to an issue",

@@ -1,4 +1,4 @@
-import { normaliseLabel } from "../../src/issue-refinement.ts"
+import { CANONICAL_READINESS, normaliseLabel } from "../../src/issue-refinement.ts"
 import type { StopSection } from "./types.ts"
 
 export const DEFAULT_STOP_SECTION_ORDER: StopSection[] = ["refinement", "readyIssues", "blocked"]
@@ -8,14 +8,12 @@ export const REVIEWABLE_BLOCK_LABELS = new Set(["blocked", "upstream", "on-hold"
 
 /** Labels that indicate an issue is not actionable right now. */
 export const SKIP_LABELS = new Set([
-  "blocked",
+  ...CANONICAL_READINESS.filter((state) => state !== "ready"),
   "upstream",
   "wontfix",
   "wont-fix", // normalises to fix:wont — handled separately from wontfix
   "duplicate",
   "on-hold",
-  "waiting",
-  "backlog", // deferred follow-up; not ready pickup
   "stale", // common GitHub bot label
   "icebox", // explicit indefinite deferral
   "invalid", // not a valid issue
@@ -81,6 +79,11 @@ export const TWENTY_FOUR_HOURS_MS = 24 * 60 * 60 * 1000
 // Pre-compute normalised lookups so source tables stay human-readable.
 export const REVIEWABLE_BLOCK_NORM = new Set([...REVIEWABLE_BLOCK_LABELS].map(normaliseLabel))
 export const SKIP_NORM = new Set([...SKIP_LABELS].map(normaliseLabel))
+export const REFINEMENT_SKIP_NORM = new Set(
+  [...SKIP_LABELS]
+    .filter((label) => !CANONICAL_READINESS.some((state) => state === label))
+    .map(normaliseLabel)
+)
 export const SCORE_NORM: Record<string, number> = Object.fromEntries(
   Object.entries(LABEL_SCORE).map(([k, v]) => [normaliseLabel(k), v])
 )

@@ -1,6 +1,6 @@
 import { orderBy } from "lodash-es"
 import { getRepoSlug, ghJsonViaDaemon as ghJson } from "../../src/git-helpers.ts"
-import { normaliseLabel } from "../../src/issue-refinement.ts"
+import { canonicalReadiness, normaliseLabel } from "../../src/issue-refinement.ts"
 import {
   getDaemonBackedStore,
   getIssueStore,
@@ -8,7 +8,13 @@ import {
   replayPendingMutations,
 } from "../../src/issue-store.ts"
 import { messageFromUnknownError } from "../../src/utils/hook-json-helpers.ts"
-import { REVIEWABLE_BLOCK_NORM, SCORE_NORM, SKIP_NORM, TWENTY_FOUR_HOURS_MS } from "./constants.ts"
+import {
+  REFINEMENT_SKIP_NORM,
+  REVIEWABLE_BLOCK_NORM,
+  SCORE_NORM,
+  SKIP_NORM,
+  TWENTY_FOUR_HOURS_MS,
+} from "./constants.ts"
 import type { Issue } from "./types.ts"
 
 function logHookEvent(event: string, details: string): void {
@@ -61,7 +67,7 @@ async function readCachedIssues(repoSlug: string): Promise<Issue[]> {
   }
 }
 
-function filterByUser(issues: Issue[], filterUser?: string): Issue[] {
+export function filterByUser(issues: Issue[], filterUser?: string): Issue[] {
   return filterUser
     ? issues.filter(
         (i) => i.author?.login === filterUser || i.assignees?.some((a) => a.login === filterUser)
@@ -69,9 +75,32 @@ function filterByUser(issues: Issue[], filterUser?: string): Issue[] {
     : issues
 }
 
-export function filterVisibleIssues(issues: Issue[], filterUser?: string): Issue[] {
+/** Refresh native decomposition evidence for coordination parents before classifying Stop. */
+export async function withNativeChildCounts(
+  issues: Issue[],
+  repoSlug: string | null,
+  cwd: string
+): Promise<Issue[]> {
+  return await Promise.all(
+    issues.map(async (issue) => {
+      if (!repoSlug || canonicalReadiness(issue)[0] !== "needs-breakdown") return issue
+      const children = await ghJson<Array<{ number: number }>>(
+        ["api", `repos/${repoSlug}/issues/${issue.number}/sub_issues?per_page=100`],
+        cwd
+      ).catch(() => null)
+      return { ...issue, nativeChildCount: Array.isArray(children) ? children.length : undefined }
+    })
+  )
+}
+
+export function filterVisibleIssues(
+  issues: Issue[],
+  filterUser?: string,
+  includeDeferred = false
+): Issue[] {
+  const skipped = includeDeferred ? REFINEMENT_SKIP_NORM : SKIP_NORM
   return filterByUser(issues, filterUser).filter(
-    (i) => !(i.labels ?? []).some((l) => SKIP_NORM.has(normaliseLabel(l.name)))
+    (i) => !(i.labels ?? []).some((l) => skipped.has(normaliseLabel(l.name)))
   )
 }
 
@@ -101,8 +130,13 @@ export function filterBlockedIssues(
   repoSlug: string,
   filterUser?: string
 ): Issue[] {
-  const candidates = filterByUser(issues, filterUser).filter((i) =>
-    (i.labels ?? []).some((l) => REVIEWABLE_BLOCK_NORM.has(normaliseLabel(l.name)))
+  const candidates = filterByUser(issues, filterUser).filter(
+    (i) =>
+      (i.labels ?? []).some((l) => REVIEWABLE_BLOCK_NORM.has(normaliseLabel(l.name))) &&
+      !(i.labels ?? []).some((l) => {
+        const name = normaliseLabel(l.name)
+        return REFINEMENT_SKIP_NORM.has(name) && !REVIEWABLE_BLOCK_NORM.has(name)
+      })
   )
   const results: Issue[] = []
   for (const issue of candidates) {

@@ -10,7 +10,7 @@
  */
 
 import { getRepoSlug, git } from "../src/git-helpers.ts"
-import { needsRefinement } from "../src/issue-refinement.ts"
+import { isReadyForImplementation } from "../src/issue-refinement.ts"
 import { getIssueStore } from "../src/issue-store.ts"
 import { runSwizHookAsMain, type SwizHook, type SwizHookOutput } from "../src/SwizHook.ts"
 import type { PostToolHookInput } from "../src/schemas.ts"
@@ -56,7 +56,9 @@ export async function getReadyIssue(
   const openIssues = issues.filter((i) => (i.state ?? "open").toLowerCase() === "open")
   if (openIssues.length === 0) return null
 
-  const readyIssues = openIssues.filter((i) => !needsRefinement({ ...i, labels: i.labels ?? [] }))
+  const readyIssues = openIssues.filter((i) =>
+    isReadyForImplementation({ ...i, labels: i.labels ?? [] })
+  )
   return readyIssues[0] ?? null
 }
 

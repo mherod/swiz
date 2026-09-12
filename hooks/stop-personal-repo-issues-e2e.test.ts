@@ -10,19 +10,14 @@
  * but kept self-contained so the tests never hit the network.
  */
 import { describe, expect, setDefaultTimeout, test } from "bun:test"
-import { needsRefinement } from "../src/issue-refinement.ts"
 import { useTempDir } from "../src/utils/test-utils.ts"
 import { buildStopPlanSteps } from "./stop-personal-repo-issues/action-plan.ts"
-import { buildStopContext } from "./stop-personal-repo-issues/context.ts"
+import { buildStopContext, classifyStopIssues } from "./stop-personal-repo-issues/context.ts"
 import {
   evaluateStopPersonalRepoIssues,
   type PersonalRepoIssuesCollect,
 } from "./stop-personal-repo-issues/evaluate.ts"
-import {
-  filterBlockedIssues,
-  filterVisibleIssues,
-  sortIssuesByScoreAndNumber,
-} from "./stop-personal-repo-issues/issues.ts"
+import { filterByUser } from "./stop-personal-repo-issues/issues.ts"
 import type { Issue } from "./stop-personal-repo-issues/types.ts"
 
 setDefaultTimeout(30_000)
@@ -80,31 +75,18 @@ async function runHook(repoDir: string, opts: RunOptions = {}): Promise<HookResu
   const metadata = repoMetadata.get(repoDir) ?? { owner: user, repo: "testrepo" }
   const isPersonalRepo = metadata.owner === user
   const filterUser = isPersonalRepo ? undefined : user
-  const actionable = filterVisibleIssues(issues, filterUser)
-  const sortedRefinement = sortIssuesByScoreAndNumber(actionable.filter(needsRefinement))
-  const allReadyIssues = actionable.filter((issue) => !needsRefinement(issue))
   const openPrIssueNumbers = new Set(
     prs.flatMap((pr) => {
       const fixture = pr as { closingIssuesReferences?: Array<{ number: number }> }
       return (fixture.closingIssuesReferences ?? []).map(({ number }) => number)
     })
   )
-  const readyWithoutPr = allReadyIssues.filter((issue) => !openPrIssueNumbers.has(issue.number))
-  const sortedIssues = sortIssuesByScoreAndNumber(
-    readyWithoutPr.length > 0 ? readyWithoutPr : allReadyIssues
-  )
   const repoSlug = `${metadata.owner}/${metadata.repo}`
-  const blockedIssues =
-    sortedIssues.length === 0
-      ? sortIssuesByScoreAndNumber(filterBlockedIssues(issues, repoSlug, filterUser))
-      : []
-  const gathered = {
-    sortedRefinement,
-    sortedIssues,
-    blockedIssues,
-    firstRefinementNum: sortedRefinement[0]?.number,
-    firstIssueNum: sortedIssues[0]?.number,
-  }
+  const gathered = classifyStopIssues(
+    filterByUser(issues, filterUser),
+    repoSlug,
+    openPrIssueNumbers
+  )
   const stopCtx = buildStopContext(
     {
       cwd: repoDir,
@@ -323,7 +305,7 @@ describe("E2E stop-personal-repo-issues: personal repo issue blocking", () => {
         makeIssue(10, "Duplicate report", ["duplicate"]),
         makeIssue(11, "Stale request", ["stale"]),
         makeIssue(12, "Invalid report", ["invalid"]),
-        makeIssue(13, "Backlog follow-up", ["backlog"]),
+        makeIssue(13, "Backlog follow-up", ["bug", "priority-low", "backlog"]),
       ],
     })
     expect(result.blocked).toBe(false)
@@ -338,7 +320,7 @@ describe("E2E stop-personal-repo-issues: personal repo issue blocking", () => {
     expect(result.blocked).toBe(false)
   })
 
-  test("backlog plus ready issue is still excluded from pickup", async () => {
+  test("backlog plus ready issue requires conflict repair before pickup", async () => {
     const dir = await createGitRepoWithGitHubRemote("-backlogready", "testuser", "myrepo")
     const result = await runHook(dir, {
       user: "testuser",
@@ -346,7 +328,9 @@ describe("E2E stop-personal-repo-issues: personal repo issue blocking", () => {
         makeIssue(99, "Deferred but tagged ready", ["bug", "backlog", "ready", "priority:high"]),
       ],
     })
-    expect(result.blocked).toBe(false)
+    expect(result.blocked).toBe(true)
+    expect(result.reason).toContain("conflicting readiness: ready, backlog")
+    expect(result.reason).not.toContain("Pick up")
   })
 
   test("skip + actionable mix: skipped issues omitted from refinement/ready lists", async () => {
@@ -439,7 +423,7 @@ describe("E2E stop-personal-repo-issues: top-5 truncation", () => {
     const r = result.reason!
     // 5 issues are missing one or more required refinement categories
     expect(r).toContain("Refine")
-    expect(r).toContain("[missing labels:")
+    expect(r).toContain("[missing readiness")
     // 3 issues have `ready` → actionable section
     expect(r).toContain("3 open issue(s)")
     // No truncation — 5 refinement + 3 actionable both fit within MAX_SHOWN_ISSUES

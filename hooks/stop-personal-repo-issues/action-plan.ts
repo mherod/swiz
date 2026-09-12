@@ -1,8 +1,9 @@
 import { type ActionPlanItem, formatActionPlan } from "../../src/action-plan.ts"
 import {
-  missingRefinementCategories,
   NEEDS_REFINEMENT_NORM,
   normaliseLabel,
+  READINESS_GUIDANCE,
+  refinementReasons,
 } from "../../src/issue-refinement.ts"
 import { skillExistsForHookPayload } from "../../src/skill-utils.ts"
 import { type StopAction, stopActionId } from "../../src/stop-actions.ts"
@@ -47,8 +48,9 @@ function buildRefinementSteps(
     const hasExplicitLabel = issue.labels.some(
       (l) => normaliseLabel(l.name) === NEEDS_REFINEMENT_NORM
     )
-    const missing = missingRefinementCategories(issue)
-    const tag = hasExplicitLabel ? "[needs-refinement]" : `[missing labels: ${missing.join(", ")}]`
+    const reasons = refinementReasons(issue)
+    if (hasExplicitLabel) reasons.unshift("needs-refinement")
+    const tag = `[${reasons.join("; ")}]`
     return `#${issue.number} ${issue.title} ${tag}`
   })
   if (hiddenRefinement > 0) issueListParts.push(`…and ${hiddenRefinement} more`)
@@ -57,11 +59,11 @@ function buildRefinementSteps(
   if (skillExistsForHookPayload("refine-issue", payload ?? {}))
     subSteps.push(`/refine-issue${refineArg} — Refine the next issue needing attention`)
   subSteps.push(
-    "Every issue MUST have at least one label from each category: Type (bug, enhancement, documentation), Readiness (ready, triaged, backlog), Priority (priority-high, priority-medium, priority-low)",
+    "Every issue MUST have a Type (bug, enhancement, documentation) and Priority (priority-high, priority-medium, priority-low).",
+    READINESS_GUIDANCE,
     "Run gh label list to check available labels",
-    "Choose readiness based on intent: immediate pickup → ready; needs more detail → triaged; future/follow-up work → backlog",
-    'Example (immediate work): gh issue edit <number> --add-label "bug,ready,priority-high" --remove-label "needs-refinement"',
-    'Example (follow-up/future): gh issue edit <number> --add-label "enhancement,backlog,priority-medium" --remove-label "needs-refinement"',
+    "Remove needs-refinement only after the missing categories or conflicting states are resolved.",
+    "For needs-breakdown, inspect native children and the bounded residual before choosing work. Create missing child decomposition; retain a decomposed parent and select eligible ready children independently.",
     "Rule: If you created the issue, NEVER add new comments — always edit the original issue body instead"
   )
   return [
@@ -100,7 +102,7 @@ function buildIssuePickupSteps(
     `Verify branch starting point: git branch --show-current, then check out the correct base (default: ${ctx.defaultBranch}; or an existing feature branch / PR head if one exists for this issue), git pull --rebase --autostash`,
     `Plan with ${getTaskToolName("TaskCreate")} before touching any code for issue #${issueNum}`,
     `Check for blockers on #${issueNum}: inspect labels and body for blocked/depends-on references`,
-    "Quality checks (MANDATORY before commit): bun run typecheck && bun run lint && bun test --concurrent",
+    "Quality checks (MANDATORY before commit): bun run typecheck && bun run lint && bun test --reporter=dots --parallel=4",
     `Resolve: swiz issue resolve ${issueNum} --body "<evidence>"`
   )
   return [
@@ -128,8 +130,9 @@ function buildBlockedIssueReviewSteps(
   const subSteps: ActionPlanItem[] = []
   subSteps.push(
     `Read the latest comments on #${blockedNum} to understand the block reason — dependencies, upstream issues, or missing information`,
-    `Check if the blocking condition has been resolved (e.g., dependency issue closed, upstream fix merged)`,
-    `If unblockable: remove the block label and choose readiness (ready for immediate pickup, backlog for future work): gh issue edit ${blockedNum} --remove-label "blocked" --add-label "ready"`,
+    "For blocked, verify the open same-repository dependency and its current state. For waiting, verify the external decision or evidence with its named owner; a closed dependency alone does not resolve an external wait.",
+    READINESS_GUIDANCE,
+    "When the documented condition is resolved, replace the current state with the appropriate single readiness label.",
     `If still blocked: document current status in a comment and move to the next blocked issue`
   )
   if (skillExistsForHookPayload("refine-issue", payload ?? {}))

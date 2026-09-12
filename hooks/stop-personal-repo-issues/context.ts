@@ -1,17 +1,28 @@
 import { detectRepoOwnership } from "../../src/collaboration-policy.ts"
 import { hasGhCli, isGitHubRemote } from "../../src/git-helpers.ts"
-import { needsRefinement } from "../../src/issue-refinement.ts"
+import {
+  breakdownReviewReason,
+  isReadyForImplementation,
+  needsRefinement,
+} from "../../src/issue-refinement.ts"
 import { isGitRepoForHookPayload } from "../../src/repository-capability.ts"
 import { sanitizeSessionId } from "../../src/session-id.ts"
 import type { ProjectState } from "../../src/settings.ts"
 import { isInCooldown } from "./cooldown.ts"
 import {
   filterBlockedIssues,
+  filterByUser,
   filterVisibleIssues,
   getAllOpenIssues,
   sortIssuesByScoreAndNumber,
+  withNativeChildCounts,
 } from "./issues.ts"
 import type { Issue, RepoContext, StopContext } from "./types.ts"
+
+type StopIssueGroups = Pick<
+  StopContext,
+  "sortedRefinement" | "sortedIssues" | "blockedIssues" | "firstRefinementNum" | "firstIssueNum"
+>
 
 /** Matches cooldown update in main: refinement-only blocks do not refresh cooldown. */
 export function shouldUpdateStopCooldown(ctx: StopContext): boolean {
@@ -24,24 +35,30 @@ export async function gatherStopContext(
   currentUser: string,
   hasChangesRequested: boolean,
   allOpenPRIssueNumbers: Set<number>
-): Promise<{
-  sortedRefinement: Issue[]
-  sortedIssues: Issue[]
-  blockedIssues: Issue[]
-  firstRefinementNum?: number
-  firstIssueNum?: number
-}> {
+): Promise<StopIssueGroups> {
   if (hasChangesRequested) {
     return { sortedRefinement: [], sortedIssues: [], blockedIssues: [] }
   }
 
   const { issues: rawIssues, repoSlug } = await getAllOpenIssues(cwd)
   const filterUser = isPersonalRepo ? undefined : currentUser
-  const actionable = filterVisibleIssues(rawIssues, filterUser)
+  const issues = await withNativeChildCounts(filterByUser(rawIssues, filterUser), repoSlug, cwd)
+  return classifyStopIssues(issues, repoSlug ?? "", allOpenPRIssueNumbers)
+}
 
-  const refinementIssues = actionable.filter((i) => needsRefinement(i))
+export function classifyStopIssues(
+  rawIssues: Issue[],
+  repoSlug: string,
+  allOpenPRIssueNumbers: Set<number> = new Set()
+): StopIssueGroups {
+  const actionable = filterVisibleIssues(rawIssues)
+
+  const reviewable = filterVisibleIssues(rawIssues, undefined, true)
+  const refinementIssues = reviewable.filter(
+    (i) => needsRefinement(i) || breakdownReviewReason(i) !== null
+  )
   // Prefer issues that do not already have an open PR representing started work
-  const allReadyIssues = actionable.filter((i) => !needsRefinement(i))
+  const allReadyIssues = actionable.filter(isReadyForImplementation)
   const readyWithoutPR = allReadyIssues.filter((i) => !allOpenPRIssueNumbers.has(i.number))
   const readyIssues = readyWithoutPR.length > 0 ? readyWithoutPR : allReadyIssues
 
@@ -51,7 +68,9 @@ export async function gatherStopContext(
   // Only surface blocked issues when there are no ready issues to work on
   const blockedIssues =
     sortedIssues.length === 0
-      ? sortIssuesByScoreAndNumber(filterBlockedIssues(rawIssues, repoSlug ?? "", filterUser))
+      ? sortIssuesByScoreAndNumber(filterBlockedIssues(rawIssues, repoSlug)).filter(
+          (issue) => !refinementIssues.includes(issue)
+        )
       : []
 
   return {

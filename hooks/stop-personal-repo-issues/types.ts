@@ -16,6 +16,7 @@ export interface Issue {
    * and `readCachedIssues` filters out anything not equal to `"open"`.
    */
   state?: string
+  nativeChildCount?: number
 }
 
 export interface StopContext {

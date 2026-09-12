@@ -1084,12 +1084,12 @@ describe("needsRefinement — issues that are ready (should NOT need refinement)
     expect(needsRefinement(issue(["bug", "ready", "priority-high"]))).toBe(false)
   })
 
-  test("feature + ready-for-dev + p1 does not need refinement", () => {
-    expect(needsRefinement(issue(["feature", "ready-for-dev", "p1"]))).toBe(false)
+  test("feature + ready-for-dev + p1 still needs a canonical state", () => {
+    expect(needsRefinement(issue(["feature", "ready-for-dev", "p1"]))).toBe(true)
   })
 
-  test("maintenance + confirmed + priority/medium does not need refinement", () => {
-    expect(needsRefinement(issue(["maintenance", "confirmed", "priority/medium"]))).toBe(false)
+  test("maintenance + confirmed + priority/medium still needs a canonical state", () => {
+    expect(needsRefinement(issue(["maintenance", "confirmed", "priority/medium"]))).toBe(true)
   })
 
   test("documentation + backlog + priority-low does not need refinement", () => {
