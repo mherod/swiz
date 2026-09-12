@@ -12,7 +12,7 @@ import { merge } from "lodash-es"
 import { debugLog } from "../debug.ts"
 import { SwizHookExit, withInlineSwizHookRun } from "../inline-hook-context.ts"
 import { evalCondition, type HookGroup, hookIdentifier, isInlineHookDef } from "../manifest.ts"
-import type { SwizHook } from "../SwizHook.ts"
+import type { SwizHook, SwizHookRunContext } from "../SwizHook.ts"
 import { hookBaseSchema, hookOutputSchema } from "../schemas.ts"
 import { swizDispatchLogPath } from "../temp-paths.ts"
 import {
@@ -73,7 +73,7 @@ const SLOW_HOOK_THRESHOLD_MS = Number(process.env.SWIZ_SLOW_HOOK_THRESHOLD_MS) |
 // Consolidate the pattern of extracting properties that differ between inline
 // and subprocess hooks: isInlineHookDef(hook) ? hook.hook.property : hook.property
 
-function getHookTimeout(hook: HookDef): number | undefined {
+export function getHookTimeout(hook: HookDef): number | undefined {
   return isInlineHookDef(hook) ? hook.hook.timeout : hook.timeout
 }
 
@@ -770,7 +770,8 @@ async function runInlineHook(
   const configuredTimeoutSec = getConfiguredTimeoutSec(hook.timeout)
   const { parsed, status, stderrSnippet } = await executeInlineHookWithErrorHandling(
     hook,
-    payloadStr
+    payloadStr,
+    { signal, timeoutMs: configuredTimeoutSec * 1000 }
   )
   const endTime = Date.now()
 
@@ -793,7 +794,8 @@ async function runInlineHook(
 /** Helper to isolate error handling and parsing logic from runInlineHook. */
 async function executeInlineHookWithErrorHandling(
   hook: SwizHook,
-  payloadStr: string
+  payloadStr: string,
+  context: SwizHookRunContext
 ): Promise<{
   parsed: Record<string, any> | null
   status: HookStatus
@@ -805,7 +807,7 @@ async function executeInlineHookWithErrorHandling(
     if (!validation.success) {
       throw new Error(`Invalid hook input: ${validation.error}`)
     }
-    const output = await withInlineSwizHookRun(async () => hook.run(input))
+    const output = await withInlineSwizHookRun(async () => hook.run(input, context))
     if (hasNonEmptyHookOutput(output)) {
       const out = output as Record<string, any>
       const outParsed = hookOutputSchema.safeParse(out)

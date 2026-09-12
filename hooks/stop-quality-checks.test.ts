@@ -5,14 +5,166 @@ import { spawnWithTimeout } from "../src/utils/process-utils.ts"
 import { neutralAgentEnv, useTempDir } from "../src/utils/test-utils.ts"
 import {
   buildFeatureBranchActionSteps,
+  classifyQualityExecution,
+  evaluateStopQualityChecks,
   findScript,
   isQualityChecksEnabled,
   LINT_SCRIPTS,
+  qualityCheckBudget,
+  qualityResultsResponse,
+  runQualityScript,
   summarizeCheckOutput,
   TYPECHECK_SCRIPTS,
 } from "./stop-quality-checks.ts"
 
 const { create } = useTempDir("swiz-stop-quality-cwd-")
+
+describe("stop-quality-checks: unverified execution", () => {
+  test("does not demand source fixes when no package manager can be selected", async () => {
+    const cwd = await realpath(await create())
+    await Bun.write(join(cwd, "package.json"), JSON.stringify({ scripts: { lint: "check" } }))
+
+    const result = await evaluateStopQualityChecks({
+      cwd,
+      session_id: "quality-unverified-test",
+      _effectiveSettings: { qualityChecksGate: true, trunkMode: true },
+    })
+
+    expect(result).toMatchObject({ decision: "block" })
+    const reason = "reason" in result ? result.reason : ""
+    expect(reason).toContain("unverified")
+    expect(reason).toContain("no verification command was run")
+    expect(reason).not.toContain("Fix every lint")
+    expect(reason).not.toContain("Commit")
+  })
+})
+
+async function qualityFixture(source: string): Promise<string> {
+  const cwd = await realpath(await create())
+  await Bun.write(
+    join(cwd, "package.json"),
+    JSON.stringify({
+      packageManager: "bun@1.3.14",
+      scripts: { lint: "bun check.ts" },
+    })
+  )
+  await Bun.write(join(cwd, "check.ts"), source)
+  return cwd
+}
+
+describe("stop-quality-checks: subprocess outcomes", () => {
+  test("accepts delayed success without treating output text as the exit status", async () => {
+    const cwd = await qualityFixture('await Bun.sleep(100); process.stdout.write("0 errors\\n")')
+    const result = await runQualityScript(process.execPath, "lint", cwd, {
+      timeoutMs: 2_000,
+      hookTimeoutMs: 7_000,
+    })
+    expect(result.status).toBe("passed")
+    expect(await qualityResultsResponse([result], { cwd, settings: {} })).toEqual({})
+    expect(
+      await qualityResultsResponse(
+        [
+          classifyQualityExecution(
+            { exitCode: 0, stdout: "", stderr: "", timedOut: false },
+            "npm run lint",
+            ""
+          ),
+        ],
+        { cwd, settings: {} }
+      )
+    ).toEqual({})
+  })
+
+  test("retains true diagnostic failures", async () => {
+    const cwd = await qualityFixture(
+      'process.stderr.write("file.ts:1:1 invalid code\\n"); process.exitCode = 1'
+    )
+    const result = await runQualityScript(process.execPath, "lint", cwd)
+    expect(result.status).toBe("failed")
+    const response = await qualityResultsResponse([result], { cwd, settings: { trunkMode: true } })
+    expect(response).toMatchObject({ decision: "block" })
+    expect("reason" in response && response.reason).toContain("invalid code")
+  })
+
+  test("reports a hung process as unverified within the bounded deadline", async () => {
+    const cwd = await qualityFixture("await Bun.sleep(60_000)")
+    const result = await runQualityScript(process.execPath, "lint", cwd, {
+      timeoutMs: 150,
+      hookTimeoutMs: 5_150,
+    })
+    expect(result.status).toBe("timeout")
+    expect(result.output).toContain("Check budget: 0.15s; hook budget: 5.15s")
+    const response = await qualityResultsResponse([result], { cwd, settings: {} })
+    expect(response).toMatchObject({ decision: "block" })
+    const reason = "reason" in response ? response.reason : ""
+    expect(reason).toContain("timeout (unverified)")
+    expect(reason).not.toContain("Fix every lint")
+    expect(reason).not.toContain("Commit")
+  }, 5_000)
+
+  test("reports inability to execute separately from lint failure", async () => {
+    const cwd = await qualityFixture("")
+    const result = await runQualityScript(join(cwd, "missing-manager"), "lint", cwd)
+    expect(result.status).toBe("unavailable")
+    expect(result.output).toContain("Could not execute")
+  })
+
+  test("cancels an active check when dispatch aborts", async () => {
+    const cwd = await qualityFixture("await Bun.sleep(60_000)")
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), 150)
+    try {
+      const result = await runQualityScript(process.execPath, "lint", cwd, {
+        timeoutMs: 20_000,
+        hookTimeoutMs: 25_000,
+        signal: controller.signal,
+      })
+      expect(result.status).toBe("unavailable")
+      expect(result.output).toContain("cancelled")
+    } finally {
+      clearTimeout(timer)
+    }
+  }, 5_000)
+
+  test("classifies a missing script executable as unavailable", async () => {
+    const cwd = await qualityFixture("")
+    await Bun.write(
+      join(cwd, "package.json"),
+      JSON.stringify({ scripts: { lint: "swiz-nonexistent-lint-executable" } })
+    )
+    const result = await runQualityScript(process.execPath, "lint", cwd)
+    expect(result.status).toBe("unavailable")
+    const response = await qualityResultsResponse([result], { cwd, settings: {} })
+    const reason = "reason" in response ? response.reason : ""
+    expect(reason).toContain("unverified")
+    expect(reason).not.toContain("Commit")
+  })
+
+  test.skipIf(process.platform === "win32")(
+    "cancels descendants holding output pipes open",
+    async () => {
+      const cwd = await qualityFixture(
+        'const child = Bun.spawn([process.execPath, "-e", "await Bun.sleep(60_000)"], { stdout: "inherit", stderr: "inherit" }); await child.exited'
+      )
+      const result = await runQualityScript(process.execPath, "lint", cwd, {
+        timeoutMs: 200,
+        hookTimeoutMs: 5_200,
+      })
+      expect(result.status).toBe("timeout")
+    },
+    5_000
+  )
+
+  test("reserves cleanup time and honours a smaller outer budget", () => {
+    expect(qualityCheckBudget().timeoutMs).toBe(115_000)
+    expect(qualityCheckBudget({ timeoutMs: 10_000 }, 500)).toMatchObject({
+      timeoutMs: 4_500,
+      hookTimeoutMs: 10_000,
+    })
+    expect(qualityCheckBudget({ timeoutMs: 999_999 }).hookTimeoutMs).toBe(120_000)
+    expect(qualityCheckBudget({ timeoutMs: 1_000 }).timeoutMs).toBe(0)
+  })
+})
 
 describe("stop-quality-checks: project package manager", () => {
   test("uses hook cwd even when the daemon package manager is cached", async () => {

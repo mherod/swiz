@@ -7,13 +7,13 @@
 import { join } from "node:path"
 import { formatActionPlan } from "../src/action-plan.ts"
 import { getOpenPrForBranch, git } from "../src/git-helpers.ts"
-import type { SwizHookOutput, SwizStopHook } from "../src/SwizHook.ts"
+import type { SwizHookOutput, SwizHookRunContext, SwizStopHook } from "../src/SwizHook.ts"
 import { runSwizHookAsMain } from "../src/SwizHook.ts"
 import { type StopHookInput, stopHookInputSchema } from "../src/schemas.ts"
 import { getDefaultBranch, isDefaultBranch } from "../src/utils/git-utils.ts"
 import { blockStopObj } from "../src/utils/hook-response.ts"
 import { detectPackageManagerDetails } from "../src/utils/package-detection.ts"
-import { spawnWithTimeout } from "../src/utils/process-utils.ts"
+import { type SpawnWithTimeoutResult, spawnWithTimeout } from "../src/utils/process-utils.ts"
 import { evaluateWorktreePreservation } from "../src/worktree-preservation.ts"
 
 export const LINT_SCRIPTS = ["lint", "lint:check", "eslint", "biome:check"] as const
@@ -29,7 +29,8 @@ export function findScript(
   return null
 }
 
-const SCRIPT_TIMEOUT_MS = 45_000
+export const QUALITY_HOOK_TIMEOUT_MS = 120_000
+const QUALITY_CLEANUP_MS = 5_000
 const MAX_FAILURE_SUMMARY_LINES = 40
 const DIAGNOSTIC_LINE_RE =
   /^(?:[\w./-]+:\d+:\d+\s|Found \d+|Checked \d+|[×!] |\S*ELIFECYCLE|Command failed|TIMEOUT:)/
@@ -49,22 +50,100 @@ export function summarizeCheckOutput(output: string): string {
   return `${kept.join("\n")}\n\n(Output trimmed: ${omitted} more line(s). Run the command for full details.)`
 }
 
-async function runScript(
+export interface QualityCheckResult {
+  status: "passed" | "failed" | "timeout" | "unavailable"
+  command: string
+  output: string
+}
+
+export interface QualityCheckBudget {
+  timeoutMs: number
+  hookTimeoutMs: number
+  signal?: AbortSignal
+}
+
+export function qualityCheckBudget(
+  context?: SwizHookRunContext,
+  elapsedMs = 0
+): QualityCheckBudget {
+  const requestedMs = context?.timeoutMs ?? QUALITY_HOOK_TIMEOUT_MS
+  const hookTimeoutMs = Number.isFinite(requestedMs)
+    ? Math.max(0, Math.min(requestedMs, QUALITY_HOOK_TIMEOUT_MS))
+    : QUALITY_HOOK_TIMEOUT_MS
+  return {
+    timeoutMs: Math.max(0, hookTimeoutMs - QUALITY_CLEANUP_MS - elapsedMs),
+    hookTimeoutMs,
+    signal: context?.signal,
+  }
+}
+
+export async function runQualityScript(
   pm: string,
   scriptName: string,
-  cwd: string
-): Promise<{ passed: boolean; output: string }> {
-  const result = await spawnWithTimeout([pm, "run", scriptName], {
-    cwd,
-    timeoutMs: SCRIPT_TIMEOUT_MS,
-  })
-  if (result.timedOut) {
+  cwd: string,
+  budget: QualityCheckBudget = qualityCheckBudget()
+): Promise<QualityCheckResult> {
+  const command = `${pm} run ${scriptName}`
+  const budgets = `Check budget: ${budget.timeoutMs / 1000}s; hook budget: ${budget.hookTimeoutMs / 1000}s.`
+  if (budget.timeoutMs <= 0) {
+    return { status: "timeout", command, output: `No execution time remains. ${budgets}` }
+  }
+  try {
+    const result = await spawnWithTimeout([pm, "run", scriptName], {
+      cwd,
+      timeoutMs: budget.timeoutMs,
+      signal: budget.signal,
+      killProcessGroup: true,
+    })
+    return classifyQualityExecution(result, command, budgets)
+  } catch (error) {
     return {
-      passed: false,
-      output: `TIMEOUT: \`${pm} run ${scriptName}\` exceeded ${SCRIPT_TIMEOUT_MS / 1000}s`,
+      status: "unavailable",
+      command,
+      output: `Could not execute the check: ${error instanceof Error ? error.message : String(error)}`,
     }
   }
-  return { passed: result.exitCode === 0, output: (result.stdout + result.stderr).trim() }
+}
+
+export function classifyQualityExecution(
+  result: SpawnWithTimeoutResult,
+  command: string,
+  budgets: string
+): QualityCheckResult {
+  const output = (result.stdout + result.stderr).trim()
+  if (result.aborted) {
+    return {
+      status: "unavailable",
+      command,
+      output: `Verification was cancelled. ${budgets}\n${output}`.trim(),
+    }
+  }
+  if (result.timedOut) {
+    return {
+      status: "timeout",
+      command,
+      output: `Execution deadline exceeded. ${budgets}\n${output}`.trim(),
+    }
+  }
+  if (result.exitCode === null) {
+    return {
+      status: "unavailable",
+      command,
+      output: `No terminal exit status was received.\n${output}`.trim(),
+    }
+  }
+  if (result.exitCode === 126 || result.exitCode === 127) {
+    return {
+      status: "unavailable",
+      command,
+      output: `Could not execute a script command (exit ${result.exitCode}).\n${output}`.trim(),
+    }
+  }
+  return {
+    status: result.exitCode === 0 ? "passed" : "failed",
+    command,
+    output: result.exitCode === 0 ? output : `Exit ${result.exitCode}.\n${output}`.trim(),
+  }
 }
 
 async function resolveScripts(cwd: string): Promise<{
@@ -205,32 +284,58 @@ async function buildQualityBlockReason(
   ])}`
 }
 
-async function collectFailures(
+async function collectQualityResults(
   resolved: { lint: string | null; typecheck: string | null },
-  cwd: string
-): Promise<string[]> {
+  cwd: string,
+  startedAt: number,
+  context?: SwizHookRunContext
+): Promise<QualityCheckResult[]> {
   const selection = await detectPackageManagerDetails(cwd)
   if (!selection) {
     return [
-      "Cannot select a package manager safely. Add an explicit packageManager declaration or a project lockfile; no verification command was run.",
+      {
+        status: "unavailable",
+        command: "",
+        output:
+          "Cannot select a package manager safely. Add an explicit packageManager declaration or a project lockfile; no verification command was run.",
+      },
     ]
   }
   const pm = selection.packageManager
   const scriptNames = [resolved.lint, resolved.typecheck].filter((s): s is string => s !== null)
-  const results = await Promise.all(scriptNames.map((s) => runScript(pm, s, cwd)))
-  const failures: string[] = []
-  for (let i = 0; i < results.length; i++) {
-    if (!results[i]!.passed) {
-      failures.push(
-        `\`${pm} run ${scriptNames[i]}\` failed:\n${summarizeCheckOutput(results[i]!.output)}\n` +
-          `Selection: ${pm}; root: ${selection.root}; evidence: ${selection.source}; command cwd: ${cwd}`
-      )
-    }
-  }
-  return failures
+  const budget = qualityCheckBudget(context, Date.now() - startedAt)
+  const results = await Promise.all(scriptNames.map((s) => runQualityScript(pm, s, cwd, budget)))
+  return results.map((result) => ({
+    ...result,
+    output: `${result.output}\nSelection: ${pm}; root: ${selection.root}; evidence: ${selection.source}; command cwd: ${cwd}`,
+  }))
 }
 
-export async function evaluateStopQualityChecks(input: StopHookInput): Promise<SwizHookOutput> {
+export async function qualityResultsResponse(
+  results: QualityCheckResult[],
+  ctx: QualityBlockContext
+): Promise<SwizHookOutput> {
+  const incomplete = results.filter((result) => result.status !== "passed")
+  if (incomplete.length === 0) return {}
+  const details = incomplete.map((result) => {
+    const status = result.status === "failed" ? "failed" : `${result.status} (unverified)`
+    return `${result.command ? `\`${result.command}\` ${status}:\n` : ""}${summarizeCheckOutput(result.output)}`
+  })
+  if (incomplete.some((result) => result.status === "failed")) {
+    return blockStopObj(await buildQualityBlockReason(details, ctx))
+  }
+  return blockStopObj(
+    `Quality checks remain unverified.\n\n${details.join("\n\n")}\n\n` +
+      "Complete verification before stopping. Re-run the listed commands in the reported command cwd and investigate execution or timing problems. " +
+      "An incomplete run does not establish lint or type errors."
+  )
+}
+
+export async function evaluateStopQualityChecks(
+  input: StopHookInput,
+  context?: SwizHookRunContext
+): Promise<SwizHookOutput> {
+  const startedAt = Date.now()
   const raw = input as Record<string, any>
   if (!isQualityChecksEnabled(raw)) return {}
   const parsed = stopHookInputSchema.parse(input)
@@ -238,21 +343,19 @@ export async function evaluateStopQualityChecks(input: StopHookInput): Promise<S
   const resolved = await resolveScripts(cwd)
   if (!resolved) return {}
 
-  const failures = await collectFailures(resolved, cwd)
-  if (failures.length === 0) return {}
-
+  const results = await collectQualityResults(resolved, cwd, startedAt, context)
   const settings = (raw._effectiveSettings as Record<string, any>) ?? {}
-  return blockStopObj(await buildQualityBlockReason(failures, { cwd, settings }))
+  return await qualityResultsResponse(results, { cwd, settings })
 }
 
 const stopQualityChecks: SwizStopHook = {
   name: "stop-quality-checks",
   event: "stop",
-  timeout: 60,
+  timeout: QUALITY_HOOK_TIMEOUT_MS / 1000,
   requiredSettings: ["qualityChecksGate"],
 
-  run(input) {
-    return evaluateStopQualityChecks(input)
+  run(input, context) {
+    return evaluateStopQualityChecks(input, context)
   },
 }
 

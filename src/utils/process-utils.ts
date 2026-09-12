@@ -8,6 +8,7 @@ export interface SpawnWithTimeoutResult {
   stderr: string
   exitCode: number | null
   timedOut: boolean
+  aborted?: boolean
 }
 
 /**
@@ -23,42 +24,80 @@ export interface SpawnWithTimeoutResult {
  */
 export async function spawnWithTimeout(
   cmd: string[],
-  opts: { cwd?: string; timeoutMs?: number; stdin?: string } = {}
+  opts: {
+    cwd?: string
+    timeoutMs?: number
+    stdin?: string
+    signal?: AbortSignal
+    /** Isolate and terminate script descendants along with their runner on POSIX. */
+    killProcessGroup?: boolean
+  } = {}
 ): Promise<SpawnWithTimeoutResult> {
-  const { cwd, timeoutMs = 30_000, stdin } = opts
+  const { cwd, timeoutMs = 30_000, stdin, signal } = opts
+  const detached = opts.killProcessGroup === true && process.platform !== "win32"
+  if (signal?.aborted) {
+    return { stdout: "", stderr: "", exitCode: null, timedOut: false, aborted: true }
+  }
 
   const finish = async (
     proc: Subprocess<"pipe" | "ignore", "pipe", "pipe">
   ): Promise<SpawnWithTimeoutResult> => {
     let timedOut = false
+    let aborted = false
     let sigkillTimer: ReturnType<typeof setTimeout> | undefined
+    const kill = (signalName: "SIGTERM" | "SIGKILL") => {
+      if (detached) {
+        try {
+          process.kill(-proc.pid, signalName)
+        } catch (error) {
+          if ((error as { code?: string }).code !== "ESRCH") proc.kill(signalName)
+        }
+      } else {
+        proc.kill(signalName)
+      }
+    }
+    const terminate = () => {
+      if (sigkillTimer) return
+      kill("SIGTERM")
+      sigkillTimer = setTimeout(() => {
+        kill("SIGKILL")
+      }, SUBPROCESS_SIGKILL_GRACE_MS)
+    }
+    const onAbort = () => {
+      aborted = true
+      terminate()
+    }
     const timer = setTimeout(() => {
       timedOut = true
-      proc.kill("SIGTERM")
-      sigkillTimer = setTimeout(() => {
-        proc.kill("SIGKILL")
-      }, SUBPROCESS_SIGKILL_GRACE_MS)
+      terminate()
     }, timeoutMs)
+    signal?.addEventListener("abort", onAbort, { once: true })
+    if (signal?.aborted) onAbort()
 
-    const [stdout, stderr] = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-    ])
-    await proc.exited
-    clearTimeout(timer)
-    if (sigkillTimer) clearTimeout(sigkillTimer)
-
-    return {
-      stdout,
-      stderr,
-      exitCode: proc.exitCode,
-      timedOut,
+    try {
+      const [stdout, stderr] = await Promise.all([
+        new Response(proc.stdout).text(),
+        new Response(proc.stderr).text(),
+      ])
+      await proc.exited
+      return {
+        stdout,
+        stderr,
+        exitCode: proc.exitCode,
+        timedOut,
+        ...(aborted ? { aborted: true } : {}),
+      }
+    } finally {
+      clearTimeout(timer)
+      if (sigkillTimer) clearTimeout(sigkillTimer)
+      signal?.removeEventListener("abort", onAbort)
     }
   }
 
   if (stdin !== undefined) {
     const proc = Bun.spawn(cmd, {
       cwd,
+      detached,
       stdin: "pipe",
       stdout: "pipe",
       stderr: "pipe",
@@ -71,6 +110,7 @@ export async function spawnWithTimeout(
   return finish(
     Bun.spawn(cmd, {
       cwd,
+      detached,
       stdin: "ignore",
       stdout: "pipe",
       stderr: "pipe",

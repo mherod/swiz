@@ -10,7 +10,9 @@ import { coerceDispatchAgentEnvelopeInPlace } from "./dispatch-zod-surfaces.ts"
 import type { HookExecution } from "./engine.ts"
 import {
   buildSpawnContext,
+  DEFAULT_TIMEOUT,
   flatSyncHooks,
+  getHookTimeout,
   launchAsyncHooks,
   logSlowHookSummary,
   runEntry,
@@ -19,6 +21,7 @@ import {
 import { injectDispatchSessionAgeContext } from "./session-age-context.ts"
 import { injectProjectStateProvenance } from "./state-provenance.ts"
 import { isStopLikeDispatchEvent, normalizeStopDispatchResponseInPlace } from "./stop-response.ts"
+import { DISPATCH_TIMEOUTS } from "./timeouts.ts"
 import type { DispatchStage } from "./timing.ts"
 
 /** Context passed to each hook execution strategy. */
@@ -44,6 +47,14 @@ export interface HookExecutionStrategy<T = Record<string, any>> {
 }
 
 type HookResult = { execution: HookExecution; parsed: Record<string, any> | null }
+
+/** Let synchronous Stop checks use their declared budgets, within the event cap. */
+export function stopCollectionTimeoutMs(groups: HookGroup[], minimumMs: number): number {
+  const budgets = flatSyncHooks(groups).map(
+    ({ hook }) => (getHookTimeout(hook) ?? DEFAULT_TIMEOUT) * 1000
+  )
+  return Math.min(DISPATCH_TIMEOUTS.stop! * 1000, Math.max(minimumMs, ...budgets))
+}
 
 /**
  * Shared scaffolding for all three strategies: sets up an AbortController,
@@ -85,12 +96,17 @@ export async function runStrategyPipeline(
 
   const onDispatchAbort = () => controller.abort()
   ctx.signal?.addEventListener("abort", onDispatchAbort, { once: true })
+  if (ctx.signal?.aborted) controller.abort()
 
   // When a collection timeout is set, abort remaining hooks after the window
   // expires rather than relying solely on per-hook onResult abort.
   let collectionTimer: ReturnType<typeof setTimeout> | null = null
   if (opts.collectionTimeoutMs) {
-    collectionTimer = setTimeout(() => controller.abort(), opts.collectionTimeoutMs)
+    const timeoutMs =
+      ctx.canonicalEvent === "stop"
+        ? stopCollectionTimeoutMs(filteredGroups, opts.collectionTimeoutMs)
+        : opts.collectionTimeoutMs
+    collectionTimer = setTimeout(() => controller.abort(), timeoutMs)
   }
 
   const syncStartedAt = performance.now()

@@ -212,7 +212,9 @@ export async function runSwizHookAsMain(
       normalizedPayload: structuredClone(input),
     })
   }
-  const output = await hook.run(input)
+  const output = await hook.run(input, {
+    timeoutMs: hook.timeout === undefined ? undefined : hook.timeout * 1000,
+  })
   await emitHookOutputIfNonEmpty(output)
   // The hook decision is already emitted above. Keep the old flush point for
   // compatibility with any external hook path that still tracks async rewrites.
@@ -455,6 +457,14 @@ export interface SwizHookMeta {
 
 // ─── Core interface ───────────────────────────────────────────────────────────
 
+/** Execution limits supplied by the hook runner. */
+export interface SwizHookRunContext {
+  /** Cancellation from the dispatch or collection deadline. */
+  signal?: AbortSignal
+  /** Effective per-hook budget; hooks should reserve time for cleanup/output. */
+  timeoutMs?: number
+}
+
 /**
  * A SwizHook bundles dispatch metadata with a typed run() implementation.
  *
@@ -471,7 +481,7 @@ export interface SwizHook<TInput = ToolHookInput> extends SwizHookMeta {
    *   `process.exit` or rely on subprocess-only `hook-utils` helpers — return structured
    *   output so cooldowns and multi-hook dispatch work.
    */
-  run(input: TInput): SwizHookOutput | Promise<SwizHookOutput>
+  run(input: TInput, context?: SwizHookRunContext): SwizHookOutput | Promise<SwizHookOutput>
 }
 
 // ─── Event-specific aliases ───────────────────────────────────────────────────
