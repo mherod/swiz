@@ -511,6 +511,11 @@ async function showMcpServer(
         .join(", ")
       console.log(`    env: ${envPairs}`)
     }
+    if (server.headers && Object.keys(server.headers).length > 0) {
+      // Custom names can carry credentials too; display presence without exposing values.
+      const headers = Object.keys(server.headers).map((key) => `${key}=[redacted]`)
+      console.log(`    headers: ${headers.join(", ")}`)
+    }
   }
   console.log("")
 }
