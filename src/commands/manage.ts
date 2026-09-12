@@ -378,8 +378,8 @@ function validateManageOptions(action: ManageAction, state: ManageParseState): v
     throw new Error("Claude Desktop has no project MCP configuration")
   if (action === "sync" && state.sourceAgentFlags.size)
     throw new Error("sync uses participating agents as sources; use merge for --from")
-  if (state.dryRun && action !== "sync" && action !== "merge")
-    throw new Error("--dry-run supports sync and merge only")
+  if (state.dryRun && !["add", "remove", "sync", "merge"].includes(action))
+    throw new Error("--dry-run supports add, remove, sync and merge only")
 }
 
 function validateAddTransport(state: ManageParseState): void {
@@ -526,8 +526,10 @@ async function addMcpServer(parsed: ParsedManageArgs, base: string): Promise<voi
     const json = await readMcpFile(path)
     const mcpServers = { ...(json.mcpServers ?? {}) }
     mcpServers[name] = translateServerForAgent(definition, agentId)
-    await writeMcpFile(path, { ...json, mcpServers })
-    console.log(`Added "${name}" to ${agent.displayName} (${path})`)
+    if (!parsed.dryRun) await writeMcpFile(path, { ...json, mcpServers })
+    console.log(
+      `${parsed.dryRun ? "Would add" : "Added"} "${name}" to ${agent.displayName} (${path})`
+    )
   }
 }
 
@@ -543,8 +545,10 @@ async function removeMcpServer(parsed: ParsedManageArgs, base: string): Promise<
       continue
     }
     delete mcpServers[name]
-    await writeMcpFile(path, { ...json, mcpServers })
-    console.log(`Removed "${name}" from ${agent.displayName} (${path})`)
+    if (!parsed.dryRun) await writeMcpFile(path, { ...json, mcpServers })
+    console.log(
+      `${parsed.dryRun ? "Would remove" : "Removed"} "${name}" from ${agent.displayName} (${path})`
+    )
   }
 }
 
@@ -937,7 +941,7 @@ export const manageCommand: Command<ManageCommandOptions> = {
       flags: "mcp sync",
       description: "Sync enabled servers across agents; preserve disabled entries locally",
     },
-    { flags: "--dry-run", description: "Preview sync or merge without writes" },
+    { flags: "--dry-run", description: "Preview add, remove, sync or merge without writes" },
     {
       flags: "--skip-non-portable",
       description: "Sync portable definitions while preserving incompatible entries",
