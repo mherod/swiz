@@ -5,13 +5,13 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js"
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js"
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js"
 import { mcpToolResultSchema, runMcpTool } from "../mcp-tool-core.ts"
-import { useTempDir } from "../utils/test-utils.ts"
+import { acquireEnvLock, releaseEnvLockFn, useTempDir } from "../utils/test-utils.ts"
 import { handleMcpToolRoute } from "./daemon/mcp-tool-routes.ts"
 import { executeMcpTool, registerSkillQueryTool, resetMcpToolDaemonBackoff } from "./mcp.ts"
 
 const tmp = useTempDir("swiz-skill-query-")
-const originalHome = process.env.HOME
-const originalNoDaemon = process.env.SWIZ_NO_DAEMON
+let originalHome: string | undefined
+let originalNoDaemon: string | undefined
 const body = "---\ndescription: Project review\n---\n# Review\n!`git status`\n"
 let cwd: string
 let localPath: string
@@ -32,6 +32,9 @@ async function writeSkill(root: string, name: string, content: string): Promise<
 }
 
 beforeEach(async () => {
+  await acquireEnvLock()
+  originalHome = process.env.HOME
+  originalNoDaemon = process.env.SWIZ_NO_DAEMON
   const home = await tmp.create()
   cwd = join(home, "project")
   localPath = await writeSkill(join(cwd, ".skills"), "review", body)
@@ -54,14 +57,18 @@ beforeEach(async () => {
 })
 
 afterEach(() => {
-  spawn.mockRestore()
-  spawnSync.mockRestore()
-  fetchSpy.mockRestore()
-  if (originalHome === undefined) delete process.env.HOME
-  else process.env.HOME = originalHome
-  if (originalNoDaemon === undefined) delete process.env.SWIZ_NO_DAEMON
-  else process.env.SWIZ_NO_DAEMON = originalNoDaemon
-  resetMcpToolDaemonBackoff()
+  try {
+    spawn?.mockRestore()
+    spawnSync?.mockRestore()
+    fetchSpy?.mockRestore()
+    if (originalHome === undefined) delete process.env.HOME
+    else process.env.HOME = originalHome
+    if (originalNoDaemon === undefined) delete process.env.SWIZ_NO_DAEMON
+    else process.env.SWIZ_NO_DAEMON = originalNoDaemon
+    resetMcpToolDaemonBackoff()
+  } finally {
+    releaseEnvLockFn()
+  }
 })
 
 function routeRequest(input: object, project = cwd): Request {

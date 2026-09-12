@@ -30,13 +30,13 @@ describe("MCP add/remove previews", () => {
     expect((await run(["add", "preview", "--command", "bun", ...targets], home)).exitCode).toBe(0)
     const paths = [join(home, ".cursor", "mcp.json"), join(home, ".codex", "config.toml")]
     const before = await Promise.all(paths.map((path) => Bun.file(path).text()))
-    const entries = await readdir(home, { recursive: true })
+    const entries = (await readdir(home, { recursive: true })).sort()
     const definition = action === "add" ? ["--url", "https://example.com/mcp"] : []
     const result = await run([action, "preview", ...definition, ...targets, "--dry-run"], home)
     expect(result.exitCode).toBe(0)
     expect(result.stdout).toContain(`Would ${action} "preview"`)
     expect(await Promise.all(paths.map((path) => Bun.file(path).text()))).toEqual(before)
-    expect(await readdir(home, { recursive: true })).toEqual(entries)
+    expect((await readdir(home, { recursive: true })).sort()).toEqual(entries)
   })
 
   test("project preview uses project paths and missing remove stays a no-op", async () => {

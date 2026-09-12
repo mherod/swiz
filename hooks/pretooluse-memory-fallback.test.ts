@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test"
+import { mkdir } from "node:fs/promises"
 import { join } from "node:path"
 import { withGitClient } from "../src/git/client.ts"
 import { MockGitClient } from "../src/git/mock-client.ts"
@@ -46,6 +47,8 @@ function completed(name: string, input: Record<string, unknown>, failed = false,
 async function fixture() {
   const git = new MockGitClient((args) => (args[0] === "rev-parse" ? ".git\n" : ""))
   const cwd = await withGitClient(git, () => createEnforcementProjectDir(create))
+  // Canonical project identity uses filesystem discovery, independent of the Git mock.
+  await mkdir(join(cwd, ".git"))
   const home = await create()
   const skillPath = join(cwd, ".skills/update-memory/SKILL.md")
   await Bun.write(skillPath, "---\nname: update-memory\n---\nRecord a project rule.\n")
