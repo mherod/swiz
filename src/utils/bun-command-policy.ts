@@ -26,6 +26,9 @@ const VALUE_FLAGS = new Set([
 const EVAL_FLAGS = new Set(["-e", "--eval", "-p", "--print"])
 const VERSION_FLAGS = new Set(["-v", "--version", "--revision", "-h", "--help"])
 const FILE_EXTENSION = /\.(?:[cm]?[jt]s|[jt]sx)$/i
+// PreToolUse sees shell text before expansion. A variable plus a fixed file suffix
+// expresses runtime intent without reading the daemon's unrelated environment.
+const SYMBOLIC_FILE_PATH = /^\$(?:[A-Za-z_]\w*|\{[A-Za-z_]\w*\})\/(?:[\w@+.-]+\/)*[\w@+.-]+$/
 const BUILTIN_COMMANDS = new Set([
   "test",
   "build",
@@ -210,6 +213,9 @@ async function isBunRuntime(invocation: BunInvocation): Promise<boolean> {
   if (!invocation.run && invocation.entry === "test") return true
   if (!FILE_EXTENSION.test(invocation.entry)) return false
   if (invocation.run && (await hasPackageScript(invocation.cwd, invocation.entry))) return false
+  if (invocation.entry.startsWith("$")) {
+    return SYMBOLIC_FILE_PATH.test(invocation.entry) && !invocation.entry.split("/").includes("..")
+  }
   return Bun.file(resolve(invocation.cwd, invocation.entry)).exists()
 }
 

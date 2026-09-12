@@ -102,6 +102,40 @@ describe("signed skill helper guard composition (#909)", () => {
     }
   })
 
+  test("classifies symbolic helper paths inside the complete memory preflight (#910)", async () => {
+    // Exact command fixture from update-memory on 12 September 2026; no external skill dependency.
+    const preflight = await Bun.file(join(import.meta.dir, "fixtures/memory-preflight.sh")).text()
+    for (const command of [
+      'bun "$SKILLS_ROOT/compact-memory/scripts/analyze-claude-md.ts" --resolve-thresholds',
+      'bun "${SKILLS_ROOT}/compact-memory/scripts/analyze-claude-md.ts" --resolve-thresholds',
+      '(RESOLUTION=$(bun "$SKILLS_ROOT/compact-memory/scripts/analyze-claude-md.ts" "$@"))',
+      preflight,
+    ]) {
+      const outputs = await evaluate(command)
+      expect(
+        outputs.map((output) => output.decision),
+        command
+      ).not.toContain("deny")
+      expect(outputs[0]?.reason).toContain("Bun runtime")
+    }
+  })
+
+  test("symbolic paths do not exempt package operations or nested executable substitutions", async () => {
+    for (const command of [
+      'bun add "$PACKAGE"',
+      "(RESULT=$(bun install))",
+      'bun "$SKILLS_ROOT/helper.ts"; bun run build',
+      'bun "$(bun add dependency)/helper.ts"',
+      'bun "${SKILLS_ROOT:-$(bun install)}/helper.ts"',
+      'bun "$SKILLS_ROOT/../../.private/injected.mjs"',
+      'bun "$SKILLS_ROOT/helpers/*.ts"',
+      'bun "$ENTRY"',
+    ]) {
+      const outputs = await evaluate(command)
+      expect(outputs[0]?.decision, command).toBe("deny")
+    }
+  })
+
   test("denies unsupported wrappers and imports with a direct Bun recipe", async () => {
     for (const command of [
       `pnpm exec bun ${helper} preflight`,
