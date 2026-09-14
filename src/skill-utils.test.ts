@@ -7,6 +7,7 @@ import {
   DEFAULT_SKILL_RECENCY_MAX_AGE_MINUTES,
   DEFAULT_SKILL_RECENCY_MAX_TURNS,
 } from "./settings/resolution.ts"
+import { querySkills } from "./skill-query.ts"
 import {
   buildSkillAgentToolEnvironmentFooter,
   clearSkillCache,
@@ -440,6 +441,48 @@ describe("findSkills", () => {
         false
       )
       expect(skills.some((skill) => skill.name === "live-skill")).toBe(true)
+    } finally {
+      if (originalHome === undefined) delete process.env.HOME
+      else process.env.HOME = originalHome
+      releaseEnvLockFn()
+      clearSkillCache()
+    }
+  })
+
+  // Guards the alloydb-basics symptom from #914: a folded block scalar description
+  // used to index as the literal ">-", so searching its text matched nothing.
+  test("indexes folded block scalar descriptions so SkillQuery can search them", async () => {
+    const fakeHome = await createTempDir()
+    const fakeProject = await createTempDir()
+
+    const folded = join(fakeProject, ".skills", "alloydb-basics")
+    await mkdir(folded, { recursive: true })
+    await writeFile(
+      join(folded, "SKILL.md"),
+      "---\nname: alloydb-basics\ndescription: >-\n  Manage AlloyDB for PostgreSQL clusters,\n  instances, and backups.\n---\n"
+    )
+
+    const unrelated = join(fakeProject, ".skills", "deploy")
+    await mkdir(unrelated, { recursive: true })
+    await writeFile(join(unrelated, "SKILL.md"), "---\ndescription: Ship changes\n---\n")
+
+    const originalHome = process.env.HOME
+    await acquireEnvLock()
+    try {
+      process.env.HOME = fakeHome
+      const skills = await findSkills(fakeProject)
+      const alloydb = skills.find((skill) => skill.name === "alloydb-basics")
+      expect(alloydb?.description).toBe(
+        "Manage AlloyDB for PostgreSQL clusters, instances, and backups."
+      )
+
+      const found = await querySkills({ query: "PostgreSQL" }, fakeProject, {
+        discover: async (cwd: string) => await findSkills(cwd),
+        read: async (path: string) => await Bun.file(path).text(),
+      })
+      expect(found).toMatchObject({ action: "list", total: 1 })
+      if (found.action !== "list") throw new Error("Expected index")
+      expect(found.skills.map((skill) => skill.name)).toEqual(["alloydb-basics"])
     } finally {
       if (originalHome === undefined) delete process.env.HOME
       else process.env.HOME = originalHome
