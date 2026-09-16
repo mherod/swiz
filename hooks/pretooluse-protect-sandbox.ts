@@ -27,6 +27,7 @@ import { splitShellSegments, tokenizeShellSegment } from "../src/utils/shell-pat
 import {
   buildProtectedTaskStorageDenyReason,
   isAllowedMarkdownShellReadCommand,
+  isAllowedNvmSourceShellCommand,
   isAllowedSharedSkillShellCommand,
   isAllowedTrashMoveCommand,
   isCodexHomePath,
@@ -216,6 +217,9 @@ async function allowedHiddenHomeCandidate(
 ): Promise<boolean> {
   if (await isAllowedTrashMoveCommand(ctx.command, ctx.cwd, ctx.homeDir)) return true
   if (!resolvedCandidate) return false
+  if (isAllowedNvmSourceShellCommand(ctx.command, candidate, resolvedCandidate, ctx.homeDir)) {
+    return true
+  }
   const isSharedSkill = await isConfiguredSkillPath(resolvedCandidate, ctx.homeDir)
   return isSharedSkill && isAllowedSharedSkillShellCommand(ctx.command, candidate)
 }

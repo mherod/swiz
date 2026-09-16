@@ -32,6 +32,7 @@ const SAFE_READ_ONLY_COMMANDS = new Set([
 
 const SKILL_SCRIPT_RUNNERS = new Set(["bash", "bun", "sh", "zsh"])
 const SKILL_PROGRAM_FILE_FLAGS = new Set(["-f", "--from-file"])
+const NVM_SOURCE_COMMANDS = new Set(["source", "."])
 
 export const SAFE_READ_ONLY_INSPECTION_HINT = [
   "If you only need to inspect the file, use Read or a read-only shell command (cat, head, tail, grep, rg, sed -n, awk).",
@@ -388,6 +389,41 @@ export function isAllowedSharedSkillShellCommand(command: string, skillPath: str
     if (pathIndexes.length === 0) continue
     matched = true
     if (!isAllowedSkillPathStage(tokens, pathIndexes)) return false
+  }
+  return matched
+}
+
+function isNvmPath(target: string, homeDir: string): boolean {
+  const nvmRoot = joinPath(homeDir, ".nvm")
+  return target !== nvmRoot && isPathWithin(nvmRoot, target)
+}
+
+function isAllowedNvmSourceStage(tokens: string[], pathIndexes: number[]): boolean {
+  const commandIndex = commandTokenIndex(tokens)
+  if (!NVM_SOURCE_COMMANDS.has(tokens[commandIndex] ?? "")) return false
+  if (tokens.slice(0, commandIndex).some((token) => token.includes("="))) return false
+  return pathIndexes.length === 1 && pathIndexes[0] === commandIndex + 1
+}
+
+export function isAllowedNvmSourceShellCommand(
+  command: string,
+  nvmPath: string,
+  resolvedPath: string,
+  homeDir: string
+): boolean {
+  if (!command.trim() || !nvmPath.trim() || !isNvmPath(resolvedPath, homeDir)) return false
+  const normalized = command.normalize("NFKC")
+  if (normalized.includes("`") || normalized.includes("$(")) return false
+
+  let matched = false
+  for (const segment of splitShellSegments(normalized)) {
+    const tokens = tokenizeShellSegment(segment)
+    const pathIndexes = tokens.flatMap((token, index) =>
+      tokenReferencesPath(token, nvmPath) ? [index] : []
+    )
+    if (pathIndexes.length === 0) continue
+    matched = true
+    if (!isAllowedNvmSourceStage(tokens, pathIndexes)) return false
   }
   return matched
 }

@@ -2,7 +2,9 @@ import { describe, expect, it } from "bun:test"
 import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { isSandboxDisableCommand } from "../hooks/pretooluse-protect-sandbox.ts"
+import pretoolUseProtectSandbox, {
+  isSandboxDisableCommand,
+} from "../hooks/pretooluse-protect-sandbox.ts"
 import {
   isProtectedTaskStoragePath,
   isProtectedTaskStoragePathResolved,
@@ -167,6 +169,72 @@ describe("isSafeReadOnlyShellCommand", () => {
   it("still rejects redirects that write to real files", () => {
     expect(isSafeReadOnlyShellCommand("ls -la ~/.gemini > /tmp/out")).toBe(false)
     expect(isSafeReadOnlyShellCommand("cat ~/.swiz/settings.json 2>/tmp/err")).toBe(false)
+  })
+})
+
+describe("pretooluse-protect-sandbox nvm sourcing", () => {
+  async function runSandboxHook(home: string, command: string) {
+    const previousHome = process.env.HOME
+    process.env.HOME = home
+    try {
+      return await pretoolUseProtectSandbox.run({
+        cwd: join(home, "project"),
+        tool_name: "Bash",
+        tool_input: { command },
+      })
+    } finally {
+      if (previousHome === undefined) {
+        delete process.env.HOME
+      } else {
+        process.env.HOME = previousHome
+      }
+    }
+  }
+
+  it("allows sourcing nvm from tilde paths", async () => {
+    const home = await mkdtemp(join(tmpdir(), "swiz-nvm-home-"))
+    try {
+      await mkdir(join(home, ".nvm"), { recursive: true })
+      await writeFile(join(home, ".nvm", "nvm.sh"), "nvm() { :; }\n")
+      await mkdir(join(home, "project"), { recursive: true })
+
+      const result = await runSandboxHook(home, "source ~/.nvm/nvm.sh")
+
+      expect(result).toEqual({})
+    } finally {
+      await rm(home, { recursive: true, force: true })
+    }
+  })
+
+  it("allows dot-sourcing nvm from HOME paths", async () => {
+    const home = await mkdtemp(join(tmpdir(), "swiz-nvm-home-"))
+    try {
+      await mkdir(join(home, ".nvm"), { recursive: true })
+      await writeFile(join(home, ".nvm", "nvm.sh"), "nvm() { :; }\n")
+      await mkdir(join(home, "project"), { recursive: true })
+
+      const result = await runSandboxHook(home, '. "$HOME/.nvm/nvm.sh"')
+
+      expect(result).toEqual({})
+    } finally {
+      await rm(home, { recursive: true, force: true })
+    }
+  })
+
+  it("continues blocking arbitrary hidden-home sourcing", async () => {
+    const home = await mkdtemp(join(tmpdir(), "swiz-hidden-home-"))
+    try {
+      await mkdir(join(home, ".swiz"), { recursive: true })
+      await writeFile(join(home, ".swiz", "settings.json"), "{}")
+      await mkdir(join(home, "project"), { recursive: true })
+
+      const result = await runSandboxHook(home, "source ~/.swiz/settings.json")
+
+      expect(JSON.stringify(result)).toContain('"permissionDecision":"deny"')
+      expect(JSON.stringify(result)).toContain("Hidden home-directory path references")
+    } finally {
+      await rm(home, { recursive: true, force: true })
+    }
   })
 })
 
