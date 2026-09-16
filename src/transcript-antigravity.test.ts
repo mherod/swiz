@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { mkdtemp, rm } from "node:fs/promises"
+import { mkdir, mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import {
@@ -8,6 +8,7 @@ import {
 } from "./transcript-analysis-parse-part2.ts"
 import { parseTranscriptArgs } from "./transcript-args.ts"
 import type { Session } from "./transcript-schemas.ts"
+import { findAntigravitySessions } from "./transcript-sessions-discovery.ts"
 import { loadSessionContent } from "./transcript-turns.ts"
 
 function createToolTranscript(): string {
@@ -36,6 +37,40 @@ function createToolTranscript(): string {
     }),
   ].join("\n")
 }
+
+describe("Antigravity project discovery", () => {
+  test.each([
+    "antigravity",
+    "antigravity-cli",
+  ])("requires matching project hints for %s sessions", async (provider) => {
+    const home = await mkdtemp(join(tmpdir(), "swiz-antigravity-project-"))
+    try {
+      const project = join(home, "workspace", "target")
+      const root = join(home, ".gemini", provider)
+      for (const id of ["missing", "empty", "unrelated", "matched"]) {
+        const brain = join(root, "brain", id)
+        if (provider === "antigravity-cli") {
+          const logs = join(brain, ".system_generated", "logs")
+          await mkdir(logs, { recursive: true })
+          await Bun.write(join(logs, "transcript.jsonl"), createToolTranscript())
+        } else {
+          await mkdir(join(root, "conversations"), { recursive: true })
+          await Bun.write(join(root, "conversations", `${id}.pb`), new Uint8Array([0]))
+        }
+        if (id === "missing") continue
+        await mkdir(brain, { recursive: true })
+        if (id === "empty") continue
+        const hint = id === "matched" ? project : `${project}-other`
+        await Bun.write(join(brain, "task.md"), `Working in file://${hint}/src/index.ts`)
+      }
+
+      expect((await findAntigravitySessions(project, home)).map((s) => s.id)).toEqual(["matched"])
+      expect(await findAntigravitySessions(join(home, "unrelated-project"), home)).toEqual([])
+    } finally {
+      await rm(home, { recursive: true, force: true })
+    }
+  })
+})
 
 describe("parseAntigravityJsonlEntries", () => {
   test("parses user, assistant, tool-use, and tool-result records", () => {

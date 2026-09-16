@@ -1,6 +1,7 @@
 import { LRUCache } from "lru-cache"
 import type { DisplayTurn } from "../scripts/transcript/monitor-state.ts"
 import { projectKeyFromCwd } from "./project-key.ts"
+import { createCodexLineParser } from "./transcript-analysis-parse-part1.ts"
 import type { TimeRange, TranscriptArgs } from "./transcript-args.ts"
 import { type DebugEvent, loadDebugLog, parseDebugEvents } from "./transcript-debug.ts"
 import {
@@ -179,9 +180,12 @@ async function loadJsonlTurnsForward(
   if (limit !== undefined && limit <= 0) return []
 
   const turns: Turn[] = []
+  const parseCodexLine = formatHint === "codex-jsonl" ? createCodexLineParser() : undefined
   for await (const line of streamJsonlLinesFromFile(file)) {
     if (!line.trim()) continue
-    const parsedTurns = collectTurnsFromJsonlText(line, formatHint, userOnly)
+    const parsedTurns = parseCodexLine
+      ? collectTurns(parseCodexLine(line), userOnly)
+      : collectTurnsFromJsonlText(line, formatHint, userOnly)
     if (appendFilteredTurns(turns, parsedTurns, timeRange, limit)) return turns
   }
 

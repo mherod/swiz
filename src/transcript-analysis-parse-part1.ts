@@ -593,7 +593,7 @@ const codexEventMsgSchema = z.looseObject({
   }),
 })
 
-/** Schema for Codex response_item records (assistant messages and tool calls) */
+/** Schema for Codex response_item records (messages and tool calls) */
 const codexResponseItemSchema = z.looseObject({
   type: z.literal("response_item"),
   timestamp: z.string().optional(),
@@ -654,22 +654,35 @@ interface CodexResponseData {
   }
 }
 
+function classifyCodexMessage(
+  data: CodexResponseData,
+  sessionId: string | undefined,
+  entries: TranscriptEntry[]
+): void {
+  const { timestamp, payload } = data
+  const role = payload.role
+  if (role !== "user" && role !== "assistant") return
+  const text = extractCodexMessageText(
+    payload.content,
+    role === "user" ? "input_text" : "output_text"
+  )
+  if (!text) return
+  entries.push({
+    type: role,
+    sessionId,
+    timestamp,
+    message: { role, content: role === "user" ? text : [{ type: "text", text }] },
+  })
+}
+
 function classifyCodexResponseItem(
   data: CodexResponseData,
   sessionId: string | undefined,
   entries: TranscriptEntry[]
 ): void {
   const { timestamp, payload } = data
-  if (payload.type === "message" && payload.role === "assistant") {
-    const text = extractCodexMessageText(payload.content, "output_text")
-    if (text) {
-      entries.push({
-        type: "assistant",
-        sessionId,
-        timestamp,
-        message: { role: "assistant", content: [{ type: "text", text }] },
-      })
-    }
+  if (payload.type === "message") {
+    classifyCodexMessage(data, sessionId, entries)
     return
   }
   if ((payload.type === "function_call" || payload.type === "custom_tool_call") && payload.name) {
@@ -693,15 +706,59 @@ function classifyCodexResponseItem(
   }
 }
 
-export function parseCodexJsonlEntries(text: string): TranscriptEntry[] {
-  const entries: TranscriptEntry[] = []
+const codexTurnBoundarySchema = z.object({
+  type: z.literal("event_msg"),
+  payload: z.object({
+    type: z.enum(["task_started", "task_complete", "turn_aborted", "context_compacted"]),
+  }),
+})
+
+interface CodexUserRecord {
+  source: unknown
+  text: string
+}
+
+function codexEntryUserText(entry: TranscriptEntry | undefined): string | undefined {
+  if (entry?.type !== "user") return undefined
+  const content = entry.message?.content
+  return typeof content === "string" ? content : undefined
+}
+
+function isPairedCodexUser(
+  previous: CodexUserRecord | undefined,
+  source: unknown,
+  text: string
+): boolean {
+  return previous !== undefined && previous.source !== source && previous.text === text
+}
+
+/** Keep paired legacy/current user records from becoming two conversation turns. */
+export function createCodexLineParser(): (line: string) => TranscriptEntry[] {
   let sessionId: string | undefined
+  let previousUser: CodexUserRecord | undefined
 
-  for (const line of splitJsonlLines(text)) {
+  return (line) => {
     const parsed = tryParseJsonLine(line)
-    if (parsed === undefined) continue
+    if (!parsed || typeof parsed !== "object" || !("type" in parsed)) return []
+    if (codexTurnBoundarySchema.safeParse(parsed).success) previousUser = undefined
+    const entries: TranscriptEntry[] = []
     sessionId = classifyCodexLine(parsed, sessionId, entries)
+    const entry = entries[0]
+    const text = codexEntryUserText(entry)
+    if (text !== undefined) {
+      if (isPairedCodexUser(previousUser, parsed.type, text)) {
+        previousUser = undefined
+        return []
+      }
+      previousUser = { source: parsed.type, text }
+    } else if (entry || parsed.type === "session_meta" || parsed.type === "compacted") {
+      previousUser = undefined
+    }
+    return entries
   }
+}
 
-  return entries
+export function parseCodexJsonlEntries(text: string): TranscriptEntry[] {
+  const parseLine = createCodexLineParser()
+  return splitJsonlLines(text).flatMap(parseLine)
 }

@@ -652,8 +652,7 @@ async function antigravitySessionMatchesTarget(
   try {
     entries = await readdir(brainSessionDir, { withFileTypes: true })
   } catch {
-    // If no metadata can be read, include as fallback so users can still resolve by ID.
-    return true
+    return false
   }
 
   const fileNames = entries.filter((entry) => entry.isFile()).map((entry) => entry.name)
@@ -665,7 +664,7 @@ async function antigravitySessionMatchesTarget(
     .slice(0, 5)
 
   const candidates = [...new Set([...preferred, ...fallback])].slice(0, 8)
-  if (candidates.length === 0) return true
+  if (candidates.length === 0) return false
 
   const targetPath = resolve(targetDir)
   for (const name of candidates) {
