@@ -65,6 +65,18 @@ describe("pretooluse-banned-commands", () => {
       expect(result.decision).toBe("allow")
       expect(result.stdout).toContain("fd")
     })
+
+    test.each([
+      "python script.py",
+      "python3 script.py",
+      'python3 -c "print(1)"',
+    ])("Python gets a tip: %s", async (command) => {
+      const result = await runHook(command)
+      expect(result.decision).toBe("allow")
+      expect(result.reason).toContain("Tip: prefer")
+      expect(result.reason).toContain("System Python versions can vary")
+      expect(result.reason).not.toContain("Do not use")
+    })
   })
 
   describe("deny severity (blocked)", () => {
@@ -456,9 +468,10 @@ describe("pretooluse-banned-commands", () => {
       expect(result.reason).toContain("Write tool")
     })
 
-    test("python is blocked", async () => {
-      const result = await runHook("python3 script.py")
+    test("Python advice does not override another command denial", async () => {
+      const result = await runHook("python3 script.py && rm output.txt")
       expect(result.decision).toBe("deny")
+      expect(result.reason).toContain("trash")
     })
 
     test("git stash is blocked", async () => {
@@ -1427,14 +1440,23 @@ describe("pretooluse-banned-commands", () => {
     })
   })
 
-  describe("runtime rules (bun project)", () => {
-    // Note: These tests verify behavior when package manager is detected as bun.
-    // In CI/environments where bun is not the detected PM, node/ts-node may pass through.
-    test("python3 is always blocked regardless of package manager", async () => {
-      const result = await runHook("python3 script.py")
-      expect(result.decision).toBe("deny")
-      // Message mentions either bun or node depending on detected package manager
-      expect(result.reason).toMatch(/bun|node/)
+  describe("runtime advice", () => {
+    const tmp = useTempDir("swiz-python-advice-")
+
+    test.each([
+      ["bun@1.3.14", "bun"],
+      ["npm@10.0.0", "node"],
+    ])("Python is allowed with runtime guidance for %s", async (packageManager, runtime) => {
+      const cwd = await tmp.create()
+      await Bun.write(join(cwd, "package.json"), JSON.stringify({ packageManager }))
+      const result = await runHookInProcess(HOOK, {
+        tool_name: "Bash",
+        tool_input: { command: "python3 script.py" },
+        cwd,
+      })
+      expect(result.decision).toBe("allow")
+      expect(result.reason).toContain(`Tip: prefer \`${runtime}\``)
+      expect(result.reason).toContain(`${runtime} script.`)
     })
   })
 

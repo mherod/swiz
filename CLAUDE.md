@@ -125,7 +125,7 @@ alwaysApply: false
 - No `cd` in Bash; use absolute paths, `git -C`, `pnpm --prefix`, or `cwd` in `Bun.spawn()`.
 - `sed -i`/`sed > file` blocked; `sed -n` allowed. Use Read `offset`/`limit`.
 - `awk` is blocked entirely; prefer `bun -e`, `cut`, `git --format`.
-- Do not use `python`/`python3`; use `bun -e` or `jq`.
+- Prefer `bun -e` or `jq` for general scripting; `python`/`python3` are allowed with an advisory tip.
 - No `rm`/`rm -rf`; use `trash <path>`; guard with `[[ -e <path> ]] && trash <path>`.
 - DO NOT edit `~/.claude/hooks/` or `~/.claude/skills/` (external repos). For cross-repo bugs, file an issue with error, root cause, fix, and criteria.
 - **DO NOT mark tasks complete without shipped code:** modify source, verify `git diff`, commit, mark complete.

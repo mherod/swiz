@@ -411,8 +411,9 @@ function buildRuntimeRules(pm: string | null, runtime: "bun" | "node", context: 
   const rules: Rule[] = [
     {
       match: (c) => PYTHON_CMD_RE.test(c),
+      severity: "warn",
       message:
-        `Do not use \`python\` or \`python3\`. The system Python version is unreliable across environments.\n\nUse \`${runtime}\` instead — it ships a consistent runtime:\n` +
+        `Tip: prefer \`${runtime}\` over \`python\` or \`python3\` for general scripting when practical. System Python versions can vary across environments.\n\nAlternatives:\n` +
         (runtime === "bun"
           ? "  • bun script.ts       — run a TypeScript or JavaScript file\n  • bun -e 'code here'  — evaluate an inline expression"
           : "  • node script.js      — run a JavaScript file\n  • bun script.ts       — run a TypeScript file with Bun") +
