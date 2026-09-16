@@ -10,7 +10,7 @@
 
 import { detectCurrentAgentFromHookPayload } from "../../src/agent-paths.ts"
 import { isIncompleteTaskStatus } from "../../src/tasks/task-recovery.ts"
-import { isTaskListTool } from "../../src/tool-matchers.ts"
+import { isAnyProviderTaskListTool } from "../../src/tool-matchers.ts"
 import {
   formatCurrentSessionUsageWindow,
   getCurrentSessionTaskToolStats,
@@ -32,8 +32,11 @@ export function requireTaskListSync(
   const agent = detectCurrentAgentFromHookPayload(input)
   if (!agent || agent.id !== "claude") return null
 
-  // Skip if TaskList was called recently in the current session.
-  if (ctx.recentObservedToolNames.some((n) => isTaskListTool(n))) return null
+  // Skip if TaskList was called recently in the current session. Observed names come
+  // straight off the transcript, so a session whose only task tools are MCP-provided
+  // reports `mcp__swiz__TaskList`; matching the bare name would leave the gate
+  // permanently unsatisfiable there.
+  if (ctx.recentObservedToolNames.some((n) => isAnyProviderTaskListTool(n))) return null
 
   // Block stop and require TaskList sync
   return {
