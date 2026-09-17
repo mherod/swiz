@@ -17,7 +17,9 @@ import {
   compareTaskIds,
   legacySessionPrefix,
   parseTaskId,
+  projectStoreKey,
   readTasks,
+  readTasksAcrossStores,
   sessionDirPath,
   sessionPrefix,
 } from "../tasks/task-repository.ts"
@@ -176,6 +178,11 @@ async function runListTasks(args: string[], cwd: string = process.cwd()): Promis
     return
   }
 
+  if (!allProjects && !extractFlag(args, "--session")) {
+    await listTasks(cwd, "current project", dateFormat, false, await readDefaultProjectTasks(cwd))
+    return
+  }
+
   const sessionId = await resolveSession(args)
   const orphanIds = await getOrphanSessionIds()
   await listTasks(
@@ -184,6 +191,11 @@ async function runListTasks(args: string[], cwd: string = process.cwd()): Promis
     dateFormat,
     orphanIds.has(sessionId)
   )
+}
+
+/** Default CLI queue uses the same scope as MCP; --session remains an explicit single-store view. */
+export async function readDefaultProjectTasks(cwd: string, tasksDir?: string): Promise<Task[]> {
+  return readTasksAcrossStores("", projectStoreKey(cwd).key, tasksDir)
 }
 
 async function runCreateTask(rest: string[], cwd: string = process.cwd()): Promise<void> {

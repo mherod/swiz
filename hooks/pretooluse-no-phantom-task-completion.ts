@@ -24,11 +24,10 @@ import type { SwizHookOutput, SwizToolHook } from "../src/SwizHook.ts"
 import { preToolUseAllow, preToolUseDeny, runSwizHookAsMain } from "../src/SwizHook.ts"
 import { toolHookInputSchema } from "../src/schemas.ts"
 import { resolveSafeSessionId } from "../src/session-id.ts"
-import { createDefaultTaskStore } from "../src/task-roots.ts"
 import { hasStructuredEvidence } from "../src/tasks/task-evidence.ts"
 import { isWithinUserMessageGrace } from "../src/tasks/task-governance-grace.ts"
 import { buildTaskGovernanceMessage } from "../src/tasks/task-governance-messages.ts"
-import { readTasks } from "../src/tasks/task-repository.ts"
+import { readHookTasks } from "../src/tasks/task-recovery.ts"
 import { isTaskTool } from "../src/tool-matchers.ts"
 import { extractToolBlocksFromEntry, resolveSessionLines } from "../src/utils/transcript.ts"
 
@@ -152,13 +151,12 @@ function buildDenialMessage(
 }
 
 async function evaluateTaskBufferAllowance(
-  sessionId: string | undefined,
+  input: ReturnType<typeof toolHookInputSchema.parse>,
   taskId: string
 ): Promise<SwizHookOutput | null> {
-  if (!sessionId) return null
+  if (!input.session_id) return null
 
-  const { tasksDir } = createDefaultTaskStore()
-  const tasks = await readTasks(sessionId, tasksDir)
+  const tasks = await readHookTasks(input)
   const otherInProgress = tasks.filter(
     (task) => task.id !== taskId && task.status === "in_progress"
   )
@@ -226,8 +224,7 @@ export async function evaluatePretooluseNoPhantomTaskCompletion(
 ): Promise<SwizHookOutput> {
   const raw = toolHookInputSchema.parse(input)
   if (!agentHasTaskToolsForHookPayload(raw as Record<string, any>)) return {}
-  const { toolName, toolInput, cwd, transcriptPath, sessionId, safeSessionId } =
-    extractRawFields(raw)
+  const { toolName, toolInput, cwd, transcriptPath, safeSessionId } = extractRawFields(raw)
 
   if (!isCompletionCall(toolName, toolInput)) return {}
 
@@ -238,7 +235,7 @@ export async function evaluatePretooluseNoPhantomTaskCompletion(
   // OR the session has at least 2 pending tasks queued, we assume the session
   // has enough real work in flight or planned to allow a potentially
   // phantom/cleanup task without strict transcript evidence.
-  const bufferAllowance = await evaluateTaskBufferAllowance(sessionId, taskId)
+  const bufferAllowance = await evaluateTaskBufferAllowance(raw, taskId)
   if (bufferAllowance) return bufferAllowance
 
   if (!(await isGitRepoForHookPayload(raw as Record<string, unknown>, cwd))) {

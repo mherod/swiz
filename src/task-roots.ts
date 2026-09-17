@@ -80,13 +80,14 @@ export function createTaskStoreForHookPayload(
 
 export function findTaskStoreForSession(
   sessionId: string,
-  homeDir = getHomeDir()
+  homeDir = getHomeDir(),
+  fallback = createDefaultTaskStore(homeDir)
 ): ProviderTaskRoots {
   for (const provider of PROVIDER_ORDER) {
     const roots = createTaskStoreForProvider(provider, homeDir)
     if (taskSessionDirHasFiles(roots.tasksDir, sessionId)) return roots
   }
-  return createDefaultTaskStore(homeDir)
+  return fallback
 }
 
 /**

@@ -28,7 +28,7 @@ import { getAutoSteerStore } from "../src/auto-steer-store.ts"
 import type { SwizHook, SwizHookOutput } from "../src/SwizHook.ts"
 import { runSwizHookAsMain } from "../src/SwizHook.ts"
 import { sanitizeSessionId } from "../src/session-id.ts"
-import { readSessionTasks } from "../src/tasks/task-recovery.ts"
+import { readHookTasks } from "../src/tasks/task-recovery.ts"
 import {
   isAnyProviderTaskCreateTool,
   isAnyProviderTaskUpdateTool,
@@ -60,10 +60,10 @@ function hasCommitTrigger(
 async function hasAllTasksCompleteTrigger(
   store: ReturnType<typeof getAutoSteerStore>,
   safeSession: string,
-  sessionId: string
+  input: Record<string, any>
 ): Promise<boolean> {
   if (!store.hasPending(safeSession, "after_all_tasks_complete")) return false
-  const tasks = await readSessionTasks(sessionId)
+  const tasks = await readHookTasks(input)
   return (
     tasks.length > 0 && tasks.every((t) => t.status === "completed" || t.status === "cancelled")
   )
@@ -116,7 +116,7 @@ export async function getTriggersToDeliver(
     triggers.push("after_commit")
   }
 
-  if (await hasAllTasksCompleteTrigger(store, safeSession, sessionId)) {
+  if (await hasAllTasksCompleteTrigger(store, safeSession, { ...rec, session_id: sessionId })) {
     triggers.push("after_all_tasks_complete")
   }
 

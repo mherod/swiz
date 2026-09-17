@@ -1,5 +1,8 @@
 import { describe, expect, it } from "bun:test"
+import { useTempDir } from "../src/utils/test-utils.ts"
 import { applyMutationOverlay, buildCountSummary } from "./posttooluse-task-count-context.ts"
+
+const tmp = useTempDir("swiz-task-count-context-")
 
 describe("applyMutationOverlay", () => {
   it("updates task status on TaskUpdate", () => {
@@ -105,7 +108,7 @@ describe("evaluatePosttooluseTaskCountContext", () => {
       session_id: sessionId,
       tool_name: "TaskUpdate",
       tool_input: { taskId: "1", status: "in_progress" },
-      cwd: process.cwd(),
+      cwd: await tmp.create(),
       agent: "claude",
     })
     expect(res).toEqual({})
@@ -122,7 +125,7 @@ describe("evaluatePosttooluseTaskCountContext", () => {
       session_id: sessionId,
       tool_name: "TaskUpdate",
       tool_input: { taskId: "1", status: "in_progress" },
-      cwd: process.cwd(),
+      cwd: await tmp.create(),
       agent: "claude",
     })
     expect(res).not.toEqual({})

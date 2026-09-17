@@ -122,9 +122,10 @@ export async function listTasks(
   sessionId: string,
   label: string,
   dateFormat: DateFormat = "relative",
-  recovered = false
+  recovered = false,
+  queue?: Task[]
 ): Promise<void> {
-  const tasks = await readTasks(sessionId)
+  const tasks = queue ?? (await readTasks(sessionId))
   const recoveredTag = recovered ? ` ${YELLOW}[recovered]${RESET}` : ""
   console.log(
     `\n  ${BOLD}Tasks${RESET} ${DIM}(${label}: ${sessionId.slice(0, 8)}...)${RESET}${recoveredTag}\n`

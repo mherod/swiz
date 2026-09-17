@@ -3,6 +3,8 @@ import { orderBy } from "lodash-es"
 import { debugLog } from "../debug.ts"
 import { getHomeDirWithFallback } from "../home.ts"
 import { computeSubjectFingerprint } from "../subject-fingerprint.ts"
+import { createTaskStoreForHookPayload, findTaskStoreForSession } from "../task-roots.ts"
+import { projectStoreKey, readTasksAcrossStores } from "./task-repository.ts"
 import type { TaskStateCache } from "./task-state-cache.ts"
 import { backfillTaskTimingFields } from "./task-timing.ts"
 
@@ -149,18 +151,26 @@ export async function readSessionTasksUnioned(
   cwd: string | null | undefined,
   home: string = getHomeDirWithFallback("")
 ): Promise<SessionTask[]> {
-  const sessionTasks = await readSessionTasks(sessionId, home)
-  if (!cwd) return sessionTasks
+  const root = getTasksRoot(home)
+  return root
+    ? readTasksAcrossStores(sessionId, cwd ? projectStoreKey(cwd).key : undefined, root)
+    : []
+}
 
-  const { projectKeyFromCwd } = await import("../project-key.ts")
-  const projectKey = projectKeyFromCwd(cwd)
-  if (!projectKey || projectKey === sessionId) return sessionTasks
-
-  const projectTasks = await readSessionTasks(projectKey, home)
-  if (projectTasks.length === 0) return sessionTasks
-
-  const { mergeTaskStoresByRecency } = await import("./task-repository.ts")
-  return mergeTaskStoresByRecency(sessionTasks, projectTasks)
+/** Provider-aware queue boundary for hooks, sharing MCP's legacy ownership rules. */
+export async function readHookTasks(
+  payload: { session_id?: string; cwd?: string; [key: string]: unknown },
+  home?: string
+): Promise<SessionTask[]> {
+  const fallback = createTaskStoreForHookPayload(payload, home)
+  const store = payload.session_id
+    ? findTaskStoreForSession(payload.session_id, home, fallback)
+    : fallback
+  return readTasksAcrossStores(
+    payload.session_id ?? "",
+    payload.cwd ? projectStoreKey(payload.cwd).key : undefined,
+    store.tasksDir
+  )
 }
 
 // ─── Cache-backed reads ─────────────────────────────────────────────────────

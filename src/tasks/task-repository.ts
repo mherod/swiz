@@ -272,6 +272,11 @@ export async function readTasks(
         try {
           const filePath = join(dir, f)
           const task = JSON.parse(await readFile(filePath, "utf-8")) as Task
+          if (!task.id || !task.subject || !taskStatusSchema.safeParse(task.status).success)
+            return null
+          task.description ??= ""
+          task.blocks ??= []
+          task.blockedBy ??= []
           const st = await stat(filePath)
           // Backfill timing fields for legacy tasks that predate explicit timestamps.
           if (!task.statusChangedAt) task.statusChangedAt = st.mtime.toISOString()
@@ -338,14 +343,77 @@ export async function readTasksAcrossStores(
   projectKey: string | undefined,
   tasksDir = createDefaultTaskStore().tasksDir
 ): Promise<Task[]> {
-  if (!projectKey || projectKey === sessionId) return await readTasks(sessionId, tasksDir)
+  return (await readTaskRecordsAcrossStores(sessionId, projectKey, tasksDir)).map(
+    ({ task }) => task
+  )
+}
 
-  const [sessionTasks, projectTasks] = await Promise.all([
-    readTasks(sessionId, tasksDir),
-    readTasks(projectKey, tasksDir),
-  ])
+/** A task's persistence address travels with it through lookup and mutation. */
+export interface StoredTask {
+  storeKey: TaskStoreKey
+  task: Task
+}
 
-  return mergeTaskStoresByRecency(sessionTasks, projectTasks)
+/** Explicit single-store reader for native session snapshots and targeted mutations. */
+export async function readTaskStore(
+  storeKey: TaskStoreKey,
+  tasksDir = createDefaultTaskStore().tasksDir
+): Promise<Task[]> {
+  return readTasks(taskStoreDirName(storeKey), tasksDir)
+}
+
+/**
+ * Project queue shared by MCP and hooks. Include positively attributed legacy sessions,
+ * plus the explicit current session when it has no ownership metadata yet. Unknown historical
+ * directories are not evidence of project ownership. Never use this union for store pruning.
+ */
+export async function readTaskRecordsAcrossStores(
+  sessionId: string | undefined,
+  projectKey: string | undefined,
+  tasksDir = createDefaultTaskStore().tasksDir
+): Promise<StoredTask[]> {
+  const keys: TaskStoreKey[] = []
+  if (projectKey) keys.push({ kind: "project", key: projectKey })
+  for (const id of await sessionCandidates(sessionId, Boolean(projectKey), tasksDir)) {
+    if (await sessionBelongsToQueue(id, sessionId, projectKey, tasksDir))
+      keys.push(sessionStoreKey(id))
+  }
+  const groups = await Promise.all(
+    keys.map(async (storeKey) =>
+      (await readTaskStore(storeKey, tasksDir)).map((task) => ({ ...task, storeKey }))
+    )
+  )
+  return mergeTaskStoresByRecency(...groups).map(({ storeKey, ...task }) => ({ storeKey, task }))
+}
+
+async function sessionCandidates(
+  sessionId: string | undefined,
+  includeHistory: boolean,
+  tasksDir: string
+) {
+  const candidates = new Set<string>(sessionId ? [sessionId] : [])
+  if (includeHistory) {
+    const entries = await readdir(tasksDir, { withFileTypes: true }).catch(() => [])
+    for (const entry of entries) if (entry.isDirectory()) candidates.add(entry.name)
+  }
+  return candidates
+}
+
+async function sessionBelongsToQueue(
+  id: string,
+  sessionId: string | undefined,
+  projectKey: string | undefined,
+  tasksDir: string
+) {
+  if (id === projectKey || !isSafeSessionId(sessionStoreKey(id), tasksDir)) return false
+  // Historical daemon writes overwrote cwd on some foreign path keys. A contradictory path
+  // key is not evidence of a session; only its explicit project address may select it.
+  if (id.startsWith("-") && id !== sessionId) return false
+  const meta = await readSessionMeta(id, tasksDir)
+  const owner = typeof meta?.cwd === "string" ? projectStoreKey(meta.cwd).key : undefined
+  if (owner === id) return false
+  if (!owner) return id === sessionId
+  return !projectKey || owner === projectKey
 }
 
 /** Lightweight per-session metadata index for O(1) open-task-count lookups. */
@@ -383,14 +451,13 @@ async function countOpenTasks(dir: string, files: string[]): Promise<number> {
 }
 
 async function resolveMetaCwd(dir: string, cwd?: string): Promise<string | undefined> {
-  if (cwd) return cwd
   try {
     const existing = JSON.parse(
       await readFile(join(dir, SESSION_META_FILE), "utf-8")
     ) as SessionMeta
-    return existing.cwd
+    return existing.cwd ?? cwd
   } catch {
-    return undefined
+    return cwd
   }
 }
 

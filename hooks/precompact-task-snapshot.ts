@@ -14,11 +14,12 @@ import { runSwizHookAsMain } from "../src/SwizHook.ts"
 import { preCompactHookInputSchema } from "../src/schemas.ts"
 import {
   getSessionCompactSnapshotPath,
+  getTasksRoot,
   isIncompleteTaskStatus,
   limitItems,
-  readSessionTasks,
   type SessionTask,
 } from "../src/tasks/task-recovery.ts"
+import { readTaskStore, sessionStoreKey } from "../src/tasks/task-repository.ts"
 
 export interface CompactSnapshot {
   sessionId: string
@@ -107,7 +108,12 @@ export async function evaluatePrecompactTaskSnapshot(input: unknown): Promise<Sw
   const home = getHomeDirWithFallback("")
   if (!home) return {}
 
-  const sessionTasks = await readSessionTasks(sessionId, home)
+  // The resume hook restores into this native session directory. Project records must never
+  // enter this snapshot: doing so would recreate them in the wrong store after compaction.
+  const sessionTasks = await readTaskStore(
+    sessionStoreKey(sessionId),
+    getTasksRoot(home)!
+  )
   if (sessionTasks.length === 0) return {}
   const snapshotTasks = toSnapshotTasks(sessionTasks)
   const snapshot = buildSnapshot(sessionId, snapshotTasks)

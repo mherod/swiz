@@ -15,7 +15,7 @@ import { getIssueStore } from "../src/issue-store.ts"
 import { runSwizHookAsMain, type SwizHook, type SwizHookOutput } from "../src/SwizHook.ts"
 import type { PostToolHookInput } from "../src/schemas.ts"
 import { postToolUseHookInputSchema } from "../src/schemas.ts"
-import { readSessionTasks } from "../src/tasks/task-recovery.ts"
+import { readHookTasks } from "../src/tasks/task-recovery.ts"
 import { isShellTool } from "../src/tool-matchers.ts"
 import { scheduleAutoSteer } from "../src/utils/auto-steer-helpers.ts"
 import { GIT_PUSH_RE } from "../src/utils/shell-patterns.ts"
@@ -34,8 +34,8 @@ export async function verifyPushLanded(cwd: string): Promise<boolean> {
   return localHead === remoteHead
 }
 
-export async function hasActiveTasks(sessionId: string): Promise<boolean> {
-  const tasks = await readSessionTasks(sessionId)
+export async function hasActiveTasks(sessionId: string, cwd?: string): Promise<boolean> {
+  const tasks = await readHookTasks({ session_id: sessionId, cwd })
   return tasks.some((t) => t.status === "in_progress" || t.status === "pending")
 }
 
@@ -86,7 +86,7 @@ export async function evaluatePushAutosteerIssue(input: unknown): Promise<SwizHo
 
   // Verify the push actually landed
   if (!(await verifyPushLanded(context.cwd))) return {}
-  if (await hasActiveTasks(context.sessionId)) return {}
+  if (await hasActiveTasks(context.sessionId, context.cwd)) return {}
 
   // Read open and ready issues from the local IssueStore
   const pick = await getReadyIssue(context.cwd)

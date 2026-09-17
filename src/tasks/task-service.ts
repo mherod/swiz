@@ -22,11 +22,13 @@ import {
   isIncompleteTaskStatus,
   legacySessionPrefix,
   parseTaskId,
+  readTaskStore,
   readTasks,
   resolveLegacyTaskStoreKey,
   STATUS_STYLE,
   sessionPrefix,
   type Task,
+  type TaskStoreKey,
   writeAudit,
   writeTask,
 } from "./task-repository.ts"
@@ -61,6 +63,8 @@ export function findCollidingTask(
 
 export interface CreateTaskOptions {
   sessionId: string
+  /** Explicit address for callers that already know the store kind. */
+  storeKey?: TaskStoreKey
   subject: string
   description: string
   /** Present continuous form for spinner display (e.g., 'Fixing login bug') */
@@ -77,6 +81,7 @@ export interface CreateTaskOptions {
  */
 export async function createTaskInProcess(opts: CreateTaskOptions): Promise<Task> {
   const { sessionId, subject, description, cwd = process.cwd() } = opts
+  const storeKey = opts.storeKey ?? (await resolveLegacyTaskStoreKey(sessionId, cwd))
 
   if (!opts.skipSubjectValidation) {
     const detection = detect(subject)
@@ -85,7 +90,7 @@ export async function createTaskInProcess(opts: CreateTaskOptions): Promise<Task
     }
   }
 
-  const tasks = await readTasks(sessionId)
+  const tasks = await readTaskStore(storeKey)
 
   const incomplete = tasks.filter((t) => isIncompleteTaskStatus(t.status))
   const collision = findCollidingTask(subject, incomplete)
@@ -118,7 +123,6 @@ export async function createTaskInProcess(opts: CreateTaskOptions): Promise<Task
     blockedBy: [],
   }
 
-  const storeKey = await resolveLegacyTaskStoreKey(sessionId, cwd)
   await writeTask(storeKey, task, cwd)
   await writeAudit(storeKey, {
     timestamp: new Date().toISOString(),
@@ -486,7 +490,7 @@ export function applyStatusTransition(
 }
 
 export async function updateStatus(
-  sessionId: string,
+  sessionId: string | TaskStoreKey,
   taskId: string,
   newStatus: Task["status"],
   options: {
@@ -497,11 +501,7 @@ export async function updateStatus(
   } = {}
 ): Promise<void> {
   const { evidence, verifyText, filterCwd } = options
-  const { sessionId: effectiveSessionId, task } = await resolveTaskById(
-    taskId,
-    sessionId,
-    filterCwd
-  )
+  const { storeKey, task } = await resolveTaskAddress(taskId, sessionId, filterCwd)
 
   if (verifyText) {
     const verifyError = verifyTaskSubject(task.subject, verifyText)
@@ -530,8 +530,7 @@ export async function updateStatus(
     task.completionTimestamp = now
   }
 
-  const storeKey = await resolveLegacyTaskStoreKey(effectiveSessionId, filterCwd ?? process.cwd())
-  await writeTask(storeKey, task, process.cwd())
+  await writeTask(storeKey, task, filterCwd ?? process.cwd())
   await writeAudit(storeKey, {
     timestamp: new Date().toISOString(),
     taskId,
@@ -560,7 +559,7 @@ export async function updateStatus(
  * the phantom-prone jump is gated.
  */
 export async function completeTaskWithAutoTransition(
-  sessionId: string,
+  sessionId: string | TaskStoreKey,
   taskId: string,
   options: {
     evidence?: string
@@ -571,7 +570,7 @@ export async function completeTaskWithAutoTransition(
 ): Promise<void> {
   const { filterCwd } = options
 
-  const { task } = await resolveTaskById(taskId, sessionId, filterCwd)
+  const { task } = await resolveTaskAddress(taskId, sessionId, filterCwd)
   if (task.status === "pending") {
     const settings = await readSwizSettings()
     if (!settings.taskAutoTransition) {
@@ -659,12 +658,15 @@ export async function validatePushPreFlightTaskState(filterCwd?: string): Promis
 // ─── Task field update ────────────────────────────────────────────────────────
 
 export async function writeTaskUpdate(
-  sessionId: string,
+  sessionId: string | TaskStoreKey,
   taskId: string,
   task: Task,
   newStatus?: Task["status"]
 ): Promise<void> {
-  const storeKey = await resolveLegacyTaskStoreKey(sessionId, process.cwd())
+  const storeKey =
+    typeof sessionId === "string"
+      ? await resolveLegacyTaskStoreKey(sessionId, process.cwd())
+      : sessionId
   if (newStatus) {
     const oldStatus = task.status
     const nowIso = new Date().toISOString()
@@ -695,4 +697,18 @@ export async function writeTaskUpdate(
   })
   console.log(`\n  ✏️  #${taskId}: updated`)
   console.log(`     ${task.subject}`)
+}
+
+/** Typed callers have already resolved ownership: never repeat a cross-store lookup. */
+async function resolveTaskAddress(taskId: string, address: string | TaskStoreKey, cwd?: string) {
+  if (typeof address === "string") {
+    const resolved = await resolveTaskById(taskId, address, cwd)
+    return {
+      task: resolved.task,
+      storeKey: await resolveLegacyTaskStoreKey(resolved.sessionId, cwd),
+    }
+  }
+  const task = (await readTaskStore(address)).find((candidate) => candidate.id === taskId)
+  if (!task) throw new Error(`Task #${taskId} not found in the resolved ${address.kind} store.`)
+  return { task, storeKey: address }
 }
