@@ -36,7 +36,7 @@ import {
   renderUnblockedLine,
   truncateForLine,
 } from "./tasks/task-mcp-view.ts"
-import { mergeDuplicateTaskFiles } from "./tasks/task-merge-duplicates.ts"
+import { mergeDuplicateTasksAcrossStores } from "./tasks/task-merge-duplicates.ts"
 import { pruneStaleCompletedTasks } from "./tasks/task-prune.ts"
 import {
   isSafeSessionId,
@@ -46,6 +46,7 @@ import {
   type StoredTask,
   type Task,
   type TaskStoreKey,
+  writeTask,
 } from "./tasks/task-repository.ts"
 import {
   completeTaskWithAutoTransition,
@@ -158,14 +159,35 @@ export async function readProjectTasksWithPrune(
   if (!isSafeSessionId(key, tasksDir)) return []
   const tasks = await readTaskStore(key, tasksDir)
   const dir = await readTaskStorePath(key, tasksDir)
-  const pruned = await pruneStaleCompletedTasks(dir, tasks)
-  return mergeDuplicateTaskFiles(dir, pruned, (task) => writeTaskUpdate(key, task.id, task))
+  return pruneStaleCompletedTasks(dir, tasks)
 }
 
-/** Prune only project-owned files before building the non-destructive legacy-session union. */
-async function readProjectQueueWithPrune(projectKey: string) {
-  await readProjectTasksWithPrune(projectKey)
-  return readMcpTaskQueue(projectKey)
+/**
+ * Prune project-owned files, then collapse duplicates across the whole
+ * assembled queue.
+ *
+ * Order is the point. The duplicates worth merging are one hook stub per prior
+ * session, each alone in its own session store, so merging before the union
+ * sees a group of one everywhere and collapses nothing. Only after
+ * `readMcpTaskQueue` unions the project store with the affiliated session
+ * stores do the copies sit side by side.
+ */
+async function readProjectQueueWithPrune(
+  projectKey: string,
+  tasksDir = createDefaultTaskStore().tasksDir
+): Promise<StoredTask[]> {
+  await readProjectTasksWithPrune(projectKey, tasksDir)
+  const records = await readMcpTaskQueue(projectKey, tasksDir)
+  const merged = await mergeDuplicateTasksAcrossStores(
+    records.map(({ storeKey, task }) => ({ address: storeKey, task })),
+    {
+      dirFor: (storeKey) => readTaskStorePath(storeKey, tasksDir),
+      // writeTask, not writeTaskUpdate: the latter prints to stdout, which the
+      // stdio MCP server reserves for JSON-RPC, and it ignores tasksDir.
+      write: (storeKey, task) => writeTask(storeKey, task, undefined, tasksDir),
+    }
+  )
+  return merged.map(({ address, task }) => ({ storeKey: address, task }))
 }
 
 /** Read-only MCP projection, also used by the scope diagnostic without invoking retention. */

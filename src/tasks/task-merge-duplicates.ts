@@ -168,6 +168,94 @@ export function planDuplicateMerges<T extends MergeableTask>(
  * Deleting a record that is already gone is still fine to ignore; that is
  * convergence, not loss.
  */
+/** A task paired with whatever the caller uses to address its owning store. */
+export interface AddressedTask<T, A> {
+  address: A
+  task: T
+}
+
+/**
+ * Store access for a cross-store merge. Kept as callbacks so this stays a leaf
+ * module: the task repository imports it, not the other way round.
+ */
+export interface StoreAccess<T, A> {
+  /** Directory holding the records of the given store. */
+  dirFor(address: A): Promise<string> | string
+  /** Quiet, durable write of the survivor to its own store. */
+  write(address: A, task: T): Promise<void>
+}
+
+/**
+ * Merge duplicates across several stores at once.
+ *
+ * This is the case the feature exists for. Each session that ends with unpushed
+ * commits leaves one "Push branch to remote" stub in its *own* session store,
+ * so every store holds a single copy and a per-directory pass never sees a
+ * group. Only the assembled queue does.
+ *
+ * The survivor stays in the store it came from and the folded records are
+ * deleted from theirs, so no record moves between stores.
+ */
+export async function mergeDuplicateTasksAcrossStores<T extends MergeableTask, A>(
+  records: readonly AddressedTask<T, A>[],
+  access: StoreAccess<T, A>
+): Promise<AddressedTask<T, A>[]> {
+  const { merges } = planDuplicateMerges(records.map((record) => record.task))
+  if (merges.length === 0) return [...records]
+
+  const addressById = new Map(records.map((record) => [record.task.id, record.address]))
+  const folded = new Set<string>()
+  const survivors = new Map<string, T>()
+
+  for (const merge of merges) {
+    const address = addressById.get(merge.task.id)
+    if (address === undefined) continue
+    if (!(await applyCrossStoreMerge(merge, address, addressById, access))) continue
+    survivors.set(merge.task.id, merge.task)
+    for (const id of merge.mergedIds) folded.add(id)
+  }
+
+  const result: AddressedTask<T, A>[] = []
+  for (const record of records) {
+    if (folded.has(record.task.id)) continue
+    const survivor = survivors.get(record.task.id)
+    result.push(survivor ? { ...record, task: survivor } : record)
+  }
+  return result
+}
+
+/** Survivor-first, same ordering guarantee as the single-store path. */
+async function applyCrossStoreMerge<T extends MergeableTask, A>(
+  merge: DuplicateMergeResult<T>,
+  survivorAddress: A,
+  addressById: ReadonlyMap<string, A>,
+  access: StoreAccess<T, A>
+): Promise<boolean> {
+  const targets: string[] = []
+  for (const id of merge.mergedIds) {
+    const address = addressById.get(id)
+    if (address === undefined) return false
+    const path = resolveTaskFilePath(await access.dirFor(address), id)
+    if (path === null) return false
+    targets.push(path)
+  }
+
+  try {
+    await access.write(survivorAddress, merge.task)
+  } catch {
+    return false
+  }
+
+  for (const path of targets) {
+    try {
+      await unlink(path)
+    } catch {
+      // already gone — the survivor covers this work either way
+    }
+  }
+  return true
+}
+
 /**
  * Persist one survivor and remove its folded records. Returns false when the
  * group was left untouched, so the caller keeps every original in its result.

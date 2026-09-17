@@ -5,6 +5,7 @@ import { join } from "node:path"
 import {
   type MergeableTask,
   mergeDuplicateTaskFiles,
+  mergeDuplicateTasksAcrossStores,
   mergeGroup,
   planDuplicateMerges,
   selectSurvivor,
@@ -200,5 +201,83 @@ describe("mergeDuplicateTaskFiles", () => {
     expect(await Bun.file(outside).exists()).toBe(true)
     // The group is left whole rather than half-merged.
     expect(surviving.map((t) => t.id)).toEqual(["1", "../settings"])
+  })
+})
+
+describe("mergeDuplicateTasksAcrossStores", () => {
+  // The motivating population: one hook stub per prior session, each alone in
+  // its own store. A per-directory pass sees a group of one everywhere and
+  // collapses nothing, which is why this case needs its own merge path.
+  async function makeSessionStores(ids: readonly string[]) {
+    const stores = new Map<string, string>()
+    for (const id of ids) {
+      const dir = await makeStoreDir()
+      stores.set(id, dir)
+      await writeTaskFile(dir, stub(id))
+    }
+    return stores
+  }
+
+  function accessFor(stores: Map<string, string>, written: Array<[string, string]>) {
+    return {
+      dirFor: (address: string) => stores.get(address) as string,
+      write: async (address: string, task: MergeableTask) => {
+        written.push([address, task.id])
+      },
+    }
+  }
+
+  it("collapses one stub per session store into a single survivor", async () => {
+    const ids = ["2487-1", "3448-1", "5976-1", "7271-1", "a1ea-1"]
+    const stores = await makeSessionStores(ids)
+    const records = ids.map((id) => ({ address: id, task: stub(id) }))
+    const written: Array<[string, string]> = []
+
+    const surviving = await mergeDuplicateTasksAcrossStores(records, accessFor(stores, written))
+
+    expect(surviving).toHaveLength(1)
+    const survivorId = surviving[0]?.task.id as string
+    expect(ids).toContain(survivorId)
+    // The survivor is rewritten to its own store, never relocated.
+    expect(written).toEqual([[survivorId, survivorId]])
+
+    for (const id of ids) {
+      const dir = stores.get(id) as string
+      expect(await fileExists(dir, id)).toBe(id === survivorId)
+    }
+  })
+
+  it("leaves distinct subjects in separate stores untouched", async () => {
+    // Control: proves the collapse above comes from matching subjects, not
+    // merely from records sharing a queue.
+    const stores = await makeSessionStores(["1", "2"])
+    const records = [
+      { address: "1", task: stub("1") },
+      { address: "2", task: { id: "2", subject: "Run the test suite", status: "pending" } },
+    ]
+    const written: Array<[string, string]> = []
+
+    const surviving = await mergeDuplicateTasksAcrossStores(records, accessFor(stores, written))
+
+    expect(surviving.map((r) => r.task.id)).toEqual(["1", "2"])
+    expect(written).toEqual([])
+    expect(await fileExists(stores.get("1") as string, "1")).toBe(true)
+    expect(await fileExists(stores.get("2") as string, "2")).toBe(true)
+  })
+
+  it("keeps every store's record when the survivor write fails", async () => {
+    const ids = ["1", "2"]
+    const stores = await makeSessionStores(ids)
+    const records = ids.map((id) => ({ address: id, task: stub(id) }))
+
+    const surviving = await mergeDuplicateTasksAcrossStores(records, {
+      dirFor: (address: string) => stores.get(address) as string,
+      write: async () => {
+        throw new Error("disk full")
+      },
+    })
+
+    expect(surviving.map((r) => r.task.id)).toEqual(ids)
+    for (const id of ids) expect(await fileExists(stores.get(id) as string, id)).toBe(true)
   })
 })
