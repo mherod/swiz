@@ -11,10 +11,26 @@
  * store-root resolver without a cycle. A guard only some call sites can import is how the
  * original fix ended up covering one file out of eleven.
  *
- * Depends on `node:path` alone — keep it that way so any module can import it.
+ * Keep this a leaf: only path operations and the pure project-key derivation belong here.
  */
 
 import { join, resolve, sep } from "node:path"
+import { projectKeyFromCwd } from "../project-key.ts"
+
+export type TaskStoreKey = { kind: "session"; id: string } | { kind: "project"; key: string }
+
+export function sessionStoreKey(id: string): Extract<TaskStoreKey, { kind: "session" }> {
+  return { kind: "session", id }
+}
+
+export function projectStoreKey(cwd: string): Extract<TaskStoreKey, { kind: "project" }> {
+  return { kind: "project", key: projectKeyFromCwd(cwd) }
+}
+
+/** Preserve the flat layout until all readers have migrated (#831). */
+export function taskStoreDirName(key: TaskStoreKey): string {
+  return key.kind === "session" ? key.id : key.key
+}
 
 /**
  * Whether `sessionId` stays inside the task store when joined onto `tasksDir`.
@@ -25,7 +41,8 @@ import { join, resolve, sep } from "node:path"
  * cannot be honoured exactly is refused, never rewritten. An absolute-looking id is safe —
  * `join` keeps it under the store, unlike `resolve`.
  */
-export function isSafeSessionId(sessionId: string, tasksDir: string): boolean {
+export function isSafeSessionId(key: TaskStoreKey, tasksDir: string): boolean {
+  const sessionId = taskStoreDirName(key)
   if (!sessionId.trim()) return false
   const root = resolve(tasksDir)
   const dir = resolve(join(root, sessionId))
@@ -38,8 +55,9 @@ export function isSafeSessionId(sessionId: string, tasksDir: string): boolean {
  * Hard backstop for every write and delete path; read paths that prefer an empty result over a
  * throw should test {@link isSafeSessionId} first.
  */
-export function sessionDirPath(sessionId: string, tasksDir: string): string {
-  if (!isSafeSessionId(sessionId, tasksDir)) {
+export function sessionDirPath(key: TaskStoreKey, tasksDir: string): string {
+  const sessionId = taskStoreDirName(key)
+  if (!isSafeSessionId(key, tasksDir)) {
     throw new Error(
       `Unsafe task session id ${JSON.stringify(sessionId)}: resolves outside the task store.`
     )

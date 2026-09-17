@@ -8,6 +8,7 @@ import { projectKeyFromCwd } from "../../src/project-key.ts"
 import type { StopHookInput } from "../../src/schemas.ts"
 import { createTaskStoreForHookPayload } from "../../src/task-roots.ts"
 import { isSafeSessionId, readTasksAcrossStores } from "../../src/tasks/task-repository.ts"
+import { sessionStoreKey } from "../../src/tasks/task-store-path.ts"
 import type { TaskCheckContext } from "./types.ts"
 
 /**
@@ -22,7 +23,7 @@ export async function resolveTaskCheckContext(
   if (!home) return null
 
   const taskStore = createTaskStoreForHookPayload(input as Record<string, any>, home)
-  if (!sessionId || !isSafeSessionId(sessionId, taskStore.tasksDir)) return null
+  if (!sessionId || !isSafeSessionId(sessionStoreKey(sessionId), taskStore.tasksDir)) return null
   const tasksDir = join(taskStore.tasksDir, sessionId)
   const projectKey = input.cwd ? projectKeyFromCwd(input.cwd) : undefined
   const allTasks = await readTasksAcrossStores(sessionId, projectKey, taskStore.tasksDir)

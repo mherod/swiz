@@ -15,7 +15,7 @@ async function probe(body: string): Promise<void> {
     import { runMcpTool } from ${modulePath("src/mcp-tool-core.ts")}
     import { projectKeyFromCwd } from ${modulePath("src/project-key.ts")}
     import { createDefaultTaskStore } from ${modulePath("src/task-roots.ts")}
-    import { readTasks, writeTask, writeAudit } from ${modulePath("src/tasks/task-repository.ts")}
+    import { readTasks, writeTask, writeAudit, sessionStoreKey, projectStoreKey } from ${modulePath("src/tasks/task-repository.ts")}
     import { createTaskInProcess } from ${modulePath("src/tasks/task-service.ts")}
     import { completeSessionTask } from ${modulePath("src/utils/session-task-io.ts")}
     import { mergeActionPlanIntoTasks } from ${modulePath("src/action-plan.ts")}
@@ -88,9 +88,9 @@ describe("hook task addressing (#868)", () => {
     await probe(`
       const task = await createTaskInProcess({ sessionId, subject: "Preserve completed work", description: "fixture", cwd })
       task.statusChangedAt = "2026-01-01T00:00:00Z"
-      await writeTask(sessionId, task, cwd)
-      await writeTask(projectKey, { ...task, status: "completed", statusChangedAt: "2026-01-02T00:00:00Z" }, cwd)
-      await writeAudit(projectKey, { timestamp: "2026-01-02T00:00:00Z", taskId: task.id, action: "status_change", newStatus: "completed" })
+      await writeTask(sessionStoreKey(sessionId), task, cwd)
+      await writeTask(projectStoreKey(cwd), { ...task, status: "completed", statusChangedAt: "2026-01-02T00:00:00Z" }, cwd)
+      await writeAudit(projectStoreKey(cwd), { timestamp: "2026-01-02T00:00:00Z", taskId: task.id, action: "status_change", newStatus: "completed" })
       check(!(await completeSessionTask(sessionId, task.subject, { cwd, evidence: "test: already completed" })), "resurrected stale task")
       check((await evaluateStopIncompleteTasks(payload)).decision !== "block", "stale session copy blocked stop")
       const ctx = await resolveCompletionAuditContext(payload, payload)

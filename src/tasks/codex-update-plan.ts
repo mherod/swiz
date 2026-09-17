@@ -20,6 +20,7 @@ import {
   writeTaskBatch,
 } from "./task-repository.ts"
 import { writeCanonicalTaskListSyncSentinel } from "./task-state-cache.ts"
+import { sessionStoreKey } from "./task-store-path.ts"
 
 export const CODEX_UPDATE_PLAN_TOOL_NAMES = new Set(["update_plan", "functions.update_plan"])
 const CODEX_PLAN_TASK_ID_PREFIX = "codex-"
@@ -171,7 +172,7 @@ function planMarkerCacheKey(sessionId: string, tasksDir: string): string {
  * reader already treats any failure as "no marker" inside its own try/catch.
  */
 export function codexPlanSyncMarkerPath(sessionId: string, tasksDir: string): string {
-  return join(sessionDirPath(sessionId, tasksDir), CODEX_PLAN_SYNC_MARKER_FILE)
+  return join(sessionDirPath(sessionStoreKey(sessionId), tasksDir), CODEX_PLAN_SYNC_MARKER_FILE)
 }
 
 async function readAppliedPlanMarker(
@@ -207,7 +208,7 @@ async function writeAppliedPlanMarker(
     appliedAt: new Date().toISOString(),
   }
   const markerPath = codexPlanSyncMarkerPath(sessionId, tasksDir)
-  await mkdir(sessionDirPath(sessionId, tasksDir), { recursive: true })
+  await mkdir(sessionDirPath(sessionStoreKey(sessionId), tasksDir), { recursive: true })
   if (writeMarker) await writeMarker(markerPath, marker)
   else await atomicWriteJson(markerPath, marker)
   appliedPlanMarkers.set(planMarkerCacheKey(sessionId, tasksDir), marker)
@@ -619,7 +620,7 @@ export async function syncCodexUpdatePlanSnapshot(
     const finalTasks = [...finalById.values()].sort((left, right) =>
       left.id.localeCompare(right.id)
     )
-    await writeTaskBatch(sessionId, writes, finalTasks, cwd, tasksDir)
+    await writeTaskBatch(sessionStoreKey(sessionId), writes, finalTasks, cwd, tasksDir)
     applyPlanSnapshotToEventState(sessionId, finalTasks)
     await writePlanSyncSentinel(sessionId, options.writeSentinel)
     await writeAppliedPlanMarker(

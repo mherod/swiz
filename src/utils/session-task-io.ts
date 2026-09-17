@@ -10,15 +10,18 @@
 import { join } from "node:path"
 import { stderrLog } from "../debug.ts"
 import { getHomeDirOrNull } from "../home.ts"
-import { projectKeyFromCwd } from "../project-key.ts"
 import { createDefaultTaskStore } from "../task-roots.ts"
 import {
   isIncompleteTaskStatus,
   isSafeSessionId,
   mergeTaskStoresByRecency,
+  projectStoreKey,
   readTasks,
   sessionDirPath,
+  sessionStoreKey,
   type TaskStatus,
+  type TaskStoreKey,
+  taskStoreDirName,
   writeAudit,
   writeTask,
 } from "../tasks/task-repository.ts"
@@ -39,13 +42,17 @@ function isValidSessionId(sessionId: string | undefined): sessionId is string {
 async function validateCreateTaskInputs(
   sessionId: string | undefined,
   sentinelKey: string,
-  storeKey: string
+  storeKey: TaskStoreKey
 ): Promise<{ sentinel: string } | null> {
   if (!isValidSessionId(sessionId) || !sentinelKey.trim()) return null
   const home = getHomeDirOrNull()
   if (!home) return null
   const { tasksDir } = createDefaultTaskStore()
-  if (!isSafeSessionId(sessionId, tasksDir) || !isSafeSessionId(storeKey, tasksDir)) return null
+  if (
+    !isSafeSessionId(sessionStoreKey(sessionId), tasksDir) ||
+    !isSafeSessionId(storeKey, tasksDir)
+  )
+    return null
   const digest = new Bun.CryptoHasher("sha256")
     .update(JSON.stringify([sessionId, sentinelKey]))
     .digest("hex")
@@ -103,7 +110,8 @@ export async function createSessionTask(
   cwdOrExecutor?: string | ((args: string[]) => Promise<number>)
 ): Promise<void> {
   const cwd = typeof cwdOrExecutor === "string" ? cwdOrExecutor : undefined
-  const storeKey = cwd ? projectKeyFromCwd(cwd) : (sessionId ?? "")
+  const storeKey = cwd ? projectStoreKey(cwd) : sessionStoreKey(sessionId ?? "")
+  const directoryName = taskStoreDirName(storeKey)
   const validated = await validateCreateTaskInputs(sessionId, sentinelKey, storeKey)
   if (!validated) return
   const { sentinel } = validated
@@ -111,7 +119,9 @@ export async function createSessionTask(
 
   // Legacy path: test-injected executor shells out to swiz CLI
   if (executor) {
-    const exitCode = await executor(buildTaskCreateArgs("swiz", subject, description, storeKey))
+    const exitCode = await executor(
+      buildTaskCreateArgs("swiz", subject, description, directoryName)
+    )
     if (exitCode === 0) await writeSentinel(sentinel)
     return
   }
@@ -119,14 +129,14 @@ export async function createSessionTask(
   // In-process path: direct disk write, no subprocess
   try {
     const { createTaskInProcess } = await import("../tasks/task-service.ts")
-    await createTaskInProcess({ sessionId: storeKey, subject, description, cwd })
+    await createTaskInProcess({ sessionId: directoryName, subject, description, cwd })
     await writeSentinel(sentinel)
   } catch (err) {
     stderrLog(
       "createSessionTask fallback",
       `[swiz] createSessionTask: in-process creation failed (${messageFromUnknownError(err)}), falling back to subprocess`
     )
-    await createTaskViaSubprocess(subject, description, storeKey, sentinel)
+    await createTaskViaSubprocess(subject, description, directoryName, sentinel)
   }
 }
 
@@ -144,13 +154,13 @@ export async function completeSessionTask(
   options: { cwd?: string; evidence: string }
 ): Promise<boolean> {
   if (!isValidSessionId(sessionId) || !subject.trim()) return false
-  if (!isSafeSessionId(sessionId, createDefaultTaskStore().tasksDir)) return false
+  if (!isSafeSessionId(sessionStoreKey(sessionId), createDefaultTaskStore().tasksDir)) return false
 
   const cwd = options.cwd ?? process.cwd()
-  const storeKeys = [...new Set([sessionId, projectKeyFromCwd(cwd)])]
+  const storeKeys = [sessionStoreKey(sessionId), projectStoreKey(cwd)]
   const groups = await Promise.all(
     storeKeys.map(async (storeKey) =>
-      (await readTasks(storeKey)).map((task) => ({ ...task, storeKey }))
+      (await readTasks(taskStoreDirName(storeKey))).map((task) => ({ ...task, storeKey }))
     )
   )
   const match = mergeTaskStoresByRecency(...groups).find(

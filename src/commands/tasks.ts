@@ -37,6 +37,7 @@ import {
   updateStatus,
   writeTaskUpdate,
 } from "../tasks/task-service.ts"
+import { sessionStoreKey } from "../tasks/task-store-path.ts"
 import type { Command } from "../types.ts"
 import { messageFromUnknownError } from "../utils/hook-json-helpers.ts"
 import { type McpFileData, type McpServerDef, readMcpFile } from "./mcp-config.ts"
@@ -622,7 +623,7 @@ async function runRepairTasks(rest: string[]): Promise<void> {
   const currentById = new Map(currentTasks.map((t) => [t.id, t]))
   // Repair rewrites task files, so an id that escapes the store must stop the command outright
   // rather than repair something outside it.
-  const sessionDir = sessionDirPath(sessionId, tasksDir)
+  const sessionDir = sessionDirPath(sessionStoreKey(sessionId), tasksDir)
   let repaired = 0
   let verified = 0
   const actions: RepairAction[] = []

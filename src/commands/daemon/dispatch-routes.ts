@@ -30,7 +30,7 @@ import type { DispatchStageDurations } from "../../dispatch/timing.ts"
 import { DISPATCH_TIMEOUTS } from "../../manifest.ts"
 import { taskCompletedHookInputSchema, taskCreatedHookInputSchema } from "../../schemas.ts"
 import { createTaskStoreForHookPayload } from "../../task-roots.ts"
-import { sessionDirPath } from "../../tasks/task-store-path.ts"
+import { sessionDirPath, sessionStoreKey } from "../../tasks/task-store-path.ts"
 import { isAnyProviderTaskCreateTool, isAnyProviderTaskUpdateTool } from "../../tool-matchers.ts"
 import type { CurrentSessionToolUsage } from "../../transcript-summary.ts"
 import {
@@ -736,7 +736,7 @@ async function seedTaskStateAndCapturePayload(
       const { tasksDir } = createTaskStoreForHookPayload(parsedPayload)
       // session_id is raw hook stdin here. The surrounding catch already swallows failures as
       // best-effort seeding, so a traversing id simply seeds nothing.
-      const sessionTasksDir = sessionDirPath(sessionId, tasksDir)
+      const sessionTasksDir = sessionDirPath(sessionStoreKey(sessionId), tasksDir)
       ctx.taskStateCache.watchSession(sessionId, sessionTasksDir)
       const { seedSessionFromDisk } = await import("../../tasks/task-event-state.ts")
       await seedSessionFromDisk(sessionId, sessionTasksDir)

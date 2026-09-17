@@ -7,7 +7,7 @@ import {
 } from "./agent-paths.ts"
 import { getHomeDir } from "./home.ts"
 import { getProviderTaskRoots, type ProviderTaskRoots } from "./provider-adapters.ts"
-import { isSafeSessionId } from "./tasks/task-store-path.ts"
+import { isSafeSessionId, sessionStoreKey } from "./tasks/task-store-path.ts"
 
 export type { ProviderTaskRoots as TaskRoots }
 
@@ -58,7 +58,7 @@ export function createTaskStoreForProvider(
 
 function taskSessionDirHasFiles(tasksDir: string, sessionId: string): boolean {
   // Store-root resolution feeds write paths, so an id that escapes must never look populated.
-  if (!isSafeSessionId(sessionId, tasksDir)) return false
+  if (!isSafeSessionId(sessionStoreKey(sessionId), tasksDir)) return false
   const sessionDir = join(tasksDir, sessionId)
   if (!existsSync(sessionDir)) return false
   try {

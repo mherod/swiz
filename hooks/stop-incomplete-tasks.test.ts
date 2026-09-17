@@ -2,7 +2,11 @@ import { describe, expect, test } from "bun:test"
 import { join } from "node:path"
 import { AGENTS } from "../src/agents.ts"
 import type { StopHookInput } from "../src/schemas.ts"
-import { type Task, writeTask as writeRepositoryTask } from "../src/tasks/task-repository.ts"
+import {
+  sessionStoreKey,
+  type Task,
+  writeTask as writeRepositoryTask,
+} from "../src/tasks/task-repository.ts"
 import { useTempDir, writeTask } from "../src/utils/test-utils.ts"
 import { evaluateStopIncompleteTasksHook } from "./stop-incomplete-tasks.ts"
 
@@ -250,7 +254,7 @@ describe("stop-incomplete-tasks", () => {
     const homeDir = await createTempHome()
     const sessionId = "session-codex-transcript"
     await writeRepositoryTask(
-      sessionId,
+      sessionStoreKey(sessionId),
       {
         id: "1",
         subject: "Codex work",

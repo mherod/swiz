@@ -1,18 +1,94 @@
-import { describe, expect, it } from "bun:test"
+import { describe, expect, expectTypeOf, it } from "bun:test"
 import { readdir, readFile, stat } from "node:fs/promises"
 import { join } from "node:path"
+import { projectKeyFromCwd } from "../project-key.ts"
 import { useTempDir } from "../utils/test-utils.ts"
+import { readAuditLog } from "./task-audit-verification.ts"
 import {
   isSafeSessionId,
+  projectStoreKey,
   readSessionMeta,
   readTasks,
+  resolveLegacyTaskStoreKey,
   sessionDirPath,
   type Task,
+  type TaskStoreKey,
+  taskStoreDirName,
+  writeAudit,
   writeTask,
   writeTaskBatch,
 } from "./task-repository.ts"
+import { sessionStoreKey } from "./task-store-path.ts"
 
 const tmp = useTempDir("swiz-task-repo-")
+
+describe("typed task store keys", () => {
+  it("requires explicit keys for writers and containment while preserving string readers", () => {
+    expectTypeOf<Parameters<typeof writeTask>[0]>().toEqualTypeOf<TaskStoreKey>()
+    expectTypeOf<Parameters<typeof writeTaskBatch>[0]>().toEqualTypeOf<TaskStoreKey>()
+    expectTypeOf<Parameters<typeof writeAudit>[0]>().toEqualTypeOf<TaskStoreKey>()
+    expectTypeOf<Parameters<typeof sessionDirPath>[0]>().toEqualTypeOf<TaskStoreKey>()
+    expectTypeOf<Parameters<typeof isSafeSessionId>[0]>().toEqualTypeOf<TaskStoreKey>()
+    expectTypeOf<Parameters<typeof readTasks>[0]>().toEqualTypeOf<string>()
+    expectTypeOf<Parameters<typeof readSessionMeta>[0]>().toEqualTypeOf<string>()
+    expectTypeOf<string>().not.toMatchTypeOf<Parameters<typeof writeTask>[0]>()
+    expectTypeOf(sessionStoreKey("id").kind).toEqualTypeOf<"session">()
+    expectTypeOf(projectStoreKey("/project").kind).toEqualTypeOf<"project">()
+  })
+
+  it("keeps both kinds at exactly the old paths without migrating directories or IDs", async () => {
+    const base = await tmp.create()
+    const cwd = "/workspace/project"
+    const keys = [sessionStoreKey("abcd-session"), projectStoreKey(cwd)]
+    const names = ["abcd-session", projectKeyFromCwd(cwd)]
+    for (const [index, key] of keys.entries()) {
+      const name = names[index]!
+      expect(taskStoreDirName(key)).toBe(name)
+      expect(sessionDirPath(key, base)).toBe(join(base, name))
+      const task = makeTask("user-1", "in_progress")
+      await writeTask(key, task, cwd, base)
+      await writeAudit(
+        key,
+        { timestamp: "2026-09-17T00:00:00Z", taskId: task.id, action: "create" },
+        base
+      )
+      expect(await readTasks(name, base)).toEqual([task])
+      expect((await readAuditLog(name, base))[0]?.taskId).toBe("user-1")
+      expect(await resolveLegacyTaskStoreKey(name, "/different-project", base)).toEqual(key)
+      task.status = "completed"
+      await writeTask(key, task, undefined, base)
+      expect(await Bun.file(join(base, name, "user-1.json")).json()).toEqual(task)
+    }
+    expect((await readdir(base)).sort()).toEqual(names.sort())
+  })
+
+  it("classifies first writes from explicit cwd without guessing from a directory prefix", async () => {
+    const base = await tmp.create()
+    const project = projectStoreKey("/workspace/project")
+    expect(await resolveLegacyTaskStoreKey(project.key, "/workspace/project", base)).toEqual(
+      project
+    )
+    expect(
+      await resolveLegacyTaskStoreKey("-arbitrary-session", "/workspace/project", base)
+    ).toEqual(sessionStoreKey("-arbitrary-session"))
+    expect(await readdir(base)).toEqual([])
+  })
+
+  it("enforces containment for project keys as well as session keys", () => {
+    expect(isSafeSessionId({ kind: "project", key: "../escape" }, "/tmp/store")).toBe(false)
+    expect(() => sessionDirPath({ kind: "project", key: "../escape" }, "/tmp/store")).toThrow()
+  })
+
+  it("ignores malformed metadata ownership without changing the legacy write address", async () => {
+    const base = await tmp.create()
+    const key = projectStoreKey("/workspace/project")
+    await Bun.write(join(base, key.key, ".session-meta.json"), JSON.stringify({ cwd: 42 }))
+    expect(await resolveLegacyTaskStoreKey(key.key, "/workspace/project", base)).toEqual(key)
+    const task = makeTask("user-2", "pending")
+    await writeTask(key, task, "/workspace/project", base)
+    expect(await readTasks(key.key, base)).toEqual([task])
+  })
+})
 
 function makeTask(id: string, status: Task["status"], subject?: string): Task {
   return {
@@ -45,29 +121,31 @@ describe("session directory containment", () => {
 
   it("rejects session ids that resolve outside the store", () => {
     for (const sessionId of ESCAPING) {
-      expect(isSafeSessionId(sessionId, "/tmp/store")).toBe(false)
-      expect(() => sessionDirPath(sessionId, "/tmp/store")).toThrow(/Unsafe task session id/)
+      expect(isSafeSessionId(sessionStoreKey(sessionId), "/tmp/store")).toBe(false)
+      expect(() => sessionDirPath(sessionStoreKey(sessionId), "/tmp/store")).toThrow(
+        /Unsafe task session id/
+      )
     }
   })
 
   it("accepts ordinary session ids", () => {
     // Control for the rejection case above: proves the guard is not refusing everything.
     for (const sessionId of CONTAINED) {
-      expect(isSafeSessionId(sessionId, "/tmp/store")).toBe(true)
-      expect(sessionDirPath(sessionId, "/tmp/store")).toStartWith("/tmp/store/")
+      expect(isSafeSessionId(sessionStoreKey(sessionId), "/tmp/store")).toBe(true)
+      expect(sessionDirPath(sessionStoreKey(sessionId), "/tmp/store")).toStartWith("/tmp/store/")
     }
   })
 
   it("rejects empty and whitespace-only session ids", () => {
     for (const sessionId of ["", "   ", "."]) {
-      expect(isSafeSessionId(sessionId, "/tmp/store")).toBe(false)
+      expect(isSafeSessionId(sessionStoreKey(sessionId), "/tmp/store")).toBe(false)
     }
   })
 
   it("writes nothing outside the store when given a traversing id", async () => {
     const base = await tmp.create()
     await expect(
-      writeTask("../escapee", makeTask("1", "pending"), undefined, base)
+      writeTask(sessionStoreKey("../escapee"), makeTask("1", "pending"), undefined, base)
     ).rejects.toThrow(/Unsafe task session id/)
     expect(await readdir(base)).toEqual([])
   })
@@ -85,8 +163,8 @@ describe("writeTask atomicity", () => {
     // Atomic writes go through a `${path}.${pid}.${ts}.${rand}.tmp` staging
     // file and rename. A successful write must leave only the .json file.
     const base = await tmp.create()
-    await writeTask("sess-atomic-1", makeTask("1", "pending"), undefined, base)
-    await writeTask("sess-atomic-1", makeTask("2", "in_progress"), undefined, base)
+    await writeTask(sessionStoreKey("sess-atomic-1"), makeTask("1", "pending"), undefined, base)
+    await writeTask(sessionStoreKey("sess-atomic-1"), makeTask("2", "in_progress"), undefined, base)
 
     const sessionDir = join(base, "sess-atomic-1")
     const files = await readdir(sessionDir)
@@ -102,7 +180,7 @@ describe("writeTask atomicity", () => {
     const sessionId = "sess-atomic-burst"
 
     const writers = Array.from({ length: 25 }, (_, i) =>
-      writeTask(sessionId, makeTask(String(i + 1), "pending"), undefined, base)
+      writeTask(sessionStoreKey(sessionId), makeTask(String(i + 1), "pending"), undefined, base)
     )
     const readers = Array.from({ length: 25 }, () => readTasks(sessionId, base))
 
@@ -134,12 +212,12 @@ describe("writeTask atomicity", () => {
     const base = await tmp.create()
     const sessionId = "sess-atomic-replace"
 
-    await writeTask(sessionId, makeTask("1", "pending"), undefined, base)
+    await writeTask(sessionStoreKey(sessionId), makeTask("1", "pending"), undefined, base)
     const filePath = join(base, sessionId, "1.json")
     const mtime1 = (await stat(filePath)).mtimeMs
 
     await Bun.sleep(15)
-    await writeTask(sessionId, makeTask("1", "in_progress"), undefined, base)
+    await writeTask(sessionStoreKey(sessionId), makeTask("1", "in_progress"), undefined, base)
     const mtime2 = (await stat(filePath)).mtimeMs
     expect(mtime2).toBeGreaterThan(mtime1)
 
@@ -155,7 +233,7 @@ describe("writeTask atomicity", () => {
     const second = makeTask("2", "completed", "Second task")
 
     const result = await writeTaskBatch(
-      sessionId,
+      sessionStoreKey(sessionId),
       [
         {
           task: first,
@@ -210,7 +288,7 @@ describe("writeTask atomicity", () => {
     )
 
     const result = await writeTaskBatch(
-      sessionId,
+      sessionStoreKey(sessionId),
       tasks.map((task) => ({
         task,
         audit: {

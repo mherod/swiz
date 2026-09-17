@@ -10,6 +10,7 @@ import {
   sessionPrefix,
 } from "../tasks/task-repository.ts"
 import { getSessions } from "../tasks/task-resolver.ts"
+import { sessionStoreKey } from "../tasks/task-store-path.ts"
 
 const RECOVERY_MUTATIONS = new Set(["complete", "status", "update", "repair"])
 const LIST_FLAGS = new Set([
@@ -114,7 +115,7 @@ async function assertSelectedSessionTasks(sessionId: string, taskIds: string[]):
   for (const taskId of taskIds) assertRecoveryTaskId(sessionId, taskId)
   const tasks = await readTasks(sessionId)
   const existingIds = new Set(tasks.map((task) => task.id))
-  const directory = sessionDirPath(sessionId, createDefaultTaskStore().tasksDir)
+  const directory = sessionDirPath(sessionStoreKey(sessionId), createDefaultTaskStore().tasksDir)
   for (const taskId of taskIds) {
     if (!existingIds.has(taskId)) {
       throw new Error(

@@ -83,9 +83,11 @@ function queueDiskRevert(
 ): void {
   void (async () => {
     try {
-      const { revertTaskStatusOnDisk } = await import("./task-repository.ts")
+      const { revertTaskStatusOnDisk, resolveLegacyTaskStoreKey } = await import(
+        "./task-repository.ts"
+      )
       await revertTaskStatusOnDisk(
-        sessionId,
+        await resolveLegacyTaskStoreKey(sessionId, process.cwd()),
         taskId,
         targetStatus as never,
         attemptedStatus as never

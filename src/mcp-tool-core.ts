@@ -144,7 +144,7 @@ export async function readProjectTasksWithPrune(
   tasksDir = createDefaultTaskStore().tasksDir
 ): Promise<Task[]> {
   const tasks = await readTasks(projectKey, tasksDir)
-  if (!isSafeSessionId(projectKey, tasksDir)) return tasks
+  if (!isSafeSessionId({ kind: "project", key: projectKey }, tasksDir)) return tasks
   return pruneStaleCompletedTasks(join(tasksDir, projectKey), tasks)
 }
 

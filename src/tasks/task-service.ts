@@ -23,6 +23,7 @@ import {
   legacySessionPrefix,
   parseTaskId,
   readTasks,
+  resolveLegacyTaskStoreKey,
   STATUS_STYLE,
   sessionPrefix,
   type Task,
@@ -117,8 +118,9 @@ export async function createTaskInProcess(opts: CreateTaskOptions): Promise<Task
     blockedBy: [],
   }
 
-  await writeTask(sessionId, task, cwd)
-  await writeAudit(sessionId, {
+  const storeKey = await resolveLegacyTaskStoreKey(sessionId, cwd)
+  await writeTask(storeKey, task, cwd)
+  await writeAudit(storeKey, {
     timestamp: new Date().toISOString(),
     taskId: id,
     action: "create",
@@ -391,8 +393,9 @@ export async function ensureFileBackedTask({
   if (findCollidingTask(resolved.subject, incomplete)) return false
 
   const stubTask = buildStubTask(taskId, resolved.subject, { description, activeForm, status })
-  await writeTask(sessionId, stubTask, process.cwd())
-  await writeAudit(sessionId, {
+  const storeKey = await resolveLegacyTaskStoreKey(sessionId, filterCwd ?? process.cwd())
+  await writeTask(storeKey, stubTask, process.cwd())
+  await writeAudit(storeKey, {
     timestamp: new Date().toISOString(),
     taskId,
     action: "create",
@@ -527,8 +530,9 @@ export async function updateStatus(
     task.completionTimestamp = now
   }
 
-  await writeTask(effectiveSessionId, task, process.cwd())
-  await writeAudit(effectiveSessionId, {
+  const storeKey = await resolveLegacyTaskStoreKey(effectiveSessionId, filterCwd ?? process.cwd())
+  await writeTask(storeKey, task, process.cwd())
+  await writeAudit(storeKey, {
     timestamp: new Date().toISOString(),
     taskId,
     action: "status_change",
@@ -660,12 +664,13 @@ export async function writeTaskUpdate(
   task: Task,
   newStatus?: Task["status"]
 ): Promise<void> {
+  const storeKey = await resolveLegacyTaskStoreKey(sessionId, process.cwd())
   if (newStatus) {
     const oldStatus = task.status
     const nowIso = new Date().toISOString()
     applyStatusTransition(task, newStatus, nowIso, Date.now())
-    await writeTask(sessionId, task, process.cwd())
-    await writeAudit(sessionId, {
+    await writeTask(storeKey, task, process.cwd())
+    await writeAudit(storeKey, {
       timestamp: new Date().toISOString(),
       taskId,
       action: "status_change",
@@ -679,8 +684,8 @@ export async function writeTaskUpdate(
     return
   }
 
-  await writeTask(sessionId, task, process.cwd())
-  await writeAudit(sessionId, {
+  await writeTask(storeKey, task, process.cwd())
+  await writeAudit(storeKey, {
     timestamp: new Date().toISOString(),
     taskId,
     action: "field_update",

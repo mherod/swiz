@@ -18,7 +18,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { codexPlanSyncMarkerPath } from "./codex-update-plan.ts"
 import { readAuditLog, readRecentAuditEntries } from "./task-audit-verification.ts"
-import { isSafeSessionId, sessionDirPath } from "./task-store-path.ts"
+import { isSafeSessionId, sessionDirPath, sessionStoreKey } from "./task-store-path.ts"
 
 /** Ids that must never resolve to a directory outside the store. */
 const HOSTILE_IDS = ["../../etc/passwd", "a/../../../../escaped", "..", "../sibling", "   ", ""]
@@ -53,18 +53,20 @@ async function outsideStoreEntries(root: string): Promise<string[]> {
 describe("sessionDirPath", () => {
   test.each(HOSTILE_IDS)("refuses %p", async (sessionId) => {
     const { tasksDir } = await makeStore()
-    expect(() => sessionDirPath(sessionId, tasksDir)).toThrow(/outside the task store/)
+    expect(() => sessionDirPath(sessionStoreKey(sessionId), tasksDir)).toThrow(
+      /outside the task store/
+    )
   })
 
   test("control: an ordinary id resolves inside the store", async () => {
     const { tasksDir } = await makeStore()
-    expect(sessionDirPath(ORDINARY_ID, tasksDir)).toBe(join(tasksDir, ORDINARY_ID))
+    expect(sessionDirPath(sessionStoreKey(ORDINARY_ID), tasksDir)).toBe(join(tasksDir, ORDINARY_ID))
   })
 
   test("an absolute-looking id stays inside the store rather than rebasing on root", async () => {
     const { tasksDir } = await makeStore()
     // `join` keeps it contained; only `resolve` would honour the leading slash.
-    expect(sessionDirPath("/etc/passwd", tasksDir).startsWith(tasksDir)).toBe(true)
+    expect(sessionDirPath(sessionStoreKey("/etc/passwd"), tasksDir).startsWith(tasksDir)).toBe(true)
   })
 })
 
@@ -108,12 +110,12 @@ describe("audit log reads", () => {
 describe("isSafeSessionId", () => {
   test.each(HOSTILE_IDS)("rejects %p", async (sessionId) => {
     const { tasksDir } = await makeStore()
-    expect(isSafeSessionId(sessionId, tasksDir)).toBe(false)
+    expect(isSafeSessionId(sessionStoreKey(sessionId), tasksDir)).toBe(false)
   })
 
   test("control: accepts an ordinary id and a nested-but-contained one", async () => {
     const { tasksDir } = await makeStore()
-    expect(isSafeSessionId(ORDINARY_ID, tasksDir)).toBe(true)
-    expect(isSafeSessionId("nested/child", tasksDir)).toBe(true)
+    expect(isSafeSessionId(sessionStoreKey(ORDINARY_ID), tasksDir)).toBe(true)
+    expect(isSafeSessionId(sessionStoreKey("nested/child"), tasksDir)).toBe(true)
   })
 })

@@ -13,7 +13,14 @@ import { createDefaultTaskStore } from "../task-roots.ts"
 import { CappedMap } from "../utils/capped-map.ts"
 import { appendJsonlEntry, parseJsonl } from "../utils/jsonl.ts"
 import { isSessionTaskJsonFile } from "./task-file-utils.ts"
-import { isSafeSessionId, sessionDirPath } from "./task-store-path.ts"
+import {
+  isSafeSessionId,
+  projectStoreKey,
+  sessionDirPath,
+  sessionStoreKey,
+  type TaskStoreKey,
+  taskStoreDirName,
+} from "./task-store-path.ts"
 import { backfillTaskTimingFields } from "./task-timing.ts"
 
 const AUDIT_LOG_FILENAME = ".audit-log.jsonl"
@@ -26,7 +33,14 @@ export { legacySessionPrefix, sessionPrefix }
 // is what binds it for this module's own calls — `export … from` alone re-exports without
 // introducing a local binding, which leaves readTasks throwing "isSafeSessionId is not defined".
 
-export { isSafeSessionId, sessionDirPath }
+export {
+  isSafeSessionId,
+  projectStoreKey,
+  sessionDirPath,
+  sessionStoreKey,
+  taskStoreDirName,
+  type TaskStoreKey,
+}
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -199,7 +213,7 @@ export async function readTasks(
 ): Promise<Task[]> {
   // Reads prefer an empty result over a throw: a traversing id names no legitimate session, and
   // callers here (status lines, governance gates) must not crash on a malformed payload.
-  if (!isSafeSessionId(sessionId, tasksDir)) return []
+  if (!isSafeSessionId(sessionStoreKey(sessionId), tasksDir)) return []
   const dir = join(tasksDir, sessionId)
 
   // Junie fallback: if events.jsonl exists, parse tasks from AgentPlanUpdatedEvent
@@ -490,13 +504,14 @@ async function readAuditOperationIds(auditPath: string): Promise<Set<string>> {
  * exactly once. Callers own any cache/event projection that follows the batch.
  */
 export async function writeTaskBatch(
-  sessionId: string,
+  storeKey: TaskStoreKey,
   writes: readonly TaskBatchWrite[],
   finalTasks: readonly Task[],
   cwd?: string,
   tasksDir = createDefaultTaskStore().tasksDir
 ): Promise<TaskBatchWriteResult> {
-  const dir = sessionDirPath(sessionId, tasksDir)
+  const sessionId = taskStoreDirName(storeKey)
+  const dir = sessionDirPath(storeKey, tasksDir)
   await mkdir(dir, { recursive: true })
   const auditPath = join(dir, AUDIT_LOG_FILENAME)
   const persistedOperationIds = await readAuditOperationIds(auditPath)
@@ -533,7 +548,7 @@ export async function readSessionMeta(
 ): Promise<SessionMeta | null> {
   const key = metaCacheKey(sessionId, tasksDir)
   if (sessionMetaCache.has(key)) return sessionMetaCache.get(key)!
-  if (!isSafeSessionId(sessionId, tasksDir)) return null
+  if (!isSafeSessionId(sessionStoreKey(sessionId), tasksDir)) return null
   try {
     const text = await readFile(join(tasksDir, sessionId, SESSION_META_FILE), "utf-8")
     const meta = JSON.parse(text) as SessionMeta
@@ -545,13 +560,30 @@ export async function readSessionMeta(
   }
 }
 
+/**
+ * Classify an address obtained from the legacy flat-directory readers.
+ * Metadata is authoritative; cwd is a fallback for a store's first write.
+ * Remove this compatibility boundary when reader addresses become typed (#831).
+ */
+export async function resolveLegacyTaskStoreKey(
+  directoryName: string,
+  cwd?: string,
+  tasksDir = createDefaultTaskStore().tasksDir
+): Promise<TaskStoreKey> {
+  const metadataCwd = (await readSessionMeta(directoryName, tasksDir))?.cwd
+  const ownerCwd = typeof metadataCwd === "string" ? metadataCwd : cwd
+  const project = ownerCwd ? projectStoreKey(ownerCwd) : undefined
+  return project?.key === directoryName ? project : sessionStoreKey(directoryName)
+}
+
 export async function writeTask(
-  sessionId: string,
+  storeKey: TaskStoreKey,
   task: Task,
   cwd?: string,
   tasksDir = createDefaultTaskStore().tasksDir
 ): Promise<void> {
-  const dir = sessionDirPath(sessionId, tasksDir)
+  const sessionId = taskStoreDirName(storeKey)
+  const dir = sessionDirPath(storeKey, tasksDir)
   await mkdir(dir, { recursive: true })
   await atomicWriteJson(join(dir, `${task.id}.json`), task)
   // Update lightweight index so status.ts can read openCount without scanning every task file.
@@ -583,13 +615,14 @@ export async function writeTask(
  * so the reload is a no-op.
  */
 export async function revertTaskStatusOnDisk(
-  sessionId: string,
+  storeKey: TaskStoreKey,
   taskId: string,
   targetStatus: TaskStatus,
   attemptedStatus: TaskStatus,
   tasksDir = createDefaultTaskStore().tasksDir
 ): Promise<boolean> {
-  const dir = sessionDirPath(sessionId, tasksDir)
+  const sessionId = taskStoreDirName(storeKey)
+  const dir = sessionDirPath(storeKey, tasksDir)
   const filePath = join(dir, `${taskId}.json`)
   let task: Task
   try {
@@ -626,12 +659,13 @@ export async function revertTaskStatusOnDisk(
 }
 
 export async function writeAudit(
-  sessionId: string,
+  storeKey: TaskStoreKey,
   entry: AuditEntry,
   tasksDir = createDefaultTaskStore().tasksDir
 ): Promise<void> {
+  const sessionId = taskStoreDirName(storeKey)
   try {
-    const dir = sessionDirPath(sessionId, tasksDir)
+    const dir = sessionDirPath(storeKey, tasksDir)
     await mkdir(dir, { recursive: true })
     await appendJsonlEntry(join(dir, ".audit-log.jsonl"), entry)
   } catch (e) {

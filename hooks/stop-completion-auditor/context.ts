@@ -16,13 +16,14 @@ import {
 } from "../../src/settings.ts"
 import { createTaskStoreForHookPayload } from "../../src/task-roots.ts"
 import { isSafeSessionId, readTasksAcrossStores } from "../../src/tasks/task-repository.ts"
+import { sessionStoreKey } from "../../src/tasks/task-store-path.ts"
 import { getTranscriptSummary } from "../../src/transcript-summary.ts"
 import type { CompletionAuditContext, CompletionValidationGate } from "./types.ts"
 
 function resolveAuditStores(input: StopHookInput, home: string) {
   const store = createTaskStoreForHookPayload(input, home)
   const sessionId = input.session_id ?? ""
-  if (!sessionId || !isSafeSessionId(sessionId, store.tasksDir)) return null
+  if (!sessionId || !isSafeSessionId(sessionStoreKey(sessionId), store.tasksDir)) return null
   const projectKey = input.cwd ? projectKeyFromCwd(input.cwd) : undefined
   return {
     root: store.tasksDir,

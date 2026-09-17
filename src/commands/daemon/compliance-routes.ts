@@ -7,7 +7,7 @@ import { complianceBaselineWantedLevel } from "../../infractions.ts"
 import { projectKeyFromCwd } from "../../project-key.ts"
 import { findTaskStoreForSession } from "../../task-roots.ts"
 import { mergeTaskStoresByRecency, readTasks } from "../../tasks/task-repository.ts"
-import { sessionDirPath } from "../../tasks/task-store-path.ts"
+import { sessionDirPath, sessionStoreKey } from "../../tasks/task-store-path.ts"
 import type { TaskCounts, WarmStatusLineSnapshot } from "../status-line.ts"
 import { buildTaskCountsFromTasks } from "../status-line.ts"
 import type { CappedMap } from "./cache/capped-map.ts"
@@ -64,7 +64,10 @@ async function resolveTaskCountsFromCache(
     const projectKey = projectKeyFromCwd(cwd)
     // Throws inside the try for a traversing id, taking the same null exit as any other failure
     // so a malformed payload cannot break the compliance route.
-    const sessionState = await cache.getState(sessionId, sessionDirPath(sessionId, tasksDir))
+    const sessionState = await cache.getState(
+      sessionId,
+      sessionDirPath(sessionStoreKey(sessionId), tasksDir)
+    )
     const projectTasks =
       projectKey && projectKey !== sessionId
         ? await readProjectStoreTasks(projectKey, tasksDir)
