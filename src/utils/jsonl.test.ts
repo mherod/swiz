@@ -398,4 +398,40 @@ describe("jsonl utilities", () => {
     expect((await cursor.read(path, latest)).lines).toEqual(['{"value":"café"}'])
     expect((await cursor.read(path, latest)).lines).toEqual([])
   })
+
+  it("cold streams through the observed EOF and keeps raw pending bytes", async () => {
+    await resetTestDir()
+    const path = join(TEST_DIR, "cold-stream.jsonl")
+    const first = '{"id":1}\n'
+    const last = new TextEncoder().encode('{"value":"🌍"}\n')
+    const split = last.indexOf(0xf0) + 2
+    await Bun.write(path, first)
+    await appendFile(path, last.slice(0, split))
+    const observed = await Bun.file(path).stat()
+    await appendFile(path, last.slice(split))
+    const cursor = new JsonlAppendCursor()
+    const lines: string[] = []
+    for await (const line of cursor.rebuild(Bun.file(path), observed)) lines.push(line)
+    expect(lines).toEqual([first.trim()])
+    expect(cursor.tailByteLength).toBe(split)
+    const latest = await Bun.file(path).stat()
+    expect((await cursor.read(path, latest)).lines).toEqual(['{"value":"🌍"}'])
+    expect((await cursor.read(path, latest)).lines).toEqual([])
+  })
+
+  it("bounds cold seed retention and clears an interrupted cold scan", async () => {
+    const cursor = new JsonlAppendCursor()
+    const oversized = new Uint8Array(1024 * 1024 + 1)
+    cursor.seed({ size: oversized.length, mtimeMs: 1 }, oversized)
+    expect(cursor.tailByteLength).toBe(0)
+    expect((await cursor.read("/missing", { size: oversized.length, mtimeMs: 1 })).kind).toBe(
+      "cold"
+    )
+    await resetTestDir()
+    const path = join(TEST_DIR, "interrupted-cold.jsonl")
+    await Bun.write(path, '{"id":1}\n{"id":2}\n')
+    const metadata = await Bun.file(path).stat()
+    for await (const _line of cursor.rebuild(Bun.file(path), metadata)) break
+    expect((await cursor.read(path, metadata)).kind).toBe("cold")
+  })
 })
