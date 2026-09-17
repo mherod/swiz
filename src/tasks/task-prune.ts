@@ -1,5 +1,8 @@
 /**
- * Completed-task pruning — deletes completed task files past a retention age.
+ * Task pruning — deletes task files past a retention age. Two rules apply:
+ * completed tasks go once they have been done for COMPLETED_TASK_PRUNE_AGE_MS,
+ * and a task of any status goes once its last recorded activity is older than
+ * STALE_TASK_PRUNE_AGE_MS.
  *
  * Session-keyed stores are pruned by TaskStateCache full loads (daemon path).
  * The project-keyed store is pruned only by the swiz MCP task tools, where a
@@ -13,31 +16,58 @@
 
 import { unlink } from "node:fs/promises"
 import { join } from "node:path"
-import { COMPLETED_TASK_PRUNE_AGE_MS } from "./task-governance-constants.ts"
+import {
+  COMPLETED_TASK_PRUNE_AGE_MS,
+  STALE_TASK_PRUNE_AGE_MS,
+} from "./task-governance-constants.ts"
+import { parseIsoTimestampMs } from "./task-timing.ts"
 
 /** The fields pruning needs; satisfied by both `Task` and `SessionTask`. */
 interface PrunableTask {
   id: string
   status: string
+  startedAt?: number | null
   completedAt?: number | null
+  statusChangedAt?: string | null
 }
 
 /**
- * Remove completed tasks that have been done for more than `maxAgeMs`.
- * Deletes their .json files from disk and returns only the surviving tasks.
- * Cancelled tasks are never pruned — they carry no `completedAt` and their
- * retention is a separate decision. Fail-open: deletion errors are ignored
- * and the task is still dropped from the returned list.
+ * Epoch ms of the task's most recent recorded activity, or null when the
+ * record carries no usable timestamp at all. `statusChangedAt` is stamped on
+ * every status change, so it is the primary anchor; the numeric fields cover
+ * records written before it existed.
+ */
+function lastActivityMs(task: PrunableTask): number | null {
+  const candidates = [
+    parseIsoTimestampMs(task.statusChangedAt),
+    typeof task.completedAt === "number" && Number.isFinite(task.completedAt)
+      ? task.completedAt
+      : null,
+    typeof task.startedAt === "number" && Number.isFinite(task.startedAt) ? task.startedAt : null,
+  ].filter((value): value is number => value !== null)
+  return candidates.length === 0 ? null : Math.max(...candidates)
+}
+
+/**
+ * Remove tasks that have aged out under either rule: completed for more than
+ * `maxAgeMs`, or last touched more than `staleMaxAgeMs` ago regardless of
+ * status. Deletes their .json files from disk and returns only the surviving
+ * tasks. A record carrying no usable timestamp is always kept — its age is
+ * unknown, and guessing would delete live work. Fail-open: deletion errors
+ * are ignored and the task is still dropped from the returned list.
  */
 export async function pruneStaleCompletedTasks<T extends PrunableTask>(
   dir: string,
   tasks: readonly T[],
-  maxAgeMs: number = COMPLETED_TASK_PRUNE_AGE_MS
+  maxAgeMs: number = COMPLETED_TASK_PRUNE_AGE_MS,
+  staleMaxAgeMs: number = STALE_TASK_PRUNE_AGE_MS
 ): Promise<T[]> {
-  const cutoff = Date.now() - maxAgeMs
+  const now = Date.now()
+  const completedCutoff = now - maxAgeMs
+  const staleCutoff = now - staleMaxAgeMs
   const surviving: T[] = []
   for (const task of tasks) {
-    if (task.status === "completed" && task.completedAt != null && task.completedAt < cutoff) {
+    if (shouldPrune(task, completedCutoff, staleCutoff)) {
       try {
         await unlink(join(dir, `${task.id}.json`))
       } catch {
@@ -48,4 +78,11 @@ export async function pruneStaleCompletedTasks<T extends PrunableTask>(
     surviving.push(task)
   }
   return surviving
+}
+
+function shouldPrune(task: PrunableTask, completedCutoff: number, staleCutoff: number): boolean {
+  if (task.status === "completed" && task.completedAt != null && task.completedAt < completedCutoff)
+    return true
+  const activityMs = lastActivityMs(task)
+  return activityMs !== null && activityMs < staleCutoff
 }
