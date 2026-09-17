@@ -14,6 +14,11 @@ import { scriptPermissionsCheck } from "./doctor/checks/script-permissions.ts"
 import type { CheckResult, DiagnosticCheck, DiagnosticContext } from "./doctor/types.ts"
 import { installAgent } from "./install/agent-helpers.ts"
 import {
+  type CleanupAgentOptions,
+  installCleanupLaunchAgent,
+  uninstallCleanupLaunchAgent,
+} from "./install/cleanup-agent.ts"
+import {
   installDaemonForCli,
   installDaemonLaunchAgent,
   uninstallDaemonForCli,
@@ -78,6 +83,30 @@ function isFullUninstall(args: string[], opts: InstallRunOptions): boolean {
 
 function shouldInstallHooks(args: string[], opts: InstallRunOptions): boolean {
   return (!opts.mergeTool && !opts.daemon) || hasAnyAgentFlag(args)
+}
+
+async function runCleanupAgentStep(
+  args: string[],
+  opts: InstallRunOptions,
+  options: CleanupAgentOptions
+): Promise<void> {
+  // Scoped installs/uninstalls must not change this user-wide maintenance job.
+  if (
+    opts.jsonOutput ||
+    opts.mergeTool ||
+    opts.statusLine ||
+    opts.daemon ||
+    hasAnyAgentFlag(args)
+  ) {
+    return
+  }
+  const action = opts.uninstall
+    ? await uninstallCleanupLaunchAgent(opts.dryRun, options)
+    : await installCleanupLaunchAgent(opts.dryRun, options)
+  if (action === "unsupported") return
+  const detail =
+    action === "unchanged" ? "no changes needed" : `${opts.dryRun ? "would " : ""}${action}`
+  console.log(`  Cleanup LaunchAgent: ${detail} (on load and every 24 hours)\n`)
 }
 
 function getScopedMcpTargets(
@@ -332,6 +361,7 @@ async function uninstallProjectHooks(dryRun: boolean): Promise<void> {
 export interface InstallCommandOptions {
   bunAvailable?: () => boolean
   homeDir?: string | null
+  cleanupAgentOptions?: CleanupAgentOptions
 }
 
 function assertBunAvailable(bunAvailable: () => boolean): void {
@@ -343,8 +373,13 @@ function assertBunAvailable(bunAvailable: () => boolean): void {
   )
 }
 
-async function runUninstallMode(args: string[], opts: InstallRunOptions): Promise<void> {
+async function runUninstallMode(
+  args: string[],
+  opts: InstallRunOptions,
+  cleanupOptions: CleanupAgentOptions
+): Promise<void> {
   console.log(`\n  swiz install --uninstall${opts.dryRun ? " (dry run)" : ""}\n`)
+  await runCleanupAgentStep(args, opts, cleanupOptions)
   await runOptionalUninstallSteps(args, opts)
   await uninstallSwizMcpServerStep(args, opts)
   await uninstallShellShimStep(args, opts)
@@ -355,13 +390,18 @@ async function runUninstallMode(args: string[], opts: InstallRunOptions): Promis
   if (opts.dryRun) console.log("  No changes written.\n")
 }
 
-async function runInstallMode(args: string[], opts: InstallRunOptions): Promise<void> {
+async function runInstallMode(
+  args: string[],
+  opts: InstallRunOptions,
+  cleanupOptions: CleanupAgentOptions
+): Promise<void> {
   console.log(`\n  swiz install${opts.dryRun ? " (dry run)" : ""}\n`)
   await runOptionalInstallSteps(opts)
   await installProjectHooks(opts.dryRun)
   await installSwizMcpServerStep(args, opts)
   await installShellShimStep(args, opts)
   if (await installHooksForTargets(args, opts)) return
+  await runCleanupAgentStep(args, opts, cleanupOptions)
   if (opts.dryRun) console.log("  No changes written.\n")
   else if (shouldInstallHooks(args, opts)) await verifyInstallation(opts.dryRun)
 }
@@ -376,23 +416,28 @@ export const installCommand: Command<InstallCommandOptions> = {
     {
       flags: "--uninstall",
       description:
-        "Remove all swiz integration (hooks, mergetool, status-line, daemon); add flags below to limit scope",
+        "Remove all swiz integration (hooks, mergetool, status-line, daemon, cleanup); add flags below to limit scope",
     },
     { flags: "--merge-tool", description: "Configure swiz as the global Git mergetool" },
     { flags: "--status-line", description: "Install swiz status-line into Claude Code settings" },
     { flags: "--daemon", description: "Install swiz daemon as a LaunchAgent (default port 7943)" },
     { flags: "--port <port>", description: "Port for daemon when using --daemon (default: 7943)" },
     { flags: "--json", description: "Output plugin status as JSON (implies --dry-run)" },
-    { flags: "(no flags)", description: "Install for all detected agents" },
+    {
+      flags: "(no flags)",
+      description: "Install for all detected agents and schedule daily cleanup on macOS",
+    },
   ],
   async run(args, dependencies = {}) {
-    const opts = parseInstallRunOptions(args, dependencies.homeDir ?? getHomeDirOrNull())
+    const homeDir = dependencies.homeDir ?? getHomeDirOrNull()
+    const opts = parseInstallRunOptions(args, homeDir)
+    const cleanupOptions = { homeDir: homeDir ?? undefined, ...dependencies.cleanupAgentOptions }
     assertBunAvailable(dependencies.bunAvailable ?? checkBunAvailable)
 
     if (opts.uninstall) {
-      await runUninstallMode(args, opts)
+      await runUninstallMode(args, opts, cleanupOptions)
       return
     }
-    await runInstallMode(args, opts)
+    await runInstallMode(args, opts, cleanupOptions)
   },
 }

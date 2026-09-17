@@ -44,6 +44,22 @@ Commands are registered in this order in `index.ts`:
 | `uninstall` | `src/commands/uninstall.ts` | Remove swiz hooks from agent settings |
 | `shim` | `src/commands/shim.ts` | Install shell-level command interception for agents |
 
+On macOS, default `swiz install` also installs and loads
+`~/Library/LaunchAgents/com.swiz.doctor-clean.plist`. It runs `swiz doctor clean`
+immediately when loaded (including login), then every 24 hours while logged in.
+Reinstalling an unchanged, loaded agent does not restart it. Changes to an existing
+plist are backed up to `.plist.bak` before replacement.
+
+The scheduled cleanup uses Trash and the normal retention defaults below. It never
+forces Codex to quit. Output is appended to `~/Library/Logs/Swiz/doctor-clean.log`
+and errors to `~/Library/Logs/Swiz/doctor-clean.error.log`.
+
+`swiz install --dry-run` previews the job without writing or loading it.
+`--json` and scoped installs such as `--codex`, `--daemon`, `--merge-tool`, and
+`--status-line` leave this user-wide job unchanged. Full `swiz install --uninstall`
+unloads the job and moves its plist to Trash; logs are retained. Other platforms
+skip the LaunchAgent integration.
+
 ### Status & Configuration
 
 | Command | Source | Description |
@@ -129,6 +145,10 @@ the Codex app and stop its remaining processes before cleanup. On macOS this use
 Cleanup proceeds only after Codex has exited, with a final check before deletion.
 `--force --dry-run` previews the shutdown and cleanup without stopping anything.
 Automatic cleanup through `doctor --fix` never forces Codex to stop.
+
+`swiz doctor` checks the cleanup LaunchAgent's configuration and loaded state on
+macOS. `swiz doctor --fix` installs or repairs missing, outdated, or unloaded jobs
+after its automatic cleanup completes. Repairs use the same installer and backups.
 
 ---
 

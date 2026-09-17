@@ -2,6 +2,7 @@ import type { DiagnosticCheck } from "../types.ts"
 import { agentBinaryAndSettingsCheck } from "./agent-binary-and-settings.ts"
 import { agentConfigSyncCheck } from "./agent-config-sync.ts"
 import { bunRuntimeCheck } from "./bun-runtime.ts"
+import { cleanupLaunchAgentCheck } from "./cleanup-launch-agent.ts"
 import { codexHookSourcesCheck } from "./codex-hook-sources.ts"
 import { codexMemoryCheck } from "./codex-memory.ts"
 import { configScriptsCheck } from "./config-scripts.ts"
@@ -25,6 +26,7 @@ export const DIAGNOSTIC_CHECKS: DiagnosticCheck[] = [
   ghAuthCheck,
   ttsBackendCheck,
   daemonLaunchAgentEnvCheck,
+  cleanupLaunchAgentCheck,
   agentBinaryAndSettingsCheck,
   hookScriptsCheck,
   manifestPathsCheck,

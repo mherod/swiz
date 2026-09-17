@@ -2,6 +2,7 @@ import { join } from "node:path"
 import { getHomeDir } from "./home.ts"
 
 export const SWIZ_DAEMON_LABEL = "com.swiz.daemon"
+export const SWIZ_CLEANUP_LABEL = "com.swiz.doctor-clean"
 
 export interface LaunchAgentCommandResult {
   exitCode: number
@@ -44,12 +45,44 @@ export async function launchAgentExists(label: string): Promise<boolean> {
   return file.exists()
 }
 
+/** Parse XML or binary plists without depending on formatting or dictionary key order. */
+export async function readLaunchAgentPlist(
+  plistPath: string,
+  runtime: LaunchAgentRuntime = launchAgentRuntime
+): Promise<object | null> {
+  const result = await runtime.run(["plutil", "-convert", "json", "-o", "-", plistPath])
+  if (result.exitCode !== 0) return null
+  try {
+    const value = JSON.parse(result.stdout)
+    return value && typeof value === "object" && !Array.isArray(value) ? value : null
+  } catch {
+    return null
+  }
+}
+
 export async function isLaunchAgentLoaded(
   label: string,
   runtime: LaunchAgentRuntime = launchAgentRuntime
 ): Promise<boolean> {
   const result = await runtime.run(["launchctl", "list", label])
   return result.exitCode === 0
+}
+
+/** GUI agents can be invisible to `launchctl list` from a different bootstrap domain. */
+export async function isGuiLaunchAgentLoaded(
+  label: string,
+  runtime: LaunchAgentRuntime = launchAgentRuntime
+): Promise<boolean> {
+  const result = await runtime.run(["launchctl", "print", `gui/${runtime.getUid()}/${label}`])
+  return result.exitCode === 0
+}
+
+export async function bootstrapLaunchAgent(
+  plistPath: string,
+  runtime: LaunchAgentRuntime = launchAgentRuntime
+): Promise<number> {
+  return (await runtime.run(["launchctl", "bootstrap", `gui/${runtime.getUid()}`, plistPath]))
+    .exitCode
 }
 
 export async function loadLaunchAgent(

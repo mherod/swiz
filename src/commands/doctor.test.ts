@@ -4,6 +4,7 @@ import { join } from "node:path"
 import { AGENTS } from "../agents.ts"
 import { hookIdentifier, isInlineHookDef, manifest } from "../manifest.ts"
 import { runCommandInProcess, useTempDir } from "../utils/test-utils.ts"
+import { CLEANUP_LAUNCH_AGENT_CHECK_NAME } from "./doctor/checks/cleanup-launch-agent.ts"
 import { DIAGNOSTIC_CHECKS } from "./doctor/checks/index.ts"
 import { type DoctorCommandOptions, doctorCommand } from "./doctor.ts"
 import { collectCommands } from "./install/config-helpers.ts"
@@ -25,6 +26,7 @@ const DOCTOR_TEST_OPTIONS: DoctorCommandOptions = {
   ),
   autoCleanup: async () => {},
   fixStaleConfigs: async () => {},
+  fixCleanupLaunchAgent: async () => {},
   notifyDaemon: async () => {},
 }
 
@@ -70,6 +72,35 @@ function buildExpectedHooks() {
 }
 
 describe("swiz doctor", () => {
+  test("repairs cleanup scheduling only with --fix and after automatic cleanup", async () => {
+    const home = await createTempHome()
+    const calls: string[] = []
+    const warning = {
+      name: CLEANUP_LAUNCH_AGENT_CHECK_NAME,
+      status: "warn" as const,
+      detail: "not installed",
+    }
+    const commandOptions: DoctorCommandOptions = {
+      ...DOCTOR_TEST_OPTIONS,
+      allChecks: [{ name: "cleanup-launch-agent", run: async () => warning }],
+      autoCleanup: async () => {
+        calls.push("cleanup")
+      },
+      fixCleanupLaunchAgent: async (results) => {
+        expect(results).toEqual([warning])
+        calls.push("repair")
+      },
+    }
+    const options = { commandOptions, cwd: home, env: { HOME: home, AI_TEST_NO_BACKEND: "1" } }
+    const report = await runCommandInProcess(doctorCommand, [], options)
+    expect(report.exitCode).toBe(0)
+    expect(report.stdout).toContain("swiz doctor --fix")
+    expect(calls).toEqual([])
+    const fixed = await runCommandInProcess(doctorCommand, ["--fix"], options)
+    expect(fixed.exitCode).toBe(0)
+    expect(calls).toEqual(["cleanup", "repair"])
+  })
+
   // ── Clean-home tests: share a single command invocation ───────────────
   describe("clean home checks", () => {
     let result: DoctorResult

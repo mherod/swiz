@@ -1,4 +1,5 @@
 import { join } from "node:path"
+import { AGENTS } from "../agents.ts"
 import { BOLD, DIM, GREEN, RED, RESET, YELLOW } from "../ansi.ts"
 import { repairCodexHookSources } from "../codex-hook-config.ts"
 import { debugLog, stderrLog } from "../debug.ts"
@@ -8,6 +9,7 @@ import { isDaemonReady } from "./daemon/daemon-admin.ts"
 import { type AggressiveHookReplacement, replaceAgentHooksWithSwiz } from "./doctor/aggressive.ts"
 import { type AutoFixContext, runDoctorChecks } from "./doctor/check-runner.ts"
 import { DIAGNOSTIC_CHECKS } from "./doctor/checks"
+import { needsCleanupLaunchAgentRepair } from "./doctor/checks/cleanup-launch-agent.ts"
 import { codexHookCheckName, codexHookDirectories } from "./doctor/checks/codex-hook-sources.ts"
 import {
   findMissingConfigScriptPaths,
@@ -24,6 +26,7 @@ import {
   removeInvalidCategoryFields,
 } from "./doctor/fix.ts"
 import type { CheckResult, DiagnosticCheck } from "./doctor/types.ts"
+import { installCleanupLaunchAgent } from "./install/cleanup-agent.ts"
 
 export { checkAgentConfigSync } from "./doctor/checks/agent-config-sync.ts"
 export { truncateJsonlFile } from "./doctor/cleanup.ts"
@@ -76,10 +79,17 @@ async function fixStaleConfigs(results: CheckResult[]): Promise<void> {
   )
   if (staleConfigs.length === 0) return
   console.log(`  ${BOLD}Auto-fixing stale configs...${RESET}\n`)
-  const proc = Bun.spawn([process.execPath, "run", join(SWIZ_ROOT, "index.ts"), "install"], {
-    stdout: "inherit",
-    stderr: "inherit",
-  })
+  // Scope this hook repair to agents; the cleanup LaunchAgent is repaired after auto-cleanup.
+  const proc = Bun.spawn(
+    [
+      process.execPath,
+      "run",
+      join(SWIZ_ROOT, "index.ts"),
+      "install",
+      ...AGENTS.map((a) => `--${a.id}`),
+    ],
+    { stdout: "inherit", stderr: "inherit" }
+  )
   await proc.exited
   if (proc.exitCode === 0) {
     console.log(`  ${GREEN}✓ Configs updated successfully${RESET}\n`)
@@ -143,8 +153,17 @@ async function fixCodexHookSources(results: CheckResult[]): Promise<void> {
   }
 }
 
+async function fixCleanupLaunchAgent(results: CheckResult[]): Promise<void> {
+  if (!needsCleanupLaunchAgentRepair(results)) return
+  const action = await installCleanupLaunchAgent(false)
+  if (action !== "unsupported") {
+    console.log(`  ${GREEN}✓${RESET} Cleanup LaunchAgent ready (on load and every 24 hours)\n`)
+  }
+}
+
 interface AutoFixDependencies {
   fixCodexHookSources: typeof fixCodexHookSources
+  fixCleanupLaunchAgent: typeof fixCleanupLaunchAgent
   fixStaleConfigs: typeof fixStaleConfigs
   replaceAgentHooksWithSwiz: typeof replaceAgentHooksWithSwiz
   autoCleanup: typeof autoCleanup
@@ -274,6 +293,8 @@ async function applyDoctorFixes(
   await fixAndReportCategoryFields()
   await fixAndReportPluginCache(ctx)
   await runAutoCleanup(dependencies)
+  // RunAtLoad can start cleanup immediately, so finish this command's cleanup first.
+  await dependencies.fixCleanupLaunchAgent(ctx.results)
 }
 
 function reportAvailableFixes(ctx: AutoFixContext): void {
@@ -282,6 +303,7 @@ function reportAvailableFixes(ctx: AutoFixContext): void {
       ? "conflicting Codex hook sources"
       : null,
     hasStaleConfigWarnings(ctx.results) ? "stale configs" : null,
+    needsCleanupLaunchAgentRepair(ctx.results) ? "cleanup LaunchAgent issues" : null,
     ctx.invalidSkillEntries.length > 0 ? "invalid skill entries" : null,
     ctx.pluginCacheInfos.length > 0 ? "stale plugin cache" : null,
   ].filter((value): value is string => value !== null)
@@ -317,11 +339,22 @@ async function notifyDaemon(jsonOutput: boolean): Promise<void> {
 export interface DoctorCommandOptions {
   codexCleanupRuntime?: CodexProcessRuntime
   fixCodexHookSources?: typeof fixCodexHookSources
+  fixCleanupLaunchAgent?: typeof fixCleanupLaunchAgent
   allChecks?: DiagnosticCheck[]
   autoCleanup?: typeof autoCleanup
   fixStaleConfigs?: typeof fixStaleConfigs
   replaceAgentHooksWithSwiz?: typeof replaceAgentHooksWithSwiz
   notifyDaemon?: typeof notifyDaemon
+}
+
+function resolveAutoFixDependencies(options: DoctorCommandOptions = {}): AutoFixDependencies {
+  return {
+    fixCodexHookSources: options.fixCodexHookSources ?? fixCodexHookSources,
+    fixCleanupLaunchAgent: options.fixCleanupLaunchAgent ?? fixCleanupLaunchAgent,
+    fixStaleConfigs: options.fixStaleConfigs ?? fixStaleConfigs,
+    replaceAgentHooksWithSwiz: options.replaceAgentHooksWithSwiz ?? replaceAgentHooksWithSwiz,
+    autoCleanup: options.autoCleanup ?? autoCleanup,
+  }
 }
 
 export const doctorCommand: Command<DoctorCommandOptions> = {
@@ -332,7 +365,8 @@ export const doctorCommand: Command<DoctorCommandOptions> = {
   options: [
     {
       flags: "--fix",
-      description: "Repair conflicting Codex hook sources and stale agent configs with backups",
+      description:
+        "Repair Codex hook sources, stale agent configs, and the daily cleanup LaunchAgent",
     },
     {
       flags: "--aggressive",
@@ -368,14 +402,7 @@ export const doctorCommand: Command<DoctorCommandOptions> = {
     await runWithTimeout("diagnostic checks", DOCTOR_CHECK_TIMEOUT_MS, () =>
       runDoctorChecks(args, {
         allChecks: options?.allChecks ?? DIAGNOSTIC_CHECKS,
-        handleAutoFixes: (context) =>
-          handleAutoFixes(context, {
-            fixCodexHookSources: options?.fixCodexHookSources ?? fixCodexHookSources,
-            fixStaleConfigs: options?.fixStaleConfigs ?? fixStaleConfigs,
-            replaceAgentHooksWithSwiz:
-              options?.replaceAgentHooksWithSwiz ?? replaceAgentHooksWithSwiz,
-            autoCleanup: options?.autoCleanup ?? autoCleanup,
-          }),
+        handleAutoFixes: (context) => handleAutoFixes(context, resolveAutoFixDependencies(options)),
         notifyDaemon: options?.notifyDaemon ?? notifyDaemon,
       })
     )
