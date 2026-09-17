@@ -15,7 +15,7 @@
  */
 
 import { unlink } from "node:fs/promises"
-import { join } from "node:path"
+import { resolveTaskFilePath } from "./task-file-path.ts"
 import {
   COMPLETED_TASK_PRUNE_AGE_MS,
   STALE_TASK_PRUNE_AGE_MS,
@@ -68,8 +68,15 @@ export async function pruneStaleCompletedTasks<T extends PrunableTask>(
   const surviving: T[] = []
   for (const task of tasks) {
     if (shouldPrune(task, completedCutoff, staleCutoff)) {
+      // The id is record content, not the filename it was read from, so it can
+      // name a path outside the store. Keep an unusable record instead.
+      const path = resolveTaskFilePath(dir, task.id)
+      if (path === null) {
+        surviving.push(task)
+        continue
+      }
       try {
-        await unlink(join(dir, `${task.id}.json`))
+        await unlink(path)
       } catch {
         // already gone or locked — treat as pruned
       }

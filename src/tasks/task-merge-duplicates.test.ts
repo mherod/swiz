@@ -165,7 +165,7 @@ describe("mergeDuplicateTaskFiles", () => {
     expect(surviving.map((t) => t.id)).toEqual(["1"])
   })
 
-  it("keeps the in-memory result correct when persisting the survivor fails", async () => {
+  it("abandons the group intact when persisting the survivor fails", async () => {
     const dir = await makeStoreDir()
     const tasks = [stub("1"), stub("2")]
     for (const task of tasks) await writeTaskFile(dir, task)
@@ -174,7 +174,31 @@ describe("mergeDuplicateTaskFiles", () => {
       throw new Error("disk full")
     })
 
-    expect(surviving.map((t) => t.id)).toEqual(["1"])
-    expect(await fileExists(dir, "2")).toBe(false)
+    // The survivor carries the union of both records' edges and that union is
+    // now nowhere on disk, so deleting the duplicate would lose it for good.
+    expect(surviving.map((t) => t.id)).toEqual(["1", "2"])
+    expect(await fileExists(dir, "1")).toBe(true)
+    expect(await fileExists(dir, "2")).toBe(true)
+  })
+
+  it("refuses to delete a record whose id escapes the store directory", async () => {
+    const dir = await makeStoreDir()
+    const outside = join(dir, "..", "settings.json")
+    await Bun.write(outside, JSON.stringify({ keep: true }))
+
+    // Same subject, so grouping pairs them. in_progress makes the well-formed
+    // record the survivor outright, so the traversal id is the one that would
+    // be unlinked rather than whichever way a locale tie-break happens to fall.
+    const tasks = [
+      stub("1", { status: "in_progress" }),
+      { ...stub("placeholder"), id: "../settings" },
+    ]
+    await writeTaskFile(dir, tasks[0] as MergeableTask)
+
+    const surviving = await mergeDuplicateTaskFiles(dir, tasks, async () => {})
+
+    expect(await Bun.file(outside).exists()).toBe(true)
+    // The group is left whole rather than half-merged.
+    expect(surviving.map((t) => t.id)).toEqual(["1", "../settings"])
   })
 })

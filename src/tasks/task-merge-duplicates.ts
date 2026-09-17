@@ -17,7 +17,7 @@
  */
 
 import { unlink } from "node:fs/promises"
-import { join } from "node:path"
+import { resolveTaskFilePath } from "./task-file-path.ts"
 import {
   isDuplicateSubjectCandidate,
   normalizeTaskSubjectForDuplicate,
@@ -155,34 +155,76 @@ export function planDuplicateMerges<T extends MergeableTask>(
 }
 
 /**
- * Apply `planDuplicateMerges` to a store directory: delete the folded-in task
- * files and persist each survivor through `writeSurvivor`. Fail-open, matching
- * the pruning pass — a deletion error still drops the record from the returned
- * list, because the survivor already represents that work.
+ * Apply `planDuplicateMerges` to a store directory: persist each survivor, then
+ * delete the records folded into it.
+ *
+ * Order matters and is the opposite of the obvious one. The survivor carries
+ * the union of every duplicate's dependency edges, which exists nowhere else
+ * once the folded files are gone — so the write has to land first. If it fails,
+ * that group is abandoned with all of its records still on disk: a duplicate
+ * row is a cosmetic problem, a dropped blocker is a correctness one, and the
+ * next pass will retry the merge from an intact population.
+ *
+ * Deleting a record that is already gone is still fine to ignore; that is
+ * convergence, not loss.
  */
+/**
+ * Persist one survivor and remove its folded records. Returns false when the
+ * group was left untouched, so the caller keeps every original in its result.
+ */
+async function applyMerge<T extends MergeableTask>(
+  dir: string,
+  merge: DuplicateMergeResult<T>,
+  writeSurvivor?: (task: T) => Promise<void>
+): Promise<boolean> {
+  // A record whose id cannot be turned into a path inside `dir` is corrupt.
+  // Leave the whole group alone rather than half-merge it.
+  const paths: string[] = []
+  for (const id of merge.mergedIds) {
+    const path = resolveTaskFilePath(dir, id)
+    if (path === null) return false
+    paths.push(path)
+  }
+
+  if (writeSurvivor) {
+    try {
+      await writeSurvivor(merge.task)
+    } catch {
+      // Survivor not durable — keep every original record and retry later.
+      return false
+    }
+  }
+
+  for (const path of paths) {
+    try {
+      await unlink(path)
+    } catch {
+      // already gone — the survivor covers this work either way
+    }
+  }
+  return true
+}
+
 export async function mergeDuplicateTaskFiles<T extends MergeableTask>(
   dir: string,
   tasks: readonly T[],
   writeSurvivor?: (task: T) => Promise<void>
 ): Promise<T[]> {
-  const { tasks: merged, merges } = planDuplicateMerges(tasks)
+  const { merges } = planDuplicateMerges(tasks)
   if (merges.length === 0) return [...tasks]
 
+  const folded = new Set<string>()
+  const survivors = new Map<string, T>()
   for (const merge of merges) {
-    for (const id of merge.mergedIds) {
-      try {
-        await unlink(join(dir, `${id}.json`))
-      } catch {
-        // already gone or locked — the survivor still covers this work
-      }
-    }
-    if (writeSurvivor) {
-      try {
-        await writeSurvivor(merge.task)
-      } catch {
-        // the in-memory result stays correct even if persistence fails
-      }
-    }
+    if (!(await applyMerge(dir, merge, writeSurvivor))) continue
+    survivors.set(merge.task.id, merge.task)
+    for (const id of merge.mergedIds) folded.add(id)
   }
-  return merged
+
+  const result: T[] = []
+  for (const task of tasks) {
+    if (folded.has(task.id)) continue
+    result.push(survivors.get(task.id) ?? task)
+  }
+  return result
 }
