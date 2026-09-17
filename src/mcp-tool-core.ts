@@ -36,6 +36,7 @@ import {
   renderUnblockedLine,
   truncateForLine,
 } from "./tasks/task-mcp-view.ts"
+import { mergeDuplicateTaskFiles } from "./tasks/task-merge-duplicates.ts"
 import { pruneStaleCompletedTasks } from "./tasks/task-prune.ts"
 import {
   isSafeSessionId,
@@ -142,11 +143,12 @@ async function runReplyTool(input: McpToolInput, cwd: string): Promise<McpToolRe
 
 /**
  * Read the project-keyed store, deleting completed tasks past the retention
- * age (COMPLETED_TASK_PRUNE_AGE_MS). The MCP task tools are the one surface
- * allowed to prune this store: a task mutation or query here is an explicit
- * agent action. Passive read paths must stay non-destructive — the daemon
- * status line once deleted the tasks it was counting (see
- * readProjectStoreTasks in compliance-routes.ts).
+ * age (COMPLETED_TASK_PRUNE_AGE_MS) and collapsing duplicate open tasks that
+ * describe the same work. The MCP task tools are the one surface allowed to
+ * maintain this store: a task mutation or query here is an explicit agent
+ * action. Passive read paths must stay non-destructive — the daemon status
+ * line once deleted the tasks it was counting (see readProjectStoreTasks in
+ * compliance-routes.ts).
  */
 export async function readProjectTasksWithPrune(
   projectKey: string,
@@ -155,7 +157,9 @@ export async function readProjectTasksWithPrune(
   const key: TaskStoreKey = { kind: "project", key: projectKey }
   if (!isSafeSessionId(key, tasksDir)) return []
   const tasks = await readTaskStore(key, tasksDir)
-  return pruneStaleCompletedTasks(await readTaskStorePath(key, tasksDir), tasks)
+  const dir = await readTaskStorePath(key, tasksDir)
+  const pruned = await pruneStaleCompletedTasks(dir, tasks)
+  return mergeDuplicateTaskFiles(dir, pruned, (task) => writeTaskUpdate(key, task.id, task))
 }
 
 /** Prune only project-owned files before building the non-destructive legacy-session union. */
