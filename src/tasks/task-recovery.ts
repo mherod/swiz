@@ -6,6 +6,7 @@ import { computeSubjectFingerprint } from "../subject-fingerprint.ts"
 import { createTaskStoreForHookPayload, findTaskStoreForSession } from "../task-roots.ts"
 import { projectStoreKey, readTasksAcrossStores } from "./task-repository.ts"
 import type { TaskStateCache } from "./task-state-cache.ts"
+import { readTaskStorePath, resolveLegacyTaskStoreKey } from "./task-store-layout.ts"
 import { backfillTaskTimingFields } from "./task-timing.ts"
 
 export { isIncompleteTaskStatus } from "./task-repository.ts"
@@ -118,8 +119,17 @@ export async function readSessionTasks(
   sessionId: string,
   home: string = getHomeDirWithFallback("")
 ): Promise<SessionTask[]> {
-  const tasksDir = getSessionTasksDir(sessionId, home)
-  if (!tasksDir) return []
+  const root = getTasksRoot(home)
+  if (!root || !sessionId) return []
+  let tasksDir: string
+  try {
+    tasksDir = await readTaskStorePath(
+      await resolveLegacyTaskStoreKey(sessionId, undefined, root),
+      root
+    )
+  } catch {
+    return []
+  }
   let files: string[]
   try {
     const { readdir } = await import("node:fs/promises")
@@ -201,8 +211,12 @@ export async function readSessionTasksFresh(
   maxStaleMs = 60_000
 ): Promise<SessionTask[]> {
   if (globalTaskStateCache) {
-    const tasksDir = getSessionTasksDir(sessionId, home)
-    if (tasksDir) {
+    const root = getTasksRoot(home)
+    if (root) {
+      const tasksDir = await readTaskStorePath(
+        await resolveLegacyTaskStoreKey(sessionId, undefined, root),
+        root
+      )
       return globalTaskStateCache.getTasksFresh(sessionId, tasksDir, maxStaleMs)
     }
   }

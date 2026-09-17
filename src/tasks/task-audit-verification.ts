@@ -16,7 +16,7 @@ import {
   type TaskMutationAction,
   writeAudit,
 } from "./task-repository.ts"
-import { sessionDirPath, sessionStoreKey } from "./task-store-path.ts"
+import { readTaskStorePath } from "./task-store-layout.ts"
 
 const AUDIT_LOG_FILENAME = ".audit-log.jsonl"
 
@@ -31,7 +31,13 @@ export async function readAuditLog(
   try {
     // Inside the try on purpose: an id that escapes the store throws here and takes the same
     // empty-log exit as a missing file, so a malformed payload cannot crash a stop hook.
-    const logPath = join(sessionDirPath(sessionStoreKey(sessionId), tasksDir), AUDIT_LOG_FILENAME)
+    const logPath = join(
+      await readTaskStorePath(
+        await resolveLegacyTaskStoreKey(sessionId, undefined, tasksDir),
+        tasksDir
+      ),
+      AUDIT_LOG_FILENAME
+    )
     const content = await readFile(logPath, "utf-8")
     const lines = content.trim().split("\n").filter(Boolean)
     return lines.map((line) => JSON.parse(line) as AuditEntry)
@@ -50,7 +56,13 @@ export async function readRecentAuditEntries(
   tasksDir = createDefaultTaskStore().tasksDir
 ): Promise<AuditEntry[]> {
   try {
-    const logPath = join(sessionDirPath(sessionStoreKey(sessionId), tasksDir), AUDIT_LOG_FILENAME)
+    const logPath = join(
+      await readTaskStorePath(
+        await resolveLegacyTaskStoreKey(sessionId, undefined, tasksDir),
+        tasksDir
+      ),
+      AUDIT_LOG_FILENAME
+    )
     return (await readJsonlFileTailUntyped(logPath, count)) as AuditEntry[]
   } catch {
     return []

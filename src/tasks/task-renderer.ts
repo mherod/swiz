@@ -7,7 +7,7 @@ import { format, formatDistanceToNow } from "date-fns"
 import { BOLD, DIM, RESET, YELLOW } from "../ansi.ts"
 import { formatDuration } from "../format-duration.ts"
 import { isIncompleteTaskStatus, readTasks, STATUS_STYLE, type Task } from "./task-repository.ts"
-import { getOrphanSessionIds, getSessions } from "./task-resolver.ts"
+import { getOrphanSessionIds, getTaskStoreAddresses } from "./task-resolver.ts"
 import { getTaskCompletedAtMs, getTaskCurrentDurationMs } from "./task-timing.ts"
 
 export type { Task }
@@ -176,7 +176,10 @@ export async function listAllSessionsTasks(
   dateFormat: DateFormat = "relative",
   recoveredOnly = false
 ): Promise<void> {
-  const [sessions, orphanIds] = await Promise.all([getSessions(filterCwd), getOrphanSessionIds()])
+  const [sessions, orphanIds] = await Promise.all([
+    getTaskStoreAddresses(filterCwd),
+    getOrphanSessionIds(),
+  ])
   const filteredSessions = recoveredOnly ? sessions.filter((s) => orphanIds.has(s)) : sessions
   const label = recoveredOnly
     ? "recovered sessions"

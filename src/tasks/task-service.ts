@@ -1,4 +1,4 @@
-import { readdir, readFile, stat } from "node:fs/promises"
+import { readFile, stat } from "node:fs/promises"
 import { join } from "node:path"
 import { resolveTranslationAgent } from "../agent-paths.ts"
 import { type AgentDef, translateMatcher } from "../agents.ts"
@@ -33,6 +33,12 @@ import {
   writeTask,
 } from "./task-repository.ts"
 import { collectIncompleteTasks, resolveTaskById } from "./task-resolver.ts"
+import {
+  listProjectStoreKeys,
+  listSessionStoreIds,
+  readTaskStorePath,
+} from "./task-store-layout.ts"
+import { taskStoreId } from "./task-store-path.ts"
 import { detect, formatMessage } from "./task-subject-validation.ts"
 
 export { compareTaskIds, legacySessionPrefix, parseTaskId, sessionPrefix }
@@ -100,7 +106,7 @@ export async function createTaskInProcess(opts: CreateTaskOptions): Promise<Task
     )
   }
 
-  const prefix = sessionPrefix(sessionId)
+  const prefix = sessionPrefix(taskStoreId(storeKey))
   const maxSeq = tasks.reduce((m, t) => {
     const parsed = parseTaskId(t.id)
     const seq = parsed.prefix === prefix || parsed.prefix === null ? parsed.seq : 0
@@ -314,7 +320,10 @@ function isValidRecoveredSubject(entry: unknown, taskId: string): entry is Recor
 async function collectSessionMtimes(tasksDir: string): Promise<{ dir: string; mtime: number }[]> {
   let sessionDirs: string[]
   try {
-    sessionDirs = await readdir(tasksDir)
+    sessionDirs = [
+      ...(await listSessionStoreIds(tasksDir)),
+      ...(await listProjectStoreKeys(tasksDir)),
+    ]
   } catch {
     return []
   }
@@ -322,7 +331,15 @@ async function collectSessionMtimes(tasksDir: string): Promise<{ dir: string; mt
   const withMtime: { dir: string; mtime: number }[] = []
   for (const dir of sessionDirs) {
     try {
-      const { mtimeMs } = await stat(join(tasksDir, dir, ".audit-log.jsonl"))
+      const { mtimeMs } = await stat(
+        join(
+          await readTaskStorePath(
+            await resolveLegacyTaskStoreKey(dir, undefined, tasksDir),
+            tasksDir
+          ),
+          ".audit-log.jsonl"
+        )
+      )
       withMtime.push({ dir, mtime: mtimeMs })
     } catch {}
   }
@@ -355,7 +372,10 @@ async function recoverSubjectFromAuditLogs(
 ): Promise<string | null> {
   const withMtime = await collectSessionMtimes(tasksDir)
   for (const { dir } of withMtime.slice(0, AUDIT_RECOVERY_MAX_SESSIONS)) {
-    const auditPath = join(tasksDir, dir, ".audit-log.jsonl")
+    const auditPath = join(
+      await readTaskStorePath(await resolveLegacyTaskStoreKey(dir, undefined, tasksDir), tasksDir),
+      ".audit-log.jsonl"
+    )
     const subject = await searchAuditLogForTask(auditPath, taskId)
     if (subject) return subject
   }

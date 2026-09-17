@@ -20,7 +20,6 @@ import {
   projectStoreKey,
   readTasks,
   readTasksAcrossStores,
-  sessionDirPath,
   sessionPrefix,
 } from "../tasks/task-repository.ts"
 import {
@@ -29,6 +28,7 @@ import {
   getSessionIdsByCwdScan,
   getSessionIdsForProject,
   getSessions,
+  getTaskStoreAddresses,
   resolveTaskById,
 } from "../tasks/task-resolver.ts"
 import {
@@ -39,7 +39,11 @@ import {
   updateStatus,
   writeTaskUpdate,
 } from "../tasks/task-service.ts"
-import { sessionStoreKey } from "../tasks/task-store-path.ts"
+import {
+  prepareTaskStoreWrite,
+  readTaskStorePath,
+  resolveLegacyTaskStoreKey,
+} from "../tasks/task-store-layout.ts"
 import type { Command } from "../types.ts"
 import { messageFromUnknownError } from "../utils/hook-json-helpers.ts"
 import { type McpFileData, type McpServerDef, readMcpFile } from "./mcp-config.ts"
@@ -75,7 +79,7 @@ async function resolveSession(args: string[]): Promise<string> {
   const explicit = extractFlag(args, "--session")
 
   if (explicit) {
-    const allSessions = await getSessions()
+    const allSessions = await getTaskStoreAddresses()
     const match = allSessions.find((s) => s.startsWith(explicit))
     if (!match) {
       throw new Error(`Session "${explicit}" not found.`)
@@ -85,12 +89,12 @@ async function resolveSession(args: string[]): Promise<string> {
 
   const allProjects = args.includes("--all-projects")
   const filterCwd = allProjects ? undefined : process.cwd()
-  let sessions = await getSessions(filterCwd)
+  let sessions = await getTaskStoreAddresses(filterCwd)
 
   // Compaction fallback: if no sessions found for cwd, fall back to the most
   // recently modified session across all projects.
   if (sessions.length === 0 && filterCwd) {
-    sessions = await getSessions(undefined)
+    sessions = await getTaskStoreAddresses(undefined)
   }
 
   if (sessions.length === 0) {
@@ -116,7 +120,7 @@ async function resolveSession(args: string[]): Promise<string> {
 function reportSessionSelection(sessions: string[]): void {
   if (sessions.length < 2) return
   console.log(
-    `  ${DIM}Showing most recently updated of ${sessions.length} sessions: ${sessions[0]}. ` +
+    `  ${DIM}Showing the selected store from ${sessions.length} stores: ${sessions[0]}. ` +
       `Use --session <id> to pick another, or --all-sessions to see them all.${RESET}`
   )
 }
@@ -608,6 +612,13 @@ function printRepairResult(result: RepairResult): void {
   }
 }
 
+async function resolveRepairDirectory(sessionId: string, tasksDir: string, dryRun: boolean) {
+  const storeKey = await resolveLegacyTaskStoreKey(sessionId, process.cwd(), tasksDir)
+  return dryRun
+    ? readTaskStorePath(storeKey, tasksDir)
+    : prepareTaskStoreWrite(storeKey, tasksDir, process.cwd())
+}
+
 async function runRepairTasks(rest: string[]): Promise<void> {
   const dryRun = rest.includes("--dry-run")
   const jsonOutput = rest.includes("--json")
@@ -635,7 +646,7 @@ async function runRepairTasks(rest: string[]): Promise<void> {
   const currentById = new Map(currentTasks.map((t) => [t.id, t]))
   // Repair rewrites task files, so an id that escapes the store must stop the command outright
   // rather than repair something outside it.
-  const sessionDir = sessionDirPath(sessionStoreKey(sessionId), tasksDir)
+  const sessionDir = await resolveRepairDirectory(sessionId, tasksDir, dryRun)
   let repaired = 0
   let verified = 0
   const actions: RepairAction[] = []

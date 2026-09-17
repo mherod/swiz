@@ -14,7 +14,7 @@
  */
 
 import { appendFile, mkdir } from "node:fs/promises"
-import { dirname, join } from "node:path"
+import { dirname } from "node:path"
 import { isDeepStrictEqual } from "node:util"
 import { z } from "zod"
 import { getHomeDirWithFallback } from "./home.ts"
@@ -41,7 +41,7 @@ import {
   isSafeSessionId,
   projectStoreKey,
   readTaskRecordsAcrossStores,
-  readTasks,
+  readTaskStore,
   type StoredTask,
   type Task,
   type TaskStoreKey,
@@ -52,6 +52,7 @@ import {
   updateStatus,
   writeTaskUpdate,
 } from "./tasks/task-service.ts"
+import { readTaskStorePath } from "./tasks/task-store-layout.ts"
 import { swizMcpRepliesLogPath } from "./temp-paths.ts"
 import { messageFromUnknownError } from "./utils/hook-json-helpers.ts"
 
@@ -151,9 +152,10 @@ export async function readProjectTasksWithPrune(
   projectKey: string,
   tasksDir = createDefaultTaskStore().tasksDir
 ): Promise<Task[]> {
-  const tasks = await readTasks(projectKey, tasksDir)
-  if (!isSafeSessionId({ kind: "project", key: projectKey }, tasksDir)) return tasks
-  return pruneStaleCompletedTasks(join(tasksDir, projectKey), tasks)
+  const key: TaskStoreKey = { kind: "project", key: projectKey }
+  if (!isSafeSessionId(key, tasksDir)) return []
+  const tasks = await readTaskStore(key, tasksDir)
+  return pruneStaleCompletedTasks(await readTaskStorePath(key, tasksDir), tasks)
 }
 
 /** Prune only project-owned files before building the non-destructive legacy-session union. */

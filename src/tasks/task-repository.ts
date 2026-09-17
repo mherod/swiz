@@ -4,7 +4,7 @@
  *       ID utilities (parseTaskId, compareTaskIds), and STATUS_STYLE.
  */
 
-import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises"
+import { readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { z } from "zod"
 import { debugLog } from "../debug.ts"
@@ -14,6 +14,11 @@ import { CappedMap } from "../utils/capped-map.ts"
 import { appendJsonlEntry, parseJsonl } from "../utils/jsonl.ts"
 import { isSessionTaskJsonFile } from "./task-file-utils.ts"
 import {
+  prepareTaskStoreWrite,
+  readTaskStorePath,
+  resolveLegacyTaskStoreKey,
+} from "./task-store-layout.ts"
+import {
   isSafeSessionId,
   projectStoreKey,
   sessionDirPath,
@@ -21,6 +26,9 @@ import {
   type TaskStoreKey,
   taskStoreDirName,
 } from "./task-store-path.ts"
+
+export { resolveLegacyTaskStoreKey } from "./task-store-layout.ts"
+
 import { backfillTaskTimingFields } from "./task-timing.ts"
 
 const AUDIT_LOG_FILENAME = ".audit-log.jsonl"
@@ -211,11 +219,10 @@ export async function readTasks(
   sessionId: string,
   tasksDir = createDefaultTaskStore().tasksDir
 ): Promise<Task[]> {
-  // Reads prefer an empty result over a throw: a traversing id names no legitimate session, and
-  // callers here (status lines, governance gates) must not crash on a malformed payload.
-  if (!isSafeSessionId(sessionStoreKey(sessionId), tasksDir)) return []
-  const dir = join(tasksDir, sessionId)
+  return readTaskStore(await resolveLegacyTaskStoreKey(sessionId, undefined, tasksDir), tasksDir)
+}
 
+async function readTasksInDirectory(dir: string): Promise<Task[]> {
   // Junie fallback: if events.jsonl exists, parse tasks from AgentPlanUpdatedEvent
   const eventsPath = join(dir, "events.jsonl")
   try {
@@ -359,7 +366,16 @@ export async function readTaskStore(
   storeKey: TaskStoreKey,
   tasksDir = createDefaultTaskStore().tasksDir
 ): Promise<Task[]> {
-  return readTasks(taskStoreDirName(storeKey), tasksDir)
+  if (!isSafeSessionId(storeKey, tasksDir)) return []
+  const dir = await readTaskStorePath(storeKey, tasksDir)
+  const tasks = await readTasksInDirectory(dir)
+  // A concurrent migration can rename the legacy directory after path resolution.
+  // Re-read the destination rather than briefly projecting an empty queue.
+  if (storeKey.kind === "project" && dir !== sessionDirPath(storeKey, tasksDir)) {
+    const current = await readTaskStorePath(storeKey, tasksDir)
+    if (current !== dir) return readTasksInDirectory(current)
+  }
+  return tasks
 }
 
 /**
@@ -372,6 +388,11 @@ export async function readTaskRecordsAcrossStores(
   projectKey: string | undefined,
   tasksDir = createDefaultTaskStore().tasksDir
 ): Promise<StoredTask[]> {
+  if (!projectKey) {
+    if (!sessionId) return []
+    const storeKey = await resolveLegacyTaskStoreKey(sessionId, undefined, tasksDir)
+    return (await readTaskStore(storeKey, tasksDir)).map((task) => ({ storeKey, task }))
+  }
   const keys: TaskStoreKey[] = []
   if (projectKey) keys.push({ kind: "project", key: projectKey })
   for (const id of await sessionCandidates(sessionId, Boolean(projectKey), tasksDir)) {
@@ -399,25 +420,34 @@ async function sessionCandidates(
   return candidates
 }
 
+/** Legacy path keys are project addresses, including ones with damaged cwd metadata. */
+function isLegacyProjectAddress(
+  id: string,
+  sessionId: string | undefined,
+  projectKey: string | undefined,
+  owner: string | undefined
+) {
+  return id === projectKey || owner === id || (id.startsWith("-") && id !== sessionId)
+}
+
 async function sessionBelongsToQueue(
   id: string,
   sessionId: string | undefined,
   projectKey: string | undefined,
   tasksDir: string
 ) {
-  if (id === projectKey || !isSafeSessionId(sessionStoreKey(id), tasksDir)) return false
-  // Historical daemon writes overwrote cwd on some foreign path keys. A contradictory path
-  // key is not evidence of a session; only its explicit project address may select it.
-  if (id.startsWith("-") && id !== sessionId) return false
-  const meta = await readSessionMeta(id, tasksDir)
+  if (!isSafeSessionId(sessionStoreKey(id), tasksDir)) return false
+  const meta = await readTaskStoreMeta(sessionStoreKey(id), tasksDir)
   const owner = typeof meta?.cwd === "string" ? projectStoreKey(meta.cwd).key : undefined
-  if (owner === id) return false
-  if (!owner) return id === sessionId
-  return !projectKey || owner === projectKey
+  if (meta?.storeKind !== "session" && isLegacyProjectAddress(id, sessionId, projectKey, owner))
+    return false
+  return owner ? owner === projectKey : id === sessionId
 }
 
 /** Lightweight per-session metadata index for O(1) open-task-count lookups. */
 export interface SessionMeta {
+  /** Explicit kind for newly written stores; legacy ownership is inferred from cwd. */
+  storeKind?: TaskStoreKey["kind"]
   /** Number of tasks with status "pending" or "in_progress". */
   openCount: number
   /** ISO timestamp of last update. */
@@ -455,18 +485,23 @@ async function resolveMetaCwd(dir: string, cwd?: string): Promise<string | undef
     const existing = JSON.parse(
       await readFile(join(dir, SESSION_META_FILE), "utf-8")
     ) as SessionMeta
-    return existing.cwd ?? cwd
+    return typeof existing.cwd === "string" ? existing.cwd : cwd
   } catch {
     return cwd
   }
 }
 
-async function updateSessionMeta(dir: string, cwd?: string): Promise<void> {
+async function updateSessionMeta(
+  dir: string,
+  storeKind: TaskStoreKey["kind"],
+  cwd?: string
+): Promise<void> {
   try {
     const files = await readdir(dir)
     const openCount = await countOpenTasks(dir, files)
     const effectiveCwd = await resolveMetaCwd(dir, cwd)
     const meta: SessionMeta = {
+      storeKind,
       openCount,
       updatedAt: new Date().toISOString(),
       ...(effectiveCwd !== undefined ? { cwd: effectiveCwd } : {}),
@@ -480,10 +515,12 @@ async function updateSessionMeta(dir: string, cwd?: string): Promise<void> {
 async function updateSessionMetaFromTasks(
   dir: string,
   tasks: readonly Task[],
+  storeKind: TaskStoreKey["kind"],
   cwd?: string
 ): Promise<void> {
   const effectiveCwd = await resolveMetaCwd(dir, cwd)
   const meta: SessionMeta = {
+    storeKind,
     openCount: tasks.filter((task) => isIncompleteTaskStatus(task.status)).length,
     updatedAt: new Date().toISOString(),
     ...(effectiveCwd !== undefined ? { cwd: effectiveCwd } : {}),
@@ -578,8 +615,7 @@ export async function writeTaskBatch(
   tasksDir = createDefaultTaskStore().tasksDir
 ): Promise<TaskBatchWriteResult> {
   const sessionId = taskStoreDirName(storeKey)
-  const dir = sessionDirPath(storeKey, tasksDir)
-  await mkdir(dir, { recursive: true })
+  const dir = await prepareTaskStoreWrite(storeKey, tasksDir, cwd)
   const auditPath = join(dir, AUDIT_LOG_FILENAME)
   const persistedOperationIds = await readAuditOperationIds(auditPath)
   let auditWrites = 0
@@ -595,7 +631,7 @@ export async function writeTaskBatch(
     dir,
     writes.map((write) => write.task)
   )
-  await updateSessionMetaFromTasks(dir, finalTasks, cwd)
+  await updateSessionMetaFromTasks(dir, finalTasks, storeKey.kind, cwd)
   sessionMetaCache.delete(metaCacheKey(sessionId, tasksDir))
   return {
     ...taskWrites,
@@ -613,11 +649,21 @@ export async function readSessionMeta(
   sessionId: string,
   tasksDir = createDefaultTaskStore().tasksDir
 ): Promise<SessionMeta | null> {
-  const key = metaCacheKey(sessionId, tasksDir)
+  const storeKey = await resolveLegacyTaskStoreKey(sessionId, undefined, tasksDir)
+  return readTaskStoreMeta(storeKey, tasksDir)
+}
+
+/** Typed metadata access must not reinterpret a native session as a project with the same ID. */
+export async function readTaskStoreMeta(
+  storeKey: TaskStoreKey,
+  tasksDir = createDefaultTaskStore().tasksDir
+): Promise<SessionMeta | null> {
+  if (!isSafeSessionId(storeKey, tasksDir)) return null
+  const key = metaCacheKey(taskStoreDirName(storeKey), tasksDir)
   if (sessionMetaCache.has(key)) return sessionMetaCache.get(key)!
-  if (!isSafeSessionId(sessionStoreKey(sessionId), tasksDir)) return null
+  const dir = await readTaskStorePath(storeKey, tasksDir)
   try {
-    const text = await readFile(join(tasksDir, sessionId, SESSION_META_FILE), "utf-8")
+    const text = await readFile(join(dir, SESSION_META_FILE), "utf-8")
     const meta = JSON.parse(text) as SessionMeta
     sessionMetaCache.set(key, meta)
     return meta
@@ -627,22 +673,6 @@ export async function readSessionMeta(
   }
 }
 
-/**
- * Classify an address obtained from the legacy flat-directory readers.
- * Metadata is authoritative; cwd is a fallback for a store's first write.
- * Remove this compatibility boundary when reader addresses become typed (#831).
- */
-export async function resolveLegacyTaskStoreKey(
-  directoryName: string,
-  cwd?: string,
-  tasksDir = createDefaultTaskStore().tasksDir
-): Promise<TaskStoreKey> {
-  const metadataCwd = (await readSessionMeta(directoryName, tasksDir))?.cwd
-  const ownerCwd = typeof metadataCwd === "string" ? metadataCwd : cwd
-  const project = ownerCwd ? projectStoreKey(ownerCwd) : undefined
-  return project?.key === directoryName ? project : sessionStoreKey(directoryName)
-}
-
 export async function writeTask(
   storeKey: TaskStoreKey,
   task: Task,
@@ -650,11 +680,10 @@ export async function writeTask(
   tasksDir = createDefaultTaskStore().tasksDir
 ): Promise<void> {
   const sessionId = taskStoreDirName(storeKey)
-  const dir = sessionDirPath(storeKey, tasksDir)
-  await mkdir(dir, { recursive: true })
+  const dir = await prepareTaskStoreWrite(storeKey, tasksDir, cwd)
   await atomicWriteJson(join(dir, `${task.id}.json`), task)
   // Update lightweight index so status.ts can read openCount without scanning every task file.
-  await updateSessionMeta(dir, cwd)
+  await updateSessionMeta(dir, storeKey.kind, cwd)
   // Invalidate in-process cache so subsequent reads reflect the write.
   sessionMetaCache.delete(metaCacheKey(sessionId, tasksDir))
   // Write-through to the global TaskStateCache (daemon path) so hooks and
@@ -689,7 +718,7 @@ export async function revertTaskStatusOnDisk(
   tasksDir = createDefaultTaskStore().tasksDir
 ): Promise<boolean> {
   const sessionId = taskStoreDirName(storeKey)
-  const dir = sessionDirPath(storeKey, tasksDir)
+  const dir = await prepareTaskStoreWrite(storeKey, tasksDir)
   const filePath = join(dir, `${taskId}.json`)
   let task: Task
   try {
@@ -732,8 +761,7 @@ export async function writeAudit(
 ): Promise<void> {
   const sessionId = taskStoreDirName(storeKey)
   try {
-    const dir = sessionDirPath(storeKey, tasksDir)
-    await mkdir(dir, { recursive: true })
+    const dir = await prepareTaskStoreWrite(storeKey, tasksDir)
     await appendJsonlEntry(join(dir, ".audit-log.jsonl"), entry)
   } catch (e) {
     debugLog(`writeAudit: failed to write audit entry for session ${sessionId}:`, e)

@@ -30,6 +30,7 @@ async function runDriver(): Promise<DriverResult> {
   const cwd = join(home, "project")
   const corePath = join(process.cwd(), "src", "mcp-tool-core.ts")
   const taskRootsPath = join(process.cwd(), "src", "task-roots.ts")
+  const repositoryPath = join(process.cwd(), "src", "tasks", "task-repository.ts")
   const discoveryPath = join(process.cwd(), "src", "tasks", "task-discovery.ts")
   const script = `
     import { mock } from "bun:test"
@@ -73,18 +74,9 @@ async function runDriver(): Promise<DriverResult> {
     )
     const edgeId = /Created #(\\S+)/.exec(textOf(edgeFixture))?.[1] ?? ""
     await runMcpTool("TaskUpdate", { taskId: createdId, addBlocks: ["#" + edgeId] }, cwd)
-    const { readdir } = await import("node:fs/promises")
+    const { readTaskStore, projectStoreKey } = await import(${JSON.stringify(repositoryPath)})
     const tasksRoot = createDefaultTaskStore().tasksDir
-    const readBlocks = async () => {
-      for (const projectDir of await readdir(tasksRoot)) {
-        for (const file of await readdir(tasksRoot + "/" + projectDir)) {
-          if (!file.endsWith(".json")) continue
-          const data = await Bun.file(tasksRoot + "/" + projectDir + "/" + file).json()
-          if (data.id === createdId) return data.blocks ?? null
-        }
-      }
-      return null
-    }
+    const readBlocks = async () => (await readTaskStore(projectStoreKey(cwd), tasksRoot)).find(task => task.id === createdId)?.blocks ?? null
     const storedBlocks = await readBlocks()
     await runMcpTool("TaskUpdate", { taskId: createdId, removeBlocks: [edgeId] }, cwd)
     const blocksAfterRemove = await readBlocks()

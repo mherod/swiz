@@ -24,6 +24,12 @@ import {
   type Task,
 } from "./task-repository.ts"
 
+import {
+  listProjectStoreKeys,
+  listSessionStoreIds,
+  readTaskStorePath,
+} from "./task-store-layout.ts"
+
 export type { Task }
 
 // ─── Session discovery ───────────────────────────────────────────────────────
@@ -321,7 +327,7 @@ export async function getSessions(
   projectsDir = createDefaultTaskStore().projectsDir
 ): Promise<string[]> {
   try {
-    const entries = await readdir(tasksDir)
+    const entries = await listSessionStoreIds(tasksDir)
     const matched = filterCwd
       ? await matchSessionsByCwd(entries, filterCwd, projectsDir, tasksDir)
       : null
@@ -336,6 +342,26 @@ export async function getSessions(
   } catch {
     return []
   }
+}
+
+/** Compatibility addresses for operations spanning projects and native sessions. */
+export async function getTaskStoreAddresses(
+  filterCwd?: string,
+  tasksDir = createDefaultTaskStore().tasksDir,
+  projectsDir = createDefaultTaskStore().projectsDir
+): Promise<string[]> {
+  const sessions = await getSessions(filterCwd, tasksDir, projectsDir)
+  const projects = filterCwd ? [projectKeyFromCwd(filterCwd)] : await listProjectStoreKeys(tasksDir)
+  const existing = await Promise.all(
+    projects.map(async (key) => {
+      const dir = await readTaskStorePath({ kind: "project", key }, tasksDir)
+      return await stat(dir).then(
+        () => key,
+        () => null
+      )
+    })
+  )
+  return [...new Set([...existing.filter((key): key is string => key !== null), ...sessions])]
 }
 
 // ─── Hint builders ───────────────────────────────────────────────────────────
@@ -400,7 +426,7 @@ export async function findTaskAcrossSessions(
   tasksDir = createDefaultTaskStore().tasksDir,
   projectsDir = createDefaultTaskStore().projectsDir
 ): Promise<{ sessionId: string; task: Task }[]> {
-  const sessions = await getSessions(filterCwd, tasksDir, projectsDir)
+  const sessions = await getTaskStoreAddresses(filterCwd, tasksDir, projectsDir)
   const matches: { sessionId: string; task: Task }[] = []
   for (const sessionId of sessions) {
     const tasks = await readTasks(sessionId, tasksDir)
@@ -413,7 +439,7 @@ export async function findTaskAcrossSessions(
 /** List task-dir entries, returning [] on failure. */
 async function safeReadTaskDirEntries(tasksDir: string): Promise<string[]> {
   try {
-    return await readdir(tasksDir)
+    return await listSessionStoreIds(tasksDir)
   } catch {
     return []
   }
@@ -543,7 +569,7 @@ async function resolvePrefixedTaskId(opts: {
     if (task) return { sessionId: primarySessionId, task }
   }
 
-  const sessions = await getSessions(filterCwd, tasksDir, projectsDir)
+  const sessions = await getTaskStoreAddresses(filterCwd, tasksDir, projectsDir)
   const { prefixMatches, isLegacyFallback } = findSessionsMatchingPrefix(sessions, prefix)
   const holders = await sessionsHoldingTask(prefixMatches, taskId, tasksDir)
   assertUnambiguousHolders(taskId, prefix, holders)
@@ -669,7 +695,7 @@ export async function getOrphanSessionIds(
   const allIndexed = await getAllProjectSessionIds(projectsDir)
   let entries: string[]
   try {
-    entries = await readdir(tasksDir)
+    entries = await listSessionStoreIds(tasksDir)
   } catch {
     return new Set()
   }
@@ -694,7 +720,7 @@ export async function collectIncompleteTasks(
   tasksDir = createDefaultTaskStore().tasksDir,
   projectsDir = createDefaultTaskStore().projectsDir
 ): Promise<{ sessionId: string; task: Task }[]> {
-  const sessions = await getSessions(filterCwd, tasksDir, projectsDir)
+  const sessions = await getTaskStoreAddresses(filterCwd, tasksDir, projectsDir)
   const results: { sessionId: string; task: Task }[] = []
   for (const sessionId of sessions) {
     // Fast skip: if session meta reports zero open tasks, skip the full read.
