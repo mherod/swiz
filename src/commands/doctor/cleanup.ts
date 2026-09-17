@@ -23,7 +23,7 @@ import { isSafeSessionId } from "../../tasks/task-repository.ts"
 import { formatBytes } from "../../utils/format.ts"
 import { getDaemonStatus } from "../daemon/daemon-admin.ts"
 import { findAntigravityCleanupGroups } from "./cleanup-antigravity.ts"
-import { findCodexCleanupGroups } from "./cleanup-codex.ts"
+import { CODEX_MIN_RETENTION_MS, findCodexCleanupGroups } from "./cleanup-codex.ts"
 import {
   type CodexProcessRuntime,
   createCodexProcessRuntime,
@@ -881,6 +881,9 @@ async function printCleanupReport(opts: CleanupReportOpts): Promise<CleanupTotal
 
   const totals = await printProjectTable(results)
 
+  if (results.some((result) => result.provider === "codex")) {
+    console.log("    Codex: archived sessions only (48h minimum); unarchived sessions protected.")
+  }
   console.log()
   printTaskCleanupSection(totals, oldTaskFiles, oldTaskBytes, cleanupArgs, taskCutoffMs)
   printBackupSection("claude", claudeBackups)
@@ -897,7 +900,9 @@ async function printCleanupReport(opts: CleanupReportOpts): Promise<CleanupTotal
   if (nothingToTrash) {
     const taskPhrase =
       taskCutoffMs === null ? "old task file cleanup disabled" : "no old task files"
-    const sessionPhrase = results.some((result) => result.cleanupSkipped)
+    const sessionPhrase = results.some(
+      (result) => result.cleanupSkipped || result.provider === "codex"
+    )
       ? "No sessions selected for cleanup"
       : `No sessions older than ${cleanupArgs.olderThanLabel}`
     console.log(
@@ -1154,7 +1159,7 @@ export async function autoCleanup(codexRuntime = createCodexProcessRuntime()): P
     return
   }
 
-  console.log(`\n  ${BOLD}Cleaning up old session data (> 24h)...${RESET}`)
+  console.log(`\n  ${BOLD}Cleaning up old session data (> 24h; Codex archives > 48h)...${RESET}`)
   await executeCleanup({
     results,
     claudeBackups,
@@ -1193,6 +1198,7 @@ async function gatherCleanupData(cleanupArgs: CleanupArgs, codexRuntime: CodexPr
   const tasksDir = join(claudeDir, "tasks")
 
   const cutoffMs = Date.now() - cleanupArgs.olderThanMs
+  const codexCutoffMs = Date.now() - (cleanupArgs.codexOlderThanMs ?? CODEX_MIN_RETENTION_MS)
   const taskCutoffMs = cleanupArgs.taskOlderThanMs ? Date.now() - cleanupArgs.taskOlderThanMs : null
 
   let results: ProjectResult[] = []
@@ -1209,7 +1215,7 @@ async function gatherCleanupData(cleanupArgs: CleanupArgs, codexRuntime: CodexPr
   // project path, so they are only scanned for unscoped cleanups.
   if (!cleanupArgs.projectFilter) {
     results = results.concat(await findAntigravityCleanupGroups(homeDir, cutoffMs))
-    codexGroups = await findCodexCleanupGroups(homeDir, cutoffMs)
+    codexGroups = await findCodexCleanupGroups(homeDir, codexCutoffMs)
     results = results.concat(codexGroups)
   }
 
@@ -1222,6 +1228,7 @@ async function gatherCleanupData(cleanupArgs: CleanupArgs, codexRuntime: CodexPr
           taskCutoffMs,
           cleanupArgs.projectFilter ? scopedSessionIds : undefined
         )
+  discoveredTaskFiles = filterProtectedCodexTasks(discoveredTaskFiles, codexGroups)
   const stopped = await guardCodexGroups(
     codexGroups,
     discoveredTaskFiles,
@@ -1231,11 +1238,11 @@ async function gatherCleanupData(cleanupArgs: CleanupArgs, codexRuntime: CodexPr
   if (stopped) {
     // Quitting may flush rollouts and tasks, changing which files satisfy the age cutoff.
     results = results.filter((result) => result.provider !== "codex")
-    results = results.concat(await findCodexCleanupGroups(homeDir, cutoffMs))
+    codexGroups = await findCodexCleanupGroups(homeDir, codexCutoffMs)
+    results = results.concat(codexGroups)
     if (taskCutoffMs !== null) discoveredTaskFiles = await findOldTaskFiles(tasksDir, taskCutoffMs)
   }
-  const protectedIds = collectSessionIds(results.filter((result) => result.cleanupSkipped))
-  const oldTaskFiles = discoveredTaskFiles.filter((task) => !protectedIds.has(task.sessionId))
+  const oldTaskFiles = filterProtectedCodexTasks(discoveredTaskFiles, codexGroups)
   const oldTaskBytes = oldTaskFiles.reduce((sum, task) => sum + task.sizeBytes, 0)
 
   if (!cleanupArgs.projectFilter) {
@@ -1247,6 +1254,16 @@ async function gatherCleanupData(cleanupArgs: CleanupArgs, codexRuntime: CodexPr
     findGeminiBackups(homeDir),
   ])
   return { results, oldTaskFiles, oldTaskBytes, taskCutoffMs, claudeBackups, geminiBackups }
+}
+
+function filterProtectedCodexTasks(
+  tasks: OldTaskFileInfo[],
+  groups: ProjectResult[]
+): OldTaskFileInfo[] {
+  const retainedIds = new Set(
+    groups.flatMap((group) => group.keep.map((session) => session.sessionId))
+  )
+  return tasks.filter((task) => !retainedIds.has(task.sessionId))
 }
 
 export async function runCleanupCommand(

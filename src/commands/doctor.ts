@@ -342,9 +342,12 @@ export const doctorCommand: Command<DoctorCommandOptions> = {
     { flags: "--clean", description: "Alias for swiz doctor clean" },
     {
       flags: "clean",
-      description: "Remove old Claude Code, Codex, and Antigravity sessions plus backup artifacts",
+      description: "Remove old Claude Code/Antigravity sessions, Codex archives, and backups",
     },
-    { flags: "--older-than <time>", description: "Cleanup window (e.g. 30, 7d, 48h)" },
+    {
+      flags: "--older-than <time>",
+      description: "Cleanup window (default: 30d; Codex archives: 48h default and minimum)",
+    },
     { flags: "--task-older-than <time>", description: "Separate window for task files" },
     { flags: "--project <name>", description: "Filter by project name or path" },
     { flags: "--dry-run", description: "Show what would be removed without trashing" },

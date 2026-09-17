@@ -3,6 +3,8 @@ import { lstat, readdir } from "node:fs/promises"
 import { join } from "node:path"
 import type { ProjectResult, SessionInfo } from "./cleanup-fs.ts"
 
+export const CODEX_MIN_RETENTION_MS = 48 * 60 * 60 * 1000
+
 const ROLLOUT_RE =
   /^rollout-.+-([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/i
 
@@ -35,8 +37,9 @@ async function collectRollouts(directory: string, sessions: SessionInfo[]): Prom
 
 export async function findCodexCleanupGroups(
   homeDir: string,
-  cutoffMs: number
+  cutoffMs = Date.now() - CODEX_MIN_RETENTION_MS
 ): Promise<ProjectResult[]> {
+  const archiveCutoffMs = Math.min(cutoffMs, Date.now() - CODEX_MIN_RETENTION_MS)
   const root = join(homeDir, ".codex")
   if (!(await lstat(root).catch(() => null))?.isDirectory()) return []
   const groups: ProjectResult[] = []
@@ -47,11 +50,15 @@ export async function findCodexCleanupGroups(
     const sessions: SessionInfo[] = []
     await collectRollouts(join(root, directory), sessions)
     if (sessions.length === 0) continue
+    const unarchived = directory === "sessions"
     groups.push({
       provider: "codex",
+      cleanupSkipped: unarchived,
       name,
-      keep: sessions.filter((session) => session.mtimeMs >= cutoffMs),
-      old: sessions.filter((session) => session.mtimeMs < cutoffMs),
+      keep: unarchived
+        ? sessions
+        : sessions.filter((session) => session.mtimeMs >= archiveCutoffMs),
+      old: unarchived ? [] : sessions.filter((session) => session.mtimeMs < archiveCutoffMs),
       stale: false,
     })
   }

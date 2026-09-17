@@ -107,13 +107,19 @@ Commands are registered in this order in `index.ts`:
 | `doctor` | `src/commands/doctor.ts` | Run diagnostic checks on the swiz installation |
 | `usage` | `src/commands/usage.ts` | Summarize Claude usage data from `~/.claude.json` |
 
-`swiz doctor clean --older-than 48h --dry-run` previews sessions last modified more
-than 48 hours ago, including Codex rollouts under `~/.codex/sessions/` and
-`~/.codex/archived_sessions/`. Omit `--dry-run` to move selected files to Trash;
-`--skip-trash` permanently deletes them instead. Retained Codex rollouts are left
-intact, including their older metadata and history. Codex and Antigravity stores
-are excluded when `--project` is supplied. `doctor --fix` includes these stores
-in its existing automatic cleanup window of 24 hours.
+`swiz doctor clean --dry-run` previews cleanup with a 30-day default for other
+providers and a 48-hour default for Codex archives. Codex cleanup only selects
+rollouts under `~/.codex/archived_sessions/` last modified more than 48 hours ago.
+Unarchived rollouts under `~/.codex/sessions/` are always retained, including their
+associated task files, even with `--force`, `--skip-trash`, or `--task-older-than`.
+`--older-than 7d` requests a longer retention window; shorter windows never lower
+the 48-hour Codex minimum. `doctor --fix` uses the same Codex policy while keeping
+its 24-hour automatic cleanup window for other providers.
+
+Omit `--dry-run` to move selected files to Trash; `--skip-trash` permanently deletes
+them instead. Retained Codex rollouts and their task files are left intact,
+including older metadata and history. Codex and Antigravity stores are excluded
+when `--project` is supplied.
 
 Codex cleanup is skipped while the macOS app or any Codex process is running,
 or when the process list cannot be inspected. Other providers still clean up.

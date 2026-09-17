@@ -79,6 +79,8 @@ export async function decodeProjectPath(
 export interface CleanupArgs {
   olderThanMs: number
   olderThanLabel: string
+  /** Explicit session window; Codex has its own 48-hour default and minimum. */
+  codexOlderThanMs?: number
   taskOlderThanMs: number | null
   taskOlderThanLabel: string | null
   dryRun: boolean
@@ -106,7 +108,7 @@ export function parseOlderThan(value: string): { ms: number; label: string } {
 }
 
 interface CleanupFlagState {
-  olderThan: { ms: number; label: string }
+  olderThan: { ms: number; label: string } | null
   taskOlderThan: { ms: number; label: string } | null
   dryRun: boolean
   projectFilter: string | undefined
@@ -165,8 +167,8 @@ function consumeCleanupFlag(
 }
 
 export function parseCleanupArgs(args: string[]): CleanupArgs {
-  const state = {
-    olderThan: parseOlderThan("30"),
+  const state: CleanupFlagState = {
+    olderThan: null,
     taskOlderThan: null as { ms: number; label: string } | null,
     dryRun: false,
     projectFilter: undefined as string | undefined,
@@ -180,9 +182,11 @@ export function parseCleanupArgs(args: string[]): CleanupArgs {
     if (consumeCleanupFlag(arg, args[i + 1], state)) i++
   }
 
+  const olderThan = state.olderThan ?? parseOlderThan("30")
   return {
-    olderThanMs: state.olderThan.ms,
-    olderThanLabel: state.olderThan.label,
+    olderThanMs: olderThan.ms,
+    olderThanLabel: olderThan.label,
+    codexOlderThanMs: state.olderThan?.ms,
     taskOlderThanMs: state.taskOlderThan?.ms ?? null,
     taskOlderThanLabel: state.taskOlderThan?.label ?? null,
     dryRun: state.dryRun,
