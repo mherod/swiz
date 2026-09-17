@@ -340,7 +340,7 @@ export const doctorCommand: Command<DoctorCommandOptions> = {
     { flags: "--clean", description: "Alias for swiz doctor clean" },
     {
       flags: "clean",
-      description: "Remove old Claude Code session data and Gemini backup artifacts",
+      description: "Remove old Claude Code, Codex, and Antigravity sessions plus backup artifacts",
     },
     { flags: "--older-than <time>", description: "Cleanup window (e.g. 30, 7d, 48h)" },
     { flags: "--task-older-than <time>", description: "Separate window for task files" },

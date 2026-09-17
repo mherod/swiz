@@ -23,6 +23,7 @@ import { isSafeSessionId } from "../../tasks/task-repository.ts"
 import { formatBytes } from "../../utils/format.ts"
 import { getDaemonStatus } from "../daemon/daemon-admin.ts"
 import { findAntigravityCleanupGroups } from "./cleanup-antigravity.ts"
+import { findCodexCleanupGroups } from "./cleanup-codex.ts"
 import { dirSize, type ProjectResult, type SessionInfo } from "./cleanup-fs.ts"
 import {
   type CleanupArgs,
@@ -444,6 +445,7 @@ async function truncateKeptSessions(
 
   for (const { keep } of results) {
     for (const session of keep) {
+      if (session.preserveTranscript) continue
       for (const path of session.paths) {
         const result = await truncateSessionPath(path, cutoffMs, skipBackup)
         filesAffected += result.filesAffected
@@ -1138,10 +1140,11 @@ async function gatherCleanupData(cleanupArgs: CleanupArgs) {
     results = results.concat(claudeResults)
   }
 
-  // Antigravity sessions live outside the Claude projects tree and are not
-  // keyed by project path, so they are only scanned for unscoped cleanups.
+  // These stores live outside the Claude projects tree and are not keyed by
+  // project path, so they are only scanned for unscoped cleanups.
   if (!cleanupArgs.projectFilter) {
     results = results.concat(await findAntigravityCleanupGroups(homeDir, cutoffMs))
+    results = results.concat(await findCodexCleanupGroups(homeDir, cutoffMs))
   }
 
   const scopedSessionIds = collectSessionIds(results)

@@ -60,6 +60,8 @@ export interface SessionInfo {
   sizeBytes: number
   taskDirPath: string | null
   taskDirSizeBytes: number
+  /** Keep native rollout metadata and history intact when retaining the session. */
+  preserveTranscript?: boolean
 }
 
 /** A named group of sessions split into retained and trashable buckets. */

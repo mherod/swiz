@@ -103,9 +103,17 @@ Commands are registered in this order in `index.ts`:
 
 | Command | Source | Description |
 |---------|--------|-------------|
-| `doctor clean` | `src/commands/doctor/cleanup.ts` | Remove old Claude Code and Antigravity session data plus Gemini backup artifacts |
+| `doctor clean` | `src/commands/doctor/cleanup.ts` | Remove old Claude Code, Codex, and Antigravity session data plus backup artifacts |
 | `doctor` | `src/commands/doctor.ts` | Run diagnostic checks on the swiz installation |
 | `usage` | `src/commands/usage.ts` | Summarize Claude usage data from `~/.claude.json` |
+
+`swiz doctor clean --older-than 48h --dry-run` previews sessions last modified more
+than 48 hours ago, including Codex rollouts under `~/.codex/sessions/` and
+`~/.codex/archived_sessions/`. Omit `--dry-run` to move selected files to Trash;
+`--skip-trash` permanently deletes them instead. Retained Codex rollouts are left
+intact, including their older metadata and history. Codex and Antigravity stores
+are excluded when `--project` is supplied. `doctor --fix` includes these stores
+in its existing automatic cleanup window of 24 hours.
 
 ---
 
