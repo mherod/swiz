@@ -22,3 +22,11 @@ export const MAX_CACHED_SESSIONS = 50
 
 /** Completed task pruning age threshold. */
 export const COMPLETED_TASK_PRUNE_AGE_MS = 15 * 60_000
+
+/**
+ * Age-based pruning threshold for task records of any status. A task whose
+ * last recorded activity predates this no longer reflects work anybody is
+ * doing, and a stale in_progress row keeps consuming the project WIP budget
+ * of sessions that never opened it.
+ */
+export const STALE_TASK_PRUNE_AGE_MS = 2 * 24 * 60 * 60_000
