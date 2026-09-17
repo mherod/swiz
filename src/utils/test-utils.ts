@@ -789,7 +789,14 @@ export async function writeClaudeSession(
 export async function writeTask(
   homeDir: string,
   sessionId: string,
-  task: { id: string; subject: string; status: string }
+  task: {
+    id: string
+    subject: string
+    status: string
+    /** ISO timestamp of the last write; omit to let the reader backfill from file mtime. */
+    updatedAt?: string
+    statusChangedAt?: string
+  }
 ): Promise<void> {
   const dir = getSessionTasksDir(sessionId, homeDir)
   if (!dir) throw new Error("Failed to resolve session tasks directory")

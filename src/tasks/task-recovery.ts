@@ -27,6 +27,8 @@ export interface SessionTask {
   completionEvidence?: string
   completionTimestamp?: string
   statusChangedAt?: string
+  /** ISO timestamp of the last persisted write of any kind. */
+  updatedAt?: string
   elapsedMs?: number
   startedAt?: number | null
   completedAt?: number | null

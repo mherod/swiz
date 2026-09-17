@@ -3,6 +3,14 @@
 /** Threshold (non-task calls) before hard blocking on stale tasks. */
 export const TASK_STALENESS_ENFORCEMENT_THRESHOLD = 60
 
+/**
+ * Maximum age (in milliseconds) an open task's last update may reach before
+ * new task creation is blocked. A queue whose open rows have gone quiet for
+ * this long no longer describes the work in flight, so the next TaskCreate
+ * has to reconcile the existing rows first.
+ */
+export const OPEN_TASK_UPDATE_RECENCY_LIMIT_MS = 10 * 60_000
+
 /** Maximum age (in milliseconds) before canonical TaskList must be refreshed. */
 export const CANONICAL_TASKLIST_SYNC_MAX_AGE_MS = 20 * 60_000
 

@@ -72,6 +72,12 @@ export interface Task {
   completedAt?: number | null
   /** ISO timestamp of last status change (used for elapsed-time tracking) */
   statusChangedAt?: string
+  /**
+   * ISO timestamp of the last persisted write of any kind. Unlike
+   * `statusChangedAt`, a description-only update refreshes this, so recency
+   * gates can be satisfied without forcing a status transition.
+   */
+  updatedAt?: string
   /** Cumulative milliseconds spent in in_progress status */
   elapsedMs?: number
   /** Deterministic fingerprint of the normalized subject for deduplication. */
@@ -287,6 +293,7 @@ async function readTasksInDirectory(dir: string): Promise<Task[]> {
           const st = await stat(filePath)
           // Backfill timing fields for legacy tasks that predate explicit timestamps.
           if (!task.statusChangedAt) task.statusChangedAt = st.mtime.toISOString()
+          if (!task.updatedAt) task.updatedAt = st.mtime.toISOString()
           backfillTaskTimingFields(task, st.mtimeMs)
           return task
         } catch {
@@ -627,9 +634,13 @@ export async function writeTaskBatch(
     if (operationId) persistedOperationIds.add(operationId)
   }
 
+  const writtenAt = new Date().toISOString()
   const taskWrites = await writeBoundedTaskFiles(
     dir,
-    writes.map((write) => write.task)
+    writes.map((write) => {
+      write.task.updatedAt = writtenAt
+      return write.task
+    })
   )
   await updateSessionMetaFromTasks(dir, finalTasks, storeKey.kind, cwd)
   sessionMetaCache.delete(metaCacheKey(sessionId, tasksDir))
@@ -681,6 +692,7 @@ export async function writeTask(
 ): Promise<void> {
   const sessionId = taskStoreDirName(storeKey)
   const dir = await prepareTaskStoreWrite(storeKey, tasksDir, cwd)
+  task.updatedAt = new Date().toISOString()
   await atomicWriteJson(join(dir, `${task.id}.json`), task)
   // Update lightweight index so status.ts can read openCount without scanning every task file.
   await updateSessionMeta(dir, storeKey.kind, cwd)

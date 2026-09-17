@@ -98,7 +98,7 @@ import {
   taskIdIsInDuplicateGroups,
 } from "../src/tasks/task-subject-duplicates.ts"
 import { detect, formatMessage } from "../src/tasks/task-subject-validation.ts"
-import { getTaskCurrentDurationMs } from "../src/tasks/task-timing.ts"
+import { getTaskCurrentDurationMs, getTaskLastUpdatedMs } from "../src/tasks/task-timing.ts"
 import { SWIZ_INCOMING_ROOT } from "../src/temp-paths.ts"
 import {
   isAnyProviderTaskCreateTool,
@@ -332,6 +332,76 @@ async function sessionHasHealthyPendingTaskBuffer(input: Record<string, any>): P
   }
 }
 
+interface OpenTaskRecency {
+  id: string
+  status: string
+  subject: string
+  updatedAt?: string | null
+  statusChangedAt?: string | null
+  startedAt?: number | null
+}
+
+/**
+ * Open tasks whose last recorded update is older than the recency limit.
+ * A record with no usable timestamp is treated as fresh so a malformed or
+ * legacy row can never wedge task creation.
+ */
+export function findStaleOpenTasks<T extends OpenTaskRecency>(
+  allTasks: readonly T[],
+  nowMs: number = Date.now(),
+  limitMs: number = OPEN_TASK_UPDATE_RECENCY_LIMIT_MS
+): T[] {
+  return allTasks.filter((task) => {
+    if (!isIncompleteTaskStatus(task.status)) return false
+    const lastUpdatedMs = getTaskLastUpdatedMs(task)
+    if (lastUpdatedMs === null) return false
+    return nowMs - lastUpdatedMs > limitMs
+  })
+}
+
+export function buildStaleOpenTaskMessage(
+  staleTasks: readonly OpenTaskRecency[],
+  nowMs: number = Date.now()
+): string {
+  const taskList = staleTasks
+    .map(
+      (task) =>
+        `  • #${task.id} (${task.status}): ${task.subject} — last updated ` +
+        `${formatDuration(Math.max(0, nowMs - (getTaskLastUpdatedMs(task) ?? nowMs)))} ago`
+    )
+    .join("\n")
+  const noun = staleTasks.length === 1 ? "task has" : "tasks have"
+  return (
+    `${staleTasks.length} open ${noun} not been updated in over ` +
+    `${Math.round(OPEN_TASK_UPDATE_RECENCY_LIMIT_MS / 60_000)} minutes:\n${taskList}\n\n` +
+    "Bring them current with TaskUpdate before creating another task — record progress in " +
+    "`description`, move finished work to `completed` with evidence, or cancel what is no longer real. " +
+    "Then retry this TaskCreate."
+  )
+}
+
+/**
+ * State gate: block new task creation while the existing open queue has gone
+ * stale. Stands down during a skill-owned workflow, like the other state gates.
+ */
+async function checkOpenTaskUpdateRecency(
+  input: Record<string, any>
+): Promise<SwizHookOutput | null> {
+  try {
+    const sessionId = resolveSafeSessionId(input?.session_id as string | undefined)
+    if (!sessionId) return null
+    if (await skillOwnsWorkflow(input, input?.cwd as string | undefined)) return null
+
+    const allTasks = overlayEventState(await readTasksForInput(input, sessionId), sessionId)
+    const staleTasks = findStaleOpenTasks(allTasks as unknown as OpenTaskRecency[])
+    if (staleTasks.length === 0) return null
+    return preToolUseDeny(buildStaleOpenTaskMessage(staleTasks))
+  } catch {
+    // Fail open — a read failure must never wedge task creation.
+    return null
+  }
+}
+
 function allowCompoundSubjectWithBuffer(): SwizHookOutput {
   const note =
     "Compound subject allowed: session already has a healthy pending task buffer (≥2 pending tasks). " +
@@ -356,7 +426,12 @@ async function denyAutoSteerOrBlock(
   return preToolUseDeny(reason)
 }
 
-import { TASK_STALENESS_ENFORCEMENT_THRESHOLD as STALENESS_THRESHOLD } from "../src/tasks/task-governance-constants.ts"
+import {
+  OPEN_TASK_UPDATE_RECENCY_LIMIT_MS,
+  TASK_STALENESS_ENFORCEMENT_THRESHOLD as STALENESS_THRESHOLD,
+} from "../src/tasks/task-governance-constants.ts"
+
+export { OPEN_TASK_UPDATE_RECENCY_LIMIT_MS }
 
 const LARGE_CONTENT_LINE_THRESHOLD = 10
 const IN_PROGRESS_CAP = 4
@@ -1697,6 +1772,9 @@ export async function evaluateTaskCreatePath(
         "Replace it with concrete current-session work, start it now, or record a real blocker with evidence."
     )
   }
+  const staleOutcome = await checkOpenTaskUpdateRecency(input)
+  if (staleOutcome) return staleOutcome
+
   const duplicateOutcome = await checkTaskCreateSubjectGovernance(input, subject)
   if (duplicateOutcome) return duplicateOutcome
 
