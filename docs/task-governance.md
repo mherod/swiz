@@ -92,6 +92,49 @@ Disabling the hook removes both its advice and steering. Disabling `auto-steer`
 retains advisory context but skips scheduled nudges; normal transport eligibility
 still applies. Neither control disables existing hard task gates.
 
+### Evidence and provider support
+
+Recognizing a provider's task-tool name does not prove that its mutation succeeded.
+The outcome adapter accepts `structuredContent.taskMutation.changed` from successful
+Swiz MCP responses. `true` proves movement; `false` preserves the counter. Explicit
+`isError: true` or `success: false` responses are failures, even if a change flag is
+also present. Other response shapes are unknown; rendered success text and attempted
+input fields are not movement evidence. The advisory hook only runs for agents with
+task tools enabled.
+
+A new session has an incomplete baseline until a confirmed mutation. A pending
+mutation temporarily suppresses advice; a confirmed no-op or failure restores the
+previous completeness without resetting the sum. An unknown outcome leaves the
+baseline incomplete until later confirmed movement. Consequently, silence can mean
+insufficient evidence, a disabled hook, or a value below threshold; it
+does not certify that the agent is on plan.
+
+The existing `/status-line/snapshot` response exposes `snapshot.divergence`, including
+`weightedSum`, last movement, `complete`, `provenance` (`live` or `recovered`), and the
+effective thresholds with their individual source tiers. Recovery reads the existing
+captured-call ledger rather than inferring success from a generic transcript. New
+divergence evidence contains normalized outcomes, weights and bounded checkpoints,
+without adding raw commands, task text or tool responses. The running aggregate
+survives eviction from the recent-call window.
+
+### Rollout and acceptance coverage
+
+[#865](https://github.com/mherod/swiz/issues/865#issuecomment-5574263444) shipped
+telemetry in `b3710af7` on 2026-09-07. The owner recorded the distribution review in
+[#844](https://github.com/mherod/swiz/issues/844) before
+[#866](https://github.com/mherod/swiz/issues/866#issuecomment-5718681058) activated
+advice in `d3bc1198` on 2026-09-17. These remain separate rollout stages; retaining
+the 60-call hard staleness gate was an explicit decision.
+
+| Contract | Verification |
+|---|---|
+| Shared 0/1/2 weights, outward writes before shell exemptions, real movement resets | [`divergence.test.ts`](../src/commands/daemon/divergence.test.ts) classification and movement suites; [`dispatch-routes.test.ts`](../src/commands/daemon/dispatch-routes.test.ts) confirmed task outcomes |
+| Drained queues and 40 read-only calls stay silent; mutations advise at 15 and steer at 30 | [`posttooluse-task-advisor.test.ts`](../hooks/posttooluse-task-advisor.test.ts) incidence and threshold cases |
+| Task reads and no-op updates preserve divergence; incomplete evidence stays silent | Advisor cases plus dispatch pending/unknown-outcome cases |
+| Layered settings, recovery parity, capped-history resilience and session separation | [`divergence-settings.test.ts`](../src/commands/daemon/divergence-settings.test.ts) and reducer recovery cases |
+| Factual task counts and existing hard gates remain intact | [`task-governance-rephrasing.test.ts`](../src/tasks/task-governance-rephrasing.test.ts), [`posttooluse-task-count-context.test.ts`](../hooks/posttooluse-task-count-context.test.ts) and [`pretooluse-task-governance-compliance.test.ts`](../hooks/pretooluse-task-governance-compliance.test.ts) |
+| Hook disable path and auto-steer opt-out | Advisor disable/steering cases |
+
 ## PostToolUse hooks
 
 - `posttooluse-task-sync.ts` — syncs disk task state into daemon caches

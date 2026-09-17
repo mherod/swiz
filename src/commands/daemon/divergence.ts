@@ -1,5 +1,7 @@
 /**
- * Weighted divergence signal — issue #844, phase 1 (telemetry only).
+ * Canonical weighted divergence signal — issue #844.
+ * Telemetry shipped in #865; advisory consumers were activated in #866
+ * after the owner reviewed the observed distribution and accepted 15/30.
  *
  * `divergence = Σ weight(call)` over governed tool calls since the last
  * task-movement event. The queue-depth proxy this replaces had inverted
@@ -24,9 +26,8 @@
  * Movement requires a confirmed successful TaskCreate or changed TaskUpdate
  * outcome. Attempts, failures, no-ops and unknown provider outcomes never reset.
  *
- * State is in-memory per session. lefthook restarts the daemon on every
- * commit, so consumers rebuild lazily from the captured tool-call JSONL
- * via normalized bounded checkpoints in the captured tool-call ledger.
+ * State is in-memory per session. After a daemon restart, consumers rebuild
+ * lazily from normalized bounded checkpoints in the captured tool-call ledger.
  * Legacy captures lack outcomes and are explicitly incomplete.
  *
  * Complete snapshots drive advisory-only task guidance after the #844
