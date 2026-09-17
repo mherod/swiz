@@ -206,13 +206,17 @@ export async function mergeDuplicateTasksAcrossStores<T extends MergeableTask, A
   const addressById = new Map(records.map((record) => [record.task.id, record.address]))
   const folded = new Set<string>()
   const survivors = new Map<string, T>()
+  const foldedToSurvivor = new Map<string, string>()
 
   for (const merge of merges) {
     const address = addressById.get(merge.task.id)
     if (address === undefined) continue
     if (!(await applyCrossStoreMerge(merge, address, addressById, access))) continue
     survivors.set(merge.task.id, merge.task)
-    for (const id of merge.mergedIds) folded.add(id)
+    for (const id of merge.mergedIds) {
+      folded.add(id)
+      foldedToSurvivor.set(id, merge.task.id)
+    }
   }
 
   const result: AddressedTask<T, A>[] = []
@@ -221,7 +225,68 @@ export async function mergeDuplicateTasksAcrossStores<T extends MergeableTask, A
     const survivor = survivors.get(record.task.id)
     result.push(survivor ? { ...record, task: survivor } : record)
   }
+  return repointExternalRefs(result, foldedToSurvivor, access)
+}
+
+/**
+ * Rewrite dependency edges that pointed at a folded record so they point at its
+ * survivor.
+ *
+ * Without this a merge silently unblocks work: `openBlockersOf` drops any
+ * blocker id it cannot resolve, so a task blocked by a duplicate that was just
+ * folded away reads as ready while the survivor is still open. Edges inside a
+ * merged group are handled by `unionRefs`; these are the edges held by everyone
+ * else.
+ */
+async function repointExternalRefs<T extends MergeableTask, A>(
+  records: readonly AddressedTask<T, A>[],
+  foldedToSurvivor: ReadonlyMap<string, string>,
+  access: StoreAccess<T, A>
+): Promise<AddressedTask<T, A>[]> {
+  if (foldedToSurvivor.size === 0) return [...records]
+
+  const result: AddressedTask<T, A>[] = []
+  for (const record of records) {
+    const blocks = remapRefs(record.task.id, record.task.blocks, foldedToSurvivor)
+    const blockedBy = remapRefs(record.task.id, record.task.blockedBy, foldedToSurvivor)
+    if (!blocks && !blockedBy) {
+      result.push(record)
+      continue
+    }
+
+    const task = {
+      ...record.task,
+      ...(blocks ? { blocks } : {}),
+      ...(blockedBy ? { blockedBy } : {}),
+    }
+    try {
+      await access.write(record.address, task)
+      result.push({ ...record, task })
+    } catch {
+      // Edge repointing failed to persist; keep the record as read so the
+      // in-memory view does not claim a durable state it does not have.
+      result.push(record)
+    }
+  }
   return result
+}
+
+/** Returns the rewritten list, or null when nothing referenced a folded id. */
+function remapRefs(
+  ownerId: string,
+  refs: readonly string[] | undefined,
+  foldedToSurvivor: ReadonlyMap<string, string>
+): string[] | null {
+  if (!refs || refs.length === 0) return null
+  if (!refs.some((ref) => foldedToSurvivor.has(ref))) return null
+
+  const seen = new Set<string>()
+  for (const ref of refs) {
+    const target = foldedToSurvivor.get(ref) ?? ref
+    // Collapsing a group can make an edge point at its own holder.
+    if (target !== ownerId) seen.add(target)
+  }
+  return [...seen]
 }
 
 /** Survivor-first, same ordering guarantee as the single-store path. */

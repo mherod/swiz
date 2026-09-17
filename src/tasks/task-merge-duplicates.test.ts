@@ -265,6 +265,60 @@ describe("mergeDuplicateTasksAcrossStores", () => {
     expect(await fileExists(stores.get("2") as string, "2")).toBe(true)
   })
 
+  it("repoints an outsider's blockedBy edge from the folded record to the survivor", async () => {
+    const stores = await makeSessionStores(["1", "2"])
+    const outsiderDir = await makeStoreDir()
+    const outsider = {
+      id: "9",
+      subject: "Ship the release",
+      status: "pending",
+      blockedBy: ["2"],
+    }
+    await writeTaskFile(outsiderDir, outsider)
+    stores.set("9", outsiderDir)
+
+    const records = [
+      { address: "1", task: stub("1", { status: "in_progress" }) },
+      { address: "2", task: stub("2") },
+      { address: "9", task: outsider },
+    ]
+    const written: Array<[string, MergeableTask]> = []
+
+    const surviving = await mergeDuplicateTasksAcrossStores(records, {
+      dirFor: (address: string) => stores.get(address) as string,
+      write: async (address: string, task: MergeableTask) => {
+        written.push([address, task])
+      },
+    })
+
+    // "2" was folded into "1"; the outsider must now block on "1", not on an id
+    // that no longer resolves — openBlockersOf drops unresolvable ids, which
+    // would mark this task ready while the survivor is still open.
+    const repointed = surviving.find((r) => r.task.id === "9")
+    expect(repointed?.task.blockedBy).toEqual(["1"])
+    expect(written).toContainEqual(["9", expect.objectContaining({ id: "9", blockedBy: ["1"] })])
+  })
+
+  it("leaves edges alone when they point at nothing that was folded", async () => {
+    // Control: repointing must not rewrite unrelated dependency edges.
+    const stores = await makeSessionStores(["1"])
+    const outsiderDir = await makeStoreDir()
+    const outsider = { id: "9", subject: "Ship the release", status: "pending", blockedBy: ["7"] }
+    await writeTaskFile(outsiderDir, outsider)
+    stores.set("9", outsiderDir)
+
+    const records = [
+      { address: "1", task: stub("1") },
+      { address: "9", task: outsider },
+    ]
+    const written: Array<[string, string]> = []
+
+    const surviving = await mergeDuplicateTasksAcrossStores(records, accessFor(stores, written))
+
+    expect(surviving.find((r) => r.task.id === "9")?.task.blockedBy).toEqual(["7"])
+    expect(written).toEqual([])
+  })
+
   it("keeps every store's record when the survivor write fails", async () => {
     const ids = ["1", "2"]
     const stores = await makeSessionStores(ids)
