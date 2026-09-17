@@ -48,6 +48,7 @@ export async function findCodexCleanupGroups(
     await collectRollouts(join(root, directory), sessions)
     if (sessions.length === 0) continue
     groups.push({
+      provider: "codex",
       name,
       keep: sessions.filter((session) => session.mtimeMs >= cutoffMs),
       old: sessions.filter((session) => session.mtimeMs < cutoffMs),

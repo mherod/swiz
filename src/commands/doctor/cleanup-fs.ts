@@ -66,6 +66,8 @@ export interface SessionInfo {
 
 /** A named group of sessions split into retained and trashable buckets. */
 export interface ProjectResult {
+  provider?: "codex"
+  cleanupSkipped?: boolean
   name: string
   keep: SessionInfo[]
   old: SessionInfo[]

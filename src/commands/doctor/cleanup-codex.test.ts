@@ -1,9 +1,11 @@
-import { describe, expect, test } from "bun:test"
+import { describe, expect, mock, test } from "bun:test"
 import { chmod, mkdir, symlink, utimes } from "node:fs/promises"
 import { basename, dirname, join } from "node:path"
 import { runCommandInProcess, useTempDir } from "../../utils/test-utils.ts"
 import { doctorCommand } from "../doctor.ts"
+import { autoCleanup } from "./cleanup.ts"
 import { findCodexCleanupGroups } from "./cleanup-codex.ts"
+import type { CodexProcess, CodexProcessRuntime } from "./cleanup-codex-processes.ts"
 
 const tmp = useTempDir("swiz-codex-cleanup-")
 const HOUR_MS = 60 * 60 * 1000
@@ -37,10 +39,28 @@ async function rollout(home: string, archived: boolean, mtime: number) {
   return { id, path, original }
 }
 
-function clean(home: string, args: string[] = []) {
+const idleRuntime: CodexProcessRuntime = {
+  inspect: async () => [],
+  quitApps: async () => {},
+  terminate: async () => {},
+  wait: async () => {},
+}
+
+const runningCodex = [{ pid: 12345, executable: "/Applications/Codex.app/Contents/MacOS/Codex" }]
+
+async function oldTask(home: string, sessionId: string): Promise<string> {
+  const path = join(home, ".claude", "tasks", sessionId, "1.json")
+  await mkdir(dirname(path), { recursive: true })
+  await Bun.write(path, JSON.stringify({ id: "1", status: "completed" }))
+  await utimes(path, OLD / 1000, OLD / 1000)
+  return path
+}
+
+function clean(home: string, args: string[] = [], runtime = idleRuntime) {
   return runCommandInProcess(doctorCommand, ["clean", "--older-than=48h", ...args], {
     cwd: home,
     env: { HOME: home },
+    commandOptions: { codexCleanupRuntime: runtime },
   })
 }
 
@@ -159,6 +179,8 @@ describe("Codex session cleanup", () => {
     await mkdir(bin)
     await Bun.write(join(bin, "trash"), '#!/bin/sh\nexec /bin/mv "$1" "$SWIZ_TEST_TRASH_DIR/"\n')
     await chmod(join(bin, "trash"), 0o755)
+    await Bun.write(join(bin, "ps"), '#!/bin/sh\nprintf "999 /usr/bin/bun\\n"\n')
+    await chmod(join(bin, "ps"), 0o755)
     const result = await cleanWithTrash(home, skipTrash ? ["--skip-trash"] : [], {
       PATH: `${bin}:${process.env.PATH}`,
       SWIZ_TEST_TRASH_DIR: trash,
@@ -179,5 +201,161 @@ describe("Codex session cleanup", () => {
     expect(repeated.exitCode).toBe(0)
     expect(repeated.stdout).not.toContain("Truncated")
     expect(await Bun.file(recent.path).text()).toBe(recent.original)
+  })
+})
+
+describe("Codex cleanup process guard", () => {
+  test("protects old tasks even when the Codex rollout itself is recent", async () => {
+    const home = await tmp.create()
+    const file = await rollout(home, false, RECENT)
+    const task = await oldTask(home, file.id)
+    const runtime = { ...idleRuntime, inspect: async () => runningCodex }
+    const result = await clean(home, ["--skip-trash", "--task-older-than=48h"], runtime)
+    expect(result.exitCode).toBe(0)
+    expect(result.stdout).toContain("Skipping Codex cleanup")
+    expect(await Bun.file(task).exists()).toBe(true)
+    expect(await Bun.file(file.path).text()).toBe(file.original)
+  })
+
+  test("force does not stop Codex when it has no eligible files", async () => {
+    const home = await tmp.create()
+    await rollout(home, false, RECENT)
+    const inspect = mock(async () => runningCodex)
+    const runtime = { ...idleRuntime, inspect }
+    const result = await clean(home, ["--force", "--task-older-than=48h"], runtime)
+    expect(result.exitCode).toBe(0)
+    expect(inspect).not.toHaveBeenCalled()
+  })
+
+  test("skips both Codex stores while other provider cleanup continues", async () => {
+    const home = await tmp.create()
+    const files = [await rollout(home, false, OLD), await rollout(home, true, OLD)]
+    const task = await oldTask(home, files[0]!.id)
+    const backup = join(home, ".gemini", "settings.json.bak")
+    await mkdir(dirname(backup), { recursive: true })
+    await Bun.write(backup, "old backup")
+    const quitApps = mock(async () => {})
+    const runtime = { ...idleRuntime, inspect: async () => runningCodex, quitApps }
+
+    const result = await clean(home, ["--skip-trash", "--task-older-than=48h"], runtime)
+    expect(result.exitCode).toBe(0)
+    expect(result.stdout).toContain("Skipping Codex cleanup: Codex is running")
+    expect(quitApps).not.toHaveBeenCalled()
+    for (const file of files) expect(await Bun.file(file.path).text()).toBe(file.original)
+    expect(await Bun.file(backup).exists()).toBe(false)
+    expect(await Bun.file(task).exists()).toBe(true)
+  })
+
+  test("force dry-run previews without stopping processes or touching files", async () => {
+    const home = await tmp.create()
+    const file = await rollout(home, false, OLD)
+    const quitApps = mock(async () => {})
+    const terminate = mock(async () => {})
+    const runtime = { ...idleRuntime, inspect: async () => runningCodex, quitApps, terminate }
+
+    const result = await clean(home, ["--force", "--dry-run"], runtime)
+    expect(result.exitCode).toBe(0)
+    expect(result.stdout).toContain("would quit Codex")
+    expect(result.stdout).toMatch(/Total: .*1 sessions/)
+    expect(quitApps).not.toHaveBeenCalled()
+    expect(terminate).not.toHaveBeenCalled()
+    expect(await Bun.file(file.path).text()).toBe(file.original)
+  })
+
+  test("force rescans flushed rollouts after quitting and before deleting", async () => {
+    const home = await tmp.create()
+    const flushed = await rollout(home, false, OLD)
+    const old = await rollout(home, true, OLD)
+    let running = true
+    const quitApps = mock(async () => {
+      await utimes(flushed.path, RECENT / 1000, RECENT / 1000)
+      running = false
+    })
+    const terminate = mock(async () => {})
+    const runtime = {
+      ...idleRuntime,
+      inspect: async () => (running ? runningCodex : []),
+      quitApps,
+      terminate,
+    }
+
+    const result = await clean(home, ["--force", "--skip-trash"], runtime)
+    expect(result.exitCode).toBe(0)
+    expect(quitApps).toHaveBeenCalledTimes(1)
+    expect(terminate).not.toHaveBeenCalled()
+    expect(await Bun.file(flushed.path).text()).toBe(flushed.original)
+    expect(await Bun.file(old.path).exists()).toBe(false)
+  })
+
+  test("force retains files when Codex will not stop", async () => {
+    const home = await tmp.create()
+    const file = await rollout(home, false, OLD)
+    const terminate = mock(async (_processes: CodexProcess[], _signal: "TERM" | "KILL") => {})
+    const runtime = { ...idleRuntime, inspect: async () => runningCodex, terminate }
+
+    const result = await clean(home, ["--force", "--skip-trash"], runtime)
+    expect(result.exitCode).toBe(0)
+    expect(result.stdout).toContain("Codex processes are still running")
+    expect(terminate.mock.calls).toEqual([
+      [runningCodex, "TERM"],
+      [runningCodex, "KILL"],
+    ])
+    expect(await Bun.file(file.path).text()).toBe(file.original)
+  })
+
+  test("a process started after discovery prevents deletion", async () => {
+    const home = await tmp.create()
+    const file = await rollout(home, false, OLD)
+    const task = await oldTask(home, file.id)
+    let checks = 0
+    const runtime = { ...idleRuntime, inspect: async () => (++checks === 1 ? [] : runningCodex) }
+
+    const result = await clean(home, ["--skip-trash", "--task-older-than=48h"], runtime)
+    expect(result.exitCode).toBe(0)
+    expect(checks).toBe(2)
+    expect(result.stdout).toContain("Skipping Codex cleanup")
+    expect(result.stdout).toContain("0 session(s)")
+    expect(await Bun.file(file.path).text()).toBe(file.original)
+    expect(await Bun.file(task).exists()).toBe(true)
+  })
+
+  test("unavailable process inspection fails closed even with force", async () => {
+    const home = await tmp.create()
+    const file = await rollout(home, false, OLD)
+    const quitApps = mock(async () => {})
+    const runtime = {
+      ...idleRuntime,
+      inspect: async () => {
+        throw new Error("ps denied")
+      },
+      quitApps,
+    }
+
+    const result = await clean(home, ["--force", "--skip-trash"], runtime)
+    expect(result.exitCode).toBe(0)
+    expect(result.stdout).toContain("process inspection failed")
+    expect(result.stdout).toContain("No sessions selected for cleanup")
+    expect(quitApps).not.toHaveBeenCalled()
+    expect(await Bun.file(file.path).text()).toBe(file.original)
+  })
+
+  test("automatic doctor cleanup never stops active Codex", async () => {
+    const home = await tmp.create()
+    const file = await rollout(home, false, OLD)
+    const quitApps = mock(async () => {})
+    const runtime = { ...idleRuntime, inspect: async () => runningCodex, quitApps }
+    const result = await runCommandInProcess(
+      {
+        name: "auto-cleanup",
+        description: "Test automatic cleanup",
+        run: () => autoCleanup(runtime),
+      },
+      [],
+      { cwd: home, env: { HOME: home } }
+    )
+    expect(result.exitCode).toBe(0)
+    expect(result.stdout).toContain("Skipping Codex cleanup")
+    expect(quitApps).not.toHaveBeenCalled()
+    expect(await Bun.file(file.path).text()).toBe(file.original)
   })
 })

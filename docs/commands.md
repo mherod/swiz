@@ -115,6 +115,15 @@ intact, including their older metadata and history. Codex and Antigravity stores
 are excluded when `--project` is supplied. `doctor --fix` includes these stores
 in its existing automatic cleanup window of 24 hours.
 
+Codex cleanup is skipped while the macOS app or any Codex process is running,
+or when the process list cannot be inspected. Other providers still clean up.
+Use `swiz doctor clean --older-than 48h --force` from a separate terminal to quit
+the Codex app and stop its remaining processes before cleanup. On macOS this uses
+`osascript`, requesting a normal quit before sending TERM and then KILL if needed.
+Cleanup proceeds only after Codex has exited, with a final check before deletion.
+`--force --dry-run` previews the shutdown and cleanup without stopping anything.
+Automatic cleanup through `doctor --fix` never forces Codex to stop.
+
 ---
 
 ## Help System

@@ -14,6 +14,7 @@ import {
   fixMissingConfigScripts,
 } from "./doctor/checks/shared-scripts.ts"
 import { autoCleanup, runCleanupCommand } from "./doctor/cleanup.ts"
+import type { CodexProcessRuntime } from "./doctor/cleanup-codex-processes.ts"
 import {
   displayPath,
   fixInvalidSkillEntries,
@@ -314,6 +315,7 @@ async function notifyDaemon(jsonOutput: boolean): Promise<void> {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 export interface DoctorCommandOptions {
+  codexCleanupRuntime?: CodexProcessRuntime
   fixCodexHookSources?: typeof fixCodexHookSources
   allChecks?: DiagnosticCheck[]
   autoCleanup?: typeof autoCleanup
@@ -347,13 +349,17 @@ export const doctorCommand: Command<DoctorCommandOptions> = {
     { flags: "--project <name>", description: "Filter by project name or path" },
     { flags: "--dry-run", description: "Show what would be removed without trashing" },
     {
+      flags: "--force",
+      description: "Quit Codex and stop its processes before cleanup (clean only)",
+    },
+    {
       flags: "--skip-trash",
       description: "Hard delete instead of moving to Trash (skips .bak backups)",
     },
   ],
   async run(args, options) {
     if (args[0] === "clean" || args[0] === "--clean") {
-      await runCleanupCommand(args.slice(1))
+      await runCleanupCommand(args.slice(1), options?.codexCleanupRuntime)
       return
     }
     await runWithTimeout("diagnostic checks", DOCTOR_CHECK_TIMEOUT_MS, () =>

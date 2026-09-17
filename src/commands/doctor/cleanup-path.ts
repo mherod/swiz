@@ -84,6 +84,7 @@ export interface CleanupArgs {
   dryRun: boolean
   projectFilter: string | undefined
   skipTrash?: boolean
+  force?: boolean
 }
 
 /** Parse a time value like "7", "7d", or "48h" into milliseconds + display label. */
@@ -110,12 +111,34 @@ interface CleanupFlagState {
   dryRun: boolean
   projectFilter: string | undefined
   skipTrash: boolean
+  force: boolean
 }
 
 function splitFlagAssignment(arg: string): { flag: string; value: string | undefined } {
   const idx = arg.indexOf("=")
   if (idx === -1) return { flag: arg, value: undefined }
   return { flag: arg.slice(0, idx), value: arg.slice(idx + 1) }
+}
+
+function setCleanupBooleanFlag(
+  flag: string,
+  value: string | undefined,
+  state: CleanupFlagState
+): boolean {
+  switch (flag) {
+    case "--dry-run":
+      state.dryRun = true
+      return true
+    case "--skip-trash":
+      state.skipTrash = true
+      return true
+    case "--force":
+      if (value !== undefined) throw new Error("--force does not accept a value")
+      state.force = true
+      return true
+    default:
+      return false
+  }
 }
 
 function consumeCleanupFlag(
@@ -125,14 +148,7 @@ function consumeCleanupFlag(
 ): boolean {
   const { flag, value } = splitFlagAssignment(arg)
   const assignedOrNext = value ?? next
-  if (flag === "--dry-run") {
-    state.dryRun = true
-    return false
-  }
-  if (flag === "--skip-trash") {
-    state.skipTrash = true
-    return false
-  }
+  if (setCleanupBooleanFlag(flag, value, state)) return false
   if (flag === "--older-than" && assignedOrNext) {
     state.olderThan = parseOlderThan(assignedOrNext)
     return value === undefined
@@ -155,6 +171,7 @@ export function parseCleanupArgs(args: string[]): CleanupArgs {
     dryRun: false,
     projectFilter: undefined as string | undefined,
     skipTrash: false,
+    force: false,
   }
 
   for (let i = 0; i < args.length; i++) {
@@ -171,5 +188,6 @@ export function parseCleanupArgs(args: string[]): CleanupArgs {
     dryRun: state.dryRun,
     projectFilter: state.projectFilter,
     skipTrash: state.skipTrash,
+    force: state.force,
   }
 }
