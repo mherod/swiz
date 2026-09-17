@@ -110,10 +110,7 @@ export async function evaluatePrecompactTaskSnapshot(input: unknown): Promise<Sw
 
   // The resume hook restores into this native session directory. Project records must never
   // enter this snapshot: doing so would recreate them in the wrong store after compaction.
-  const sessionTasks = await readTaskStore(
-    sessionStoreKey(sessionId),
-    getTasksRoot(home)!
-  )
+  const sessionTasks = await readTaskStore(sessionStoreKey(sessionId), getTasksRoot(home)!)
   if (sessionTasks.length === 0) return {}
   const snapshotTasks = toSnapshotTasks(sessionTasks)
   const snapshot = buildSnapshot(sessionId, snapshotTasks)
