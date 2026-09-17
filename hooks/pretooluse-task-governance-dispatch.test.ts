@@ -14,7 +14,10 @@ import pretooluseTaskGovernance, {
   findStaleOpenTasks,
   getInProgressCap,
   MAX_COMPLETIONS_IN_WINDOW,
+  OPEN_TASK_ABANDONED_CEILING_MS,
+  OPEN_TASK_GATE_RELEASE_ATTEMPTS,
   OPEN_TASK_UPDATE_RECENCY_LIMIT_MS,
+  partitionStaleOpenTasks,
 } from "./pretooluse-task-governance.ts"
 
 const TASK_HOME = join(
@@ -265,6 +268,30 @@ describe("findStaleOpenTasks", () => {
     expect(stale.map((t) => t.id)).toEqual(["1"])
   })
 
+  test("stops blocking on a task past the abandoned ceiling", () => {
+    // The project store is shared, so a row left behind by a session that has moved on
+    // would otherwise deny every later session's first TaskCreate with no reachable remedy.
+    const { blocking, abandoned } = partitionStaleOpenTasks(
+      [
+        {
+          id: "1",
+          status: "in_progress",
+          subject: "Abandoned",
+          updatedAt: isoAgo(OPEN_TASK_ABANDONED_CEILING_MS + 60_000),
+        },
+        {
+          id: "2",
+          status: "pending",
+          subject: "Merely stale",
+          updatedAt: isoAgo(OPEN_TASK_UPDATE_RECENCY_LIMIT_MS + 60_000),
+        },
+      ],
+      now
+    )
+    expect(blocking.map((t) => t.id)).toEqual(["2"])
+    expect(abandoned.map((t) => t.id)).toEqual(["1"])
+  })
+
   test("names every stale task in the block message", () => {
     const message = buildStaleOpenTaskMessage(
       [
@@ -303,6 +330,76 @@ describe("evaluateTaskCreatePath — open-task update recency", () => {
       const result = await evaluateTaskCreatePath(input, { subject: "fix login bug" })
       expect(permissionDecision(result)).toBe("deny")
       expect(decisionReason(result)).toContain("#1")
+    } finally {
+      await cleanupSession(sessionId)
+    }
+  })
+
+  // The user's own interrupt: a fresh user message suspends all task governance,
+  // this gate included, so the loop is never something only the agent can break.
+  test("stands down inside the user-message grace window", async () => {
+    const sessionId = uniqueSessionId("pgrep-dispatch-test-grace")
+    try {
+      await cleanupSession(sessionId)
+      await seedTaskUpdatedAgo(sessionId, "1", OPEN_TASK_UPDATE_RECENCY_LIMIT_MS + 60_000)
+      const result = await pretooluseTaskGovernance.run({
+        tool_name: "TaskCreate",
+        session_id: sessionId,
+        cwd: process.cwd(),
+        _taskHome: TASK_HOME,
+        _lastUserMessageAt: Date.now(),
+        tool_input: { subject: "fix login bug" },
+      })
+      expect(permissionDecision(result)).not.toBe("deny")
+    } finally {
+      await cleanupSession(sessionId)
+    }
+  })
+
+  test("releases after repeated creation attempts rather than wedging", async () => {
+    const sessionId = uniqueSessionId("pgrep-dispatch-test-release")
+    try {
+      await cleanupSession(sessionId)
+      await seedTaskUpdatedAgo(sessionId, "1", OPEN_TASK_UPDATE_RECENCY_LIMIT_MS + 60_000)
+      const input = {
+        tool_name: "TaskCreate",
+        session_id: sessionId,
+        _taskHome: TASK_HOME,
+        // Injected tool usage stands in for the transcript scan.
+        _currentSessionToolUsage: {
+          toolNames: Array.from({ length: OPEN_TASK_GATE_RELEASE_ATTEMPTS }, () => "TaskCreate"),
+          skillInvocations: [],
+        },
+      }
+      const result = await evaluateTaskCreatePath(input, { subject: "fix login bug" })
+      expect(permissionDecision(result)).toBe("allow")
+      expect(additionalContext(result)).toContain("released")
+    } finally {
+      await cleanupSession(sessionId)
+    }
+  })
+
+  // Control: one attempt short of the threshold must still deny, proving the
+  // release above comes from the valve and not from the gate having stopped firing.
+  test("still denies one attempt below the release threshold", async () => {
+    const sessionId = uniqueSessionId("pgrep-dispatch-test-below")
+    try {
+      await cleanupSession(sessionId)
+      await seedTaskUpdatedAgo(sessionId, "1", OPEN_TASK_UPDATE_RECENCY_LIMIT_MS + 60_000)
+      const input = {
+        tool_name: "TaskCreate",
+        session_id: sessionId,
+        _taskHome: TASK_HOME,
+        _currentSessionToolUsage: {
+          toolNames: Array.from(
+            { length: OPEN_TASK_GATE_RELEASE_ATTEMPTS - 1 },
+            () => "TaskCreate"
+          ),
+          skillInvocations: [],
+        },
+      }
+      const result = await evaluateTaskCreatePath(input, { subject: "fix login bug" })
+      expect(permissionDecision(result)).toBe("deny")
     } finally {
       await cleanupSession(sessionId)
     }
