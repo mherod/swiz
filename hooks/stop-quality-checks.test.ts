@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { mkdir, realpath } from "node:fs/promises"
+import { mkdir, realpath, symlink } from "node:fs/promises"
 import { delimiter, dirname, join, resolve } from "node:path"
 import { spawnWithTimeout } from "../src/utils/process-utils.ts"
 import { neutralAgentEnv, useTempDir } from "../src/utils/test-utils.ts"
@@ -175,6 +175,7 @@ describe("stop-quality-checks: project package manager", () => {
     for (const directory of [daemonCwd, projectCwd, binDir]) {
       await mkdir(directory, { recursive: true })
     }
+    await symlink(process.execPath, join(binDir, "bun"))
     await Bun.write(
       join(daemonCwd, "package.json"),
       JSON.stringify({ packageManager: "pnpm@10.0.0" })

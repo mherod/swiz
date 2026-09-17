@@ -10,6 +10,7 @@ import {
   isProtectedTaskStoragePathResolved,
   isSafeReadOnlyShellCommand,
 } from "../hooks/sandbox-path-utils.ts"
+import { acquireEnvLock, releaseEnvLockFn } from "./utils/test-utils.ts"
 
 describe("isSandboxDisableCommand", () => {
   // ── disable subcommand ────────────────────────────────────────────────────
@@ -174,6 +175,7 @@ describe("isSafeReadOnlyShellCommand", () => {
 
 describe("pretooluse-protect-sandbox nvm sourcing", () => {
   async function runSandboxHook(home: string, command: string) {
+    await acquireEnvLock()
     const previousHome = process.env.HOME
     process.env.HOME = home
     try {
@@ -188,6 +190,7 @@ describe("pretooluse-protect-sandbox nvm sourcing", () => {
       } else {
         process.env.HOME = previousHome
       }
+      releaseEnvLockFn()
     }
   }
 
