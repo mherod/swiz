@@ -4,6 +4,7 @@
 // Used by transcript-summary parsing and hook scripts that inspect Bash tool
 // calls. Extracted from hooks/hook-utils.ts (issue #84).
 
+import { type ShellHeredoc, splitHeredocBodies } from "./utils/shell-heredocs.ts"
 import {
   type ParsedGitInvocationTokens,
   parseGitInvocationTokens,
@@ -106,6 +107,7 @@ const GIT_COMMAND_WRAPPERS = new Set([
   "xcrun",
 ])
 const SHELL_SUBCOMMAND_RE = /(?:\$\(|[<>]\()([^()]*)\)|`([^`]*)`/g
+const HEREDOC_SUBCOMMAND_RE = /(?<!\\)(?:\\\\)*(?:\$\(([^()]*)\)|`([^`]*)`)/g
 const SHELL_ASSIGNMENT_RE = /^[A-Za-z_][A-Za-z0-9_]*=/
 
 // ─── Read-only git classification for substitution bodies ───────────────────
@@ -293,8 +295,10 @@ function findUnsafeGitEnvironment(
   depth = 0
 ): NonCanonicalGitInvocation | null {
   if (depth > MAX_GIT_INVOCATION_DEPTH) return null
+  const executable = heredocEnvironmentCommand(command)
   let unsafe = inherited
-  for (const segment of splitShellSegments(command)) {
+  for (const rawSegment of splitShellSegments(executable)) {
+    const segment = normalizeCommand(rawSegment).normalize("NFKC")
     unsafe ??= unsafeEnvironmentAssignment(tokenizeShellSegment(segment))
     for (const body of extractExecutableSubcommands(segment)) {
       const nested = findUnsafeGitEnvironment(body, unsafe, depth + 1)
@@ -356,11 +360,14 @@ function collectSegmentGitUsage(segment: string, depth: number): GitInvocation |
   )
 }
 
-function collectGitInvocations(command: string, depth: number): GitInvocation[] {
-  if (depth > MAX_GIT_INVOCATION_DEPTH) return []
-
+function collectSubstitutionUsages(bodies: string[], depth: number): GitInvocation[] {
   const usages: GitInvocation[] = []
-  for (const body of extractExecutableSubcommands(command)) {
+  for (const body of bodies) {
+    const unsafe = findUnsafeGitEnvironment(body, null, depth + 1)
+    if (unsafe) {
+      usages.push(unsafe)
+      continue
+    }
     const inner = collectGitInvocations(body, depth + 1)
     if (inner.length === 0) continue
     // Canonical read-only git inside a substitution cannot bypass any
@@ -373,8 +380,63 @@ function collectGitInvocations(command: string, depth: number): GitInvocation[] 
       usages.push({ kind: "shell-substitution", invocation: body })
     }
   }
+  return usages
+}
 
-  for (const segment of splitShellSegments(command)) {
+function heredocFeedsShell(header: string): boolean {
+  return splitShellSegments(header).some((segment) => {
+    const tokens = tokenizeShellSegment(normalizeCommand(segment))
+    const start = leadingAssignmentCount(tokens)
+    const first = executableBasename(tokens[start] ?? "")
+    if (SHELL_EXECUTABLES.has(first)) return true
+    return (
+      GIT_COMMAND_WRAPPERS.has(first) &&
+      tokens.slice(start + 1).some((token) => SHELL_EXECUTABLES.has(executableBasename(token)))
+    )
+  })
+}
+
+function collectHeredocUsages(heredoc: ShellHeredoc, depth: number): GitInvocation[] {
+  if (heredocFeedsShell(heredoc.header)) {
+    return collectGitInvocations(heredoc.body, depth + 1).length > 0
+      ? [{ kind: "nested-shell", invocation: heredoc.body }]
+      : []
+  }
+  return collectSubstitutionUsages(heredocSubcommands(heredoc), depth)
+}
+
+function heredocSubcommands(heredoc: ShellHeredoc): string[] {
+  if (heredoc.quoted) return []
+  // Single quotes are literal characters in unquoted heredoc input; they do
+  // not suppress the expansions performed by the shell reading that input.
+  return [...heredoc.body.matchAll(HEREDOC_SUBCOMMAND_RE)].map(
+    (match) => match[1] ?? match[2] ?? ""
+  )
+}
+
+/** Reinsert only expansions at their original scope for environment inheritance. */
+function heredocEnvironmentCommand(command: string): string {
+  const parsed = splitHeredocBodies(command)
+  const chunks: string[] = []
+  let cursor = 0
+  for (const heredoc of parsed.heredocs) {
+    chunks.push(parsed.command.slice(cursor, heredoc.offset))
+    chunks.push(...heredocSubcommands(heredoc).map((body) => `$( ${body} )\n`))
+    cursor = heredoc.offset
+  }
+  chunks.push(parsed.command.slice(cursor))
+  return chunks.join("")
+}
+
+function collectGitInvocations(command: string, depth: number): GitInvocation[] {
+  if (depth > MAX_GIT_INVOCATION_DEPTH) return []
+  // Parse real shell syntax before continuation folding or Unicode normalization
+  // can turn literal input into delimiters and conceal executable commands.
+  const parsed = splitHeredocBodies(command)
+  const usages = collectSubstitutionUsages(extractExecutableSubcommands(parsed.command), depth)
+  for (const heredoc of parsed.heredocs) usages.push(...collectHeredocUsages(heredoc, depth))
+
+  for (const segment of splitShellSegments(normalizeCommand(parsed.command).normalize("NFKC"))) {
     const usage = collectSegmentGitUsage(segment, depth)
     if (usage) usages.push(usage)
   }
@@ -389,10 +451,9 @@ function collectGitInvocations(command: string, depth: number): GitInvocation[] 
  * substitutions are rejected so downstream Git hooks see one stable grammar.
  */
 export function findNonCanonicalGitInvocation(command: string): NonCanonicalGitInvocation | null {
-  const normalized = normalizeCommand(command).normalize("NFKC")
-  const unsafe = findUnsafeGitEnvironment(normalized)
+  const unsafe = findUnsafeGitEnvironment(command)
   if (unsafe) return unsafe
-  const usages = collectGitInvocations(normalized, 0)
+  const usages = collectGitInvocations(command, 0)
   return (
     usages.find((usage): usage is NonCanonicalGitInvocation => usage.kind !== "canonical") ?? null
   )
