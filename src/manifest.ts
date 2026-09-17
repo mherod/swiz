@@ -453,6 +453,7 @@ export const bundledHookManifest: HookGroup[] = [
       { hook: posttooluseLastCommitAge },
       { hook: posttooluseMcpChannelTrace },
       { hook: posttooluseUnansweredPeerMessage },
+      { hook: posttooluseTaskAdvisor },
       { hook: speakNarrator },
       { hook: posttooluseAutoSteer },
     ],
@@ -511,7 +512,6 @@ export const bundledHookManifest: HookGroup[] = [
     hooks: [
       { hook: posttooluseJsonValidation },
       { hook: posttooluseTestPairing },
-      { hook: posttooluseTaskAdvisor },
       { hook: posttooluseMemorySize },
       { hook: posttooluseFileTruncationGuard },
       { hook: posttoolusePrettierTs },

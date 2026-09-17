@@ -244,7 +244,7 @@ PostToolUse hooks run after a tool completes. They can feed error context back t
 | `posttooluse-git-task-autocomplete.ts` | After a successful `git commit` or `git push`, automatically marks any matching "Commit" or "Push" tasks as completed. After a push, reminds the agent to create a CI-wait task. |
 | `posttooluse-json-validation.ts` | Re-validates JSON files after any edit or write. Catches any JSON that got corrupted during a tool call. |
 | `posttooluse-test-pairing.ts` | Detects when source files were edited without corresponding test updates and reminds the agent. Tests aren't optional. |
-| `posttooluse-task-advisor.ts` | Issues a countdown warning as the agent approaches the task enforcement threshold — before it gets blocked. |
+| `posttooluse-task-advisor.ts` | Advises at 15 weighted calls and steers at 30 using complete task-divergence evidence; existing hard gates stay unchanged. |
 | `posttooluse-pr-context.ts` | Injects PR context (description, review status, CI state) when the agent checks out a branch. Instant situational awareness. |
 | `posttooluse-pr-changes-context.ts` | After switching to a branch with an open PR that has CHANGES_REQUESTED reviews, injects urgent guidance directing the agent to run `/pr-comments-address` before committing or pushing. Surfaces the reviewer names and comment previews. |
 | `posttooluse-pr-create-refine.ts` | After `gh pr create`, checks if the new PR has a thin or empty description and suggests the /refine-pr skill via `additionalContext`. Non-blocking — advisory only. |

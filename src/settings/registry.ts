@@ -559,9 +559,9 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
     default: 15,
     zodSchema: z.number().int().min(1),
     docs: {
-      description: "Observation-only weighted divergence advisory threshold",
+      description: "Weighted task divergence advisory threshold",
       effectExplanation:
-        "Included in divergence telemetry; does not enable advisories or change enforcement.",
+        "Advises when complete evidence reaches this weight since confirmed task movement. Does not change hard enforcement.",
       valuePlaceholder: "weight",
     },
   },
@@ -573,9 +573,9 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
     default: 30,
     zodSchema: z.number().int().min(1),
     docs: {
-      description: "Observation-only weighted divergence steering threshold",
+      description: "Weighted task divergence steering threshold",
       effectExplanation:
-        "Included in divergence telemetry; does not enable steering or change enforcement.",
+        "Schedules a nudge at this weight when evidence is complete and auto-steer is enabled. Does not change hard enforcement.",
       valuePlaceholder: "weight",
     },
   },

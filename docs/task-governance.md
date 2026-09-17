@@ -49,8 +49,6 @@ task-tool interaction:
 
 | Constant | Value | Effect |
 |---|---|---|
-| `TASK_CREATION_ADVISORY_THRESHOLD` | 10 | Advise creating tasks |
-| `TASK_STALENESS_ADVISORY_THRESHOLD` | 20 | Advise the queue may be stale |
 | `TASK_STALENESS_ENFORCEMENT_THRESHOLD` | 60 | **Hard block** tool use until tasks refreshed |
 | `CANONICAL_TASKLIST_SYNC_MAX_AGE_MS` | 20 min | `TaskList` refresh required beyond this age |
 
@@ -58,14 +56,50 @@ Cache tuning (same file): `INCREMENTAL_FILE_LIMIT = 10`, `DEFAULT_STALE_CEILING_
 `DEFAULT_MAX_STALE_MS = 60s`, `MAX_CACHED_SESSIONS = 50`,
 `COMPLETED_TASK_PRUNE_AGE_MS = 15 min`.
 
+## Weighted divergence advisories
+
+The owner accepted advisory **15** and steering **30** on 2026-09-17 in
+[#844](https://github.com/mherod/swiz/issues/844), after reviewing normalized
+telemetry. The sample had only 31 complete completed runs across 85 recent sessions;
+its limitations and distribution are recorded with the decision. This activation
+does not change the existing hard gates above.
+
+`posttooluse-task-advisor.ts` consumes the canonical divergence reducer: task reads,
+file reads, searches and exempt shell reads weigh 0; local mutations weigh 1; outward
+git/gh mutations weigh 2. Only confirmed task creation or changed task updates reset
+the counter. TaskList and unchanged or failed updates cannot reset it. Pending or
+unknown mutation outcomes make evidence incomplete until confirmed movement restores
+a known baseline. Confirmed unchanged/failed outcomes resolve pending attempts without
+discarding a previously complete baseline.
+
+The hook uses the daemon snapshot, falling back to its persisted normalized ledger
+when unavailable. Recovery reuses the reducer and effective thresholds. Legacy records
+without confirmed outcomes, missing history and malformed snapshots remain silent.
+Advice includes the weighted sum and last confirmed movement, and never denies a tool
+call. Read-only investigation and an honestly drained queue do not create divergence.
+Count-context messages report counts without treating a small queue as drift.
+
+Thresholds resolve independently from project, user and default settings:
+
+```sh
+swiz settings set divergence-advisory 15 --project
+swiz settings set divergence-steer 30 --project
+swiz settings disable-hook posttooluse-task-advisor.ts --project
+swiz settings enable-hook posttooluse-task-advisor.ts --project
+```
+
+Disabling the hook removes both its advice and steering. Disabling `auto-steer`
+retains advisory context but skips scheduled nudges; normal transport eligibility
+still applies. Neither control disables existing hard task gates.
+
 ## PostToolUse hooks
 
 - `posttooluse-task-sync.ts` — syncs disk task state into daemon caches
   (`taskListSyncHook` / `taskAuditSyncHook`; see also `posttooluse-task-list-sync.ts`,
   `posttooluse-task-audit-sync.ts`).
-- `posttooluse-task-count-context.ts` — injects planning stats into context; reads in-memory
+- `posttooluse-task-count-context.ts` — injects factual counts into context; reads in-memory
   event state first (`src/tasks/task-event-state.ts`), falls back to disk + mutation overlay.
-- `posttooluse-task-advisor.ts` — next-step guidance from outstanding items.
+- `posttooluse-task-advisor.ts` — complete-evidence weighted divergence advice and steering.
 - `posttooluse-git-task-autocomplete.ts` — matches commit headers to open tasks.
 - `posttooluse-task-subject-validation.ts`, `posttooluse-task-output.ts` — subject/output
   follow-ups.

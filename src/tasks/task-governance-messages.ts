@@ -13,8 +13,6 @@ import {
   formatDuplicateSubjectGroups,
 } from "./task-subject-duplicates.ts"
 
-const PLENTY_PENDING_THRESHOLD = 2
-
 let governanceTranslationAgent: AgentDef | null | undefined
 
 function resolveGovernanceTranslationAgent(): AgentDef | null {
@@ -664,51 +662,31 @@ export function buildTaskGovernancePreview(request: TaskGovernanceMessageRequest
   }
 }
 
-export function buildTaskCreationCountdownMessage(
-  total: number,
-  threshold: number,
-  taskCreateName: string
-): string | undefined {
-  const remaining = threshold - total
-  if (remaining <= 0) return undefined
-
-  if (remaining <= 1) {
-    return `Create tasks now (${remaining} tool call remaining) — ${taskCreateName} required before the next step is blocked.`
-  }
-  if (remaining <= 3) {
-    return `Plan the next tasks soon — ${taskCreateName} required in ${remaining} tool calls to avoid interruption.`
-  }
-  if (total >= 2) {
-    return `${total}/${threshold} tool calls in — consider creating tasks now before the work expands further.`
-  }
-  return undefined
-}
-
-export function buildTaskAdvisorStalenessMessage(
-  callsSinceTask: number,
-  staleRemaining: number,
-  toolName: string,
-  isImplementationTool: boolean
-): string | undefined {
-  if (staleRemaining > 0) {
-    if (staleRemaining <= 2) {
-      return `Task update due in ${staleRemaining} tool call(s) — run TaskList, refresh task state, and update tasks before the next implementation step.`
-    }
-    if (staleRemaining <= 4) {
-      return `Task update due in ${staleRemaining} tool calls — run TaskList, record completed work only when it has evidence, refresh active work, or create new tasks for the work underway.`
-    }
+export function buildTaskDivergenceMessage(snapshot: {
+  complete: boolean
+  weightedSum: number
+  callsSinceMovement: number
+  lastMovementAt: string | null
+  lastMovementKind: "task-create" | "task-update" | null
+  advisoryThreshold: number
+  steerThreshold: number
+}): string | undefined {
+  if (!snapshot.complete || !snapshot.lastMovementAt || !snapshot.lastMovementKind) return undefined
+  if (snapshot.weightedSum < Math.min(snapshot.advisoryThreshold, snapshot.steerThreshold))
     return undefined
-  }
-
-  if (!isImplementationTool) return undefined
-
-  const base =
-    `Tasks are ${callsSinceTask} tool calls behind — ` +
-    "run TaskList, record completed work only when it has evidence, update active work with current status, or create new tasks for the work underway."
-
-  if (callsSinceTask <= 20) return base
-
-  return `${base} The task list is now well behind the work — pause implementation and sync it before continuing with ${toolName}.`
+  const movement = getTaskToolName(
+    snapshot.lastMovementKind === "task-create" ? "TaskCreate" : "TaskUpdate"
+  )
+  const level =
+    snapshot.weightedSum >= snapshot.steerThreshold
+      ? "Task divergence steer"
+      : "Task divergence advisory"
+  return (
+    `${level}: ${snapshot.weightedSum} weighted calls across ${snapshot.callsSinceMovement} governed calls since ` +
+    `${movement} changed task state at ${snapshot.lastMovementAt}. ` +
+    `Use ${getTaskToolName("TaskUpdate")} or ${getTaskToolName("TaskCreate")} to record what actually changed in the work. ` +
+    "Task reads and unchanged updates do not reset this signal. This is advisory only."
+  )
 }
 
 export function buildUserPromptTaskContext(pendingCount: number, taskCreateName: string): string {
@@ -741,72 +719,20 @@ export function buildCountSummary(counts: {
   inProgress: number
   issueHints?: string[]
 }): string {
-  const parts: string[] = [formatTaskStateLead(counts)]
-  appendPlanningFeedback(parts, counts)
-  appendHygieneFeedback(parts, counts)
-  return parts.join(" ")
+  const summary = formatTaskStateLead(counts)
+  return counts.issueHints?.length && counts.pending < 2
+    ? `${summary} Potential follow-up issues: ${counts.issueHints.join("; ")}.`
+    : summary
 }
 
+/** Queue depth is factual context, never evidence that the work has drifted. */
 export function formatTaskStateLead(counts: {
   total: number
   incomplete: number
   pending: number
   inProgress: number
 }): string {
-  if (counts.total === 0 || counts.incomplete === 0) return "Task queue empty."
-  if (counts.inProgress === 0) return "No active task yet."
-  if (counts.pending === 0) return "Planning buffer empty."
-  if (counts.pending === 1 && counts.incomplete <= 2) return "Planning buffer thin."
-  if (counts.pending >= PLENTY_PENDING_THRESHOLD && counts.inProgress >= 1) {
-    return "Task buffer healthy."
-  }
-  return "Task state needs attention."
-}
-
-function appendPlanningFeedback(
-  parts: string[],
-  counts: {
-    pending: number
-    incomplete: number
-    issueHints?: string[]
-  }
-): void {
-  if (counts.pending === 0) {
-    parts.push(
-      "Add two pending tasks before continuing: one for the next step in the current work, and one broader follow-on."
-    )
-  } else if (counts.pending === 1 && counts.incomplete <= 2) {
-    parts.push(
-      "Add another pending task to keep the buffer stable. Prefer one immediate next step and one broader follow-on task."
-    )
-  }
-
-  if (
-    (counts.pending === 0 || (counts.pending === 1 && counts.incomplete <= 2)) &&
-    counts.issueHints &&
-    counts.issueHints.length > 0
-  ) {
-    parts.push(`Potential follow-up issues: ${counts.issueHints.join("; ")}.`)
-  }
-}
-
-function appendHygieneFeedback(
-  parts: string[],
-  counts: {
-    pending: number
-    inProgress: number
-    incomplete: number
-  }
-): void {
-  if (counts.inProgress === 0 && counts.incomplete > 0) {
-    parts.push(
-      "Run TaskList, then use TaskUpdate to claim one pending task before starting implementation."
-    )
-  } else if (counts.pending >= PLENTY_PENDING_THRESHOLD && counts.inProgress >= 1) {
-    parts.push(
-      "Good task hygiene: planning buffer in place; keep statuses current as work changes."
-    )
-  }
+  return `Tasks: ${counts.inProgress} in_progress, ${counts.pending} pending, ${counts.incomplete} incomplete (${counts.total} total).`
 }
 
 export function formatIncompleteReason(

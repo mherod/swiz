@@ -1,6 +1,6 @@
 /**
  * Task count summary builder — shared by PostToolUse hooks that inject
- * task hygiene feedback (count-context and list-sync).
+ * factual counts (count-context and list-sync).
  */
 
 import { buildCountSummary } from "./task-governance-messages.ts"

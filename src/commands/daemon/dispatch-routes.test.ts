@@ -21,6 +21,7 @@ import {
   prepareLifecycleTaskDispatch,
   reapStaleDispatches,
 } from "./dispatch-routes.ts"
+import { snapshotSessionDivergence } from "./divergence.ts"
 import {
   ACTIVE_LIFECYCLE_TASKS_PAYLOAD_KEY,
   LifecycleTaskRegistry,
@@ -179,6 +180,45 @@ describe("handleDispatchActive", () => {
 })
 
 describe("handleDispatchRoute", () => {
+  test("confirmed no-op outcomes preserve complete divergence after a pending attempt", async () => {
+    const ctx = createDispatchContext()
+    const sessionId = `divergence-noop-${crypto.randomUUID()}`
+    const dispatch = async (event: string, tool: string, response?: unknown) => {
+      const url = new URL(`http://daemon/dispatch?event=${event}`)
+      await handleDispatchRoute(
+        new Request(url, {
+          method: "POST",
+          body: JSON.stringify({
+            cwd: process.cwd(),
+            session_id: sessionId,
+            tool_name: tool,
+            tool_input: {},
+            tool_response: response,
+          }),
+        }),
+        url,
+        ctx
+      )
+    }
+    await dispatch("postToolUse", "TaskCreate", {
+      structuredContent: { taskMutation: { changed: true } },
+    })
+    await dispatch("preToolUse", "Edit")
+    for (const outcome of [
+      { structuredContent: { taskMutation: { changed: false } } },
+      { isError: true },
+    ]) {
+      await dispatch("preToolUse", "TaskUpdate")
+      expect(snapshotSessionDivergence(ctx.sessionDivergence, sessionId)?.complete).toBe(false)
+      await dispatch("postToolUse", "TaskUpdate", outcome)
+      expect(snapshotSessionDivergence(ctx.sessionDivergence, sessionId)?.complete).toBe(true)
+      expect(snapshotSessionDivergence(ctx.sessionDivergence, sessionId)?.weightedSum).toBe(1)
+    }
+    await dispatch("preToolUse", "TaskUpdate")
+    await dispatch("postToolUse", "TaskUpdate", {})
+    expect(snapshotSessionDivergence(ctx.sessionDivergence, sessionId)?.complete).toBe(false)
+  })
+
   test("task attempts and unsuccessful outcomes never reset weighted telemetry", async () => {
     const ctx = createDispatchContext()
     const sessionId = `divergence-${crypto.randomUUID()}`

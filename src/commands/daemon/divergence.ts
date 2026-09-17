@@ -29,9 +29,8 @@
  * via normalized bounded checkpoints in the captured tool-call ledger.
  * Legacy captures lack outcomes and are explicitly incomplete.
  *
- * Phase 1 exposes the counter and provisional thresholds for observation
- * only; no hook consumes them yet (rollout step 2 in #844 swaps the
- * queue-depth advisory separately, gated on observed distributions).
+ * Complete snapshots drive advisory-only task guidance after the #844
+ * distribution review. Unknown outcomes never authorize an advisory.
  */
 
 import { z } from "zod"
@@ -84,6 +83,8 @@ export interface SessionDivergenceState {
   updatedAt: number
   complete: boolean
   provenance: "live" | "recovered"
+  /** Unresolved task attempts make snapshots incomplete without losing known history. */
+  pendingTaskMutations?: number
 }
 
 /** Read-only view served to snapshot consumers (status line, dashboard). */
@@ -125,7 +126,7 @@ export const DEFAULT_DIVERGENCE_ADVISORY_THRESHOLD = 15
 export const DEFAULT_DIVERGENCE_STEER_THRESHOLD = 30
 
 /**
- * Observation thresholds do not activate enforcement.
+ * Defaults accepted in the #844 distribution review; these never add a hard gate.
  */
 export function divergenceThresholds(): DivergenceThresholds {
   return {
@@ -343,7 +344,7 @@ function applyMovement(
       peak: state.weightedSum,
       calls: state.callsSinceMovement,
       movementKind: kind,
-      complete: state.complete,
+      complete: state.complete && !state.pendingTaskMutations,
     })
     if (state.peaks.length > MAX_DIVERGENCE_PEAKS) {
       state.peaks.splice(0, state.peaks.length - MAX_DIVERGENCE_PEAKS)
@@ -389,6 +390,7 @@ export interface DivergenceCallRecord {
   movement: DivergenceMovementKind | null
   countCall?: boolean
   incomplete?: boolean
+  taskMutation?: "started" | "resolved"
 }
 
 export function recordDivergenceToolCall(
@@ -397,6 +399,11 @@ export function recordDivergenceToolCall(
 ): SessionDivergenceState {
   const { sessionId, toolName, toolInput, nowMs, movement } = call
   const state = sessionDivergence.get(sessionId) ?? freshDivergenceState(nowMs)
+  if (call.taskMutation) {
+    const pending = state.pendingTaskMutations ?? 0
+    state.pendingTaskMutations =
+      call.taskMutation === "started" ? pending + 1 : Math.max(0, pending - 1)
+  }
   if (movement) {
     applyMovement(state, movement, nowMs, sessionId)
   } else if (call.countCall !== false) {
@@ -424,9 +431,26 @@ export function snapshotSessionDivergence(
     lastMovementKind: state.lastMovementKind,
     ...thresholds,
     recentPeaks: state.peaks.slice(-SNAPSHOT_RECENT_PEAKS),
-    complete: state.complete,
+    complete: state.complete && !state.pendingTaskMutations,
     provenance: state.provenance,
   }
+}
+
+/** One live/recovered snapshot path for the daemon and standalone advisory hook. */
+export async function readSessionDivergenceSnapshot(
+  cwd: string,
+  sessionId: string,
+  states = new Map<string, SessionDivergenceState>(),
+  home?: string
+): Promise<DivergenceSnapshot | null> {
+  const thresholds = await resolveDivergenceThresholds(cwd, home)
+  const live = snapshotSessionDivergence(states, sessionId, thresholds)
+  if (live) return live
+  const { readPersistedSessionToolCalls } = await import("./utils.ts")
+  const calls = await readPersistedSessionToolCalls(cwd, sessionId, undefined, home, true)
+  if (calls.length === 0) return null
+  if (!states.has(sessionId)) states.set(sessionId, recoverSessionDivergence(calls, Date.now()))
+  return snapshotSessionDivergence(states, sessionId, thresholds)
 }
 
 // ─── Recovery from the captured tool-call ledger ────────────────────────────
@@ -461,7 +485,10 @@ export function recoverSessionDivergence(
   const state = freshDivergenceState(nowMs)
   for (const call of calls) {
     if (call.divergence) {
-      Object.assign(state, call.divergence.state, { peaks: [...call.divergence.state.peaks] })
+      Object.assign(state, call.divergence.state, {
+        pendingTaskMutations: call.divergence.state.pendingTaskMutations ?? 0,
+        peaks: [...call.divergence.state.peaks],
+      })
       continue
     }
     state.complete = false
@@ -488,6 +515,7 @@ export const divergenceEvidenceSchema = z.object({
     lastMovementAt: z.string().nullable(),
     lastMovementKind: z.enum(["task-create", "task-update"]).nullable(),
     complete: z.boolean(),
+    pendingTaskMutations: z.number().int().nonnegative().optional(),
     peaks: z
       .array(
         z.object({
@@ -502,6 +530,20 @@ export const divergenceEvidenceSchema = z.object({
   }),
 })
 export type DivergenceEvidence = z.infer<typeof divergenceEvidenceSchema>
+
+export const divergenceSnapshotSchema = z.object({
+  weightedSum: z.number().nonnegative(),
+  callsSinceMovement: z.number().int().nonnegative(),
+  lastMovementAt: z.iso.datetime().nullable(),
+  lastMovementKind: z.enum(["task-create", "task-update"]).nullable(),
+  advisoryThreshold: z.number().int().positive(),
+  steerThreshold: z.number().int().positive(),
+  advisoryThresholdSource: z.enum(["session", "project", "user", "default"]),
+  steerThresholdSource: z.enum(["session", "project", "user", "default"]),
+  recentPeaks: divergenceEvidenceSchema.shape.state.shape.peaks,
+  complete: z.boolean(),
+  provenance: z.enum(["live", "recovered"]),
+})
 
 export function divergenceEvidence(
   state: SessionDivergenceState,
@@ -521,6 +563,7 @@ export function divergenceEvidence(
       lastMovementAt,
       lastMovementKind,
       complete,
+      pendingTaskMutations: state.pendingTaskMutations ?? 0,
       peaks: peaks.map((peak) => ({ ...peak })),
     },
   }

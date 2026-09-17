@@ -379,7 +379,7 @@ async function captureParsedToolUse(
     toolInput: parsed.toolInput,
     nowMs,
     movement: null,
-    incomplete: taskMutation,
+    taskMutation: taskMutation ? "started" : undefined,
   })
   captureSessionToolCall(ctx.sessionToolCalls, sessionId, toolName, parsed.toolInput, nowMs)
   if (parsed.cwd) {
@@ -429,6 +429,7 @@ function captureTaskOutcome(
     countCall: false,
     movement: outcome === "changed" ? kind : null,
     incomplete: outcome === "unknown",
+    taskMutation: "resolved",
   })
   if (parsed.cwd)
     sessionToolCallPersistenceQueue.enqueue({

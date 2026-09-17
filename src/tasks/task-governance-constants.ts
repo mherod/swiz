@@ -1,11 +1,5 @@
 /** Task governance configuration thresholds and intervals. */
 
-/** Threshold (non-task calls) before advising to create tasks. */
-export const TASK_CREATION_ADVISORY_THRESHOLD = 10
-
-/** Threshold (non-task calls) before advising task state is getting stale. */
-export const TASK_STALENESS_ADVISORY_THRESHOLD = 20
-
 /** Threshold (non-task calls) before hard blocking on stale tasks. */
 export const TASK_STALENESS_ENFORCEMENT_THRESHOLD = 60
 

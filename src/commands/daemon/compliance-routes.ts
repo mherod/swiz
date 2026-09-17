@@ -13,13 +13,10 @@ import { buildTaskCountsFromTasks } from "../status-line.ts"
 import type { CappedMap } from "./cache/capped-map.ts"
 import {
   type DivergenceSnapshot,
-  recoverSessionDivergence,
-  resolveDivergenceThresholds,
+  readSessionDivergenceSnapshot,
   type SessionDivergenceState,
-  snapshotSessionDivergence,
 } from "./divergence.ts"
 import type { UpstreamSyncRegistry } from "./upstream-sync.ts"
-import { readPersistedSessionToolCalls } from "./utils.ts"
 
 type ComplianceEntry = {
   state: string
@@ -180,16 +177,8 @@ async function resolveDivergenceSnapshot(
   ctx: ComplianceRoutesContext
 ): Promise<DivergenceSnapshot | null> {
   if (!sessionId) return null
-  const thresholds = await resolveDivergenceThresholds(cwd)
-  const live = snapshotSessionDivergence(ctx.sessionDivergence, sessionId, thresholds)
-  if (live) return live
   try {
-    const calls = await readPersistedSessionToolCalls(cwd, sessionId, undefined, undefined, true)
-    if (calls.length === 0) return null
-    if (!ctx.sessionDivergence.has(sessionId)) {
-      ctx.sessionDivergence.set(sessionId, recoverSessionDivergence(calls, Date.now()))
-    }
-    return snapshotSessionDivergence(ctx.sessionDivergence, sessionId, thresholds)
+    return await readSessionDivergenceSnapshot(cwd, sessionId, ctx.sessionDivergence)
   } catch {
     return null
   }

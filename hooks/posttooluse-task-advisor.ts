@@ -1,8 +1,6 @@
 #!/usr/bin/env bun
 
-// PostToolUse hook: Remind agents to create/update tasks regularly
-// Dual-mode: SwizHook + runSwizHookAsMain.
-
+/** Advisory-only weighted task divergence; the reducer owns reset/weight semantics. */
 import { agentHasTaskToolsForHookPayload } from "../src/agent-paths.ts"
 import {
   buildContextHookOutput,
@@ -11,86 +9,73 @@ import {
   type SwizHookOutput,
 } from "../src/SwizHook.ts"
 import { toolHookInputSchema } from "../src/schemas.ts"
-import {
-  TASK_CREATION_ADVISORY_THRESHOLD as CREATION_THRESHOLD,
-  TASK_STALENESS_ADVISORY_THRESHOLD as STALENESS_THRESHOLD,
-} from "../src/tasks/task-governance-constants.ts"
-import {
-  buildTaskAdvisorStalenessMessage,
-  buildTaskCreationCountdownMessage,
-  getTaskToolName,
-} from "../src/tasks/task-governance-messages.ts"
-import { isEditTool, isWriteTool } from "../src/tool-matchers.ts"
-import { getCurrentSessionTaskToolStats } from "../src/transcript-summary.ts"
+import { buildTaskDivergenceMessage } from "../src/tasks/task-governance-messages.ts"
+import { isAnyProviderTaskCreateTool, isAnyProviderTaskUpdateTool } from "../src/tool-matchers.ts"
 import { scheduleAutoSteer } from "../src/utils/auto-steer-helpers.ts"
 
-let advisorSessionId = ""
-let advisorCwd: string | undefined
+interface AdvisorDependencies {
+  readSnapshot: (cwd: string, sessionId: string) => Promise<unknown>
+  steer: typeof scheduleAutoSteer
+}
 
-async function emitAdvisorContext(
-  message: string,
-  opts?: { skipAutoSteer?: boolean }
+/** Lazy imports avoid the manifest/settings cycle for inline hooks. */
+export async function readTaskAdvisorSnapshot(cwd: string, sessionId: string): Promise<unknown> {
+  const { fetchSessionDivergenceFromDaemon } = await import("../src/utils/daemon-git-state.ts")
+  const live = await fetchSessionDivergenceFromDaemon(cwd, sessionId)
+  if (live !== null) return live
+  const { readSessionDivergenceSnapshot } = await import("../src/commands/daemon/divergence.ts")
+  return await readSessionDivergenceSnapshot(cwd, sessionId)
+}
+
+async function hasUnsettledTaskOutcome(raw: Record<string, any>): Promise<boolean> {
+  const toolName = raw.tool_name ?? ""
+  if (!isAnyProviderTaskCreateTool(toolName) && !isAnyProviderTaskUpdateTool(toolName)) return false
+  const { taskMutationOutcome } = await import("../src/commands/daemon/divergence.ts")
+  const outcome = taskMutationOutcome(raw.tool_response ?? raw.toolResponse)
+  // PostToolUse capture may follow this hook; never warn from a pre-movement value.
+  return outcome === "changed" || outcome === "unknown"
+}
+
+function taskAdvisorContext(input: unknown) {
+  const raw = typeof input === "object" && input !== null ? (input as Record<string, any>) : {}
+  if (!agentHasTaskToolsForHookPayload(raw)) return null
+  const parsed = toolHookInputSchema.parse(raw)
+  const sessionId = parsed.session_id
+  const cwd = parsed.cwd
+  return sessionId && cwd ? { raw, sessionId, cwd } : null
+}
+
+export async function evaluatePosttooluseTaskAdvisor(
+  input: unknown,
+  dependencies: AdvisorDependencies = {
+    readSnapshot: readTaskAdvisorSnapshot,
+    steer: scheduleAutoSteer,
+  }
 ): Promise<SwizHookOutput> {
-  if (advisorSessionId && !opts?.skipAutoSteer) {
-    await scheduleAutoSteer(advisorSessionId, message, undefined, advisorCwd)
+  const context = taskAdvisorContext(input)
+  if (!context) return {}
+  const { raw, sessionId, cwd } = context
+  if (await hasUnsettledTaskOutcome(raw)) return {}
+  const { divergenceSnapshotSchema } = await import("../src/commands/daemon/divergence.ts")
+  const result = divergenceSnapshotSchema.safeParse(
+    await dependencies.readSnapshot(cwd, sessionId).catch(() => null)
+  )
+  if (!result.success) return {}
+  const snapshot = result.data
+  const message = buildTaskDivergenceMessage(snapshot)
+  if (!message) return {}
+  if (
+    snapshot.weightedSum >= snapshot.steerThreshold &&
+    raw._effectiveSettings?.autoSteer !== false
+  ) {
+    await dependencies.steer(sessionId, message, undefined, cwd).catch(() => false)
   }
   return buildContextHookOutput("PostToolUse", message)
-}
-
-async function emitCreationCountdown(
-  total: number,
-  threshold: number,
-  taskCreateName: string
-): Promise<SwizHookOutput> {
-  const message = buildTaskCreationCountdownMessage(total, threshold, taskCreateName)
-  return message ? await emitAdvisorContext(message) : {}
-}
-
-function stalenessWarningMessage(
-  callsSinceTask: number,
-  staleRemaining: number,
-  toolName: string
-): string | undefined {
-  return buildTaskAdvisorStalenessMessage(
-    callsSinceTask,
-    staleRemaining,
-    toolName,
-    isEditTool(toolName) || isWriteTool(toolName)
-  )
-}
-
-export async function evaluatePosttooluseTaskAdvisor(input: unknown): Promise<SwizHookOutput> {
-  const hookRaw = typeof input === "object" && input !== null ? (input as Record<string, any>) : {}
-  if (!agentHasTaskToolsForHookPayload(hookRaw)) return {}
-  const parsed = toolHookInputSchema.parse(hookRaw)
-
-  advisorSessionId = parsed.session_id ?? ""
-  advisorCwd = parsed.cwd
-
-  const { totalToolCalls, callsSinceLastTaskTool } = await getCurrentSessionTaskToolStats(hookRaw)
-  const taskCreateName = getTaskToolName("TaskCreate")
-
-  if (callsSinceLastTaskTool >= totalToolCalls) {
-    return await emitCreationCountdown(totalToolCalls, CREATION_THRESHOLD, taskCreateName)
-  }
-
-  const staleRemaining = STALENESS_THRESHOLD - callsSinceLastTaskTool
-  const message = stalenessWarningMessage(
-    callsSinceLastTaskTool,
-    staleRemaining,
-    parsed.tool_name ?? ""
-  )
-
-  if (message) {
-    return await emitAdvisorContext(message, { skipAutoSteer: true })
-  }
-  return {}
 }
 
 const posttooluseTaskAdvisor: SwizHook<Record<string, any>> = {
   name: "posttooluse-task-advisor",
   event: "postToolUse",
-  matcher: "Edit|Write",
   timeout: 5,
   run(input) {
     return evaluatePosttooluseTaskAdvisor(input)
@@ -98,7 +83,4 @@ const posttooluseTaskAdvisor: SwizHook<Record<string, any>> = {
 }
 
 export default posttooluseTaskAdvisor
-
-if (import.meta.main) {
-  await runSwizHookAsMain(posttooluseTaskAdvisor)
-}
+if (import.meta.main) await runSwizHookAsMain(posttooluseTaskAdvisor)

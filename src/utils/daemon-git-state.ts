@@ -96,6 +96,20 @@ export async function fetchGitStatusFromDaemon(
   return data?.status ? parseDaemonGitStateRecord(data.status) : null
 }
 
+/** Read the shared compliance snapshot; callers validate its telemetry before acting. */
+export async function fetchSessionDivergenceFromDaemon(
+  cwd: string,
+  sessionId: string,
+  options?: FetchGitStatusFromDaemonOptions
+): Promise<unknown> {
+  const data = await postDaemonJson<{ snapshot?: { divergence?: unknown } }>(
+    "/status-line/snapshot",
+    { cwd, sessionId },
+    options
+  )
+  return data?.snapshot?.divergence ?? null
+}
+
 export interface DaemonLastUserMessage {
   /** Epoch milliseconds of the most recent user message in the session. */
   at: number

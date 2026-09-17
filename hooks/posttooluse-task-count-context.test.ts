@@ -62,114 +62,30 @@ describe("applyMutationOverlay", () => {
 })
 
 describe("buildCountSummary", () => {
-  it("praises healthy state when several pending and in_progress exist", () => {
-    const s = buildCountSummary({
-      total: 4,
-      incomplete: 3,
-      pending: 2,
-      inProgress: 1,
+  for (const counts of [
+    { total: 0, incomplete: 0, pending: 0, inProgress: 0 },
+    { total: 4, incomplete: 0, pending: 0, inProgress: 0 },
+    { total: 1, incomplete: 1, pending: 0, inProgress: 1 },
+    { total: 2, incomplete: 2, pending: 1, inProgress: 1 },
+    { total: 3, incomplete: 3, pending: 3, inProgress: 0 },
+    { total: 4, incomplete: 3, pending: 2, inProgress: 1 },
+  ]) {
+    it(`reports factual counts for ${JSON.stringify(counts)}`, () => {
+      expect(buildCountSummary(counts)).toBe(
+        `Tasks: ${counts.inProgress} in_progress, ${counts.pending} pending, ${counts.incomplete} incomplete (${counts.total} total).`
+      )
     })
-    expect(s).not.toContain("Tasks: 1 in_progress, 2 pending")
-    expect(s).toContain("Task buffer healthy")
-    expect(s).toContain("Good task hygiene")
-    expect(s).toContain("planning buffer")
-  })
+  }
 
-  it("does not praise when no in_progress despite pending buffer", () => {
-    const s = buildCountSummary({
-      total: 3,
-      incomplete: 3,
-      pending: 3,
-      inProgress: 0,
-    })
-    expect(s).not.toContain("Tasks: 0 in_progress, 3 pending")
-    expect(s).not.toContain("Good task hygiene")
-    expect(s).toContain("No active task yet")
-  })
-
-  it("does not praise when only one pending even with in_progress", () => {
-    const s = buildCountSummary({
-      total: 2,
-      incomplete: 2,
-      pending: 1,
-      inProgress: 1,
-    })
-    expect(s).not.toContain("Tasks: 1 in_progress, 1 pending")
-    expect(s).not.toContain("Good task hygiene")
-    expect(s).toContain("Planning buffer thin")
-  })
-
-  it("shows planning buffer empty message without praise when zero pending", () => {
-    const s = buildCountSummary({
-      total: 1,
-      incomplete: 1,
-      pending: 0,
-      inProgress: 1,
-    })
-    expect(s).toContain("Planning buffer empty")
-    expect(s).toContain("next step in the current work")
-    expect(s).toContain("broader follow-on")
-    expect(s).not.toContain("Good task hygiene")
-  })
-
-  it("encourages specific task types when only 1 pending", () => {
-    const s = buildCountSummary({
-      total: 2,
-      incomplete: 2,
-      pending: 1,
-      inProgress: 1,
-    })
-    expect(s).toContain("immediate next step")
-    expect(s).toContain("broader follow-on task")
-  })
-
-  it("appends issue hints when pending is low and hints provided", () => {
-    const s = buildCountSummary({
-      total: 2,
-      incomplete: 2,
-      pending: 1,
-      inProgress: 1,
-      issueHints: ["#42 Fix auth timeout", "#57 Add retry logic"],
-    })
-    expect(s).toContain("Potential follow-up issues")
-    expect(s).toContain("#42 Fix auth timeout")
-    expect(s).toContain("#57 Add retry logic")
-  })
-
-  it("does not append issue hints when pending buffer is healthy", () => {
-    const s = buildCountSummary({
-      total: 4,
-      incomplete: 3,
-      pending: 2,
-      inProgress: 1,
-      issueHints: ["#42 Fix auth timeout"],
-    })
-    expect(s).not.toContain("Potential follow-up issues")
-  })
-
-  it("does not append issue hints when hints array is empty", () => {
-    const s = buildCountSummary({
-      total: 1,
-      incomplete: 1,
-      pending: 0,
-      inProgress: 1,
-      issueHints: [],
-    })
-    expect(s).not.toContain("Potential follow-up issues")
-    expect(s).toContain("Planning buffer empty")
-  })
-
-  it("appends issue hints on zero-pending state", () => {
-    const s = buildCountSummary({
-      total: 1,
-      incomplete: 1,
-      pending: 0,
-      inProgress: 1,
-      issueHints: ["#100 Critical bug in login"],
-    })
-    expect(s).toContain("Planning buffer empty")
-    expect(s).toContain("Potential follow-up issues")
-    expect(s).toContain("#100 Critical bug in login")
+  it("preserves optional issue hints without describing queue depth as divergence", () => {
+    const counts = { total: 2, incomplete: 2, pending: 1, inProgress: 1 }
+    expect(buildCountSummary({ ...counts, issueHints: ["#42 Fix auth timeout"] })).toContain(
+      "Potential follow-up issues"
+    )
+    expect(buildCountSummary({ ...counts, issueHints: [] })).toBe(buildCountSummary(counts))
+    expect(
+      buildCountSummary({ ...counts, pending: 2, issueHints: ["#42 Fix auth timeout"] })
+    ).not.toContain("Potential follow-up issues")
   })
 })
 
@@ -210,6 +126,8 @@ describe("evaluatePosttooluseTaskCountContext", () => {
       agent: "claude",
     })
     expect(res).not.toEqual({})
-    expect((res as any).systemMessage).toContain("Planning buffer empty")
+    expect((res as any).systemMessage).toContain(
+      "Tasks: 1 in_progress, 0 pending, 1 incomplete (1 total)."
+    )
   })
 })

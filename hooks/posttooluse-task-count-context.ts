@@ -4,11 +4,8 @@
  * PostToolUse hook: Inject task count context after TaskCreate/TaskUpdate.
  *
  * Reads the session's task state (via cache when available) and emits an
- * additionalContext message with compact task-state guidance.
- * Warns urgently when pending tasks drop to 1 or 0, since the governance
- * system requires at least 1 pending task at all times. When the queue is
- * healthy (several pending plus an in_progress task), emits affirmative
- * feedback so the model sees both correct and negligent patterns.
+ * additionalContext message with factual task counts. Queue depth alone
+ * does not imply task divergence or require inventing follow-on work.
  */
 
 import { agentHasTaskToolsForHookPayload } from "../src/agent-paths.ts"
