@@ -1,4 +1,4 @@
-// Unified AI provider layer built on AI SDK v6.
+// Unified AI provider layer built on AI SDK v7.
 //
 // Dispatches text/stream/object generation to whichever provider is available:
 //   1. OpenRouter (via OPENROUTER_API_KEY)
