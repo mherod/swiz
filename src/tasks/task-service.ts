@@ -408,6 +408,7 @@ export async function ensureFileBackedTask({
 }
 
 import { validateTransition } from "./task-transitions.ts"
+import { assertInProgressLimit } from "./task-wip-limit.ts"
 export { validateTransition }
 
 /**
@@ -494,6 +495,8 @@ export async function updateStatus(
     verifyText?: string
     filterCwd?: string
     skipLastTaskGuard?: boolean
+    /** Skip the project in-progress cap. Only for transient hops (see {@link completeTaskWithAutoTransition}). */
+    skipWipLimit?: boolean
   } = {}
 ): Promise<void> {
   const { evidence, verifyText, filterCwd } = options
@@ -521,6 +524,14 @@ export async function updateStatus(
   // board returned by the task tools.
 
   const oldStatus = task.status
+
+  // A project may hold at most MAX_IN_PROGRESS_TASKS_PER_PROJECT in_progress tasks. Unlike the
+  // last-task-standing rule above, this one is a rejection: the cheap way out is to finish or
+  // cancel an open task, which is the behaviour the cap exists to produce.
+  if (!options.skipWipLimit) {
+    await assertInProgressLimit(taskId, oldStatus, newStatus, filterCwd)
+  }
+
   const now = new Date().toISOString()
   const nowMs = Date.now()
 
@@ -587,7 +598,9 @@ export async function completeTaskWithAutoTransition(
           `(commit:<sha>, pr:<url>, file:<path>, test:<result>, or note:<why>).`
       )
     }
-    await updateStatus(sessionId, taskId, "in_progress", { filterCwd })
+    // Transient hop on the way to completed — it never widens the WIP front, so the
+    // project in-progress cap must not refuse a completion that is already evidenced.
+    await updateStatus(sessionId, taskId, "in_progress", { filterCwd, skipWipLimit: true })
   }
   await updateStatus(sessionId, taskId, "completed", options)
 }
@@ -667,6 +680,7 @@ export async function writeTaskUpdate(
   const storeKey = await resolveLegacyTaskStoreKey(sessionId, process.cwd())
   if (newStatus) {
     const oldStatus = task.status
+    await assertInProgressLimit(taskId, oldStatus, newStatus)
     const nowIso = new Date().toISOString()
     applyStatusTransition(task, newStatus, nowIso, Date.now())
     await writeTask(storeKey, task, process.cwd())
