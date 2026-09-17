@@ -231,6 +231,12 @@ async function loadAllTasks(dir: string): Promise<{ tasks: SessionTask[]; maxMti
     if (task) tasks.push(task)
   }
   const pruned = await pruneStaleCompletedTasks(dir, tasks)
+  // Deliberately no duplicate merging here. This is a passive cache load, and
+  // merging deletes files: the same mistake as the daemon status line that once
+  // deleted the tasks it was counting. It also cannot persist the survivor's
+  // unioned edges, and for a live session the authoritative TaskList response
+  // would simply recreate whatever was folded away. Merging belongs to the MCP
+  // task tools, where it is an explicit agent action with a real writer.
   pruned.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
   return { tasks: pruned, maxMtimeMs }
 }
