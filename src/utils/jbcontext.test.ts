@@ -328,17 +328,20 @@ exit 0
   })
 
   describe("live environment detection", () => {
-    it("detects real system jbcontext if installed", async () => {
+    it("detects real system jbcontext if installed or handles absence gracefully", async () => {
       const realAvailable = await isJbcontextAvailable()
-      // On this development environment, jbcontext is installed
-      expect(realAvailable).toBe(true)
-
       const detection = await detectJbcontext()
-      expect(detection.available).toBe(true)
-      expect(detection.binaryPath).toContain("jbcontext")
-      expect(detection.hasConfigFile).toBe(true)
-      expect(detection.authenticated).toBe(true)
-      expect(detection.configured).toBe(true)
+
+      if (realAvailable) {
+        expect(detection.available).toBe(true)
+        expect(detection.binaryPath).toContain("jbcontext")
+        expect(detection.hasConfigFile).toBe(true)
+        expect(detection.authenticated).toBe(true)
+        expect(detection.configured).toBe(true)
+      } else {
+        expect(detection.available).toBe(false)
+        expect(detection.configured).toBe(false)
+      }
     })
   })
 })
