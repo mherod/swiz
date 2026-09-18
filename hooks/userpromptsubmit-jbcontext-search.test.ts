@@ -1,8 +1,11 @@
 import { describe, expect, it } from "bun:test"
 import {
+  buildGroundedQuery,
   cleanPromptForQuery,
   evaluateUserpromptsubmitJbcontextSearch,
+  extractCodeTerms,
   formatJbcontextSearchResults,
+  meetsSimilarityFloor,
   readPromptText,
 } from "./userpromptsubmit-jbcontext-search.ts"
 
@@ -39,7 +42,9 @@ describe("hooks/userpromptsubmit-jbcontext-search.ts", () => {
       ]
 
       const formatted = formatJbcontextSearchResults("hello world query", items)
-      expect(formatted).toContain("JetBrains Context semantic code search for user prompt:")
+      expect(formatted).toContain(
+        "JetBrains Context semantic code search (query grounded in session context):"
+      )
       expect(formatted).toContain('> "hello world query"')
       expect(formatted).toContain("1. `src/example.ts` (line 42):")
       expect(formatted).toContain("function hello() { return 'world' }")
@@ -107,6 +112,71 @@ describe("hooks/userpromptsubmit-jbcontext-search.ts", () => {
         // If unindexed in some test runner, result is safely empty
         expect(result).toBeDefined()
       }
+    })
+  })
+
+  describe("extractCodeTerms", () => {
+    it("extracts paths, identifiers and backticked spans", () => {
+      const text =
+        "I updated `readSessionLines` in hooks/userpromptsubmit-git-context.ts to check the marker."
+      const terms = extractCodeTerms(text, 5)
+      expect(terms).toContain("readSessionLines")
+      expect(terms).toContain("hooks/userpromptsubmit-git-context.ts")
+    })
+
+    it("ignores plain prose with no code-shaped tokens", () => {
+      expect(extractCodeTerms("how helpful was that, really?", 5)).toEqual([])
+    })
+
+    it("dedupes case-insensitively and honours the limit", () => {
+      const terms = extractCodeTerms("`buildQuery` buildQuery extractTerms parseThing", 2)
+      expect(terms.length).toBe(2)
+      expect(terms.filter((t) => t.toLowerCase() === "buildquery").length).toBe(1)
+    })
+  })
+
+  describe("buildGroundedQuery", () => {
+    it("returns the bare prompt when there is no grounding", () => {
+      expect(buildGroundedQuery("where is the retry logic", [])).toBe("where is the retry logic")
+    })
+
+    it("appends grounding terms after the prompt", () => {
+      const query = buildGroundedQuery("how helpful was it?", [
+        "Ground jbcontext search query",
+        "extractCodeTerms",
+      ])
+      expect(query.startsWith("how helpful was it?")).toBe(true)
+      expect(query).toContain("extractCodeTerms")
+    })
+
+    it("skips grounding terms the prompt already names", () => {
+      const query = buildGroundedQuery("fix extractCodeTerms please", ["extractCodeTerms"])
+      expect(query).toBe("fix extractCodeTerms please")
+    })
+
+    it("truncates an over-long grounded query", () => {
+      const query = buildGroundedQuery("a".repeat(300), ["b".repeat(300)])
+      expect(query.length).toBeLessThanOrEqual(400)
+    })
+  })
+
+  describe("meetsSimilarityFloor", () => {
+    const withSimilarity = (similarity?: number) => ({
+      content: "x",
+      result: { scoredText: similarity === undefined ? {} : { similarity } },
+    })
+
+    it("drops weakly-matching results", () => {
+      expect(meetsSimilarityFloor(withSimilarity(0.12))).toBe(false)
+    })
+
+    it("keeps results at or above the floor", () => {
+      expect(meetsSimilarityFloor(withSimilarity(0.3))).toBe(true)
+      expect(meetsSimilarityFloor(withSimilarity(0.85))).toBe(true)
+    })
+
+    it("passes results through when jbcontext omits a score", () => {
+      expect(meetsSimilarityFloor(withSimilarity(undefined))).toBe(true)
     })
   })
 })

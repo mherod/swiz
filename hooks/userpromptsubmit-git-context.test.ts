@@ -5,7 +5,10 @@ import { join } from "node:path"
 import { hookOutputSchema } from "../src/schemas.ts"
 import { projectKeyFromCwd } from "../src/transcript-utils.ts"
 import type { GitStatusV2 } from "../src/utils/git-utils.ts"
-import { evaluateUserpromptsubmitGitContext } from "./userpromptsubmit-git-context.ts"
+import {
+  evaluateUserpromptsubmitGitContext,
+  shouldEmitSteeringContext,
+} from "./userpromptsubmit-git-context.ts"
 
 const mockGitStatusByCwd = new Map<string, GitStatusV2 | null>()
 const mockSessionEdits = new Map<string, { file_path: string; updated_at?: number }[]>()
@@ -264,5 +267,47 @@ describe("userpromptsubmit-git-context", () => {
     expect(context).toContain("    - src/possibly-mine.ts")
     expect(context).not.toContain("Edited by another active session")
     expect(context).not.toContain("Don't panic.")
+  })
+
+  describe("shouldEmitSteeringContext", () => {
+    const writeTranscript = async (name: string, lines: string[]): Promise<string> => {
+      const dir = join(tmpdir(), `swiz-steering-${name}-${Date.now()}`)
+      await mkdir(dir, { recursive: true })
+      const path = join(dir, "transcript.jsonl")
+      await Bun.write(path, lines.map((l) => JSON.stringify({ type: "user", text: l })).join("\n"))
+      return path
+    }
+
+    test("emits when there is no transcript to check", async () => {
+      expect(await shouldEmitSteeringContext(undefined)).toBe(true)
+    })
+
+    test("emits when the session has not yet seen the block", async () => {
+      const path = await writeTranscript("absent", ["On branch main.", "Tasks: 0 in_progress"])
+      expect(await shouldEmitSteeringContext(path)).toBe(true)
+    })
+
+    test("suppresses a repeat once the block is already in the session", async () => {
+      const path = await writeTranscript("present", [
+        "On branch main.",
+        "Operating instructions:\nWorkflow policy: trunk mode is on.",
+      ])
+      expect(await shouldEmitSteeringContext(path)).toBe(false)
+    })
+
+    test("re-emits after a compaction boundary drops the earlier block", async () => {
+      const dir = join(tmpdir(), `swiz-steering-compact-${Date.now()}`)
+      await mkdir(dir, { recursive: true })
+      const path = join(dir, "transcript.jsonl")
+      await Bun.write(
+        path,
+        [
+          JSON.stringify({ type: "user", text: "Operating instructions:\nWorkflow policy: on." }),
+          JSON.stringify({ type: "system", subtype: "compact_boundary" }),
+          JSON.stringify({ type: "user", text: "carry on" }),
+        ].join("\n")
+      )
+      expect(await shouldEmitSteeringContext(path)).toBe(true)
+    })
   })
 })
