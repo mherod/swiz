@@ -118,7 +118,6 @@ import {
 import {
   collectToolCallOutcomes,
   getCurrentSessionTaskToolStats,
-  readCurrentSessionLines,
   type ToolCallOutcome,
 } from "../src/transcript-summary.ts"
 import { scheduleAutoSteer } from "../src/utils/auto-steer-helpers.ts"
@@ -128,6 +127,7 @@ import {
   readNativeTaskToolAvailability,
   shouldEnforceTaskGovernance,
 } from "../src/utils/inline-hook-helpers.ts"
+import { resolveSessionLines } from "../src/utils/transcript.ts"
 
 // ─── Shared governance infrastructure ──────────────────────────────────────
 
@@ -416,19 +416,15 @@ export function countRecentStaleGateDenials(
   return outcomes
     .slice(-Math.max(0, windowSize))
     .filter(
-      (outcome) =>
-        isTaskCreateTool(outcome.name) &&
-        !outcome.success &&
-        STALE_GATE_DENY_RE.test(outcome.resultText)
+      (outcome) => isTaskCreateTool(outcome.name) && STALE_GATE_DENY_RE.test(outcome.resultText)
     ).length
 }
 
 /** Transcript-derived denial count; 0 when no transcript is reachable, so the gate keeps enforcing. */
 async function readStaleGateDenialCount(input: Record<string, any>): Promise<number> {
   const transcriptPath = typeof input?.transcript_path === "string" ? input.transcript_path : ""
-  if (!transcriptPath) return 0
-  const lines = await readCurrentSessionLines(transcriptPath)
-  if (!lines) return 0
+  const lines = await resolveSessionLines(input, transcriptPath)
+  if (!lines || lines.length === 0) return 0
   return countRecentStaleGateDenials(collectToolCallOutcomes(lines))
 }
 

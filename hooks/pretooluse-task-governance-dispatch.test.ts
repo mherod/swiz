@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, test } from "bun:test"
-import { mkdir, rm, writeFile } from "node:fs/promises"
+import { mkdir, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { syncCodexUpdatePlanSnapshot } from "../src/tasks/codex-update-plan.ts"
@@ -363,7 +363,7 @@ describe("evaluateTaskCreatePath — open-task update recency", () => {
         })
       )
     }
-    await writeFile(path, `${lines.join("\n")}\n`)
+    await Bun.write(path, `${lines.join("\n")}\n`)
     return path
   }
 
