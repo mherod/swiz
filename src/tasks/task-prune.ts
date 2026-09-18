@@ -10,11 +10,13 @@
  * as the daemon status line must never prune it (see readProjectStoreTasks in
  * compliance-routes.ts for the incident that rule comes from).
  *
- * Leaf module: node builtins + governance constants only, so both the cache
- * and the MCP server can import it without a cycle.
+ * Leaf module: node builtins, governance constants, and the import-free
+ * debug logger only, so both the cache and the MCP server can import it
+ * without a cycle.
  */
 
 import { unlink } from "node:fs/promises"
+import { debugLog } from "../debug.ts"
 import { resolveTaskFilePath } from "./task-file-path.ts"
 import {
   COMPLETED_TASK_PRUNE_AGE_MS,
@@ -55,13 +57,20 @@ function lastActivityMs(task: PrunableTask): number | null {
  * tasks. A record carrying no usable timestamp is always kept — its age is
  * unknown, and guessing would delete live work. Fail-open: deletion errors
  * are ignored and the task is still dropped from the returned list.
+ *
+ * `onPruned` runs once, only when at least one record was actually deleted, so
+ * the common no-op path writes nothing. It takes no arguments on purpose: the
+ * surviving list is a snapshot from before the deletions, and an index built
+ * from it would miss any task written in between. A refresh callback must read
+ * current state. Its failures are swallowed for the same reason `unlink`
+ * failures are — an auxiliary index write must not stop a caller reading tasks.
  */
 export async function pruneStaleCompletedTasks<T extends PrunableTask>(
   dir: string,
   tasks: readonly T[],
   maxAgeMs: number = COMPLETED_TASK_PRUNE_AGE_MS,
   staleMaxAgeMs: number = STALE_TASK_PRUNE_AGE_MS,
-  onPruned?: (surviving: readonly T[]) => Promise<void>
+  onPruned?: () => Promise<void>
 ): Promise<T[]> {
   const now = Date.now()
   const completedCutoff = now - maxAgeMs
@@ -87,7 +96,13 @@ export async function pruneStaleCompletedTasks<T extends PrunableTask>(
     }
     surviving.push(task)
   }
-  if (prunedAny) await onPruned?.(surviving)
+  if (prunedAny && onPruned) {
+    try {
+      await onPruned()
+    } catch (e) {
+      debugLog("pruneStaleCompletedTasks: metadata refresh failed:", e)
+    }
+  }
   return surviving
 }
 

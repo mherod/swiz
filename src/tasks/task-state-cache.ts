@@ -32,7 +32,7 @@ import {
 } from "./task-governance-constants.ts"
 import { pruneStaleCompletedTasks } from "./task-prune.ts"
 import type { SessionTask } from "./task-recovery.ts"
-import { updateSessionMetaFromTasks } from "./task-repository.ts"
+import { refreshSessionMetaFromDisk } from "./task-repository.ts"
 import { backfillTaskTimingFields } from "./task-timing.ts"
 import { computeTransitionPath, isValidTransition } from "./task-transitions.ts"
 
@@ -231,8 +231,8 @@ async function loadAllTasks(dir: string): Promise<{ tasks: SessionTask[]; maxMti
     const task = await readTaskFile(join(dir, entry.name))
     if (task) tasks.push(task)
   }
-  const pruned = await pruneStaleCompletedTasks(dir, tasks, undefined, undefined, (surviving) =>
-    updateSessionMetaFromTasks(dir, surviving, "session")
+  const pruned = await pruneStaleCompletedTasks(dir, tasks, undefined, undefined, () =>
+    refreshSessionMetaFromDisk(dir, "session")
   )
   // Deliberately no duplicate merging here. This is a passive cache load, and
   // merging deletes files: the same mistake as the daemon status line that once
