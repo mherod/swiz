@@ -184,6 +184,14 @@ function taskStoreForInput(input: Record<string, any>) {
   return home ? createTaskStoreForHookPayload(input, home) : createTaskStoreForHookPayload(input)
 }
 
+/** Distinguish unavailable bookkeeping from validation or unrelated hook failures. */
+class TaskStateReadError extends Error {
+  constructor(cause: unknown) {
+    super(messageFromUnknownError(cause), { cause })
+    this.name = "TaskStateReadError"
+  }
+}
+
 /**
  * Governance-facing task read.
  *
@@ -193,7 +201,11 @@ function taskStoreForInput(input: Record<string, any>) {
 async function readTasksForInput(input: Record<string, any>, sessionId: string) {
   const cwd = typeof input.cwd === "string" ? input.cwd : ""
   const projectKey = cwd ? projectKeyFromCwd(cwd) : undefined
-  return await readTasksAcrossStores(sessionId, projectKey, taskStoreForInput(input).tasksDir)
+  try {
+    return await readTasksAcrossStores(sessionId, projectKey, taskStoreForInput(input).tasksDir)
+  } catch (cause) {
+    throw new TaskStateReadError(cause)
+  }
 }
 
 function hasTaskGovernanceSurface(input: Record<string, any>, _toolName?: string): boolean {
@@ -1308,10 +1320,30 @@ async function runRequireTasksChecks(parsed: ParsedInput): Promise<SwizHookOutpu
   })
 }
 
-function unexpectedHookFailureOutput(err: unknown): SwizHookOutput {
+function unexpectedHookFailureOutput(
+  err: unknown,
+  hookName: string,
+  input?: Record<string, any>
+): SwizHookOutput {
   const message = messageFromUnknownError(err)
+  if (err instanceof TaskStateReadError) {
+    const toolName = String(input?.tool_name ?? "")
+    const mutatesTasks =
+      isAnyProviderTaskCreateTool(toolName) || isAnyProviderTaskUpdateTool(toolName)
+    const reason =
+      `Task state unavailable (${hookName}): ${message}\n\n` +
+      (mutatesTasks
+        ? "This task mutation is blocked because the shared task state cannot be validated. "
+        : "Continuing this tool call with task-state checks unavailable. ") +
+      "Read, SendMessage and ordinary shell/file work remain available. " +
+      "For diagnosis, run `cat hooks/pretooluse-task-governance.ts` from the Swiz checkout. " +
+      "Coordinate shared-store recovery with its owner; do not delete or merge task directories to bypass this error."
+    return mutatesTasks
+      ? preToolUseDeny(reason)
+      : preToolUseAllowWithContext(reason, reason, { rephrase: false })
+  }
   return preToolUseDeny(
-    `STOP. \u26a0\ufe0f pretooluse-require-tasks encountered an unexpected error and is failing closed.\n\n` +
+    `STOP. \u26a0\ufe0f ${hookName} encountered an unexpected error and is failing closed.\n\n` +
       `Error: ${message}\n\n` +
       formatActionPlan(
         [
@@ -1365,13 +1397,13 @@ export const requireTasksHook: SwizToolHook = {
     try {
       return await evaluatePretooluseRequireTasks(input as Record<string, any>)
     } catch (err: unknown) {
-      return unexpectedHookFailureOutput(err)
+      return unexpectedHookFailureOutput(err, "pretooluse-require-tasks", input)
     }
   },
 }
 
 export const requireTasksRunAsMainOptions: RunSwizHookAsMainOptions = {
-  onStdinJsonError: unexpectedHookFailureOutput,
+  onStdinJsonError: (err) => unexpectedHookFailureOutput(err, "pretooluse-require-tasks"),
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -2129,6 +2161,7 @@ async function buildTraceContext(rawInput: unknown): Promise<string> {
     const sessionId = resolveSafeSessionId(input?.session_id as string | undefined)
     return await formatTaskTraceContext(input, await readTaskCountsForTrace(sessionId, input))
   } catch (err) {
+    if (err instanceof TaskStateReadError) throw err
     return `Task state unavailable: ${(err as Error)?.message ?? err}`
   }
 }
@@ -2183,7 +2216,7 @@ const pretooluseTaskGovernance: SwizToolHook = {
         }),
       }
     } catch (err: unknown) {
-      return unexpectedHookFailureOutput(err)
+      return unexpectedHookFailureOutput(err, "pretooluse-task-governance", input)
     }
   },
 }
