@@ -56,6 +56,7 @@ import {
   writeTaskUpdate,
 } from "./tasks/task-service.ts"
 import { readTaskStorePath } from "./tasks/task-store-layout.ts"
+import { assertInProgressLimit } from "./tasks/task-wip-limit.ts"
 import { swizMcpRepliesLogPath } from "./temp-paths.ts"
 import { messageFromUnknownError } from "./utils/hook-json-helpers.ts"
 
@@ -299,6 +300,10 @@ async function persistTaskUpdate(
     if (fieldsUpdated) await writeTaskUpdate(storeKey, input.taskId, task)
     return
   }
+  // Check capacity before the field write. `updateStatus` re-checks it under the
+  // project lock, but reaching that check only after the subject/description
+  // write has landed means a rejected combined update still mutates the task.
+  await assertInProgressLimit(input.taskId, task.status, input.status, cwd)
   if (fieldsUpdated) await writeTaskUpdate(storeKey, input.taskId, task)
   if (input.status === "completed") {
     await completeTaskWithAutoTransition(storeKey, input.taskId, {

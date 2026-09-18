@@ -416,6 +416,12 @@ export async function ensureFileBackedTask({
   const incomplete = existing.filter((t) => isIncompleteTaskStatus(t.status))
   if (findCollidingTask(resolved.subject, incomplete)) return false
 
+  // A stub is created already in its target status, so an `in_progress` stub
+  // enters the project's WIP front without ever passing through a transition.
+  // Without this guard `swiz tasks update <missing-id> --status in_progress`
+  // and the status command both persist a task over the cap.
+  await assertInProgressLimit(taskId, "pending", status, filterCwd, sessionId)
+
   const stubTask = buildStubTask(taskId, resolved.subject, { description, activeForm, status })
   const storeKey = await resolveLegacyTaskStoreKey(sessionId, filterCwd ?? process.cwd())
   await writeTask(storeKey, stubTask, process.cwd())
@@ -432,7 +438,7 @@ export async function ensureFileBackedTask({
 }
 
 import { validateTransition } from "./task-transitions.ts"
-import { assertInProgressLimit } from "./task-wip-limit.ts"
+import { assertInProgressLimit, withInProgressReservation } from "./task-wip-limit.ts"
 export { validateTransition }
 
 /**
@@ -548,29 +554,40 @@ export async function updateStatus(
   // A project may hold at most MAX_IN_PROGRESS_TASKS_PER_PROJECT in_progress tasks. Unlike the
   // last-task-standing rule above, this one is a rejection: the cheap way out is to finish or
   // cancel an open task, which is the behaviour the cap exists to produce.
-  if (!options.skipWipLimit) {
-    await assertInProgressLimit(taskId, oldStatus, newStatus, filterCwd)
+  const persistTransition = async (): Promise<void> => {
+    const now = new Date().toISOString()
+    const nowMs = Date.now()
+
+    applyStatusTransition(task, newStatus, now, nowMs)
+    if (newStatus === "completed" && evidence) {
+      task.completionEvidence = evidence
+      task.completionTimestamp = now
+    }
+
+    await writeTask(storeKey, task, filterCwd ?? process.cwd())
+    await writeAudit(storeKey, {
+      timestamp: new Date().toISOString(),
+      taskId,
+      action: "status_change",
+      oldStatus,
+      newStatus,
+      evidence,
+      subject: task.subject,
+    })
   }
 
-  const now = new Date().toISOString()
-  const nowMs = Date.now()
-
-  applyStatusTransition(task, newStatus, now, nowMs)
-  if (newStatus === "completed" && evidence) {
-    task.completionEvidence = evidence
-    task.completionTimestamp = now
+  // The capacity check and the write happen under one project lock. Checking
+  // first and writing after would let two sessions read the same under-cap
+  // snapshot and both commit, which is exactly the breach the cap exists to
+  // prevent.
+  if (options.skipWipLimit) {
+    await persistTransition()
+  } else {
+    await withInProgressReservation(taskId, oldStatus, newStatus, persistTransition, {
+      filterCwd,
+      sessionId: taskStoreId(storeKey),
+    })
   }
-
-  await writeTask(storeKey, task, filterCwd ?? process.cwd())
-  await writeAudit(storeKey, {
-    timestamp: new Date().toISOString(),
-    taskId,
-    action: "status_change",
-    oldStatus,
-    newStatus,
-    evidence,
-    subject: task.subject,
-  })
 
   const { emoji, color } = STATUS_STYLE[newStatus]
   console.log(`\n  ${emoji} #${taskId}: ${oldStatus} → ${color}${newStatus}${RESET}`)
@@ -702,18 +719,25 @@ export async function writeTaskUpdate(
       : sessionId
   if (newStatus) {
     const oldStatus = task.status
-    await assertInProgressLimit(taskId, oldStatus, newStatus)
-    const nowIso = new Date().toISOString()
-    applyStatusTransition(task, newStatus, nowIso, Date.now())
-    await writeTask(storeKey, task, process.cwd())
-    await writeAudit(storeKey, {
-      timestamp: new Date().toISOString(),
+    await withInProgressReservation(
       taskId,
-      action: "status_change",
       oldStatus,
       newStatus,
-      subject: task.subject,
-    })
+      async () => {
+        const nowIso = new Date().toISOString()
+        applyStatusTransition(task, newStatus, nowIso, Date.now())
+        await writeTask(storeKey, task, process.cwd())
+        await writeAudit(storeKey, {
+          timestamp: new Date().toISOString(),
+          taskId,
+          action: "status_change",
+          oldStatus,
+          newStatus,
+          subject: task.subject,
+        })
+      },
+      { sessionId: taskStoreId(storeKey) }
+    )
     const { emoji, color } = STATUS_STYLE[newStatus]
     console.log(`\n  ${emoji} #${taskId}: ${oldStatus} → ${color}${newStatus}${RESET}`)
     console.log(`     ${task.subject}`)
