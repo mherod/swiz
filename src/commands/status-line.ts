@@ -4,6 +4,7 @@
 
 import { mkdir } from "node:fs/promises"
 import { basename, join } from "node:path"
+import { debugLog } from "../debug.ts"
 import { detectCiProviders } from "../detect.ts"
 import {
   ensureGitExclude,
@@ -886,7 +887,8 @@ export async function computeWarmStatusLineSnapshot(
   if (!ciProviders.has("github-actions")) needs.ci = false
   if (effective?.ignoreCi) needs.ci = false
   const gh = await fetchGhData(cwd, gitResult.branch, needs)
-  const taskCounts = sessionTasks.length > 0 ? buildTaskCountsFromTasks(sessionTasks) : null
+  const taskCounts =
+    sessionTasks && sessionTasks.length > 0 ? buildTaskCountsFromTasks(sessionTasks) : null
   return {
     ...assembleSnapshot({
       shortCwd,
@@ -927,7 +929,18 @@ async function readWarmSnapshotFromDaemon(
  */
 async function readStatusLineSessionTasks(sessionId: string, cwd: string) {
   const { tasksDir } = findTaskStoreForSession(sessionId)
-  return readTasksAcrossStores(sessionId, projectKeyFromCwd(cwd), tasksDir).catch(() => [])
+  try {
+    return await readTasksAcrossStores(sessionId, projectKeyFromCwd(cwd), tasksDir)
+  } catch (error) {
+    // `null`, never `[]`: an unreadable store is not an empty queue. Collapsing
+    // the two made a failed read indistinguishable from a session with no
+    // tasks, so the segment silently fell through to whatever the daemon had
+    // cached instead of reporting that this process could not read the store.
+    debugLog(
+      `status-line: task store unreadable: ${error instanceof Error ? error.message : error}`
+    )
+    return null
+  }
 }
 
 async function readDaemonJson<T>(
@@ -1368,11 +1381,16 @@ function statusLineInputContext(input: StatusLineInput): {
 
 function resolveStatusTaskCounts(
   snapshot: WarmStatusLineSnapshot,
-  sessionTasks: ReadonlyArray<{ status: string }>
+  sessionTasks: ReadonlyArray<{ status: string }> | null
 ): TaskCounts | null {
-  return (
-    snapshot.taskCounts ?? (sessionTasks.length > 0 ? buildTaskCountsFromTasks(sessionTasks) : null)
-  )
+  // The locally read queue is this process's own fresh view. The snapshot may
+  // come from a long-lived daemon whose per-process caches predate recent
+  // writes, so the two can disagree — and preferring the snapshot let a 400ms
+  // network race decide which of the two rendered, making the segment flicker
+  // between them on consecutive redraws. A null local read means the read
+  // failed, which is the only case where the snapshot is the better answer.
+  if (sessionTasks && sessionTasks.length > 0) return buildTaskCountsFromTasks(sessionTasks)
+  return snapshot.taskCounts ?? null
 }
 
 async function runStatusLine(input: StatusLineInput): Promise<void> {

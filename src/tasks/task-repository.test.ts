@@ -37,11 +37,11 @@ describe("typed task store keys", () => {
     expectTypeOf(projectStoreKey("/project").kind).toEqualTypeOf<"project">()
   })
 
-  it("keeps native session paths while separating project paths without changing IDs", async () => {
+  it("keeps both kinds in the flat store, told apart by metadata rather than by path", async () => {
     const base = await tmp.create()
     const cwd = "/workspace/project"
     const keys = [sessionStoreKey("abcd-session"), projectStoreKey(cwd)]
-    const names = ["abcd-session", join(".projects", projectKeyFromCwd(cwd))]
+    const names = ["abcd-session", projectKeyFromCwd(cwd)]
     for (const [index, key] of keys.entries()) {
       const name = names[index]!
       expect(taskStoreDirName(key)).toBe(name)
@@ -60,7 +60,7 @@ describe("typed task store keys", () => {
       await writeTask(key, task, undefined, base)
       expect(await Bun.file(join(base, name, "user-1.json")).json()).toEqual(task)
     }
-    expect((await readdir(base)).sort()).toEqual([".projects", "abcd-session"])
+    expect((await readdir(base)).sort()).toEqual([projectKeyFromCwd(cwd), "abcd-session"].sort())
   })
 
   it("classifies first writes from explicit cwd without guessing from a directory prefix", async () => {

@@ -7,7 +7,6 @@ import {
   projectStoreKey,
   readTaskStore,
   readTasks,
-  readTasksAcrossStores,
   sessionStoreKey,
   type Task,
   writeTask,
@@ -32,28 +31,47 @@ const task: Task = {
   blockedBy: [],
 }
 
-async function legacy(root: string, owner: string | undefined = cwd) {
-  const dir = join(root, project.key)
-  const files = {
-    "user-7.json": JSON.stringify(task),
-    ".audit-log.jsonl": `${JSON.stringify({ taskId: task.id, action: "create", subject: task.subject })}\n`,
-    ".session-meta.json": JSON.stringify({ cwd: owner, openCount: 1 }),
-    ".hook-dedup-existing.flag": "sentinel",
-    "compact-snapshot.json": '{"tasks":[]}',
-  }
+function audit(taskId: string) {
+  return `${JSON.stringify({ taskId, action: "create", subject: task.subject })}\n`
+}
+
+async function writeStore(dir: string, files: Record<string, string>) {
   for (const [name, text] of Object.entries(files)) await Bun.write(join(dir, name), text)
   return files
 }
 
-describe("project namespace migration (#831)", () => {
-  test("read-only compatibility preserves the flat directory; migration preserves every byte and legacy ID", async () => {
+/** The home layout: a project store sits directly in the task store. */
+function flat(root: string, owner: string | undefined = cwd) {
+  return writeStore(join(root, project.key), {
+    "user-7.json": JSON.stringify(task),
+    ".audit-log.jsonl": audit("user-7"),
+    ".session-meta.json": JSON.stringify({ cwd: owner, openCount: 1 }),
+    ".hook-dedup-existing.flag": "sentinel",
+    "compact-snapshot.json": '{"tasks":[]}',
+  })
+}
+
+/** What the reverted `.projects` split left behind, if a session wrote under it. */
+function namespaced(root: string, files?: Record<string, string>) {
+  return writeStore(
+    join(root, ".projects", project.key),
+    files ?? {
+      "split-1.json": JSON.stringify({ ...task, id: "split-1" }),
+      ".audit-log.jsonl": audit("split-1"),
+      ".session-meta.json": JSON.stringify({ cwd, openCount: 1 }),
+    }
+  )
+}
+
+describe("project namespace fold-back (reverts #831)", () => {
+  test("a flat project store is the home directory and no write relocates it", async () => {
     const root = await temp.create()
-    const files = await legacy(root)
+    const files = await flat(root)
     expect((await readTaskStore(project, root))[0]?.id).toBe("user-7")
-    expect(await readdir(root)).toEqual([project.key])
     const target = await prepareTaskStoreWrite(project, root)
-    expect(target).toBe(join(root, ".projects", project.key))
-    expect(await readdir(root)).toEqual([".projects"])
+    expect(target).toBe(join(root, project.key))
+    // The reserved namespace is never created by an ordinary write.
+    expect(await readdir(root)).toEqual([project.key])
     for (const [name, text] of Object.entries(files))
       expect(await Bun.file(join(target, name)).text()).toBe(text)
     expect((await readTasks(project.key, root))[0]?.id).toBe("user-7")
@@ -63,90 +81,111 @@ describe("project namespace migration (#831)", () => {
         .sessionId
     ).toBe(project.key)
     expect(await getSessions(cwd, root, join(root, "transcripts"))).toEqual([])
-    expect(await prepareTaskStoreWrite(project, root)).toBe(target)
   })
 
-  test("simultaneous first writes migrate once and retain all records", async () => {
+  test("a namespaced leftover reads before any write, then folds back into the flat store", async () => {
     const root = await temp.create()
-    await legacy(root)
+    const files = await namespaced(root)
+    // Readable while still namespaced: reads never wait on a migration.
+    expect(await readTaskStorePath(project, root)).toBe(join(root, ".projects", project.key))
+    expect((await readTaskStore(project, root))[0]?.id).toBe("split-1")
+    const target = await prepareTaskStoreWrite(project, root)
+    expect(target).toBe(join(root, project.key))
+    for (const [name, text] of Object.entries(files))
+      expect(await Bun.file(join(target, name)).text()).toBe(text)
+    expect(await readdir(root)).toEqual([project.key])
+    expect(await readTaskStorePath(project, root)).toBe(target)
+  })
+
+  test("merging both stores unions the audit logs and keeps every task record", async () => {
+    const root = await temp.create()
+    const flatFiles = await flat(root)
+    await namespaced(root)
+    const target = await prepareTaskStoreWrite(project, root)
+    expect(target).toBe(join(root, project.key))
+    expect(await readdir(root)).toEqual([project.key])
+    expect((await readTaskStore(project, root)).map((t) => t.id).sort()).toEqual([
+      "split-1",
+      "user-7",
+    ])
+    // Destination history first, then the namespaced store's: neither copy loses an entry.
+    expect((await readAuditLog(project.key, root)).map((entry) => entry.taskId)).toEqual([
+      "user-7",
+      "split-1",
+    ])
+    // The derived index keeps the destination copy rather than the stale legacy one.
+    expect(await Bun.file(join(target, ".session-meta.json")).text()).toBe(
+      flatFiles[".session-meta.json"] as string
+    )
+  })
+
+  test("a genuine record collision preserves both copies and refuses to pick a winner", async () => {
+    const root = await temp.create()
+    await flat(root)
+    await namespaced(root, { "user-7.json": "namespaced copy" })
+    const legacyPath = join(root, ".projects", project.key)
+    await expect(prepareTaskStoreWrite(project, root)).rejects.toThrow("exist in both")
+    expect(await Bun.file(join(legacyPath, "user-7.json")).text()).toBe("namespaced copy")
+    expect((await readTaskStore(project, root))[0]?.id).toBe("user-7")
+    expect(await Bun.file(join(root, project.key, "user-7.json")).text()).toBe(JSON.stringify(task))
+  })
+
+  test("simultaneous first writes fold back once and retain all records", async () => {
+    const root = await temp.create()
+    await namespaced(root)
     await Promise.all(
       Array.from({ length: 12 }, (_, i) =>
         writeTask(project, { ...task, id: `next-${i}` }, cwd, root)
       )
     )
     expect(await readTaskStore(project, root)).toHaveLength(13)
-    expect(await readdir(join(root, ".projects"))).toEqual([project.key])
-    expect((await readAuditLog(project.key, root))[0]?.taskId).toBe("user-7")
+    expect(await readdir(root)).toEqual([project.key])
+    expect((await readAuditLog(project.key, root))[0]?.taskId).toBe("split-1")
   })
 
   test("concurrent readers never lose an existing task while its directory moves", async () => {
     const root = await temp.create()
-    await legacy(root)
+    await namespaced(root)
     const readers = Array.from({ length: 20 }, async () => {
       for (let i = 0; i < 3; i++)
-        expect((await readTaskStore(project, root)).map((t) => t.id)).toContain("user-7")
+        expect((await readTaskStore(project, root)).map((t) => t.id)).toContain("split-1")
     })
     await Promise.all([...readers, prepareTaskStoreWrite(project, root)])
   })
 
-  test("bulk migration reports uncertain ownership and moves only confirmed projects", async () => {
+  test("bulk fold-back previews every namespaced store before moving it", async () => {
     const root = await temp.create()
-    await legacy(root)
-    const held = projectStoreKey("/Users/example/foreign")
-    await Bun.write(join(root, held.key, ".session-meta.json"), JSON.stringify({ cwd }))
+    await namespaced(root)
     const preview = await migrateLegacyProjectStores(root)
     expect(preview).toContainEqual({ directory: project.key, status: "ready" })
-    expect(preview.find((result) => result.directory === held.key)?.status).toBe("held")
-    expect(await Bun.file(join(root, project.key, "user-7.json")).exists()).toBe(true)
+    expect(await Bun.file(join(root, ".projects", project.key, "split-1.json")).exists()).toBe(true)
     expect(await migrateLegacyProjectStores(root, true)).toContainEqual({
       directory: project.key,
       status: "migrated",
     })
-    expect(await Bun.file(join(root, held.key, ".session-meta.json")).exists()).toBe(true)
-    expect(await migrateLegacyProjectStores(root, true)).toHaveLength(1)
+    expect(await Bun.file(join(root, project.key, "split-1.json")).exists()).toBe(true)
+    // Nothing is left to fold back, and a flat store is never a migration candidate.
+    expect(await migrateLegacyProjectStores(root, true)).toEqual([])
   })
 
-  test("conflicting destinations preserve both directories and refuse reads and writes", async () => {
-    const root = await temp.create()
-    const files = await legacy(root)
-    const target = sessionDirPath(project, root)
-    await Bun.write(join(target, "other.json"), "destination")
-    await expect(readTaskStore(project, root)).rejects.toThrow("Conflicting task stores")
-    await expect(writeTask(project, task, cwd, root)).rejects.toThrow("Conflicting task stores")
-    expect(await Bun.file(join(root, project.key, "user-7.json")).text()).toBe(files["user-7.json"])
-    expect(await Bun.file(join(target, "other.json")).text()).toBe("destination")
-  })
-
-  test("contradictory metadata prevents migration without hiding explicit legacy reads", async () => {
-    const root = await temp.create()
-    await legacy(root, "/different/project")
-    await expect(prepareTaskStoreWrite(project, root, cwd)).rejects.toThrow("ownership")
-    expect((await readTaskStore(project, root))[0]?.id).toBe("user-7")
-    expect(await getSessions(undefined, root, join(root, "transcripts"))).toEqual([])
-    expect(await Bun.file(join(root, project.key, "user-7.json")).exists()).toBe(true)
-  })
-
-  test("the same logical string can address distinct explicit session and project stores", async () => {
-    const root = await temp.create()
-    const session = sessionStoreKey(project.key)
-    await writeTask(session, { ...task, id: "native-1" }, cwd, root)
-    await writeTask(project, task, cwd, root)
-    expect((await readTaskStore(session, root)).map((t) => t.id)).toEqual(["native-1"])
-    expect((await readTaskStore(project, root)).map((t) => t.id)).toEqual(["user-7"])
-    expect((await readTasksAcrossStores(project.key, project.key, root)).map((t) => t.id)).toEqual([
-      "native-1",
-      "user-7",
-    ])
-    expect(isSafeSessionId(sessionStoreKey(`.projects/${project.key}`), root)).toBe(false)
-    expect(isSafeSessionId(sessionStoreKey(`nested/../.projects/${project.key}`), root)).toBe(false)
-  })
-
-  test("rejects namespace symlinks without modifying their target", async () => {
+  test("a symlinked namespace is ignored without reading or modifying its target", async () => {
     const root = await temp.create()
     const outside = await temp.create()
+    await Bun.write(join(outside, project.key, "user-7.json"), "outside")
     await symlink(outside, join(root, ".projects"))
-    await expect(prepareTaskStoreWrite(project, root, cwd)).rejects.toThrow("not a directory")
-    await expect(readTaskStorePath(project, root)).rejects.toThrow("not a directory")
-    expect(await readdir(outside)).toEqual([])
+    expect(await readTaskStorePath(project, root)).toBe(join(root, project.key))
+    expect(await prepareTaskStoreWrite(project, root)).toBe(join(root, project.key))
+    expect(await migrateLegacyProjectStores(root, true)).toEqual([])
+    expect(await Bun.file(join(outside, project.key, "user-7.json")).text()).toBe("outside")
+    expect(await readdir(outside)).toEqual([project.key])
+  })
+
+  test("a session id may not address the reserved namespace", async () => {
+    const root = await temp.create()
+    expect(isSafeSessionId(sessionStoreKey(`.projects/${project.key}`), root)).toBe(false)
+    expect(isSafeSessionId(sessionStoreKey(`nested/../.projects/${project.key}`), root)).toBe(false)
+    expect(isSafeSessionId(sessionStoreKey(".projects"), root)).toBe(false)
+    // Both kinds share the flat namespace again, so one logical string is one store.
+    expect(sessionDirPath(sessionStoreKey(project.key), root)).toBe(sessionDirPath(project, root))
   })
 })

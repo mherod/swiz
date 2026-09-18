@@ -685,7 +685,7 @@ export async function writeTaskBatch(
   tasksDir = createDefaultTaskStore().tasksDir
 ): Promise<TaskBatchWriteResult> {
   const sessionId = taskStoreDirName(storeKey)
-  const dir = await prepareTaskStoreWrite(storeKey, tasksDir, cwd)
+  const dir = await prepareTaskStoreWrite(storeKey, tasksDir)
   const auditPath = join(dir, AUDIT_LOG_FILENAME)
   const persistedOperationIds = await readAuditOperationIds(auditPath)
   let auditWrites = 0
@@ -741,8 +741,17 @@ export async function readTaskStoreMeta(
     const meta = JSON.parse(text) as SessionMeta
     sessionMetaCache.set(key, meta)
     return meta
-  } catch {
-    sessionMetaCache.set(key, null)
+  } catch (error) {
+    // Only a genuinely absent file is a durable "this store has no metadata".
+    // Every other failure — a conflicted store, a permission error, a torn
+    // write being parsed — is transient, and caching it for the process
+    // lifetime removes that store from every project queue the process builds
+    // afterwards: `sessionBelongsToQueue` reads a missing owner as "not mine".
+    // Nothing revalidates it, because the cache is only invalidated by writes
+    // from this same process. A daemon that was alive during a task-store
+    // outage therefore reported 9 tasks where a fresh process read 104, and the
+    // status line alternated between the two depending on which answered first.
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") sessionMetaCache.set(key, null)
     return null
   }
 }
@@ -754,7 +763,7 @@ export async function writeTask(
   tasksDir = createDefaultTaskStore().tasksDir
 ): Promise<void> {
   const sessionId = taskStoreDirName(storeKey)
-  const dir = await prepareTaskStoreWrite(storeKey, tasksDir, cwd)
+  const dir = await prepareTaskStoreWrite(storeKey, tasksDir)
   task.updatedAt = new Date().toISOString()
   await atomicWriteJson(join(dir, `${task.id}.json`), task)
   // Update lightweight index so status.ts can read openCount without scanning every task file.

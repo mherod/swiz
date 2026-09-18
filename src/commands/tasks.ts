@@ -614,9 +614,7 @@ function printRepairResult(result: RepairResult): void {
 
 async function resolveRepairDirectory(sessionId: string, tasksDir: string, dryRun: boolean) {
   const storeKey = await resolveLegacyTaskStoreKey(sessionId, process.cwd(), tasksDir)
-  return dryRun
-    ? readTaskStorePath(storeKey, tasksDir)
-    : prepareTaskStoreWrite(storeKey, tasksDir, process.cwd())
+  return dryRun ? readTaskStorePath(storeKey, tasksDir) : prepareTaskStoreWrite(storeKey, tasksDir)
 }
 
 async function runRepairTasks(rest: string[]): Promise<void> {
