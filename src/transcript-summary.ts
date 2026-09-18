@@ -344,6 +344,63 @@ function successfulResultOutput(output: unknown): boolean {
   )
 }
 
+/** One completed tool call paired with the result the transcript recorded for it. */
+export interface ToolCallOutcome {
+  name: string
+  success: boolean
+  resultText: string
+}
+
+function resultText(value: unknown): string {
+  return typeof value === "string" ? value : JSON.stringify(value ?? "")
+}
+
+function resultOutcomes(entry: ToolResultEntry): Array<[string, boolean, string]> {
+  return resultStates(entry).map(([id, success]) => [id, success, outcomeTextById(entry, id)])
+}
+
+function outcomeTextById(entry: ToolResultEntry, id: string): string {
+  const block = entry.message?.content?.find((candidate) => candidate.tool_use_id === id)
+  if (block) return resultText(block.content)
+  return resultText(entry.payload?.output)
+}
+
+/**
+ * Completed tool calls paired with their result state and text.
+ *
+ * A PreToolUse denial appears here as an unsuccessful call whose text carries the
+ * denying gate's message. That is the only transcript signal separating "the agent
+ * was blocked and retried" from "the agent called this tool and it worked" —
+ * `toolNames` alone records the attempt, not its outcome.
+ */
+function recordToolCallNames(line: string, calls: Map<string, string>): void {
+  for (const block of parseAssistantToolBlocks(line)) {
+    if (block.type === "tool_use" && block.id) calls.set(block.id, block.name ?? "")
+  }
+}
+
+function collectLineOutcomes(line: string, calls: Map<string, string>): ToolCallOutcome[] {
+  const entry = tryParseJsonLine(line) as ToolResultEntry | undefined
+  if (!entry) return []
+  const outcomes: ToolCallOutcome[] = []
+  for (const [id, success, text] of resultOutcomes(entry)) {
+    const name = calls.get(id)
+    if (name !== undefined) outcomes.push({ name, success, resultText: text })
+  }
+  return outcomes
+}
+
+export function collectToolCallOutcomes(lines: string[]): ToolCallOutcome[] {
+  const calls = new Map<string, string>()
+  const outcomes: ToolCallOutcome[] = []
+  for (const line of lines) {
+    if (!line?.trim()) continue
+    recordToolCallNames(line, calls)
+    outcomes.push(...collectLineOutcomes(line, calls))
+  }
+  return outcomes
+}
+
 function resultStates(entry: ToolResultEntry): Array<[string, boolean]> {
   if (entry.type === "user" && Array.isArray(entry.message?.content)) {
     return entry.message.content

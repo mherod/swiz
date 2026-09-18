@@ -1,11 +1,12 @@
 import { afterAll, describe, expect, test } from "bun:test"
-import { rm } from "node:fs/promises"
+import { mkdir, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { syncCodexUpdatePlanSnapshot } from "../src/tasks/codex-update-plan.ts"
 import { buildEffectiveTestSettings, writeTask } from "../src/utils/test-utils.ts"
 import pretooluseTaskGovernance, {
   buildStaleOpenTaskMessage,
+  countRecentStaleGateDenials,
   evaluateBlockedTaskFilesPrecheck,
   evaluateNativeTaskUpdatePath,
   evaluateOtherShellToolPath,
@@ -18,6 +19,7 @@ import pretooluseTaskGovernance, {
   OPEN_TASK_GATE_RELEASE_ATTEMPTS,
   OPEN_TASK_UPDATE_RECENCY_LIMIT_MS,
   partitionStaleOpenTasks,
+  STALE_GATE_DENY_RE,
 } from "./pretooluse-task-governance.ts"
 
 const TASK_HOME = join(
@@ -311,6 +313,60 @@ describe("findStaleOpenTasks", () => {
 })
 
 describe("evaluateTaskCreatePath — open-task update recency", () => {
+  /**
+   * Write a transcript of `count` TaskCreate calls, each paired with the result the
+   * real flow would record: this gate's actual deny message when `denied`, a plain
+   * success otherwise. Using the real builder keeps the fixture honest — a fixture
+   * with invented deny text would pass while production never matched.
+   */
+  async function writeGateTranscript(
+    sessionId: string,
+    count: number,
+    { denied }: { denied: boolean }
+  ): Promise<string> {
+    const dir = join(TASK_HOME, "transcripts", sessionId)
+    await mkdir(dir, { recursive: true })
+    const path = join(dir, "session.jsonl")
+    const denyText = buildStaleOpenTaskMessage(
+      [
+        {
+          id: "1",
+          status: "in_progress",
+          subject: "Stale",
+          updatedAt: new Date(
+            Date.now() - (OPEN_TASK_UPDATE_RECENCY_LIMIT_MS + 60_000)
+          ).toISOString(),
+        },
+      ],
+      Date.now()
+    )
+    const lines: string[] = []
+    for (let i = 0; i < count; i++) {
+      const id = `call-${i}`
+      lines.push(
+        JSON.stringify({
+          type: "assistant",
+          message: { content: [{ type: "tool_use", id, name: "TaskCreate", input: {} }] },
+        }),
+        JSON.stringify({
+          type: "user",
+          message: {
+            content: [
+              {
+                type: "tool_result",
+                tool_use_id: id,
+                is_error: denied,
+                content: denied ? denyText : "Task created.",
+              },
+            ],
+          },
+        })
+      )
+    }
+    await writeFile(path, `${lines.join("\n")}\n`)
+    return path
+  }
+
   async function seedTaskUpdatedAgo(sessionId: string, id: string, agoMs: number): Promise<void> {
     await writeTask(TASK_HOME, sessionId, {
       id,
@@ -361,15 +417,14 @@ describe("evaluateTaskCreatePath — open-task update recency", () => {
     try {
       await cleanupSession(sessionId)
       await seedTaskUpdatedAgo(sessionId, "1", OPEN_TASK_UPDATE_RECENCY_LIMIT_MS + 60_000)
+      const transcriptPath = await writeGateTranscript(sessionId, OPEN_TASK_GATE_RELEASE_ATTEMPTS, {
+        denied: true,
+      })
       const input = {
         tool_name: "TaskCreate",
         session_id: sessionId,
         _taskHome: TASK_HOME,
-        // Injected tool usage stands in for the transcript scan.
-        _currentSessionToolUsage: {
-          toolNames: Array.from({ length: OPEN_TASK_GATE_RELEASE_ATTEMPTS }, () => "TaskCreate"),
-          skillInvocations: [],
-        },
+        transcript_path: transcriptPath,
       }
       const result = await evaluateTaskCreatePath(input, { subject: "fix login bug" })
       expect(permissionDecision(result)).toBe("allow")
@@ -379,30 +434,83 @@ describe("evaluateTaskCreatePath — open-task update recency", () => {
     }
   })
 
-  // Control: one attempt short of the threshold must still deny, proving the
+  // Control: one denial short of the threshold must still deny, proving the
   // release above comes from the valve and not from the gate having stopped firing.
-  test("still denies one attempt below the release threshold", async () => {
+  test("still denies one denial below the release threshold", async () => {
     const sessionId = uniqueSessionId("pgrep-dispatch-test-below")
     try {
       await cleanupSession(sessionId)
       await seedTaskUpdatedAgo(sessionId, "1", OPEN_TASK_UPDATE_RECENCY_LIMIT_MS + 60_000)
+      const transcriptPath = await writeGateTranscript(
+        sessionId,
+        OPEN_TASK_GATE_RELEASE_ATTEMPTS - 1,
+        { denied: true }
+      )
       const input = {
         tool_name: "TaskCreate",
         session_id: sessionId,
         _taskHome: TASK_HOME,
-        _currentSessionToolUsage: {
-          toolNames: Array.from(
-            { length: OPEN_TASK_GATE_RELEASE_ATTEMPTS - 1 },
-            () => "TaskCreate"
-          ),
-          skillInvocations: [],
-        },
+        transcript_path: transcriptPath,
       }
       const result = await evaluateTaskCreatePath(input, { subject: "fix login bug" })
       expect(permissionDecision(result)).toBe("deny")
     } finally {
       await cleanupSession(sessionId)
     }
+  })
+
+  // #937: a planning burst is several successful creates in a row. Counting attempts
+  // read that as a wedge and released the gate on the first genuinely stale task.
+  test("keeps enforcing after a burst of successful creates", async () => {
+    const sessionId = uniqueSessionId("pgrep-dispatch-test-burst")
+    try {
+      await cleanupSession(sessionId)
+      await seedTaskUpdatedAgo(sessionId, "1", OPEN_TASK_UPDATE_RECENCY_LIMIT_MS + 60_000)
+      const transcriptPath = await writeGateTranscript(
+        sessionId,
+        OPEN_TASK_GATE_RELEASE_ATTEMPTS + 2,
+        { denied: false }
+      )
+      const input = {
+        tool_name: "TaskCreate",
+        session_id: sessionId,
+        _taskHome: TASK_HOME,
+        transcript_path: transcriptPath,
+      }
+      const result = await evaluateTaskCreatePath(input, { subject: "fix login bug" })
+      expect(permissionDecision(result)).toBe("deny")
+    } finally {
+      await cleanupSession(sessionId)
+    }
+  })
+
+  // A denial from a different governance gate must not release this one.
+  test("ignores denials that are not this gate's", () => {
+    const outcomes = Array.from({ length: OPEN_TASK_GATE_RELEASE_ATTEMPTS + 2 }, () => ({
+      name: "TaskCreate",
+      success: false,
+      resultText: "Duplicate task: collides with existing #1",
+    }))
+    expect(countRecentStaleGateDenials(outcomes)).toBe(0)
+  })
+
+  // Ties the detector to the builder: if the deny wording changes, this fails
+  // rather than the valve silently never firing again.
+  test("this gate's deny message is detectable by the counter", () => {
+    const message = buildStaleOpenTaskMessage(
+      [
+        {
+          id: "1",
+          status: "in_progress",
+          subject: "Stale",
+          updatedAt: new Date(
+            Date.now() - (OPEN_TASK_UPDATE_RECENCY_LIMIT_MS + 60_000)
+          ).toISOString(),
+        },
+      ],
+      Date.now()
+    )
+    expect(STALE_GATE_DENY_RE.test(message)).toBe(true)
   })
 
   // Control: the same seed, updated moments ago, must pass — proving the deny

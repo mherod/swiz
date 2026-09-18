@@ -116,8 +116,10 @@ import {
   isWriteTool,
 } from "../src/tool-matchers.ts"
 import {
+  collectToolCallOutcomes,
   getCurrentSessionTaskToolStats,
-  getToolsUsedForCurrentSession,
+  readCurrentSessionLines,
+  type ToolCallOutcome,
 } from "../src/transcript-summary.ts"
 import { scheduleAutoSteer } from "../src/utils/auto-steer-helpers.ts"
 import { hasFileInTree } from "../src/utils/file-utils.ts"
@@ -392,17 +394,42 @@ export function findStaleOpenTasks<T extends OpenTaskRecency>(
 }
 
 /**
- * Creation attempts in the trailing tool window. The valve reads attempts rather
- * than denials because a denied PreToolUse call still lands in the transcript as
- * an attempted tool use, and counting from the tool sequence keeps the check a
- * pure transcript scan with no enforcement state on disk.
+ * Distinctive phrase from this gate's deny message, used to attribute a denial to
+ * this gate rather than to any other governance block. `staleGateMessageIsDetectable`
+ * in the dispatch tests asserts the builder and this pattern stay in step, so the
+ * two cannot drift apart silently.
  */
-export function countRecentTaskCreateAttempts(
-  toolNames: readonly string[],
+export const STALE_GATE_DENY_RE = /not been updated in over \d+ minutes/i
+
+/**
+ * Denials of *this* gate in the trailing tool window.
+ *
+ * Counting attempts instead treats a planning burst — several `TaskCreate` calls in
+ * a row, all of which succeeded — as evidence of a wedge, and releases the gate on
+ * the first genuinely stale task. Only a call whose recorded result was an error
+ * carrying this gate's message proves the agent was actually blocked and retried.
+ */
+export function countRecentStaleGateDenials(
+  outcomes: readonly ToolCallOutcome[],
   windowSize: number = OPEN_TASK_GATE_RELEASE_WINDOW
 ): number {
-  const window = toolNames.slice(-Math.max(0, windowSize))
-  return window.filter((name) => isTaskCreateTool(name)).length
+  return outcomes
+    .slice(-Math.max(0, windowSize))
+    .filter(
+      (outcome) =>
+        isTaskCreateTool(outcome.name) &&
+        !outcome.success &&
+        STALE_GATE_DENY_RE.test(outcome.resultText)
+    ).length
+}
+
+/** Transcript-derived denial count; 0 when no transcript is reachable, so the gate keeps enforcing. */
+async function readStaleGateDenialCount(input: Record<string, any>): Promise<number> {
+  const transcriptPath = typeof input?.transcript_path === "string" ? input.transcript_path : ""
+  if (!transcriptPath) return 0
+  const lines = await readCurrentSessionLines(transcriptPath)
+  if (!lines) return 0
+  return countRecentStaleGateDenials(collectToolCallOutcomes(lines))
 }
 
 function formatTaskAges(tasks: readonly OpenTaskRecency[], nowMs: number): string {
@@ -445,11 +472,11 @@ export function buildStaleOpenTaskMessage(
 
 export function buildStaleGateReleaseMessage(
   staleTasks: readonly OpenTaskRecency[],
-  attempts: number,
+  denials: number,
   nowMs: number = Date.now()
 ): string {
   return (
-    `Task-recency gate released after ${attempts} creation attempts — it was blocking without ` +
+    `Task-recency gate released after blocking ${denials} creation attempts — it was denying without ` +
     `producing progress, so it is standing down for this call rather than wedging the workflow.\n` +
     `${staleTasks.length} open task(s) are still stale:\n${formatTaskAges(staleTasks, nowMs)}\n\n` +
     "Reconcile them with TaskUpdate — if a plain update is not clearing this, the queue and the " +
@@ -479,9 +506,9 @@ async function checkOpenTaskUpdateRecency(
     )
     if (blocking.length === 0) return null
 
-    const attempts = countRecentTaskCreateAttempts(await getToolsUsedForCurrentSession(input))
-    if (attempts >= OPEN_TASK_GATE_RELEASE_ATTEMPTS) {
-      const note = buildStaleGateReleaseMessage(blocking, attempts, nowMs)
+    const denials = await readStaleGateDenialCount(input)
+    if (denials >= OPEN_TASK_GATE_RELEASE_ATTEMPTS) {
+      const note = buildStaleGateReleaseMessage(blocking, denials, nowMs)
       return preToolUseAllowWithContext(note, note)
     }
 
