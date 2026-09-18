@@ -22,32 +22,11 @@ import {
   COMPLETED_TASK_PRUNE_AGE_MS,
   STALE_TASK_PRUNE_AGE_MS,
 } from "./task-governance-constants.ts"
-import { parseIsoTimestampMs } from "./task-timing.ts"
+import { getTaskLastUpdatedMs, type TaskTimingLike } from "./task-timing.ts"
 
 /** The fields pruning needs; satisfied by both `Task` and `SessionTask`. */
-interface PrunableTask {
+interface PrunableTask extends TaskTimingLike {
   id: string
-  status: string
-  startedAt?: number | null
-  completedAt?: number | null
-  statusChangedAt?: string | null
-}
-
-/**
- * Epoch ms of the task's most recent recorded activity, or null when the
- * record carries no usable timestamp at all. `statusChangedAt` is stamped on
- * every status change, so it is the primary anchor; the numeric fields cover
- * records written before it existed.
- */
-function lastActivityMs(task: PrunableTask): number | null {
-  const candidates = [
-    parseIsoTimestampMs(task.statusChangedAt),
-    typeof task.completedAt === "number" && Number.isFinite(task.completedAt)
-      ? task.completedAt
-      : null,
-    typeof task.startedAt === "number" && Number.isFinite(task.startedAt) ? task.startedAt : null,
-  ].filter((value): value is number => value !== null)
-  return candidates.length === 0 ? null : Math.max(...candidates)
 }
 
 /**
@@ -109,6 +88,6 @@ export async function pruneStaleCompletedTasks<T extends PrunableTask>(
 function shouldPrune(task: PrunableTask, completedCutoff: number, staleCutoff: number): boolean {
   if (task.status === "completed" && task.completedAt != null && task.completedAt < completedCutoff)
     return true
-  const activityMs = lastActivityMs(task)
+  const activityMs = getTaskLastUpdatedMs(task)
   return activityMs !== null && activityMs < staleCutoff
 }

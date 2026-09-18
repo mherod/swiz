@@ -1,4 +1,13 @@
-/** Task governance configuration thresholds and intervals. */
+/**
+ * Task governance configuration thresholds and intervals.
+ *
+ * Open-task lifecycle invariant:
+ * OPEN_TASK_UPDATE_RECENCY_LIMIT_MS < OPEN_TASK_ABANDONED_CEILING_MS < STALE_TASK_PRUNE_AGE_MS.
+ * Last activity comes from getTaskLastUpdatedMs: crossing the recency limit
+ * blocks creation, crossing the abandoned ceiling stops blocking, and crossing
+ * the stale prune age permits deletion. Completed retention is a separate rule
+ * based on completion time; duration warnings continue to measure time in progress.
+ */
 
 /** Threshold (non-task calls) before hard blocking on stale tasks. */
 export const TASK_STALENESS_ENFORCEMENT_THRESHOLD = 60
