@@ -1,8 +1,9 @@
 import { describe, expect, it } from "bun:test"
-import { mkdtemp, writeFile } from "node:fs/promises"
-import { tmpdir } from "node:os"
+import { mkdir } from "node:fs/promises"
 import { join } from "node:path"
+import { useTempDir } from "../utils/test-utils.ts"
 import {
+  type AddressedTask,
   type MergeableTask,
   mergeDuplicateTaskFiles,
   mergeDuplicateTasksAcrossStores,
@@ -10,13 +11,16 @@ import {
   planDuplicateMerges,
   selectSurvivor,
 } from "./task-merge-duplicates.ts"
+import { indexTasksById, openBlockersOf } from "./task-topology.ts"
+
+const tmp = useTempDir("swiz-task-merge-")
 
 async function makeStoreDir(): Promise<string> {
-  return mkdtemp(join(tmpdir(), "swiz-task-merge-"))
+  return tmp.create()
 }
 
 async function writeTaskFile(dir: string, task: MergeableTask): Promise<void> {
-  await writeFile(join(dir, `${task.id}.json`), JSON.stringify(task))
+  await Bun.write(join(dir, `${task.id}.json`), JSON.stringify(task))
 }
 
 function fileExists(dir: string, id: string): Promise<boolean> {
@@ -183,7 +187,8 @@ describe("mergeDuplicateTaskFiles", () => {
   })
 
   it("refuses to delete a record whose id escapes the store directory", async () => {
-    const dir = await makeStoreDir()
+    const dir = join(await makeStoreDir(), "store")
+    await mkdir(dir)
     const outside = join(dir, "..", "settings.json")
     await Bun.write(outside, JSON.stringify({ keep: true }))
 
@@ -208,12 +213,12 @@ describe("mergeDuplicateTasksAcrossStores", () => {
   // The motivating population: one hook stub per prior session, each alone in
   // its own store. A per-directory pass sees a group of one everywhere and
   // collapses nothing, which is why this case needs its own merge path.
-  async function makeSessionStores(ids: readonly string[]) {
+  async function makeTaskStores(tasks: readonly MergeableTask[]) {
     const stores = new Map<string, string>()
-    for (const id of ids) {
+    for (const task of tasks) {
       const dir = await makeStoreDir()
-      stores.set(id, dir)
-      await writeTaskFile(dir, stub(id))
+      stores.set(task.id, dir)
+      await writeTaskFile(dir, task)
     }
     return stores
   }
@@ -223,13 +228,14 @@ describe("mergeDuplicateTasksAcrossStores", () => {
       dirFor: (address: string) => stores.get(address) as string,
       write: async (address: string, task: MergeableTask) => {
         written.push([address, task.id])
+        await writeTaskFile(stores.get(address) as string, task)
       },
     }
   }
 
   it("collapses one stub per session store into a single survivor", async () => {
     const ids = ["2487-1", "3448-1", "5976-1", "7271-1", "a1ea-1"]
-    const stores = await makeSessionStores(ids)
+    const stores = await makeTaskStores(ids.map((id) => stub(id)))
     const records = ids.map((id) => ({ address: id, task: stub(id) }))
     const written: Array<[string, string]> = []
 
@@ -250,7 +256,7 @@ describe("mergeDuplicateTasksAcrossStores", () => {
   it("leaves distinct subjects in separate stores untouched", async () => {
     // Control: proves the collapse above comes from matching subjects, not
     // merely from records sharing a queue.
-    const stores = await makeSessionStores(["1", "2"])
+    const stores = await makeTaskStores([stub("1"), stub("2")])
     const records = [
       { address: "1", task: stub("1") },
       { address: "2", task: { id: "2", subject: "Run the test suite", status: "pending" } },
@@ -266,7 +272,7 @@ describe("mergeDuplicateTasksAcrossStores", () => {
   })
 
   it("repoints an outsider's blockedBy edge from the folded record to the survivor", async () => {
-    const stores = await makeSessionStores(["1", "2"])
+    const stores = await makeTaskStores([stub("1"), stub("2")])
     const outsiderDir = await makeStoreDir()
     const outsider = {
       id: "9",
@@ -288,6 +294,7 @@ describe("mergeDuplicateTasksAcrossStores", () => {
       dirFor: (address: string) => stores.get(address) as string,
       write: async (address: string, task: MergeableTask) => {
         written.push([address, task])
+        await writeTaskFile(stores.get(address) as string, task)
       },
     })
 
@@ -301,7 +308,7 @@ describe("mergeDuplicateTasksAcrossStores", () => {
 
   it("leaves edges alone when they point at nothing that was folded", async () => {
     // Control: repointing must not rewrite unrelated dependency edges.
-    const stores = await makeSessionStores(["1"])
+    const stores = await makeTaskStores([stub("1")])
     const outsiderDir = await makeStoreDir()
     const outsider = { id: "9", subject: "Ship the release", status: "pending", blockedBy: ["7"] }
     await writeTaskFile(outsiderDir, outsider)
@@ -321,7 +328,7 @@ describe("mergeDuplicateTasksAcrossStores", () => {
 
   it("keeps every store's record when the survivor write fails", async () => {
     const ids = ["1", "2"]
-    const stores = await makeSessionStores(ids)
+    const stores = await makeTaskStores(ids.map((id) => stub(id)))
     const records = ids.map((id) => ({ address: id, task: stub(id) }))
 
     const surviving = await mergeDuplicateTasksAcrossStores(records, {
@@ -333,5 +340,142 @@ describe("mergeDuplicateTasksAcrossStores", () => {
 
     expect(surviving.map((r) => r.task.id)).toEqual(ids)
     for (const id of ids) expect(await fileExists(stores.get(id) as string, id)).toBe(true)
+  })
+
+  async function readRecords(stores: Map<string, string>) {
+    const records: AddressedTask<MergeableTask, string>[] = []
+    for (const [id, dir] of stores) {
+      const file = Bun.file(join(dir, `${id}.json`))
+      if (await file.exists()) records.push({ address: id, task: await file.json() })
+    }
+    return records
+  }
+
+  function expectBlocked(records: AddressedTask<MergeableTask, string>[], ids: string[]) {
+    const tasks = records.map(({ task }) => ({ ...task, blockedBy: task.blockedBy ?? [] }))
+    const byId = indexTasksById(tasks)
+    for (const id of ids) {
+      const task = byId.get(id)
+      expect(task).toBeDefined()
+      expect(openBlockersOf(task!, byId).length).toBeGreaterThan(0)
+    }
+  }
+
+  it.each([
+    ["1", false],
+    ["9", false],
+    ["10", false],
+    ["9", true],
+  ] as const)("preserves blockers when writing %s fails (after persistence: %s)", async (id, afterWrite) => {
+    const tasks = [
+      stub("1", { status: "in_progress", blocks: ["unrelated"], blockedBy: ["a"] }),
+      stub("2", { blocks: ["9", "10"], blockedBy: ["b"] }),
+      stub("9", { subject: "Deploy service", blockedBy: ["2"], blocks: ["untouched"] }),
+      stub("10", { subject: "Check browser output", blockedBy: ["2"] }),
+      stub("done", { status: "completed" }),
+      stub("cancelled", { status: "cancelled" }),
+    ]
+    const stores = await makeTaskStores(tasks)
+    const records = await readRecords(stores)
+    const written: Array<[string, string]> = []
+    const access = accessFor(stores, written)
+    const failed = await mergeDuplicateTasksAcrossStores(records, {
+      ...access,
+      write: async (address, task) => {
+        if (task.id === id && !afterWrite) throw new Error("disk full")
+        await access.write(address, task)
+        if (task.id === id) throw new Error("metadata write failed")
+      },
+    })
+
+    expect(failed.map((record) => record.task.id)).toEqual(tasks.map((task) => task.id))
+    expect(await fileExists(stores.get("2")!, "2")).toBe(true)
+    expectBlocked(failed, ["9", "10"])
+    const reloaded = await readRecords(stores)
+    expectBlocked(reloaded, ["9", "10"])
+    // A callback may throw after saving its file; either durable reference is safe.
+    if (!afterWrite) expect(failed).toEqual(reloaded)
+
+    const recovered = await mergeDuplicateTasksAcrossStores(reloaded, access)
+    expect(recovered.map((record) => record.task.id)).toEqual(["1", "9", "10", "done", "cancelled"])
+    expect(await fileExists(stores.get("2")!, "2")).toBe(false)
+    expectBlocked(recovered, ["9", "10"])
+    expect(await readRecords(stores)).toEqual(recovered)
+    for (const dependent of recovered.filter((record) => ["9", "10"].includes(record.task.id))) {
+      expect(dependent.task.blockedBy).toEqual(["1"])
+    }
+    expect(recovered[0]?.task.blocks).toEqual(["unrelated", "9", "10"])
+    expect(recovered[0]?.task.blockedBy).toEqual(["a", "b"])
+    expect(recovered.find((record) => record.task.id === "9")?.task.blocks).toEqual(["untouched"])
+    for (const [address, taskId] of written) expect(address).toBe(taskId)
+    for (const terminal of tasks.slice(-2)) {
+      expect(recovered.find((record) => record.task.id === terminal.id)?.task).toEqual(terminal)
+    }
+  })
+
+  it.each([
+    "3",
+    "9",
+    null,
+  ])("keeps linked groups recoverable when writer %s fails", async (failedId) => {
+    const stores = await makeTaskStores([
+      stub("1", { status: "in_progress", blockedBy: ["4", "unrelated"] }),
+      stub("2"),
+      stub("3", { subject: "Commit changes", status: "in_progress" }),
+      stub("4", { subject: "Commit changes", blocks: ["2"] }),
+      stub("9", { subject: "Deploy release", blockedBy: ["2", "4"], blocks: ["untouched"] }),
+    ])
+    const records = await readRecords(stores)
+    const access = accessFor(stores, [])
+    const result = await mergeDuplicateTasksAcrossStores(records, {
+      ...access,
+      write: async (address, task) => {
+        // Every required write precedes every deletion, including another group's.
+        expect(await fileExists(stores.get("2")!, "2")).toBe(true)
+        expect(await fileExists(stores.get("4")!, "4")).toBe(true)
+        if (task.id === failedId) throw new Error("store unavailable")
+        await access.write(address, task)
+      },
+    })
+    expectBlocked(result, ["1", "9"])
+    expectBlocked(await readRecords(stores), ["1", "9"])
+    if (failedId !== null) {
+      expect(result.map((record) => record.task.id)).toEqual(["1", "2", "3", "4", "9"])
+      expect(await fileExists(stores.get("2")!, "2")).toBe(true)
+      expect(await fileExists(stores.get("4")!, "4")).toBe(true)
+    }
+    const recovered = await mergeDuplicateTasksAcrossStores(await readRecords(stores), access)
+    expect(recovered.map((record) => record.task.id)).toEqual(["1", "3", "9"])
+    expect(recovered[0]?.task.blockedBy).toEqual(["3", "unrelated"])
+    expect(recovered[1]?.task.blocks).toEqual(["1"])
+    expect(recovered[2]?.task.blockedBy).toEqual(["1", "3"])
+    expect(recovered[2]?.task.blocks).toEqual(["untouched"])
+    expect(await readRecords(stores)).toEqual(recovered)
+    expect(await fileExists(stores.get("2")!, "2")).toBe(false)
+    expect(await fileExists(stores.get("4")!, "4")).toBe(false)
+  })
+
+  it("leaves a corrupt cross-store group intact without touching an outside file", async () => {
+    const parent = await makeStoreDir()
+    const dir = join(parent, "store")
+    await mkdir(dir)
+    const outside = join(parent, "settings.json")
+    await Bun.write(outside, JSON.stringify({ keep: true }))
+    const records = [
+      { address: dir, task: stub("1", { status: "in_progress" }) },
+      { address: dir, task: stub("../settings") },
+    ]
+    await writeTaskFile(dir, records[0]!.task)
+    const writes: string[] = []
+    const result = await mergeDuplicateTasksAcrossStores(records, {
+      dirFor: (address) => address,
+      write: async (_address, task) => {
+        writes.push(task.id)
+      },
+    })
+    expect(result).toEqual(records)
+    expect(writes).toEqual([])
+    expect(await Bun.file(outside).json()).toEqual({ keep: true })
+    expect(await fileExists(dir, "1")).toBe(true)
   })
 })

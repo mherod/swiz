@@ -154,20 +154,6 @@ export function planDuplicateMerges<T extends MergeableTask>(
   return { tasks: result, merges }
 }
 
-/**
- * Apply `planDuplicateMerges` to a store directory: persist each survivor, then
- * delete the records folded into it.
- *
- * Order matters and is the opposite of the obvious one. The survivor carries
- * the union of every duplicate's dependency edges, which exists nowhere else
- * once the folded files are gone — so the write has to land first. If it fails,
- * that group is abandoned with all of its records still on disk: a duplicate
- * row is a cosmetic problem, a dropped blocker is a correctness one, and the
- * next pass will retry the merge from an intact population.
- *
- * Deleting a record that is already gone is still fine to ignore; that is
- * convergence, not loss.
- */
 /** A task paired with whatever the caller uses to address its owning store. */
 export interface AddressedTask<T, A> {
   address: A
@@ -181,7 +167,7 @@ export interface AddressedTask<T, A> {
 export interface StoreAccess<T, A> {
   /** Directory holding the records of the given store. */
   dirFor(address: A): Promise<string> | string
-  /** Quiet, durable write of the survivor to its own store. */
+  /** Quiet, durable write of a survivor or dependent to its own store. */
   write(address: A, task: T): Promise<void>
 }
 
@@ -195,37 +181,66 @@ export interface StoreAccess<T, A> {
  *
  * The survivor stays in the store it came from and the folded records are
  * deleted from theirs, so no record moves between stores.
+ * All survivor and reference writes must finish before any deletion. A failed
+ * write leaves the original population available for retry; successful writes
+ * remain safe because both the original and replacement IDs still resolve.
  */
 export async function mergeDuplicateTasksAcrossStores<T extends MergeableTask, A>(
   records: readonly AddressedTask<T, A>[],
   access: StoreAccess<T, A>
 ): Promise<AddressedTask<T, A>[]> {
-  const { merges } = planDuplicateMerges(records.map((record) => record.task))
-  if (merges.length === 0) return [...records]
+  const plan = await planCrossStoreMerge(records, access)
+  const persisted = new Map<string, AddressedTask<T, A>>()
+  try {
+    for (const record of plan.writes) {
+      await access.write(record.address, record.task)
+      persisted.set(record.task.id, record)
+    }
+  } catch {
+    // Reflect confirmed writes, but keep every folded record in the queue and
+    // on disk. No dangling blocker is introduced, even across linked groups.
+    return records.map((record) => persisted.get(record.task.id) ?? record)
+  }
+  await deleteFoldedTaskFiles(plan.targets)
+  return plan.records
+}
 
+/** Prepare all durable changes before applying any of them. */
+async function planCrossStoreMerge<T extends MergeableTask, A>(
+  records: readonly AddressedTask<T, A>[],
+  access: StoreAccess<T, A>
+): Promise<{
+  records: AddressedTask<T, A>[]
+  writes: AddressedTask<T, A>[]
+  targets: string[]
+}> {
+  const { merges } = planDuplicateMerges(records.map((record) => record.task))
   const addressById = new Map(records.map((record) => [record.task.id, record.address]))
-  const folded = new Set<string>()
-  const survivors = new Map<string, T>()
+  // Map insertion order keeps survivor writes ahead of external dependents.
+  const writes = new Map<string, AddressedTask<T, A>>()
   const foldedToSurvivor = new Map<string, string>()
+  const targets: string[] = []
 
   for (const merge of merges) {
     const address = addressById.get(merge.task.id)
     if (address === undefined) continue
-    if (!(await applyCrossStoreMerge(merge, address, addressById, access))) continue
-    survivors.set(merge.task.id, merge.task)
-    for (const id of merge.mergedIds) {
-      folded.add(id)
-      foldedToSurvivor.set(id, merge.task.id)
-    }
+    const paths = await resolveMergeTargets(merge.mergedIds, addressById, access)
+    if (paths === null) continue
+    targets.push(...paths)
+    writes.set(merge.task.id, { address, task: merge.task })
+    for (const id of merge.mergedIds) foldedToSurvivor.set(id, merge.task.id)
   }
 
   const result: AddressedTask<T, A>[] = []
   for (const record of records) {
-    if (folded.has(record.task.id)) continue
-    const survivor = survivors.get(record.task.id)
-    result.push(survivor ? { ...record, task: survivor } : record)
+    if (foldedToSurvivor.has(record.task.id)) continue
+    const proposed = writes.get(record.task.id) ?? record
+    const task = repointTaskRefs(proposed.task, foldedToSurvivor)
+    const updated = task === proposed.task ? proposed : { ...proposed, task }
+    if (updated !== record) writes.set(task.id, updated)
+    result.push(updated)
   }
-  return repointExternalRefs(result, foldedToSurvivor, access)
+  return { records: result, writes: [...writes.values()], targets }
 }
 
 /**
@@ -235,40 +250,21 @@ export async function mergeDuplicateTasksAcrossStores<T extends MergeableTask, A
  * Without this a merge silently unblocks work: `openBlockersOf` drops any
  * blocker id it cannot resolve, so a task blocked by a duplicate that was just
  * folded away reads as ready while the survivor is still open. Edges inside a
- * merged group are handled by `unionRefs`; these are the edges held by everyone
- * else.
+ * merged group are handled by `unionRefs`; this also repoints edges between
+ * different groups before their survivors are persisted.
  */
-async function repointExternalRefs<T extends MergeableTask, A>(
-  records: readonly AddressedTask<T, A>[],
-  foldedToSurvivor: ReadonlyMap<string, string>,
-  access: StoreAccess<T, A>
-): Promise<AddressedTask<T, A>[]> {
-  if (foldedToSurvivor.size === 0) return [...records]
-
-  const result: AddressedTask<T, A>[] = []
-  for (const record of records) {
-    const blocks = remapRefs(record.task.id, record.task.blocks, foldedToSurvivor)
-    const blockedBy = remapRefs(record.task.id, record.task.blockedBy, foldedToSurvivor)
-    if (!blocks && !blockedBy) {
-      result.push(record)
-      continue
-    }
-
-    const task = {
-      ...record.task,
-      ...(blocks ? { blocks } : {}),
-      ...(blockedBy ? { blockedBy } : {}),
-    }
-    try {
-      await access.write(record.address, task)
-      result.push({ ...record, task })
-    } catch {
-      // Edge repointing failed to persist; keep the record as read so the
-      // in-memory view does not claim a durable state it does not have.
-      result.push(record)
-    }
+function repointTaskRefs<T extends MergeableTask>(
+  task: T,
+  foldedToSurvivor: ReadonlyMap<string, string>
+): T {
+  const blocks = remapRefs(task.id, task.blocks, foldedToSurvivor)
+  const blockedBy = remapRefs(task.id, task.blockedBy, foldedToSurvivor)
+  if (!blocks && !blockedBy) return task
+  return {
+    ...task,
+    ...(blocks ? { blocks } : {}),
+    ...(blockedBy ? { blockedBy } : {}),
   }
-  return result
 }
 
 /** Returns the rewritten list, or null when nothing referenced a folded id. */
@@ -289,36 +285,32 @@ function remapRefs(
   return [...seen]
 }
 
-/** Survivor-first, same ordering guarantee as the single-store path. */
-async function applyCrossStoreMerge<T extends MergeableTask, A>(
-  merge: DuplicateMergeResult<T>,
-  survivorAddress: A,
+/** Reject a corrupt group before any of its records are rewritten or deleted. */
+async function resolveMergeTargets<T, A>(
+  mergedIds: readonly string[],
   addressById: ReadonlyMap<string, A>,
   access: StoreAccess<T, A>
-): Promise<boolean> {
+): Promise<string[] | null> {
   const targets: string[] = []
-  for (const id of merge.mergedIds) {
+  for (const id of mergedIds) {
     const address = addressById.get(id)
-    if (address === undefined) return false
+    if (address === undefined) return null
     const path = resolveTaskFilePath(await access.dirFor(address), id)
-    if (path === null) return false
+    if (path === null) return null
     targets.push(path)
   }
+  return targets
+}
 
-  try {
-    await access.write(survivorAddress, merge.task)
-  } catch {
-    return false
-  }
-
-  for (const path of targets) {
+/** Called only after the corresponding required writes have succeeded. */
+async function deleteFoldedTaskFiles(paths: readonly string[]): Promise<void> {
+  for (const path of paths) {
     try {
       await unlink(path)
     } catch {
       // already gone — the survivor covers this work either way
     }
   }
-  return true
 }
 
 /**
@@ -348,13 +340,7 @@ async function applyMerge<T extends MergeableTask>(
     }
   }
 
-  for (const path of paths) {
-    try {
-      await unlink(path)
-    } catch {
-      // already gone — the survivor covers this work either way
-    }
-  }
+  await deleteFoldedTaskFiles(paths)
   return true
 }
 
