@@ -223,6 +223,8 @@ export interface UpstreamSyncResult {
    * fully-failed sync (offline, expired gh auth) does not report as fresh (#715).
    */
   fetchOk: boolean
+  /** A known repo/cwd mismatch refused the sync before any fetch or store mutation. */
+  refused?: { cwdRepo: string; targetRepo: string }
 }
 
 /** Extract the maximum `updatedAt` ISO string from a list of entities. */
@@ -677,12 +679,12 @@ function createInitialSyncResult(): UpstreamSyncResult {
   }
 }
 
-async function verifyRepoOriginInvariant(
+async function getRepoSyncRefusal(
   repo: string,
   cwd: string,
   hasClient: boolean
-): Promise<boolean> {
-  if (hasClient) return true
+): Promise<UpstreamSyncResult["refused"]> {
+  if (hasClient) return undefined
   const originSlug = await getRepoSlug(cwd)
   if (originSlug !== null && originSlug !== repo) {
     debugLog(
@@ -690,9 +692,9 @@ async function verifyRepoOriginInvariant(
         `("${originSlug}"). cwd-implied fetches would corrupt the cache — run from the ` +
         `repo's checkout or supply a repo-targeted client.`
     )
-    return false
+    return { cwdRepo: originSlug, targetRepo: repo }
   }
-  return true
+  return undefined
 }
 
 function hasEntitySnapshotChanged(
@@ -901,8 +903,7 @@ async function resolveSyncSetup(
   const defaultClient = new GhCliGitHubClient(result.restCache, signal)
   const client = opts.client ?? defaultClient
 
-  const allowed = await verifyRepoOriginInvariant(repo, cwd, Boolean(opts.client))
-  if (!allowed || signal?.aborted) return null
+  if (signal?.aborted) return null
 
   const fetchComments = opts.client
     ? (number: number) => client.listIssueComments(cwd, number)
@@ -937,6 +938,8 @@ export async function syncUpstreamState(
     forceComments?: boolean
   }
 ): Promise<UpstreamSyncResult> {
+  const refused = await getRepoSyncRefusal(repo, cwd, Boolean(opts?.client))
+  if (refused) return { ...createInitialSyncResult(), refused }
   const setup = await resolveSyncSetup(repo, cwd, opts)
   if (!setup) return createInitialSyncResult()
 

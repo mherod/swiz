@@ -1,7 +1,7 @@
 import { getRepoSlug } from "../../git-helpers.ts"
 import { getIssueStore } from "../../issue-store.ts"
 import { syncUpstreamState, type UpstreamSyncResult } from "../../issue-store-sync.ts"
-import { ensureFreshData } from "./operations.ts"
+import { assertSyncAccepted, ensureFreshData } from "./operations.ts"
 
 type Row = [string, string]
 type ChangeList = { changes: { kind: string; key: string; reason: string }[] }
@@ -190,6 +190,7 @@ export async function handleSync(args: string[]): Promise<void> {
 
   console.log(`🔄 Syncing upstream state for ${repo}${syncAge}...`)
   const result = await syncUpstreamState(repo, cwd, { forceComments: force })
+  assertSyncAccepted(result)
   printSyncCompletion(result)
   printOpenItems(repo)
 }
