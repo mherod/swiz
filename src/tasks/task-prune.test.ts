@@ -1,8 +1,13 @@
 import { describe, expect, it } from "bun:test"
-import { mkdtemp, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { pruneStaleCompletedTasks } from "./task-prune.ts"
+import {
+  readSessionMeta,
+  refreshSessionMetaFromDisk,
+  updateSessionMetaFromTasks,
+} from "./task-repository.ts"
 
 interface FixtureTask {
   id: string
@@ -165,6 +170,159 @@ describe("pruneStaleCompletedTasks — 2-day age rule", () => {
 
     const pruned = await pruneStaleCompletedTasks(dir, tasks, COMPLETED_AGE_MS, 1_000)
     expect(pruned).toEqual([])
+    expect(await fileExists(dir, "1")).toBe(false)
+  })
+})
+
+describe("pruneStaleCompletedTasks metadata refresh", () => {
+  it("refreshes openCount after deleting open tasks and skips no-op writes", async () => {
+    const dir = await makeStoreDir()
+    const stale = { id: "1", status: "pending", statusChangedAt: new Date(0).toISOString() }
+    const survivor = { id: "2", status: "in_progress", statusChangedAt: new Date().toISOString() }
+    await writeTaskFile(dir, stale)
+    await writeTaskFile(dir, survivor)
+    await updateSessionMetaFromTasks(dir, [stale, survivor], "session")
+
+    let refreshCalls = 0
+    const refreshed = await pruneStaleCompletedTasks(
+      dir,
+      [stale, survivor],
+      TWO_DAYS_MS,
+      TWO_DAYS_MS,
+      async () => {
+        refreshCalls++
+        await refreshSessionMetaFromDisk(dir, "session")
+      }
+    )
+
+    expect(refreshed.map((task) => task.id)).toEqual(["2"])
+    expect((await Bun.file(join(dir, ".session-meta.json")).json()).openCount).toBe(1)
+    expect(refreshCalls).toBe(1)
+
+    await pruneStaleCompletedTasks(dir, refreshed, TWO_DAYS_MS, TWO_DAYS_MS, async () => {
+      refreshCalls++
+    })
+    expect(refreshCalls).toBe(1)
+  })
+
+  it("counts a task written after the snapshot instead of publishing an undercount", async () => {
+    const dir = await makeStoreDir()
+    const stale = { id: "1", status: "pending", statusChangedAt: new Date(0).toISOString() }
+    await writeTaskFile(dir, stale)
+
+    // The snapshot the prune was handed. A concurrent writer lands task "3"
+    // after it is taken — publishing the snapshot would report openCount 0,
+    // which collectIncompleteTasks treats as authoritative.
+    const snapshot = [stale]
+    const refreshed = await pruneStaleCompletedTasks(
+      dir,
+      snapshot,
+      TWO_DAYS_MS,
+      TWO_DAYS_MS,
+      async () => {
+        await writeTaskFile(dir, {
+          id: "3",
+          status: "in_progress",
+          statusChangedAt: new Date().toISOString(),
+        })
+        await refreshSessionMetaFromDisk(dir, "session")
+      }
+    )
+
+    expect(refreshed).toEqual([])
+    expect((await Bun.file(join(dir, ".session-meta.json")).json()).openCount).toBe(1)
+  })
+
+  it("lets a memoized metadata read see the refreshed count", async () => {
+    const tasksDir = await mkdtemp(join(tmpdir(), "swiz-task-prune-store-"))
+    const sessionId = "swiz-prune-cache-session"
+    const dir = join(tasksDir, sessionId)
+    await mkdir(dir, { recursive: true })
+
+    const stale = { id: "1", status: "pending", statusChangedAt: new Date(0).toISOString() }
+    const survivor = { id: "2", status: "in_progress", statusChangedAt: new Date().toISOString() }
+    await writeTaskFile(dir, stale)
+    await writeTaskFile(dir, survivor)
+    await updateSessionMetaFromTasks(dir, [stale, survivor], "session")
+
+    // Memoize the pre-prune count, as a long-lived daemon process would.
+    expect((await readSessionMeta(sessionId, tasksDir))?.openCount).toBe(2)
+
+    await pruneStaleCompletedTasks(dir, [stale, survivor], TWO_DAYS_MS, TWO_DAYS_MS, () =>
+      refreshSessionMetaFromDisk(dir, "session")
+    )
+
+    // Without invalidation this still returns the cached 2 until an unrelated
+    // task write happens to evict the entry.
+    expect((await readSessionMeta(sessionId, tasksDir))?.openCount).toBe(1)
+
+    // Control: the non-invalidating writer leaves the memoized 1 in place, so
+    // the assertion above is about invalidation, not about an inactive cache.
+    await updateSessionMetaFromTasks(dir, [], "session")
+    expect((await readSessionMeta(sessionId, tasksDir))?.openCount).toBe(1)
+  })
+
+  it("keeps reading tasks when the metadata refresh throws", async () => {
+    const dir = await makeStoreDir()
+    const stale = { id: "1", status: "pending", statusChangedAt: new Date(0).toISOString() }
+    const survivor = { id: "2", status: "in_progress", statusChangedAt: new Date().toISOString() }
+    await writeTaskFile(dir, stale)
+    await writeTaskFile(dir, survivor)
+
+    const pruned = await pruneStaleCompletedTasks(
+      dir,
+      [stale, survivor],
+      TWO_DAYS_MS,
+      TWO_DAYS_MS,
+      async () => {
+        throw new Error("read-only store")
+      }
+    )
+
+    // Deletion is fail-open, so an auxiliary index write must not turn a
+    // TaskStateCache load or MCP project read into a rejection.
+    expect(pruned.map((task) => task.id)).toEqual(["2"])
+    expect(await fileExists(dir, "1")).toBe(false)
+  })
+
+  it("keeps a record whose id cannot name a file in the store and reports no prune", async () => {
+    const dir = await makeStoreDir()
+    // `id` is record content, so a corrupt one can point outside the store.
+    // Such a record is kept, which means nothing was pruned on its account.
+    const corrupt = {
+      id: "../escape",
+      status: "pending",
+      statusChangedAt: new Date(0).toISOString(),
+    }
+    const stale = { id: "1", status: "pending", statusChangedAt: new Date(0).toISOString() }
+    await writeTaskFile(dir, stale)
+
+    let refreshCalls = 0
+    const keptOnly = await pruneStaleCompletedTasks(
+      dir,
+      [corrupt],
+      TWO_DAYS_MS,
+      TWO_DAYS_MS,
+      async () => {
+        refreshCalls++
+      }
+    )
+    expect(keptOnly.map((task) => task.id)).toEqual(["../escape"])
+    expect(refreshCalls).toBe(0)
+
+    // Control: a genuinely prunable record alongside it still fires the refresh,
+    // so the assertion above is about the guard, not about a dead callback.
+    const mixed = await pruneStaleCompletedTasks(
+      dir,
+      [corrupt, stale],
+      TWO_DAYS_MS,
+      TWO_DAYS_MS,
+      async () => {
+        refreshCalls++
+      }
+    )
+    expect(mixed.map((task) => task.id)).toEqual(["../escape"])
+    expect(refreshCalls).toBe(1)
     expect(await fileExists(dir, "1")).toBe(false)
   })
 })

@@ -541,9 +541,50 @@ async function updateSessionMeta(
   }
 }
 
-async function updateSessionMetaFromTasks(
+/**
+ * Refresh the metadata index from what is currently on disk, then drop the
+ * memoized entry for that store.
+ *
+ * Pruning uses this rather than `updateSessionMetaFromTasks`: the surviving
+ * list a prune holds is a snapshot taken before deletion, so a task written
+ * between the snapshot and the refresh is missing from it. Publishing that
+ * snapshot can persist `openCount: 0` while a live open task exists, and
+ * `collectIncompleteTasks` treats zero as authoritative and skips the full
+ * directory read. Recounting costs one `readdir` and cannot undercount a
+ * concurrent write.
+ *
+ * `updateSessionMeta` swallows its own write failures, so a read-only or
+ * locked store still leaves the caller with its pruned view.
+ */
+export async function refreshSessionMetaFromDisk(
   dir: string,
-  tasks: readonly Task[],
+  storeKind: TaskStoreKey["kind"],
+  cwd?: string
+): Promise<void> {
+  await updateSessionMeta(dir, storeKind, cwd)
+  invalidateSessionMetaForDir(dir)
+}
+
+/**
+ * Drop cached metadata for a store directory.
+ *
+ * The cache is keyed by `<tasksDir>\0<storeDirName>`, and a project store's
+ * name is itself two path segments, so the entry cannot be recovered from
+ * `basename(dir)`. Rejoining each key is exact for both layouts.
+ */
+function invalidateSessionMetaForDir(dir: string): void {
+  for (const key of [...sessionMetaCache.keys()]) {
+    const separator = key.indexOf("\0")
+    if (separator === -1) continue
+    const tasksDir = key.slice(0, separator)
+    const storeDirName = key.slice(separator + 1)
+    if (join(tasksDir, storeDirName) === dir) sessionMetaCache.delete(key)
+  }
+}
+
+export async function updateSessionMetaFromTasks(
+  dir: string,
+  tasks: readonly { status: string }[],
   storeKind: TaskStoreKey["kind"],
   cwd?: string
 ): Promise<void> {

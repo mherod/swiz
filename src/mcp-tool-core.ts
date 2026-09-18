@@ -43,6 +43,7 @@ import {
   projectStoreKey,
   readTaskRecordsAcrossStores,
   readTaskStore,
+  refreshSessionMetaFromDisk,
   type StoredTask,
   type Task,
   type TaskStoreKey,
@@ -159,7 +160,9 @@ export async function readProjectTasksWithPrune(
   if (!isSafeSessionId(key, tasksDir)) return []
   const tasks = await readTaskStore(key, tasksDir)
   const dir = await readTaskStorePath(key, tasksDir)
-  return pruneStaleCompletedTasks(dir, tasks)
+  return pruneStaleCompletedTasks(dir, tasks, undefined, undefined, () =>
+    refreshSessionMetaFromDisk(dir, "project")
+  )
 }
 
 /**
