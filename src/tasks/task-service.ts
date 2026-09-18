@@ -32,12 +32,8 @@ import {
   writeAudit,
   writeTask,
 } from "./task-repository.ts"
-import { collectIncompleteTasks, resolveTaskById } from "./task-resolver.ts"
-import {
-  listProjectStoreKeys,
-  listSessionStoreIds,
-  readTaskStorePath,
-} from "./task-store-layout.ts"
+import { collectIncompleteTasks, getTaskStoreKeys, resolveTaskById } from "./task-resolver.ts"
+import { readTaskStorePath } from "./task-store-layout.ts"
 import { taskStoreId } from "./task-store-path.ts"
 import { detect, formatMessage } from "./task-subject-validation.ts"
 
@@ -317,30 +313,23 @@ function isValidRecoveredSubject(entry: unknown, taskId: string): entry is Recor
   )
 }
 
-async function collectSessionMtimes(tasksDir: string): Promise<{ dir: string; mtime: number }[]> {
-  let sessionDirs: string[]
+async function collectSessionMtimes(
+  tasksDir: string
+): Promise<{ storeKey: TaskStoreKey; mtime: number }[]> {
+  let storeKeys: TaskStoreKey[]
   try {
-    sessionDirs = [
-      ...(await listSessionStoreIds(tasksDir)),
-      ...(await listProjectStoreKeys(tasksDir)),
-    ]
+    storeKeys = await getTaskStoreKeys(undefined, tasksDir)
   } catch {
     return []
   }
 
-  const withMtime: { dir: string; mtime: number }[] = []
-  for (const dir of sessionDirs) {
+  const withMtime: { storeKey: TaskStoreKey; mtime: number }[] = []
+  for (const storeKey of storeKeys) {
     try {
       const { mtimeMs } = await stat(
-        join(
-          await readTaskStorePath(
-            await resolveLegacyTaskStoreKey(dir, undefined, tasksDir),
-            tasksDir
-          ),
-          ".audit-log.jsonl"
-        )
+        join(await readTaskStorePath(storeKey, tasksDir), ".audit-log.jsonl")
       )
-      withMtime.push({ dir, mtime: mtimeMs })
+      withMtime.push({ storeKey, mtime: mtimeMs })
     } catch {}
   }
   withMtime.sort((a, b) => b.mtime - a.mtime)
@@ -371,11 +360,8 @@ async function recoverSubjectFromAuditLogs(
   tasksDir: string
 ): Promise<string | null> {
   const withMtime = await collectSessionMtimes(tasksDir)
-  for (const { dir } of withMtime.slice(0, AUDIT_RECOVERY_MAX_SESSIONS)) {
-    const auditPath = join(
-      await readTaskStorePath(await resolveLegacyTaskStoreKey(dir, undefined, tasksDir), tasksDir),
-      ".audit-log.jsonl"
-    )
+  for (const { storeKey } of withMtime.slice(0, AUDIT_RECOVERY_MAX_SESSIONS)) {
+    const auditPath = join(await readTaskStorePath(storeKey, tasksDir), ".audit-log.jsonl")
     const subject = await searchAuditLogForTask(auditPath, taskId)
     if (subject) return subject
   }
@@ -601,7 +587,7 @@ export async function completeTaskWithAutoTransition(
 ): Promise<void> {
   const { filterCwd } = options
 
-  const { task } = await resolveTaskAddress(taskId, sessionId, filterCwd)
+  const { task, storeKey } = await resolveTaskAddress(taskId, sessionId, filterCwd)
   if (task.status === "pending") {
     const settings = await readSwizSettings()
     if (!settings.taskAutoTransition) {
@@ -619,9 +605,9 @@ export async function completeTaskWithAutoTransition(
     }
     // Transient hop on the way to completed — it never widens the WIP front, so the
     // project in-progress cap must not refuse a completion that is already evidenced.
-    await updateStatus(sessionId, taskId, "in_progress", { filterCwd, skipWipLimit: true })
+    await updateStatus(storeKey, taskId, "in_progress", { filterCwd, skipWipLimit: true })
   }
-  await updateStatus(sessionId, taskId, "completed", options)
+  await updateStatus(storeKey, taskId, "completed", options)
 }
 
 // ─── State update ─────────────────────────────────────────────────────────────
@@ -736,11 +722,7 @@ export async function writeTaskUpdate(
 /** Typed callers have already resolved ownership: never repeat a cross-store lookup. */
 async function resolveTaskAddress(taskId: string, address: string | TaskStoreKey, cwd?: string) {
   if (typeof address === "string") {
-    const resolved = await resolveTaskById(taskId, address, cwd)
-    return {
-      task: resolved.task,
-      storeKey: await resolveLegacyTaskStoreKey(resolved.sessionId, cwd),
-    }
+    return resolveTaskById(taskId, address, cwd)
   }
   const task = (await readTaskStore(address)).find((candidate) => candidate.id === taskId)
   if (!task) throw new Error(`Task #${taskId} not found in the resolved ${address.kind} store.`)

@@ -11,13 +11,14 @@ import {
 } from "../tasks/task-cli-governance.ts"
 import { getTaskToolName, TASK_RECOVERY_HINT } from "../tasks/task-governance-messages.ts"
 import { type DateFormat, listAllSessionsTasks, listTasks } from "../tasks/task-renderer.ts"
-import type { Task } from "../tasks/task-repository.ts"
+import type { Task, TaskStoreKey } from "../tasks/task-repository.ts"
 import {
   atomicWriteJson,
   compareTaskIds,
   legacySessionPrefix,
   parseTaskId,
   projectStoreKey,
+  readTaskStore,
   readTasks,
   readTasksAcrossStores,
   sessionPrefix,
@@ -44,6 +45,7 @@ import {
   readTaskStorePath,
   resolveLegacyTaskStoreKey,
 } from "../tasks/task-store-layout.ts"
+import { taskStoreDirName } from "../tasks/task-store-path.ts"
 import type { Command } from "../types.ts"
 import { messageFromUnknownError } from "../utils/hook-json-helpers.ts"
 import { type McpFileData, type McpServerDef, readMcpFile } from "./mcp-config.ts"
@@ -140,13 +142,20 @@ function resolveFilterCwd(args: string[], cwd: string = process.cwd()): string |
   return args.includes("--all-projects") ? undefined : cwd
 }
 
-async function printSessionTasks(sessionId: string, filterCwd: string | undefined): Promise<void> {
+async function printSessionTasks(
+  address: string | TaskStoreKey,
+  filterCwd: string | undefined
+): Promise<void> {
+  const sessionId = typeof address === "string" ? address : taskStoreDirName(address)
+  const tasks =
+    typeof address === "string" ? await readTasks(address) : await readTaskStore(address)
   const orphanIds = await getOrphanSessionIds()
   await listTasks(
     sessionId,
     filterCwd ? "current project" : "all projects",
     "relative",
-    orphanIds.has(sessionId)
+    orphanIds.has(sessionId),
+    tasks
   )
 
   const agent = detectCurrentAgent()
@@ -156,7 +165,6 @@ async function printSessionTasks(sessionId: string, filterCwd: string | undefine
 
   // Some agent runtimes surface stderr as a "system message" channel. Mirror a
   // plain-text summary so it's visible even when stdout is hidden/collapsed.
-  const tasks = await readTasks(sessionId)
   const lines: string[] = []
   lines.push(`Tasks (${sessionId.slice(0, 8)}...)`)
   const order: Task["status"][] = ["in_progress", "pending", "completed", "cancelled"]
@@ -326,8 +334,8 @@ async function runCompleteTask(rest: string[], filterCwd?: string): Promise<void
   }
   if (stateFlag) await applyStateUpdate(stateFlag, filterCwd ?? process.cwd())
 
-  const { sessionId: effectiveSessionId } = await resolveTaskById(taskId, sessionId, filterCwd)
-  await printSessionTasks(effectiveSessionId, filterCwd)
+  const { storeKey } = await resolveTaskById(taskId, sessionId, filterCwd)
+  await printSessionTasks(storeKey, filterCwd)
 }
 
 async function runStatusTask(rest: string[], filterCwd?: string): Promise<void> {
@@ -366,8 +374,8 @@ async function runStatusTask(rest: string[], filterCwd?: string): Promise<void> 
   })
   if (stateFlag) await applyStateUpdate(stateFlag, filterCwd ?? process.cwd())
 
-  const { sessionId: effectiveSessionId } = await resolveTaskById(taskId, sessionId, filterCwd)
-  await printSessionTasks(effectiveSessionId, filterCwd)
+  const { storeKey } = await resolveTaskById(taskId, sessionId, filterCwd)
+  await printSessionTasks(storeKey, filterCwd)
 }
 
 const UPDATE_USAGE =
@@ -462,15 +470,11 @@ async function updateSingleTask(
   })
   if (createdStub) return
 
-  const { sessionId: effectiveSessionId, task } = await resolveTaskById(
-    taskId,
-    sessionId,
-    filterCwd
-  )
+  const { storeKey, task } = await resolveTaskById(taskId, sessionId, filterCwd)
   if (changes.newSubject) task.subject = changes.newSubject
   if (changes.newDescription) task.description = changes.newDescription
   if (changes.newActiveForm) task.activeForm = changes.newActiveForm
-  await writeTaskUpdate(effectiveSessionId, taskId, task, changes.newStatus)
+  await writeTaskUpdate(storeKey, taskId, task, changes.newStatus)
 }
 
 async function runUpdateTask(rest: string[], filterCwd?: string): Promise<void> {
