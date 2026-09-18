@@ -185,8 +185,7 @@ async function readProjectQueueWithPrune(
     records.map(({ storeKey, task }) => ({ address: storeKey, task })),
     {
       dirFor: (storeKey) => readTaskStorePath(storeKey, tasksDir),
-      // writeTask, not writeTaskUpdate: the latter prints to stdout, which the
-      // stdio MCP server reserves for JSON-RPC, and it ignores tasksDir.
+      // Queue maintenance persists merged dependencies without a user status transition.
       write: (storeKey, task) => writeTask(storeKey, task, undefined, tasksDir),
     }
   )
@@ -295,11 +294,11 @@ async function persistTaskUpdate(
   input: TaskUpdateToolInput,
   fieldsUpdated: boolean
 ): Promise<void> {
+  if (fieldsUpdated)
+    await writeTaskUpdate(storeKey, input.taskId, task, undefined, { filterCwd: cwd })
   if (input.status === undefined || input.status === task.status) {
-    if (fieldsUpdated) await writeTaskUpdate(storeKey, input.taskId, task)
     return
   }
-  if (fieldsUpdated) await writeTaskUpdate(storeKey, input.taskId, task)
   if (input.status === "completed") {
     await completeTaskWithAutoTransition(storeKey, input.taskId, {
       filterCwd: cwd,

@@ -1,7 +1,8 @@
 import { describe, expect, test } from "bun:test"
 import { readdir, realpath, symlink } from "node:fs/promises"
-import { join } from "node:path"
-import { tasksCommand } from "../commands/tasks.ts"
+import { join, relative } from "node:path"
+import { collectUnknownOptionWarnings } from "../cli.ts"
+import { runTasks, tasksCommand } from "../commands/tasks.ts"
 import { neutralAgentEnvOverrides, runCommandInProcess, useTempDir } from "../utils/test-utils.ts"
 import { readAuditLog } from "./task-audit-verification.ts"
 import {
@@ -248,6 +249,62 @@ describe("resolver store ownership (#934)", () => {
     const audit = await Bun.file(join(sessionDirPath(selected, root), ".audit-log.jsonl")).text()
     expect(JSON.parse(audit.trim()).taskId).toBe("7")
     expect(await Bun.file(join(sessionDirPath(sibling, root), ".audit-log.jsonl")).exists()).toBe(
+      false
+    )
+  })
+})
+
+describe("directory-scoped task updates (#933)", () => {
+  test("rejects missing, repeated and non-directory --dir arguments", async () => {
+    const directory = await temp.create()
+    const file = join(directory, "file.txt")
+    await Bun.write(file, "not a directory")
+    await expect(runTasks(["update", "7", "--dir"])).rejects.toThrow("requires a directory path")
+    await expect(runTasks(["--dir", directory, "--dir", directory])).rejects.toThrow(
+      "only be supplied once"
+    )
+    await expect(runTasks(["--dir", file])).rejects.toThrow("must name a directory")
+  })
+  test.each([
+    "update",
+    "status",
+    "complete",
+  ])("CLI %s uses --dir for selection and persistence", async (command) => {
+    const home = await temp.create()
+    const ambient = await realpath(await temp.create())
+    const selectedCwd = await realpath(await temp.create())
+    const root = join(home, ".claude", "tasks")
+    const selected = projectStoreKey(selectedCwd)
+    const other = projectStoreKey(ambient)
+    await writeTask(selected, { ...task, id: "7", subject: "Selected record" }, selectedCwd, root)
+    await writeTask(other, { ...task, id: "7", subject: "Ambient record" }, ambient, root)
+    const otherPath = join(sessionDirPath(other, root), "7.json")
+    const before = await Bun.file(otherPath).text()
+    const args =
+      command === "update"
+        ? [command, "7", "--description", "Scoped change", "--dir", relative(ambient, selectedCwd)]
+        : command === "status"
+          ? [command, "7", "completed", "--dir", selectedCwd]
+          : [command, "7", "--evidence", "test:directory scope", "--dir", selectedCwd]
+    expect(collectUnknownOptionWarnings("tasks", args, tasksCommand.options)).toEqual([])
+    const result = await runCommandInProcess(tasksCommand, args, {
+      cwd: ambient,
+      env: { ...neutralAgentEnvOverrides(), HOME: home, AI_TEST_NO_BACKEND: "1" },
+    })
+    expect(result.exitCode).toBe(0)
+    expect(result.stderr).toBe("")
+    expect(result.stdout).toContain("Selected record")
+    const updated = (await readTaskStore(selected, root))[0]!
+    if (command === "update") expect(updated.description).toBe("Scoped change")
+    else expect(updated.status).toBe("completed")
+    expect(await Bun.file(otherPath).text()).toBe(before)
+    const meta = await Bun.file(join(sessionDirPath(selected, root), ".session-meta.json")).json()
+    expect(meta.cwd).toBe(selectedCwd)
+    const audit = await Bun.file(join(sessionDirPath(selected, root), ".audit-log.jsonl")).text()
+    expect(JSON.parse(audit.trim()).action).toBe(
+      command === "update" ? "field_update" : "status_change"
+    )
+    expect(await Bun.file(join(sessionDirPath(other, root), ".audit-log.jsonl")).exists()).toBe(
       false
     )
   })

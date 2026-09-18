@@ -1,3 +1,4 @@
+import { realpath, stat } from "node:fs/promises"
 import { dirname, join, resolve } from "node:path"
 import { DIM, RESET } from "../ansi.ts"
 import { stderrLog } from "../debug.ts"
@@ -21,6 +22,7 @@ import {
   readTaskStore,
   readTasks,
   readTasksAcrossStores,
+  STATUS_STYLE,
   sessionPrefix,
 } from "../tasks/task-repository.ts"
 import {
@@ -37,6 +39,7 @@ import {
   completeTaskWithAutoTransition,
   createTask,
   ensureFileBackedTask,
+  type TaskMutationResult,
   updateStatus,
   writeTaskUpdate,
 } from "../tasks/task-service.ts"
@@ -77,7 +80,7 @@ function extractFlag(args: string[], flag: string): string | undefined {
   return args[i + 1]
 }
 
-async function resolveSession(args: string[]): Promise<string> {
+async function resolveSession(args: string[], cwd: string = process.cwd()): Promise<string> {
   const explicit = extractFlag(args, "--session")
 
   if (explicit) {
@@ -90,7 +93,7 @@ async function resolveSession(args: string[]): Promise<string> {
   }
 
   const allProjects = args.includes("--all-projects")
-  const filterCwd = allProjects ? undefined : process.cwd()
+  const filterCwd = allProjects ? undefined : cwd
   let sessions = await getTaskStoreAddresses(filterCwd)
 
   // Compaction fallback: if no sessions found for cwd, fall back to the most
@@ -195,7 +198,7 @@ async function runListTasks(args: string[], cwd: string = process.cwd()): Promis
     return
   }
 
-  const sessionId = await resolveSession(args)
+  const sessionId = await resolveSession(args, cwd)
   const orphanIds = await getOrphanSessionIds()
   await listTasks(
     sessionId,
@@ -228,8 +231,8 @@ async function runCreateTask(rest: string[], cwd: string = process.cwd()): Promi
         `Example: swiz tasks create "<subject>" "<description>" --state developing`
     )
   }
-  const sessionId = await resolveSession(sessionArgs)
-  await createTask(sessionId, subject, description)
+  const sessionId = await resolveSession(sessionArgs, cwd)
+  await createTask(sessionId, subject, description, cwd)
   await applyStateUpdate(stateFlag, cwd)
   await printSessionTasks(sessionId, cwd)
 }
@@ -248,12 +251,13 @@ async function handleCompleteError(
   const msg = messageFromUnknownError(e)
   if (msg.includes("Invalid transition") && msg.includes("pending")) {
     console.log(`  ⚡ Auto-transitioning #${opts.taskId}: pending → in_progress → completed`)
-    await completeTaskWithAutoTransition(opts.sessionId, opts.taskId, {
+    const result = await completeTaskWithAutoTransition(opts.sessionId, opts.taskId, {
       evidence: opts.evidence,
       verifyText: opts.verify,
       filterCwd: opts.filterCwd,
       skipLastTaskGuard: opts.skipLastTaskGuard,
     })
+    printTaskMutation(result)
     return
   }
   if (msg.includes("not found")) {
@@ -280,7 +284,7 @@ async function runCompleteTask(rest: string[], filterCwd?: string): Promise<void
   const subjectFlag = extractFlag(rest, "--subject")
 
   if (dryRun) {
-    const sessionId = await resolveSession(sessionArgs)
+    const sessionId = await resolveSession(sessionArgs, filterCwd)
     try {
       const { task } = await resolveTaskById(taskId, sessionId, filterCwd)
       console.log(`  ✅ #${taskId}: found — "${task.subject}" (${task.status})`)
@@ -294,7 +298,7 @@ async function runCompleteTask(rest: string[], filterCwd?: string): Promise<void
 
   let verify = extractFlag(rest, "--verify")
   const explicitSession = extractFlag(rest, "--session")
-  const sessionId = await resolveSession(sessionArgs)
+  const sessionId = await resolveSession(sessionArgs, filterCwd)
   // Skip the last-task-standing guard for cross-session completions (Fixes #420)
   const skipLastTaskGuard = !!explicitSession
 
@@ -312,7 +316,7 @@ async function runCompleteTask(rest: string[], filterCwd?: string): Promise<void
   }
 
   try {
-    await updateStatus(sessionId, taskId, "completed", {
+    const result = await updateStatus(sessionId, taskId, "completed", {
       evidence,
       verifyText: verify,
       filterCwd,
@@ -321,6 +325,7 @@ async function runCompleteTask(rest: string[], filterCwd?: string): Promise<void
       // a sole task trips last-task-standing here before reaching the fallback.
       skipLastTaskGuard,
     })
+    printTaskMutation(result)
   } catch (e) {
     await handleCompleteError(e, {
       sessionId,
@@ -352,7 +357,7 @@ async function runStatusTask(rest: string[], filterCwd?: string): Promise<void> 
   const stateFlag = extractFlag(rest, "--state")
   const subjectFlag = extractFlag(rest, "--subject")
   const explicitSession = extractFlag(rest, "--session")
-  const sessionId = await resolveSession(sessionArgs)
+  const sessionId = await resolveSession(sessionArgs, filterCwd)
   // Mirror runCompleteTask: an explicit --session is a cross-session maintenance
   // op, exempt from last-task-standing (Fixes #420). Without this the `status`
   // path enforces the guard while `complete` does not — an inconsistency that
@@ -366,22 +371,36 @@ async function runStatusTask(rest: string[], filterCwd?: string): Promise<void> 
     subject: subjectFlag,
   })
 
-  await updateStatus(sessionId, taskId, newStatus, {
+  const result = await updateStatus(sessionId, taskId, newStatus, {
     evidence,
     verifyText: verify,
     filterCwd,
     skipLastTaskGuard,
   })
+  printTaskMutation(result)
   if (stateFlag) await applyStateUpdate(stateFlag, filterCwd ?? process.cwd())
 
   const { storeKey } = await resolveTaskById(taskId, sessionId, filterCwd)
   await printSessionTasks(storeKey, filterCwd)
 }
 
+/** Human-readable reporting belongs to the CLI; services also serve JSON-RPC. */
+function printTaskMutation({ task, oldStatus, action, evidence }: TaskMutationResult): void {
+  if (action === "status_change") {
+    const { emoji, color } = STATUS_STYLE[task.status]
+    console.log(`\n  ${emoji} #${task.id}: ${oldStatus} → ${color}${task.status}${RESET}`)
+  } else {
+    console.log(`\n  ✏️  #${task.id}: updated`)
+  }
+  console.log(`     ${task.subject}`)
+  if (evidence) console.log(`     ${DIM}Evidence: ${evidence}${RESET}`)
+  console.log()
+}
+
 const UPDATE_USAGE =
   "Usage: swiz tasks update <task-id>... [--subject TEXT] [--description TEXT]\n" +
   "                         [--active-form TEXT] [--status STATUS] [--state STATE]\n" +
-  "                         [--session ID]\n\n" +
+  "                         [--session ID] [--dir PATH]\n\n" +
   "Accepts one or more space-separated task IDs; the same field changes are applied\n" +
   "to every listed task in sequence.\n\n" +
   "Mutable fields:\n" +
@@ -474,7 +493,8 @@ async function updateSingleTask(
   if (changes.newSubject) task.subject = changes.newSubject
   if (changes.newDescription) task.description = changes.newDescription
   if (changes.newActiveForm) task.activeForm = changes.newActiveForm
-  await writeTaskUpdate(storeKey, taskId, task, changes.newStatus)
+  const result = await writeTaskUpdate(storeKey, taskId, task, changes.newStatus, { filterCwd })
+  printTaskMutation(result)
 }
 
 async function runUpdateTask(rest: string[], filterCwd?: string): Promise<void> {
@@ -487,7 +507,7 @@ async function runUpdateTask(rest: string[], filterCwd?: string): Promise<void> 
 
   assertKnownUpdateFlags(flagArgs)
   const changes = readUpdateFieldChanges(flagArgs)
-  const sessionId = await resolveSession(flagArgs)
+  const sessionId = await resolveSession(flagArgs, filterCwd)
 
   for (const taskId of taskIds) {
     await updateSingleTask(sessionId, taskId, filterCwd, changes)
@@ -616,18 +636,23 @@ function printRepairResult(result: RepairResult): void {
   }
 }
 
-async function resolveRepairDirectory(sessionId: string, tasksDir: string, dryRun: boolean) {
-  const storeKey = await resolveLegacyTaskStoreKey(sessionId, process.cwd(), tasksDir)
+async function resolveRepairDirectory(
+  sessionId: string,
+  tasksDir: string,
+  dryRun: boolean,
+  cwd: string
+) {
+  const storeKey = await resolveLegacyTaskStoreKey(sessionId, cwd, tasksDir)
   return dryRun
     ? readTaskStorePath(storeKey, tasksDir)
-    : prepareTaskStoreWrite(storeKey, tasksDir, process.cwd())
+    : prepareTaskStoreWrite(storeKey, tasksDir, cwd)
 }
 
-async function runRepairTasks(rest: string[]): Promise<void> {
+async function runRepairTasks(rest: string[], cwd: string): Promise<void> {
   const dryRun = rest.includes("--dry-run")
   const jsonOutput = rest.includes("--json")
   const filteredRest = rest.filter((a) => a !== "--dry-run" && a !== "--json")
-  const sessionId = await resolveSession(filteredRest)
+  const sessionId = await resolveSession(filteredRest, cwd)
   const { createDefaultTaskStore } = await import("../task-roots.ts")
   const tasksDir = createDefaultTaskStore().tasksDir
 
@@ -650,7 +675,7 @@ async function runRepairTasks(rest: string[]): Promise<void> {
   const currentById = new Map(currentTasks.map((t) => [t.id, t]))
   // Repair rewrites task files, so an id that escapes the store must stop the command outright
   // rather than repair something outside it.
-  const sessionDir = await resolveRepairDirectory(sessionId, tasksDir, dryRun)
+  const sessionDir = await resolveRepairDirectory(sessionId, tasksDir, dryRun, cwd)
   let repaired = 0
   let verified = 0
   const actions: RepairAction[] = []
@@ -683,7 +708,7 @@ async function runRepairTasks(rest: string[]): Promise<void> {
   }
 
   if (!dryRun && !jsonOutput) {
-    await printSessionTasks(sessionId, process.cwd())
+    await printSessionTasks(sessionId, cwd)
   }
 }
 
@@ -726,7 +751,7 @@ const SUBCOMMAND_HANDLERS: Record<string, (rest: string[], filterCwd?: string) =
     )
     process.exitCode = 1
   },
-  repair: (rest) => runRepairTasks(rest),
+  repair: (rest, cwd) => runRepairTasks(rest, cwd ?? process.cwd()),
 }
 
 // ─── Native-tool guard (task-aware agents) ────────────────────────────────────────
@@ -814,7 +839,7 @@ export const tasksCommand: Command = {
   name: "tasks",
   description: "View and manage agent tasks",
   usage:
-    "swiz tasks [create|complete|status|recover] [--session <id>] [--all-projects] [--all-sessions] [--recovered] [--date-format <relative|absolute>] [--evidence <text>] [--verify <text>] [--state <state>]",
+    "swiz tasks [create|complete|status|recover] [--session <id>] [--dir <path>] [--all-projects] [--all-sessions] [--recovered] [--date-format <relative|absolute>] [--evidence <text>] [--verify <text>] [--state <state>]",
   options: [
     {
       flags: "recover [command]",
@@ -835,6 +860,11 @@ export const tasksCommand: Command = {
       flags: "status <id> <status>",
       description: "Set status: pending | in_progress | completed | cancelled",
     },
+    { flags: "update <id>...", description: "Update task fields or status" },
+    { flags: "--dir <path>", description: "Select a project directory (default: cwd)" },
+    { flags: "--subject <text>", description: "Replace the task subject" },
+    { flags: "--description <text>", description: "Replace the task description" },
+    { flags: "--active-form <text>", description: "Replace the in-progress spinner label" },
     { flags: "--session <id>", description: "Target a specific session (prefix match)" },
     { flags: "--all-projects", description: "Show tasks from all projects, not just cwd" },
     {
@@ -867,6 +897,21 @@ export const tasksCommand: Command = {
   },
 }
 
+async function resolveTaskCommandContext(args: string[], cwd: string) {
+  const directoryIndex = args.indexOf("--dir")
+  if (directoryIndex !== -1) {
+    const directory = args[directoryIndex + 1]
+    if (!directory || directory.startsWith("--"))
+      throw new Error("--dir requires a directory path.")
+    if (args.indexOf("--dir", directoryIndex + 1) !== -1)
+      throw new Error("--dir may only be supplied once.")
+    cwd = await realpath(resolve(cwd, directory))
+    if (!(await stat(cwd)).isDirectory()) throw new Error("--dir must name a directory.")
+    args = [...args.slice(0, directoryIndex), ...args.slice(directoryIndex + 2)]
+  }
+  return { args, cwd }
+}
+
 /**
  * Executable body of the `swiz tasks` command, parameterized by `cwd` so tests
  * can target a temp repo without mutating the process-global CWD via
@@ -874,6 +919,7 @@ export const tasksCommand: Command = {
  * The CLI entry point passes no cwd, preserving `process.cwd()` behavior.
  */
 export async function runTasks(args: string[], cwd: string = process.cwd()): Promise<void> {
+  ;({ args, cwd } = await resolveTaskCommandContext(args, cwd))
   const recovering = args[0] === "recover"
   const commandArgs = recovering
     ? await (await import("./tasks-recovery.ts")).resolveTaskRecoveryArgs(args.slice(1))

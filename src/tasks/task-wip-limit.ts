@@ -59,11 +59,12 @@ export async function assertInProgressLimit(
   taskId: string,
   currentStatus: string,
   newStatus: string,
-  filterCwd?: string
+  filterCwd?: string,
+  tasksDir?: string
 ): Promise<void> {
   if (newStatus !== "in_progress" || currentStatus === "in_progress") return
 
-  const incomplete = await collectIncompleteTasks(filterCwd ?? process.cwd())
+  const incomplete = await collectIncompleteTasks(filterCwd ?? process.cwd(), tasksDir)
   const seen = new Set<string>()
   const projectTasks: WipTask[] = []
   for (const { task } of incomplete) {

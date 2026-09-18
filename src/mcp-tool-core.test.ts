@@ -112,8 +112,8 @@ async function runDriver(): Promise<DriverResult> {
   await proc.exited
   expect(proc.exitCode).toBe(0)
   expect(stderr.includes("error")).toBe(false)
-  const lastLine = stdout.trim().split("\n").at(-1) ?? "{}"
-  return JSON.parse(lastLine) as DriverResult
+  // Services must leave stdout exclusively to the stdio JSON-RPC transport (#933).
+  return JSON.parse(stdout) as DriverResult
 }
 
 describe("runTaskUpdateTool id normalization (issue #846)", () => {
