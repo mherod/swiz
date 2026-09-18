@@ -200,4 +200,45 @@ describe("pruneStaleCompletedTasks metadata refresh", () => {
     })
     expect(refreshCalls).toBe(1)
   })
+
+  it("keeps a record whose id cannot name a file in the store and reports no prune", async () => {
+    const dir = await makeStoreDir()
+    // `id` is record content, so a corrupt one can point outside the store.
+    // Such a record is kept, which means nothing was pruned on its account.
+    const corrupt = {
+      id: "../escape",
+      status: "pending",
+      statusChangedAt: new Date(0).toISOString(),
+    }
+    const stale = { id: "1", status: "pending", statusChangedAt: new Date(0).toISOString() }
+    await writeTaskFile(dir, stale)
+
+    let refreshCalls = 0
+    const keptOnly = await pruneStaleCompletedTasks(
+      dir,
+      [corrupt],
+      TWO_DAYS_MS,
+      TWO_DAYS_MS,
+      async () => {
+        refreshCalls++
+      }
+    )
+    expect(keptOnly.map((task) => task.id)).toEqual(["../escape"])
+    expect(refreshCalls).toBe(0)
+
+    // Control: a genuinely prunable record alongside it still fires the refresh,
+    // so the assertion above is about the guard, not about a dead callback.
+    const mixed = await pruneStaleCompletedTasks(
+      dir,
+      [corrupt, stale],
+      TWO_DAYS_MS,
+      TWO_DAYS_MS,
+      async () => {
+        refreshCalls++
+      }
+    )
+    expect(mixed.map((task) => task.id)).toEqual(["../escape"])
+    expect(refreshCalls).toBe(1)
+    expect(await fileExists(dir, "1")).toBe(false)
+  })
 })
