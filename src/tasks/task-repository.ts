@@ -541,9 +541,9 @@ async function updateSessionMeta(
   }
 }
 
-async function updateSessionMetaFromTasks(
+export async function updateSessionMetaFromTasks(
   dir: string,
-  tasks: readonly Task[],
+  tasks: readonly { status: string }[],
   storeKind: TaskStoreKey["kind"],
   cwd?: string
 ): Promise<void> {

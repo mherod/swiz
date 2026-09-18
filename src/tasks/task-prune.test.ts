@@ -3,6 +3,7 @@ import { mkdtemp, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { pruneStaleCompletedTasks } from "./task-prune.ts"
+import { updateSessionMetaFromTasks } from "./task-repository.ts"
 
 interface FixtureTask {
   id: string
@@ -166,5 +167,37 @@ describe("pruneStaleCompletedTasks — 2-day age rule", () => {
     const pruned = await pruneStaleCompletedTasks(dir, tasks, COMPLETED_AGE_MS, 1_000)
     expect(pruned).toEqual([])
     expect(await fileExists(dir, "1")).toBe(false)
+  })
+})
+
+describe("pruneStaleCompletedTasks metadata refresh", () => {
+  it("refreshes openCount after deleting open tasks and skips no-op writes", async () => {
+    const dir = await makeStoreDir()
+    const stale = { id: "1", status: "pending", statusChangedAt: new Date(0).toISOString() }
+    const survivor = { id: "2", status: "in_progress", statusChangedAt: new Date().toISOString() }
+    await writeTaskFile(dir, stale)
+    await writeTaskFile(dir, survivor)
+    await updateSessionMetaFromTasks(dir, [stale, survivor], "session")
+
+    let refreshCalls = 0
+    const refreshed = await pruneStaleCompletedTasks(
+      dir,
+      [stale, survivor],
+      TWO_DAYS_MS,
+      TWO_DAYS_MS,
+      async (tasks) => {
+        refreshCalls++
+        await updateSessionMetaFromTasks(dir, tasks, "session")
+      }
+    )
+
+    expect(refreshed.map((task) => task.id)).toEqual(["2"])
+    expect((await Bun.file(join(dir, ".session-meta.json")).json()).openCount).toBe(1)
+    expect(refreshCalls).toBe(1)
+
+    await pruneStaleCompletedTasks(dir, refreshed, TWO_DAYS_MS, TWO_DAYS_MS, async () => {
+      refreshCalls++
+    })
+    expect(refreshCalls).toBe(1)
   })
 })

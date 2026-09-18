@@ -60,12 +60,14 @@ export async function pruneStaleCompletedTasks<T extends PrunableTask>(
   dir: string,
   tasks: readonly T[],
   maxAgeMs: number = COMPLETED_TASK_PRUNE_AGE_MS,
-  staleMaxAgeMs: number = STALE_TASK_PRUNE_AGE_MS
+  staleMaxAgeMs: number = STALE_TASK_PRUNE_AGE_MS,
+  onPruned?: (surviving: readonly T[]) => Promise<void>
 ): Promise<T[]> {
   const now = Date.now()
   const completedCutoff = now - maxAgeMs
   const staleCutoff = now - staleMaxAgeMs
   const surviving: T[] = []
+  let prunedAny = false
   for (const task of tasks) {
     if (shouldPrune(task, completedCutoff, staleCutoff)) {
       // The id is record content, not the filename it was read from, so it can
@@ -75,6 +77,7 @@ export async function pruneStaleCompletedTasks<T extends PrunableTask>(
         surviving.push(task)
         continue
       }
+      prunedAny = true
       try {
         await unlink(path)
       } catch {
@@ -84,6 +87,7 @@ export async function pruneStaleCompletedTasks<T extends PrunableTask>(
     }
     surviving.push(task)
   }
+  if (prunedAny) await onPruned?.(surviving)
   return surviving
 }
 
