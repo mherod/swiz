@@ -7,6 +7,7 @@ import {
   isJbcontextAvailable,
   isJbcontextConfigured,
   resolveJbcontextBinary,
+  triggerJbcontextIndex,
 } from "./jbcontext.ts"
 
 describe("src/utils/jbcontext.ts", () => {
@@ -324,6 +325,31 @@ exit 0
 
       const configured = await isJbcontextConfigured({ homeDir: mockHome })
       expect(configured).toBe(true)
+    })
+  })
+
+  describe("triggerJbcontextIndex", () => {
+    it("returns false if binary is not found", async () => {
+      const launched = await triggerJbcontextIndex({
+        binaryPath: "/path/to/nonexistent/bin",
+      })
+      expect(launched).toBe(false)
+    })
+
+    it("launches index process when binary is present", async () => {
+      const mockHome = join(tempBaseDir, "mock-home-index")
+      const binDir = join(mockHome, ".jbcontext", "bin")
+      await mkdir(binDir, { recursive: true })
+      const fakeBin = join(binDir, "jbcontext")
+      await Bun.write(fakeBin, "#!/bin/sh\nexit 0\n")
+      await chmod(fakeBin, 0o755)
+
+      const launched = await triggerJbcontextIndex({
+        binaryPath: fakeBin,
+        projectPath: mockHome,
+        silent: true,
+      })
+      expect(launched).toBe(true)
     })
   })
 

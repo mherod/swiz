@@ -139,6 +139,7 @@ export async function hasCiConfig(startDir?: string): Promise<boolean> {
 export type {
   JbcontextDetection,
   JbcontextDetectOptions,
+  JbcontextIndexOptions,
   JbcontextProjectIndex,
   JbcontextProjectSnapshot,
   JbcontextProjectStatus,
@@ -148,4 +149,5 @@ export {
   isJbcontextAvailable,
   isJbcontextConfigured,
   resolveJbcontextBinary,
+  triggerJbcontextIndex,
 } from "./utils/jbcontext.ts"

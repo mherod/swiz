@@ -15,6 +15,7 @@ import posttooluseCommitAuthorVerification from "../hooks/posttooluse-commit-aut
 import posttooluseFileTruncationGuard from "../hooks/posttooluse-file-truncation-guard.ts"
 import posttoolusGitContext from "../hooks/posttooluse-git-context.ts"
 import posttooluseGitTaskAutocomplete from "../hooks/posttooluse-git-task-autocomplete.ts"
+import posttooluseJbcontextReindex from "../hooks/posttooluse-jbcontext-reindex.ts"
 import posttooluseJsonValidation from "../hooks/posttooluse-json-validation.ts"
 import posttooluseLastCommitAge from "../hooks/posttooluse-last-commit-age.ts"
 import posttooluseMcpChannelTrace from "../hooks/posttooluse-mcp-channel-trace.ts"
@@ -133,6 +134,7 @@ import pretooluseWorkflowPermissionsGate from "../hooks/pretooluse-workflow-perm
 import sessionstartCompactContext from "../hooks/sessionstart-compact-context.ts"
 import sessionstartEnvironmentDetects from "../hooks/sessionstart-environment-detects.ts"
 import sessionstartHealthSnapshot from "../hooks/sessionstart-health-snapshot.ts"
+import sessionstartJbcontextWarmup from "../hooks/sessionstart-jbcontext-warmup.ts"
 import sessionstartMorningStandupPrompt from "../hooks/sessionstart-morning-standup-prompt.ts"
 import sessionstartSelfHeal from "../hooks/sessionstart-self-heal.ts"
 import sessionstartStateContext from "../hooks/sessionstart-state-context.ts"
@@ -503,6 +505,7 @@ export const bundledHookManifest: HookGroup[] = [
       { hook: posttooluseStateTransition },
       { hook: posttoolusUpstreamSyncOnPush },
       { hook: posttoolusePushAutosteerIssue },
+      { hook: posttooluseJbcontextReindex },
       { hook: posttooluseMeasureTestTime },
       { hook: posttooluseMeasureLintTime },
     ],
@@ -531,6 +534,7 @@ export const bundledHookManifest: HookGroup[] = [
       { hook: sessionstartSelfHeal },
       { hook: sessionstartEnvironmentDetects },
       { hook: sessionstartHealthSnapshot },
+      { hook: sessionstartJbcontextWarmup },
       { hook: sessionstartStateContext },
       { hook: sessionstartWebsearchSuggester },
       { hook: sessionstartMorningStandupPrompt },

@@ -26,6 +26,22 @@ export interface JbcontextDetectOptions {
 }
 
 /**
+ * Options for triggering jbcontext indexing.
+ */
+export interface JbcontextIndexOptions {
+  /** Explicit path to jbcontext binary or command name. */
+  binaryPath?: string
+  /** Override user home directory. */
+  homeDir?: string
+  /** Project directory to index. */
+  projectPath?: string
+  /** Specific git revision to index (defaults to HEAD). */
+  revision?: string
+  /** Suppress progress output with --silent (default: true). */
+  silent?: boolean
+}
+
+/**
  * Snapshot metadata within a project index.
  */
 export interface JbcontextProjectSnapshot {
@@ -417,5 +433,43 @@ export async function detectJbcontext(
     aiAccessSelections: meta.aiAccessSelections,
     project: projectStatus,
     ...(error ? { error } : {}),
+  }
+}
+
+function buildIndexArgs(binary: string, options?: JbcontextIndexOptions): string[] {
+  const args = [binary, "index"]
+  if (options?.projectPath) {
+    args.push(`--project-path=${options.projectPath}`)
+  }
+  if (options?.revision) {
+    args.push(`--revision=${options.revision}`)
+  }
+  if (options?.silent !== false) {
+    args.push("--silent")
+  }
+  return args
+}
+
+/**
+ * Trigger background indexing of a project via jbcontext index.
+ * Spawns a detached/unref subprocess so it does not block the caller.
+ * Returns true if the index process was successfully launched.
+ */
+export async function triggerJbcontextIndex(options?: JbcontextIndexOptions): Promise<boolean> {
+  const binary = await resolveJbcontextBinary(options)
+  if (!binary) return false
+
+  const args = buildIndexArgs(binary, options)
+
+  try {
+    const proc = Bun.spawn(args, {
+      stdout: "ignore",
+      stderr: "ignore",
+      cwd: options?.projectPath,
+    })
+    proc.unref()
+    return true
+  } catch {
+    return false
   }
 }
