@@ -336,14 +336,15 @@ describe("posttooluse-task-list-sync", () => {
       { HOME: TMP_HOME }
     )
     expect(exitCode).toBe(0)
-    // No creates or updates, but count context is still emitted
+    // Idempotency is the claim under test: an unchanged task is skipped, never
+    // rewritten. The counts line is emitted either way — it reports the queue,
+    // not the sync — so it is asserted rather than excluded.
     const parsed = JSON.parse(stdout)
-    expect(parsed.hookSpecificOutput.additionalContext).not.toContain(
-      "Tasks: 0 in_progress, 1 pending"
-    )
-    expect(parsed.hookSpecificOutput.additionalContext).toMatch(
-      /No (active|engaged|ongoing|live|open|current|running) task yet/
-    )
+    const context = parsed.hookSpecificOutput.additionalContext as string
+    expect(context).toContain("1 skipped")
+    expect(context).not.toContain("created")
+    expect(context).not.toContain("updated")
+    expect(context).toContain("Tasks: 0 in_progress, 1 pending")
   })
 
   test("updates task file when status changes", async () => {

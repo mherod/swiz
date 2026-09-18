@@ -419,47 +419,26 @@ describe("posttooluse-json-validation: positive paths", () => {
 describe("posttooluse-task-advisor: positive paths", () => {
   const HOOK = "hooks/posttooluse-task-advisor.ts"
 
-  test("emits creation countdown when approaching threshold", async () => {
+  // The advisor is snapshot-driven: `taskAdvisorContext` needs both `session_id`
+  // and `cwd` to address a divergence snapshot, and returns nothing without them.
+  // A transcript alone can no longer produce an advisory at any call count, so
+  // these payloads assert silence. The emitting path is covered against real
+  // snapshots in hooks/posttooluse-task-advisor.test.ts.
+  test("a transcript-only payload never advises, at any call count", async () => {
     const tmp = await createTempDir()
-    // 8 tool calls, no TaskCreate → remaining = 10 - 8 = 2 (within ≤3 range)
-    const transcript = await createTranscript(tmp, [
-      "Read",
-      "Glob",
-      "Read",
-      "Bash",
-      "Read",
-      "Glob",
-      "Read",
-      "Bash",
-    ])
-    const r = await runHook(HOOK, { transcript_path: transcript })
-    expect(r.exitCode).toBe(0)
-    expect(r.json).not.toBeNull()
-    const hso = r.json?.hookSpecificOutput as Record<string, any>
-    expect(hso?.hookEventName).toBe("PostToolUse")
-    expect(hso?.additionalContext).toContain("TaskCreate required")
-  })
-
-  test("emits warning at 9/10 tool calls before creation threshold", async () => {
-    const tmp = await createTempDir()
-    // 9 calls → remaining = 10 - 9 = 1 (within ≤1 range)
-    const transcript = await createTranscript(tmp, [
-      "Read",
-      "Glob",
-      "Read",
-      "Bash",
-      "Read",
-      "Glob",
-      "Read",
-      "Bash",
-      "Read",
-    ])
-    const r = await runHook(HOOK, { transcript_path: transcript })
-    expect(r.exitCode).toBe(0)
-    const hso = r.json?.hookSpecificOutput as Record<string, any>
-    const ctx = hso?.additionalContext as string
-    expect(ctx).toContain("1 tool call")
-    expect(ctx).toContain("blocked")
+    const shapes = [
+      // 8 calls, no TaskCreate — once a creation countdown.
+      ["Read", "Glob", "Read", "Bash", "Read", "Glob", "Read", "Bash"],
+      // 9 calls — once the final warning before the creation threshold.
+      ["Read", "Glob", "Read", "Bash", "Read", "Glob", "Read", "Bash", "Read"],
+      // TaskCreate then 18 calls — once a staleness countdown.
+      ["TaskCreate", ...Array.from({ length: 18 }, () => "Read")],
+    ]
+    for (const tools of shapes) {
+      const r = await runHook(HOOK, { transcript_path: await createTranscript(tmp, tools) })
+      expect(r.exitCode).toBe(0)
+      expect(r.stdout).toBe("")
+    }
   })
 
   test("stands down for agents without task tools like Codex", async () => {
@@ -490,39 +469,6 @@ describe("posttooluse-task-advisor: positive paths", () => {
     const r = await runHook(HOOK, { transcript_path: transcript })
     expect(r.exitCode).toBe(0)
     expect(r.stdout).toBe("")
-  })
-
-  test("emits staleness countdown when task tools used but stale", async () => {
-    const tmp = await createTempDir()
-    // TaskCreate at index 0, then 18 more calls → callsSinceTask = 18, remaining = 20-18 = 2
-    const tools = [
-      "TaskCreate",
-      "Read",
-      "Glob",
-      "Read",
-      "Edit",
-      "Bash",
-      "Read",
-      "Glob",
-      "Read",
-      "Read",
-      "Glob",
-      "Read",
-      "Edit",
-      "Bash",
-      "Read",
-      "Glob",
-      "Read",
-      "Read",
-      "Glob",
-    ]
-    const transcript = await createTranscript(tmp, tools)
-    const r = await runHook(HOOK, { transcript_path: transcript })
-    expect(r.exitCode).toBe(0)
-    const hso = r.json?.hookSpecificOutput as Record<string, any>
-    const ctx = hso?.additionalContext as string
-    expect(ctx).toContain("Task update")
-    expect(ctx).toContain("TaskList")
   })
 
   test("does not treat retired update_plan as a task tool (#570)", async () => {

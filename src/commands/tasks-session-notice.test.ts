@@ -108,23 +108,29 @@ describe("swiz tasks session-selection notice", () => {
     })
   })
 
-  test("names the chosen session when more than one could have answered", async () => {
+  // The listing no longer picks one session and announces the choice; it merges
+  // every store belonging to this project. Selecting a single store is what made
+  // a gate and a list disagree about the same queue, so the notice went with it.
+  test("merges every store for this project rather than choosing one", async () => {
     await serial(async () => {
       const { home, cwd } = await makeHome()
       await seedStore(home, projectKeyFromCwd(cwd), cwd, "user-1")
       await seedStore(home, "00000000-0000-0000-0000-0000000000a1", cwd, "a1-1")
 
       const output = await listOutput(home, cwd)
-      expect(output).toContain("Showing most recently updated of 2 sessions")
-      expect(output).toContain("--session")
+      expect(output).toContain("user-1")
+      expect(output).toContain("a1-1")
+      expect(output).not.toContain("Showing most recently updated")
     })
   })
 
-  test("stays quiet when only one session could have answered", async () => {
+  test("a lone store contributes only its own tasks", async () => {
     await serial(async () => {
       const { home, cwd } = await makeHome()
       await seedStore(home, projectKeyFromCwd(cwd), cwd, "user-1")
-      expect(await listOutput(home, cwd)).not.toContain("Showing most recently updated")
+      const output = await listOutput(home, cwd)
+      expect(output).toContain("user-1")
+      expect(output).not.toContain("a1-1")
     })
   })
 })
