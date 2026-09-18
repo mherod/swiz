@@ -79,12 +79,21 @@ import {
 import { replaceTaskGovernanceSynonyms } from "../src/tasks/task-governance-rephrasing.ts"
 import { fetchIssueHints } from "../src/tasks/task-issue-hints.ts"
 import {
+  projectQueueTasks,
+  TASK_QUEUE_RECOVERY,
+  taskOwnershipSuffix,
+} from "../src/tasks/task-queue-view.ts"
+import {
   applyCacheTaskUpdate,
   formatTaskSubjectsForDisplay,
   isIncompleteTaskStatus,
   isTerminalTaskStatus,
 } from "../src/tasks/task-recovery.ts"
-import { readTasksAcrossStores } from "../src/tasks/task-repository.ts"
+import {
+  parseTaskId,
+  readTaskRecordsAcrossStores,
+  taskRecordReference,
+} from "../src/tasks/task-repository.ts"
 // validateLastTaskStanding removed — handleTaskCompletion now checks full governance thresholds
 import {
   CANONICAL_TASKLIST_SYNC_MAX_AGE_MS,
@@ -102,6 +111,10 @@ import {
 } from "../src/tasks/task-subject-duplicates.ts"
 import { detect, formatMessage } from "../src/tasks/task-subject-validation.ts"
 import { getTaskCurrentDurationMs, getTaskLastUpdatedMs } from "../src/tasks/task-timing.ts"
+import {
+  checkInProgressLimit,
+  MAX_IN_PROGRESS_TASKS_PER_PROJECT,
+} from "../src/tasks/task-wip-limit.ts"
 import { SWIZ_INCOMING_ROOT } from "../src/temp-paths.ts"
 import {
   isAnyProviderTaskCreateTool,
@@ -202,7 +215,19 @@ async function readTasksForInput(input: Record<string, any>, sessionId: string) 
   const cwd = typeof input.cwd === "string" ? input.cwd : ""
   const projectKey = cwd ? projectKeyFromCwd(cwd) : undefined
   try {
-    return await readTasksAcrossStores(sessionId, projectKey, taskStoreForInput(input).tasksDir)
+    const records = await readTaskRecordsAcrossStores(
+      sessionId,
+      projectKey,
+      taskStoreForInput(input).tasksDir
+    )
+    return projectQueueTasks(records).map((task, index) => {
+      const record = records[index]!
+      if (parseTaskId(record.task.id).prefix !== null) return task
+      // Native #1 can only name this session's #1. Keep other owners visible
+      // for project counts without treating them as native mutation targets.
+      const current = record.storeKey.kind === "session" && record.storeKey.id === sessionId
+      return { ...task, id: current ? record.task.id : taskRecordReference(record) }
+    })
   } catch (cause) {
     throw new TaskStateReadError(cause)
   }
@@ -359,6 +384,7 @@ interface OpenTaskRecency {
   updatedAt?: string | null
   statusChangedAt?: string | null
   startedAt?: number | null
+  ownership?: string
 }
 
 export interface StaleOpenTaskPartition<T> {
@@ -444,7 +470,7 @@ function formatTaskAges(tasks: readonly OpenTaskRecency[], nowMs: number): strin
   return tasks
     .map(
       (task) =>
-        `  • #${task.id} (${task.status}): ${task.subject} — last updated ` +
+        `  • #${task.id} (${task.status}): ${task.subject}${taskOwnershipSuffix(task)} — last updated ` +
         `${formatDuration(Math.max(0, nowMs - (getTaskLastUpdatedMs(task) ?? nowMs)))} ago`
     )
     .join("\n")
@@ -456,7 +482,7 @@ function formatAbandonedNote(abandoned: readonly OpenTaskRecency[], nowMs: numbe
   return (
     `\n\n${abandoned.length} open ${noun} past the ${Math.round(OPEN_TASK_ABANDONED_CEILING_MS / 60_000)}-minute ` +
     `abandoned ceiling and no longer blocking, but still in the queue:\n${formatTaskAges(abandoned, nowMs)}\n` +
-    "Complete or cancel these when you get the chance."
+    TASK_QUEUE_RECOVERY
   )
 }
 
@@ -469,8 +495,10 @@ export function buildStaleOpenTaskMessage(
   return (
     `${staleTasks.length} open ${noun} not been updated in over ` +
     `${Math.round(OPEN_TASK_UPDATE_RECENCY_LIMIT_MS / 60_000)} minutes:\n${formatTaskAges(staleTasks, nowMs)}\n\n` +
-    "Bring them current with TaskUpdate before creating another task — record progress in " +
-    "`description`, move finished work to `completed` with evidence, or cancel what is no longer real. " +
+    "Bring owned work current with TaskUpdate before creating another task — record progress in " +
+    "`description`. " +
+    TASK_QUEUE_RECOVERY +
+    " " +
     "Then retry this TaskCreate." +
     formatAbandonedNote(abandoned, nowMs) +
     "\n\nIf this gate is wrong about the work in hand, say so and it stands down for " +
@@ -567,7 +595,7 @@ export {
 }
 
 const LARGE_CONTENT_LINE_THRESHOLD = 10
-const IN_PROGRESS_CAP = 4
+const IN_PROGRESS_CAP = MAX_IN_PROGRESS_TASKS_PER_PROJECT
 function canStartInProgress(inProgressCount: number, cap = IN_PROGRESS_CAP): boolean {
   return inProgressCount < cap
 }
@@ -648,7 +676,7 @@ function evaluateTaskFileAccess(
 }
 
 function buildIncompleteTaskSummary(
-  allTasks: Array<{ id: string; status: string; subject: string }>
+  allTasks: Array<{ id: string; status: string; subject: string; ownership?: string }>
 ): {
   incompleteTasks: Array<{ id: string; status: string; subject: string }>
   inProgressTasks: Array<{ id: string; status: string; subject: string }>
@@ -741,11 +769,13 @@ async function checkInProgressCap(
   toolName: string,
   sessionId: string,
   cwd: string | undefined,
-  allTasks: Array<{ id: string; status: string; subject: string }>
+  allTasks: Array<{ id: string; status: string; subject: string; ownership?: string }>
 ): Promise<SwizHookOutput | undefined> {
   const inProgressTasks = allTasks.filter((t) => t.status === "in_progress")
   if (canStartInProgress(inProgressTasks.length)) return undefined
-  const taskList = inProgressTasks.map((t) => `  • #${t.id}: ${t.subject}`).join("\n")
+  const taskList =
+    inProgressTasks.map((t) => `  • #${t.id}: ${t.subject}${taskOwnershipSuffix(t)}`).join("\n") +
+    `\n${TASK_QUEUE_RECOVERY}`
   return await denyAutoSteerOrBlock(
     sessionId,
     cwd,
@@ -1639,34 +1669,10 @@ async function checkInProgressTransitionCap(
   input: Record<string, any>
 ): Promise<SwizHookOutput | null> {
   const allTasks = await readTasksForInput(input, sessionId)
-  const inProgressCount = allTasks.filter((t) => t.status === "in_progress").length
   const currentTask = allTasks.find((t) => t.id === taskId)
-
-  // Allow transition to in_progress if:
-  // 1. The task is already in_progress (no-op), or
-  // 2. There is room under the configured in-progress cap.
-  if (!currentTask || currentTask.status === "in_progress") {
-    return null
-  }
-  if (canStartInProgress(inProgressCount)) {
-    return null
-  }
-
-  // Block: in-progress count is at or above the configured cap.
-  const inProgressTasks = allTasks
-    .filter((t) => t.status === "in_progress")
-    .map((t) => `  • #${t.id}: ${t.subject}`)
-    .join("\n")
-
-  return preToolUseDeny(
-    buildTaskGovernanceMessage({
-      kind: "in-progress-transition-cap",
-      taskId,
-      inProgressCount,
-      cap: getInProgressCap(),
-      taskList: inProgressTasks,
-    })
-  )
+  if (!currentTask) return null
+  const error = checkInProgressLimit(taskId, currentTask.status, "in_progress", allTasks)
+  return error ? preToolUseDeny(error) : null
 }
 
 type NativeTaskUpdateResult = SwizHookOutput | "early_exit" | "continue"

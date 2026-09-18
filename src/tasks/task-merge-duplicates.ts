@@ -189,6 +189,9 @@ export async function mergeDuplicateTasksAcrossStores<T extends MergeableTask, A
   records: readonly AddressedTask<T, A>[],
   access: StoreAccess<T, A>
 ): Promise<AddressedTask<T, A>[]> {
+  // Legacy session-local IDs cannot address a cross-store merge unambiguously.
+  // Preserve the full queue until an owner selects the records explicitly.
+  if (new Set(records.map((record) => record.task.id)).size !== records.length) return [...records]
   const plan = await planCrossStoreMerge(records, access)
   const persisted = new Map<string, AddressedTask<T, A>>()
   try {

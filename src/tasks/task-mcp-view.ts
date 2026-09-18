@@ -18,6 +18,7 @@
  */
 
 import { formatDuration } from "../format-duration.ts"
+import { taskOwnershipSuffix } from "./task-queue-view.ts"
 import type { Task } from "./task-repository.ts"
 import { getTaskCompletedAtMs, getTaskCurrentDurationMs } from "./task-timing.ts"
 import {
@@ -125,13 +126,13 @@ function taskSuffix(task: Task, tasks: readonly Task[], byId: ReadonlyMap<string
 
 /** One task as a single bounded line: `  → #id  subject (12m, unblocks 2)`. */
 export function formatTaskLine(
-  task: Task,
+  task: Task & { ownership?: string },
   tasks: readonly Task[] = [task],
   highlight = false
 ): string {
   const marker = highlight ? "→" : " "
   const suffix = taskSuffix(task, tasks, indexTasksById(tasks))
-  return `  ${marker} #${task.id}  ${truncateForLine(task.subject)}${suffix}`
+  return `  ${marker} #${task.id}  ${truncateForLine(task.subject)}${suffix}${taskOwnershipSuffix(task)}`
 }
 
 function formatGroup(

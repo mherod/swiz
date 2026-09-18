@@ -388,6 +388,27 @@ export async function readTasksAcrossStores(
 export interface StoredTask {
   storeKey: TaskStoreKey
   task: Task
+  /** Only an unattributed explicitly supplied native session widens the project queue. */
+  queueScope?: "project" | "current-session"
+}
+
+/** Copyable, unambiguous task reference; descriptions and transcript data are never included. */
+export function taskRecordReference({ storeKey, task }: StoredTask): string {
+  return `${storeKey.kind}:${storeKey.kind === "session" ? storeKey.id : storeKey.key}#${task.id}`
+}
+
+/** Bare native IDs are local to their store; prefixed IDs retain the existing mirror semantics. */
+function mergeStoredTasksByRecency(groups: StoredTask[][]): StoredTask[] {
+  const byIdentity = new Map<string, StoredTask>()
+  for (const record of groups.flat()) {
+    const identity =
+      parseTaskId(record.task.id).prefix === null ? taskRecordReference(record) : record.task.id
+    const existing = byIdentity.get(identity)
+    if (!existing || lastWriteMs(record.task) > lastWriteMs(existing.task)) {
+      byIdentity.set(identity, record)
+    }
+  }
+  return [...byIdentity.values()].sort((a, b) => compareTaskIds(a.task.id, b.task.id))
 }
 
 /** Explicit single-store reader for native session snapshots and targeted mutations. */
@@ -422,18 +443,19 @@ export async function readTaskRecordsAcrossStores(
     const storeKey = await resolveLegacyTaskStoreKey(sessionId, undefined, tasksDir)
     return (await readTaskStore(storeKey, tasksDir)).map((task) => ({ storeKey, task }))
   }
-  const keys: TaskStoreKey[] = []
-  if (projectKey) keys.push({ kind: "project", key: projectKey })
+  const keys: Array<{ storeKey: TaskStoreKey; queueScope: StoredTask["queueScope"] }> = [
+    { storeKey: { kind: "project", key: projectKey }, queueScope: "project" },
+  ]
   for (const id of await sessionCandidates(sessionId, Boolean(projectKey), tasksDir)) {
-    if (await sessionBelongsToQueue(id, sessionId, projectKey, tasksDir))
-      keys.push(sessionStoreKey(id))
+    const queueScope = await sessionBelongsToQueue(id, sessionId, projectKey, tasksDir)
+    if (queueScope) keys.push({ storeKey: sessionStoreKey(id), queueScope })
   }
   const groups = await Promise.all(
-    keys.map(async (storeKey) =>
-      (await readTaskStore(storeKey, tasksDir)).map((task) => ({ ...task, storeKey }))
+    keys.map(async ({ storeKey, queueScope }) =>
+      (await readTaskStore(storeKey, tasksDir)).map((task) => ({ task, storeKey, queueScope }))
     )
   )
-  return mergeTaskStoresByRecency(...groups).map(({ storeKey, ...task }) => ({ storeKey, task }))
+  return mergeStoredTasksByRecency(groups)
 }
 
 async function sessionCandidates(
@@ -466,11 +488,12 @@ async function sessionBelongsToQueue(
   tasksDir: string
 ) {
   if (!isSafeSessionId(sessionStoreKey(id), tasksDir)) return false
-  const meta = await readTaskStoreMeta(sessionStoreKey(id), tasksDir)
+  const meta = await readTaskStoreMeta(sessionStoreKey(id), tasksDir, true)
   const owner = typeof meta?.cwd === "string" ? projectStoreKey(meta.cwd).key : undefined
   if (meta?.storeKind !== "session" && isLegacyProjectAddress(id, sessionId, projectKey, owner))
     return false
-  return owner ? owner === projectKey : id === sessionId
+  if (owner) return owner === projectKey ? ("project" as const) : false
+  return id === sessionId ? ("current-session" as const) : false
 }
 
 /** Lightweight per-session metadata index for O(1) open-task-count lookups. */
@@ -730,11 +753,12 @@ export async function readSessionMeta(
 /** Typed metadata access must not reinterpret a native session as a project with the same ID. */
 export async function readTaskStoreMeta(
   storeKey: TaskStoreKey,
-  tasksDir = createDefaultTaskStore().tasksDir
+  tasksDir = createDefaultTaskStore().tasksDir,
+  fresh = false
 ): Promise<SessionMeta | null> {
   if (!isSafeSessionId(storeKey, tasksDir)) return null
   const key = metaCacheKey(taskStoreDirName(storeKey), tasksDir)
-  if (sessionMetaCache.has(key)) return sessionMetaCache.get(key)!
+  if (!fresh && sessionMetaCache.has(key)) return sessionMetaCache.get(key)!
   const dir = await readTaskStorePath(storeKey, tasksDir)
   try {
     const text = await readFile(join(dir, SESSION_META_FILE), "utf-8")

@@ -168,6 +168,30 @@ the 60-call hard staleness gate was an explicit decision.
 
 ## Storage facts that bite
 
+### Project ownership and WIP (#931)
+
+TaskList, service WIP checks and native governance use the same attributed queue
+reader. It includes the project store and session stores whose metadata identifies
+that project. Unknown historical stores and stores attributed elsewhere do not count.
+An explicitly supplied native session without ownership metadata is the only wider
+scope: its blockers say `explicit current session, outside MCP project scope`.
+Ownership is refreshed from disk; a stale `openCount: 0` cannot hide live tasks.
+
+Bare native task IDs are local to a store. Two sessions' `#1` tasks remain distinct;
+collisions appear as `session:<session-id>#1` or `project:<project-key>#1`. Pass that
+full reference as the MCP TaskUpdate `taskId` to choose an owner. An ambiguous bare
+ID is rejected. Existing prefixed mirrors still use the most recently written copy.
+Automatic subject merging preserves queues with colliding IDs until owners resolve
+them explicitly. Native event overlays cannot change another session's task.
+
+The cap remains four. Service status changes, combined field/start updates and stub
+creation hold a project lock through the capacity check and write. A rejected start
+leaves its fields unchanged; completion, cancellation and same-status updates can
+still proceed. Native hooks inspect the same project count, while their externally
+performed writes remain subject to the external-writer limitations below. Diagnostics
+identify each owning store and direct recovery to its task tool or owner; they never
+ask callers to cancel invisible foreign work.
+
 - Native `TaskCreate`/`TaskUpdate` **delete** the `.json` file on completion; a clean session
   dir holds only `.highwatermark` + `.lock`. `allTasks.length === 0` does NOT mean "no tasks
   were created" — stop hooks must not assume it does.

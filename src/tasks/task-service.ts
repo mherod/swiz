@@ -405,21 +405,29 @@ export async function ensureFileBackedTask({
 
   const stubTask = buildStubTask(taskId, resolved.subject, { description, activeForm, status })
   const storeKey = await resolveLegacyTaskStoreKey(sessionId, filterCwd ?? process.cwd())
-  await writeTask(storeKey, stubTask, filterCwd ?? process.cwd())
-  await writeAudit(storeKey, {
-    timestamp: new Date().toISOString(),
+  await withInProgressReservation(
     taskId,
-    action: "create",
-    newStatus: stubTask.status,
-    subject: resolved.subject,
-  })
+    "pending",
+    status,
+    async () => {
+      await writeTask(storeKey, stubTask, filterCwd ?? process.cwd())
+      await writeAudit(storeKey, {
+        timestamp: new Date().toISOString(),
+        taskId,
+        action: "create",
+        newStatus: stubTask.status,
+        subject: resolved.subject,
+      })
+    },
+    { filterCwd, storeKey }
+  )
 
   console.log(`  ℹ️  Task #${taskId} not in file store — created stub (${resolved.source})`)
   return true
 }
 
 import { validateTransition } from "./task-transitions.ts"
-import { assertInProgressLimit } from "./task-wip-limit.ts"
+import { withInProgressReservation } from "./task-wip-limit.ts"
 export { validateTransition }
 
 /**
@@ -545,7 +553,7 @@ export async function updateStatus(
     skipWipLimit?: boolean
   } = {}
 ): Promise<TaskMutationResult> {
-  const { evidence, verifyText, filterCwd, tasksDir } = options
+  const { evidence, verifyText } = options
   const { storeKey, task } = await resolveTaskAddress(taskId, sessionId, options)
 
   if (verifyText) {
@@ -567,27 +575,21 @@ export async function updateStatus(
 
   const oldStatus = task.status
 
-  // A project may hold at most MAX_IN_PROGRESS_TASKS_PER_PROJECT in_progress tasks. Unlike the
-  // last-task-standing rule above, this one is a rejection: the cheap way out is to finish or
-  // cancel an open task, which is the behaviour the cap exists to produce.
-  if (!options.skipWipLimit) {
-    await assertInProgressLimit(taskId, oldStatus, newStatus, filterCwd, tasksDir)
+  const persist = async () => {
+    const now = new Date().toISOString()
+    applyStatusTransition(task, newStatus, now)
+    if (newStatus === "completed" && evidence) {
+      task.completionEvidence = evidence
+      task.completionTimestamp = now
+    }
+    return persistTaskMutation(
+      storeKey,
+      { task, oldStatus, action: "status_change", evidence },
+      options
+    )
   }
-
-  const now = new Date().toISOString()
-  const nowMs = Date.now()
-
-  applyStatusTransition(task, newStatus, now, nowMs)
-  if (newStatus === "completed" && evidence) {
-    task.completionEvidence = evidence
-    task.completionTimestamp = now
-  }
-
-  return persistTaskMutation(
-    storeKey,
-    { task, oldStatus, action: "status_change", evidence },
-    options
-  )
+  if (options.skipWipLimit) return persist()
+  return withInProgressReservation(taskId, oldStatus, newStatus, persist, { ...options, storeKey })
 }
 
 /**
@@ -710,15 +712,18 @@ export async function writeTaskUpdate(
 ): Promise<TaskMutationResult> {
   const { storeKey } = await resolveTaskAddress(taskId, sessionId, options)
   const oldStatus = task.status
-  if (newStatus) {
-    await assertInProgressLimit(taskId, oldStatus, newStatus, options.filterCwd, options.tasksDir)
-    applyStatusTransition(task, newStatus)
+  const persist = async () => {
+    if (newStatus) applyStatusTransition(task, newStatus)
+    return persistTaskMutation(
+      storeKey,
+      { task, oldStatus, action: newStatus ? "status_change" : "field_update" },
+      options
+    )
   }
-  return persistTaskMutation(
+  return withInProgressReservation(taskId, oldStatus, newStatus ?? oldStatus, persist, {
+    ...options,
     storeKey,
-    { task, oldStatus, action: newStatus ? "status_change" : "field_update" },
-    options
-  )
+  })
 }
 
 /** Typed callers have already resolved ownership: never repeat a cross-store lookup. */

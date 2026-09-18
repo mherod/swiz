@@ -38,6 +38,7 @@ import {
 } from "./tasks/task-mcp-view.ts"
 import { mergeDuplicateTasksAcrossStores } from "./tasks/task-merge-duplicates.ts"
 import { pruneStaleCompletedTasks } from "./tasks/task-prune.ts"
+import { projectQueueTasks, resolveQueueTask } from "./tasks/task-queue-view.ts"
 import {
   isSafeSessionId,
   projectStoreKey,
@@ -214,7 +215,7 @@ async function runTaskCreateTool(input: McpToolInput, cwd: string): Promise<McpT
       ...(typeof input.activeForm === "string" ? { activeForm: input.activeForm } : {}),
       cwd,
     })
-    const tasks = (await readProjectQueueWithPrune(projectKey)).map(({ task }) => task)
+    const tasks = projectQueueTasks(await readProjectQueueWithPrune(projectKey))
     const headline = `Created #${task.id} — ${truncateForLine(task.subject)}`
     const advice = await discoverRelatedTaskAdvice(cwd, task)
     return {
@@ -294,6 +295,12 @@ async function persistTaskUpdate(
   input: TaskUpdateToolInput,
   fieldsUpdated: boolean
 ): Promise<void> {
+  // A combined start/field update is one guarded write: a capacity rejection
+  // must not leave the subject or description partially changed.
+  if (input.status === "in_progress" && task.status !== "in_progress") {
+    await writeTaskUpdate(storeKey, task.id, task, input.status, { filterCwd: cwd })
+    return
+  }
   if (fieldsUpdated)
     await writeTaskUpdate(storeKey, input.taskId, task, undefined, { filterCwd: cwd })
   if (input.status === undefined || input.status === task.status) {
@@ -358,8 +365,8 @@ async function runTaskUpdateTool(rawInput: McpToolInput, cwd: string): Promise<M
   try {
     const projectKey = projectKeyFromCwd(cwd)
     const records = await readProjectQueueWithPrune(projectKey)
-    const tasksBefore = records.map(({ task }) => task)
-    const record = records.find(({ task }) => task.id === input.taskId)
+    const tasksBefore = projectQueueTasks(records)
+    const record = resolveQueueTask(records, input.taskId)
     if (!record) {
       return errorResult(renderUnknownTaskId(taskUpdateName, input.taskId, tasksBefore))
     }
@@ -373,9 +380,16 @@ async function runTaskUpdateTool(rawInput: McpToolInput, cwd: string): Promise<M
       blockedBy: [...candidate.blockedBy],
     }))
     const fieldChanges = applyTaskFieldUpdates(task, input)
-    await persistTaskUpdate(storeKey, cwd, task, input, fieldChanges.length > 0)
-    const tasksAfter = (await readMcpTaskQueue(projectKey)).map(({ task }) => task)
-    const finalTask = tasksAfter.find((candidate) => candidate.id === input.taskId)
+    await persistTaskUpdate(
+      storeKey,
+      cwd,
+      task,
+      { ...input, taskId: task.id },
+      fieldChanges.length > 0
+    )
+    const recordsAfter = await readMcpTaskQueue(projectKey)
+    const tasksAfter = projectQueueTasks(recordsAfter)
+    const finalTask = resolveQueueTask(recordsAfter, input.taskId)?.task
     const headline = buildUpdateHeadline(
       input.taskId,
       finalTask?.subject ?? task.subject,
@@ -415,9 +429,7 @@ function taskMovementFields(task: Task): object {
 
 async function runTaskListTool(cwd: string): Promise<McpToolResult> {
   try {
-    const allTasks = (await readProjectQueueWithPrune(projectKeyFromCwd(cwd))).map(
-      ({ task }) => task
-    )
+    const allTasks = projectQueueTasks(await readProjectQueueWithPrune(projectKeyFromCwd(cwd)))
     const headline =
       allTasks.length === 0 ? "No tasks in this project yet." : "Task queue for this project."
     return textResult(renderTaskToolResult(headline, allTasks))
