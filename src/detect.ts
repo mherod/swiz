@@ -133,3 +133,19 @@ export async function detectCiProviders(startDir?: string): Promise<Set<CiProvid
 export async function hasCiConfig(startDir?: string): Promise<boolean> {
   return (await detectCiProviders(startDir)).size > 0
 }
+
+// ─── JetBrains Context (jbcontext) detection ─────────────────────────────────
+
+export type {
+  JbcontextDetection,
+  JbcontextDetectOptions,
+  JbcontextProjectIndex,
+  JbcontextProjectSnapshot,
+  JbcontextProjectStatus,
+} from "./utils/jbcontext.ts"
+export {
+  detectJbcontext,
+  isJbcontextAvailable,
+  isJbcontextConfigured,
+  resolveJbcontextBinary,
+} from "./utils/jbcontext.ts"
