@@ -6,7 +6,7 @@ One manifest of TypeScript hook scripts gets installed across Claude Code, Curso
 
 When `swiz idea` and `swiz continue` are used together, the system can enter a **self-directed loop** — a closed-loop state where the agent's own outputs become the next inputs, expanding the project without external prompts. See [docs/ai-providers.md](docs/ai-providers.md#self-directed-loop) for the canonical terminology.
 
-**162 hooks. 17 event types. Every agent. Zero compromises.**
+**163 hooks. 17 event types. Every agent. Zero compromises.**
 
 ## Install
 
@@ -307,13 +307,14 @@ PermissionRequest fires when a tool call needs a permission decision, giving the
 |------|-------------|
 | `permissionrequest-infraction-record.ts` | Records each permission request per session, keyed the same way the infraction scanner keys blocked attempts, and escalates an advisory when the same action repeatedly needs permission instead of being re-attempted blindly. |
 
-### UserPromptSubmit (4)
+### UserPromptSubmit (5)
 
 | Hook | What it does |
 |------|-------------|
 | `userpromptsubmit-git-context.ts` | Injects current git branch and status into every prompt. The agent always knows where it is in the repo. |
 | `userpromptsubmit-task-advisor.ts` | Surfaces active tasks before each prompt so the agent stays focused on what it was supposed to be doing. |
 | `userpromptsubmit-skill-steps.ts` | When the user's message starts with a `/skill-name` invocation, extracts steps from the skill's SKILL.md and creates pending tasks. Renders content before extraction and applies quality filtering. |
+| `userpromptsubmit-jbcontext-search.ts` | Performs semantic code search via jbcontext using the user's prompt and injects the top relevant code snippets into prompt context. |
 | `speak-narrator.ts` | Catches up on any unspoken assistant text when the user submits a prompt. Ensures narration stays current even during idle periods. Runs async. |
 
 ### Notification (1)

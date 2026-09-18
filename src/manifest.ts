@@ -167,6 +167,7 @@ import stopTodoTracker from "../hooks/stop-todo-tracker.ts"
 import stopUpstreamBranchCount from "../hooks/stop-upstream-branch-count.ts"
 import stopWorkflowPermissions from "../hooks/stop-workflow-permissions.ts"
 import userpromptsubmitGitContext from "../hooks/userpromptsubmit-git-context.ts"
+import userpromptsubmitJbcontextSearch from "../hooks/userpromptsubmit-jbcontext-search.ts"
 import userpromptsubmitSkillSteps from "../hooks/userpromptsubmit-skill-steps.ts"
 import userpromptsubmitTaskAdvisor from "../hooks/userpromptsubmit-task-advisor.ts"
 import { debugLog } from "./debug.ts"
@@ -560,6 +561,7 @@ export const bundledHookManifest: HookGroup[] = [
       { hook: userpromptsubmitGitContext },
       { hook: userpromptsubmitTaskAdvisor },
       { hook: userpromptsubmitSkillSteps },
+      { hook: userpromptsubmitJbcontextSearch },
       { hook: speakNarrator },
     ],
   },
