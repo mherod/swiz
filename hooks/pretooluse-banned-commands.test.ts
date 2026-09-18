@@ -713,7 +713,8 @@ describe("pretooluse-banned-commands", () => {
     })
 
     test("cat src > file is blocked", async () => {
-      const result = await runHook("cat src/foo.ts > ~/output.ts")
+      // HOME may itself be temporary; use a project target to exercise the denial.
+      const result = await runHook("cat src/foo.ts > src/output.ts")
       expect(result.decision).toBe("deny")
       expect(result.reason).toContain("Write tool")
     })

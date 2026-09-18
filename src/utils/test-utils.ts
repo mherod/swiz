@@ -7,7 +7,12 @@ import { MockGitClient } from "../git/mock-client.ts"
 import { projectKeyFromCwd } from "../project-key.ts"
 import { DEFAULT_SETTINGS } from "../settings/persistence.ts"
 import type { EffectiveSwizSettings, SwizSettings } from "../settings/types.ts"
-import { getSessionTasksDir, type SessionTask } from "../tasks/task-recovery.ts"
+import { getSessionTasksDir, getTasksRoot, type SessionTask } from "../tasks/task-recovery.ts"
+import {
+  sessionStoreKey,
+  type Task,
+  writeTask as writeRepositoryTask,
+} from "../tasks/task-repository.ts"
 import type { Command } from "../types.ts"
 import { extractPreToolSurfaceDecision, getHookSpecificOutput } from "./hook-specific-output.ts"
 
@@ -785,26 +790,32 @@ export async function writeClaudeSession(
   await writeFile(join(dir, `${sessionId}.jsonl`), content)
 }
 
-/** Write a task JSON file into ~/.claude/tasks/<sessionId>/<id>.json */
+/** Write a production-shaped task into an explicitly supplied test home. */
 export async function writeTask(
   homeDir: string,
   sessionId: string,
-  task: {
-    id: string
-    subject: string
-    status: string
-    /** ISO timestamp of the last write; omit to let the reader backfill from file mtime. */
-    updatedAt?: string
-    statusChangedAt?: string
-  }
+  task: Pick<Task, "id" | "subject" | "status"> & Partial<Task>
+): Promise<void> {
+  const tasksDir = getTasksRoot(homeDir)
+  if (!tasksDir) throw new Error("A test home is required")
+  await writeRepositoryTask(
+    sessionStoreKey(sessionId),
+    { description: "", blocks: [], blockedBy: [], ...task },
+    undefined,
+    tasksDir
+  )
+}
+
+/** Preserve deliberate legacy, malformed, or historical records without writer side effects. */
+export async function writeRawTaskFixture(
+  homeDir: string,
+  sessionId: string,
+  task: { id: string; [key: string]: unknown }
 ): Promise<void> {
   const dir = getSessionTasksDir(sessionId, homeDir)
   if (!dir) throw new Error("Failed to resolve session tasks directory")
   await mkdir(dir, { recursive: true })
-  await writeFile(
-    join(dir, `${task.id}.json`),
-    JSON.stringify({ ...task, description: "", blocks: [], blockedBy: [] }, null, 2)
-  )
+  await Bun.write(join(dir, `${task.id}.json`), JSON.stringify(task, null, 2))
 }
 
 let envLock: Promise<void> = Promise.resolve()

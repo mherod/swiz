@@ -3,12 +3,11 @@ import { mkdir, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { projectKeyFromCwd } from "../project-key.ts"
-import { acquireEnvLock, releaseEnvLockFn } from "../utils/test-utils.ts"
+import { acquireEnvLock, releaseEnvLockFn, writeRawTaskFixture } from "../utils/test-utils.ts"
 import { runTasks } from "./tasks.ts"
 
-// #826: session selection falls back to "most recently modified", so which list you see depends on
-// which store was written last. Picking one silently made that ambiguity invisible; the notice
-// below tells the reader a choice was made and how to pin it.
+// Project listings now union owned stores. Preserve #826's visibility guarantee by checking
+// that neither session is silently omitted or misrepresented as the selected one.
 
 const roots: string[] = []
 
@@ -41,18 +40,15 @@ async function makeHome(): Promise<{ home: string; cwd: string }> {
 
 async function seedStore(home: string, storeKey: string, cwd: string, taskId: string) {
   const dir = join(home, ".claude", "tasks", storeKey)
-  await mkdir(dir, { recursive: true })
-  await writeFile(
-    join(dir, `${taskId}.json`),
-    JSON.stringify({
-      id: taskId,
-      subject: `subject ${taskId}`,
-      description: "d",
-      status: "pending",
-      blocks: [],
-      blockedBy: [],
-    })
-  )
+  // This fixture deliberately covers legacy flat project stores without storeKind metadata.
+  await writeRawTaskFixture(home, storeKey, {
+    id: taskId,
+    subject: `subject ${taskId}`,
+    description: "d",
+    status: "pending",
+    blocks: [],
+    blockedBy: [],
+  })
   await writeFile(
     join(dir, ".session-meta.json"),
     JSON.stringify({ openCount: 1, updatedAt: new Date().toISOString(), cwd })
@@ -108,15 +104,17 @@ describe("swiz tasks session-selection notice", () => {
     })
   })
 
-  test("names the chosen session when more than one could have answered", async () => {
+  test("shows all owned sessions without claiming to select only the newest", async () => {
     await serial(async () => {
       const { home, cwd } = await makeHome()
       await seedStore(home, projectKeyFromCwd(cwd), cwd, "user-1")
       await seedStore(home, "00000000-0000-0000-0000-0000000000a1", cwd, "a1-1")
 
       const output = await listOutput(home, cwd)
-      expect(output).toContain("Showing most recently updated of 2 sessions")
-      expect(output).toContain("--session")
+      expect(output).toContain("user-1")
+      expect(output).toContain("a1-1")
+      expect(output).toContain("2/2 incomplete")
+      expect(output).not.toContain("Showing most recently updated")
     })
   })
 

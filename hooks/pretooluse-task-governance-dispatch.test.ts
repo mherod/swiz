@@ -3,7 +3,11 @@ import { mkdir, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { syncCodexUpdatePlanSnapshot } from "../src/tasks/codex-update-plan.ts"
-import { buildEffectiveTestSettings, writeTask } from "../src/utils/test-utils.ts"
+import {
+  buildEffectiveTestSettings,
+  writeRawTaskFixture,
+  writeTask,
+} from "../src/utils/test-utils.ts"
 import pretooluseTaskGovernance, {
   buildStaleOpenTaskMessage,
   countRecentStaleGateDenials,
@@ -368,7 +372,8 @@ describe("evaluateTaskCreatePath — open-task update recency", () => {
   }
 
   async function seedTaskUpdatedAgo(sessionId: string, id: string, agoMs: number): Promise<void> {
-    await writeTask(TASK_HOME, sessionId, {
+    // Historical write times are the scenario; the repository writer would stamp now.
+    await writeRawTaskFixture(TASK_HOME, sessionId, {
       id,
       subject: `Open task ${id}`,
       status: "in_progress",

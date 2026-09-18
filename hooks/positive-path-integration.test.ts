@@ -9,6 +9,12 @@ import { describe, expect, setDefaultTimeout, test } from "bun:test"
 import { mkdir, readFile, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { AGENTS } from "../src/agents.ts"
+import {
+  divergenceEvidence,
+  recordDivergenceToolCall,
+  type SessionDivergenceState,
+} from "../src/commands/daemon/divergence.ts"
+import { persistSessionToolCall } from "../src/commands/daemon/utils.ts"
 import { getSessionCompactSnapshotPath, getSessionTasksDir } from "../src/tasks/task-recovery.ts"
 import {
   buildEffectiveTestSettings,
@@ -419,131 +425,91 @@ describe("posttooluse-json-validation: positive paths", () => {
 describe("posttooluse-task-advisor: positive paths", () => {
   const HOOK = "hooks/posttooluse-task-advisor.ts"
 
-  test("emits creation countdown when approaching threshold", async () => {
-    const tmp = await createTempDir()
-    // 8 tool calls, no TaskCreate → remaining = 10 - 8 = 2 (within ≤3 range)
-    const transcript = await createTranscript(tmp, [
-      "Read",
-      "Glob",
-      "Read",
-      "Bash",
-      "Read",
-      "Glob",
-      "Read",
-      "Bash",
-    ])
-    const r = await runHook(HOOK, { transcript_path: transcript })
+  async function advisorFixture(weightedCalls: number) {
+    const home = await createTempDir()
+    const sessionId = "weighted-advisor"
+    const nowMs = Date.now()
+    const states = new Map<string, SessionDivergenceState>()
+    recordDivergenceToolCall(states, {
+      sessionId,
+      toolName: "TaskCreate",
+      movement: "task-create",
+      nowMs,
+    })
+    for (let i = 0; i < weightedCalls; i++) {
+      recordDivergenceToolCall(states, {
+        sessionId,
+        toolName: "Edit",
+        movement: null,
+        nowMs: nowMs + i + 1,
+      })
+    }
+    const state = states.get(sessionId)!
+    await persistSessionToolCall(
+      home,
+      sessionId,
+      "Edit",
+      {},
+      nowMs + weightedCalls,
+      home,
+      divergenceEvidence(state, "call", "unknown", 1)
+    )
+    return {
+      home,
+      payload: {
+        cwd: home,
+        session_id: sessionId,
+        tool_name: "Edit",
+        _effectiveSettings: buildEffectiveTestSettings({ autoSteer: false }),
+      },
+    }
+  }
+
+  test("emits advisory context from persisted weighted task movement", async () => {
+    const { home, payload } = await advisorFixture(15)
+    const r = await runHook(HOOK, payload, { HOME: home })
     expect(r.exitCode).toBe(0)
-    expect(r.json).not.toBeNull()
     const hso = r.json?.hookSpecificOutput as Record<string, any>
     expect(hso?.hookEventName).toBe("PostToolUse")
-    expect(hso?.additionalContext).toContain("TaskCreate required")
+    expect(hso?.additionalContext).toContain("15 weighted calls")
+    expect(hso?.additionalContext).toContain("TaskCreate changed task state")
+    expect(r.decision).not.toBe("deny")
   })
 
-  test("emits warning at 9/10 tool calls before creation threshold", async () => {
-    const tmp = await createTempDir()
-    // 9 calls → remaining = 10 - 9 = 1 (within ≤1 range)
-    const transcript = await createTranscript(tmp, [
-      "Read",
-      "Glob",
-      "Read",
-      "Bash",
-      "Read",
-      "Glob",
-      "Read",
-      "Bash",
-      "Read",
-    ])
-    const r = await runHook(HOOK, { transcript_path: transcript })
+  test("stays silent below the weighted threshold", async () => {
+    const { home, payload } = await advisorFixture(14)
+    const r = await runHook(HOOK, payload, { HOME: home })
     expect(r.exitCode).toBe(0)
-    const hso = r.json?.hookSpecificOutput as Record<string, any>
-    const ctx = hso?.additionalContext as string
-    expect(ctx).toContain("1 tool call")
-    expect(ctx).toContain("blocked")
+    expect(r.stdout).toBe("")
   })
 
-  test("stands down for agents without task tools like Codex", async () => {
-    const tmp = await createTempDir()
-    const transcript = await createTranscript(tmp, [
-      "Read",
-      "Glob",
-      "Read",
-      "Bash",
-      "Read",
-      "Glob",
-      "Read",
-      "Bash",
-    ])
+  test("stands down for Codex even with a weighted task snapshot", async () => {
+    const { home, payload } = await advisorFixture(15)
     const r = await runHook(
       HOOK,
-      { transcript_path: transcript, _agent: "codex" },
-      { CODEX_THREAD_ID: "test-codex" }
+      { ...payload, _agent: "codex" },
+      {
+        HOME: home,
+        CODEX_THREAD_ID: "test-codex",
+      }
     )
     expect(r.exitCode).toBe(0)
     expect(r.stdout).toBe("")
   })
 
-  test("no output for small transcript (below threshold)", async () => {
-    const tmp = await createTempDir()
-    // 1 tool call → remaining = 10 - 1 = 9 (> 3, and total < 2)
-    const transcript = await createTranscript(tmp, ["Read"])
-    const r = await runHook(HOOK, { transcript_path: transcript })
-    expect(r.exitCode).toBe(0)
-    expect(r.stdout).toBe("")
-  })
-
-  test("emits staleness countdown when task tools used but stale", async () => {
-    const tmp = await createTempDir()
-    // TaskCreate at index 0, then 18 more calls → callsSinceTask = 18, remaining = 20-18 = 2
-    const tools = [
-      "TaskCreate",
-      "Read",
-      "Glob",
-      "Read",
-      "Edit",
-      "Bash",
-      "Read",
-      "Glob",
-      "Read",
-      "Read",
-      "Glob",
-      "Read",
-      "Edit",
-      "Bash",
-      "Read",
-      "Glob",
-      "Read",
-      "Read",
-      "Glob",
-    ]
-    const transcript = await createTranscript(tmp, tools)
-    const r = await runHook(HOOK, { transcript_path: transcript })
-    expect(r.exitCode).toBe(0)
-    const hso = r.json?.hookSpecificOutput as Record<string, any>
-    const ctx = hso?.additionalContext as string
-    expect(ctx).toContain("Task update")
-    expect(ctx).toContain("TaskList")
-  })
-
-  test("does not treat retired update_plan as a task tool (#570)", async () => {
-    // update_plan is not a task-governance tool.
-    // The advisor should treat all 9 calls as non-task — emitting a
-    // creation countdown for the canonical TaskCreate, not a staleness
-    // warning rooted in update_plan.
-    const tmp = await createTempDir()
-    const tools = ["update_plan", "Read", "Glob", "Read", "Edit", "Bash", "Read", "Glob", "Read"]
-    const transcript = await createTranscript(tmp, tools)
-    const r = await runHook(HOOK, { transcript_path: transcript })
-    expect(r.exitCode).toBe(0)
-    const sysMsg = (r.json?.systemMessage as string) ?? ""
-    expect(sysMsg).not.toContain("Task update required")
-  })
-
-  test("no staleness warning when task tools used recently", async () => {
-    const tmp = await createTempDir()
-    // TaskCreate at index 0, then 2 calls → remaining = 20-2 = 18 (> 4)
-    const transcript = await createTranscript(tmp, ["TaskCreate", "Read", "Glob"])
-    const r = await runHook(HOOK, { transcript_path: transcript })
+  test("legacy transcript call counts alone do not imply task divergence", async () => {
+    const home = await createTempDir()
+    const transcript = await createTranscript(home, ["TaskCreate", ...Array(30).fill("Edit")])
+    const r = await runHook(
+      HOOK,
+      {
+        cwd: home,
+        session_id: "legacy-advisor",
+        tool_name: "Edit",
+        transcript_path: transcript,
+      },
+      { HOME: home }
+    )
     expect(r.exitCode).toBe(0)
     expect(r.stdout).toBe("")
   })
