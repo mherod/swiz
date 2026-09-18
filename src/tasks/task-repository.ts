@@ -72,6 +72,12 @@ export interface Task {
   completedAt?: number | null
   /** ISO timestamp of last status change (used for elapsed-time tracking) */
   statusChangedAt?: string
+  /**
+   * ISO timestamp of the last persisted write of any kind. Unlike
+   * `statusChangedAt`, a description-only update refreshes this, so recency
+   * gates can be satisfied without forcing a status transition.
+   */
+  updatedAt?: string
   /** Cumulative milliseconds spent in in_progress status */
   elapsedMs?: number
   /** Deterministic fingerprint of the normalized subject for deduplication. */
@@ -287,6 +293,7 @@ async function readTasksInDirectory(dir: string): Promise<Task[]> {
           const st = await stat(filePath)
           // Backfill timing fields for legacy tasks that predate explicit timestamps.
           if (!task.statusChangedAt) task.statusChangedAt = st.mtime.toISOString()
+          if (!task.updatedAt) task.updatedAt = st.mtime.toISOString()
           backfillTaskTimingFields(task, st.mtimeMs)
           return task
         } catch {
@@ -311,20 +318,37 @@ function statusChangedAtMs(task: { statusChangedAt?: string }): number {
 }
 
 /**
- * Union task lists from several stores, keeping one copy per id — the one whose status changed most
- * recently, so a completion recorded through either surface wins over a stale duplicate.
+ * Last write of any kind as epoch ms, preferring `updatedAt` and falling back to `statusChangedAt`.
+ *
+ * Tie-breaking on `statusChangedAt` alone loses every field-only update: recording progress in a
+ * task's `description` moves `updatedAt` but not `statusChangedAt`, so the refreshed copy tied with
+ * the stale one and the duplicate that happened to be seen first kept winning. That made the
+ * recency gate in `pretooluse-task-governance` unsatisfiable for any task present in both stores —
+ * the remedy it prescribes (record progress) could not change the answer it reads.
+ */
+function lastWriteMs(task: { updatedAt?: string; statusChangedAt?: string }): number {
+  if (task.updatedAt) {
+    const parsed = Date.parse(task.updatedAt)
+    if (!Number.isNaN(parsed)) return parsed
+  }
+  return statusChangedAtMs(task)
+}
+
+/**
+ * Union task lists from several stores, keeping one copy per id — the one written most recently, so
+ * a completion or a progress note recorded through either surface wins over a stale duplicate.
  *
  * Generic over the task shape because the daemon's cache serves `SessionTask` while the repository
- * serves `Task`; both carry `id` and an optional ISO `statusChangedAt`, which is all the merge needs.
+ * serves `Task`; both carry `id` and the optional ISO stamps, which is all the merge needs.
  */
-export function mergeTaskStoresByRecency<T extends { id: string; statusChangedAt?: string }>(
-  ...groups: ReadonlyArray<readonly T[]>
-): T[] {
+export function mergeTaskStoresByRecency<
+  T extends { id: string; statusChangedAt?: string; updatedAt?: string },
+>(...groups: ReadonlyArray<readonly T[]>): T[] {
   const byId = new Map<string, T>()
   for (const group of groups) {
     for (const task of group) {
       const existing = byId.get(task.id)
-      if (!existing || statusChangedAtMs(task) > statusChangedAtMs(existing)) {
+      if (!existing || lastWriteMs(task) > lastWriteMs(existing)) {
         byId.set(task.id, task)
       }
     }
@@ -627,9 +651,13 @@ export async function writeTaskBatch(
     if (operationId) persistedOperationIds.add(operationId)
   }
 
+  const writtenAt = new Date().toISOString()
   const taskWrites = await writeBoundedTaskFiles(
     dir,
-    writes.map((write) => write.task)
+    writes.map((write) => {
+      write.task.updatedAt = writtenAt
+      return write.task
+    })
   )
   await updateSessionMetaFromTasks(dir, finalTasks, storeKey.kind, cwd)
   sessionMetaCache.delete(metaCacheKey(sessionId, tasksDir))
@@ -681,6 +709,7 @@ export async function writeTask(
 ): Promise<void> {
   const sessionId = taskStoreDirName(storeKey)
   const dir = await prepareTaskStoreWrite(storeKey, tasksDir, cwd)
+  task.updatedAt = new Date().toISOString()
   await atomicWriteJson(join(dir, `${task.id}.json`), task)
   // Update lightweight index so status.ts can read openCount without scanning every task file.
   await updateSessionMeta(dir, storeKey.kind, cwd)

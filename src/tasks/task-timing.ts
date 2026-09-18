@@ -1,6 +1,7 @@
 export interface TaskTimingLike {
   status: string
   statusChangedAt?: string | null
+  updatedAt?: string | null
   completionTimestamp?: string | null
   startedAt?: number | null
   completedAt?: number | null
@@ -46,6 +47,22 @@ export function getTaskCurrentDurationMs(
   if (startedAtMs === null) return Math.max(0, baseElapsedMs)
 
   return Math.max(0, baseElapsedMs + Math.max(0, nowMs - startedAtMs))
+}
+
+/**
+ * Epoch ms of the task's most recent recorded activity, preferring the
+ * write-stamped `updatedAt` and falling back to the status timeline for
+ * records written before that field existed. Returns null when the record
+ * carries no usable timestamp, so callers can fail open.
+ */
+export function getTaskLastUpdatedMs(
+  task: Pick<TaskTimingLike, "status" | "updatedAt" | "statusChangedAt" | "startedAt">
+): number | null {
+  const updatedAtMs = parseIsoTimestampMs(task.updatedAt)
+  if (updatedAtMs !== null) return updatedAtMs
+  const statusChangedAtMs = parseIsoTimestampMs(task.statusChangedAt)
+  if (statusChangedAtMs !== null) return statusChangedAtMs
+  return isFiniteNumber(task.startedAt) ? task.startedAt : null
 }
 
 export function backfillTaskTimingFields<T extends TaskTimingLike>(

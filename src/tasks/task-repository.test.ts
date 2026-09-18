@@ -6,6 +6,7 @@ import { useTempDir } from "../utils/test-utils.ts"
 import { readAuditLog } from "./task-audit-verification.ts"
 import {
   isSafeSessionId,
+  mergeTaskStoresByRecency,
   projectStoreKey,
   readSessionMeta,
   readTasks,
@@ -315,5 +316,51 @@ describe("writeTask atomicity", () => {
       .split("\n")
       .map((line) => JSON.parse(line) as { taskId: string })
     expect(auditLines.map((entry) => entry.taskId)).toEqual(tasks.map((task) => task.id))
+  })
+})
+
+describe("mergeTaskStoresByRecency", () => {
+  const base = { subject: "shared task", status: "in_progress" as const }
+
+  it("prefers the copy written most recently, not the one whose status moved last", () => {
+    // A description-only TaskUpdate bumps updatedAt and leaves statusChangedAt alone.
+    // Tie-breaking on statusChangedAt kept returning the stale duplicate, which made the
+    // task-recency gate unsatisfiable: recording progress could not change what it read.
+    const stale = {
+      id: "1",
+      ...base,
+      statusChangedAt: "2026-09-18T10:00:00.000Z",
+      updatedAt: "2026-09-18T10:00:00.000Z",
+    }
+    const refreshed = {
+      id: "1",
+      ...base,
+      statusChangedAt: "2026-09-18T10:00:00.000Z",
+      updatedAt: "2026-09-18T10:30:00.000Z",
+    }
+
+    expect(mergeTaskStoresByRecency([stale], [refreshed])[0]?.updatedAt).toBe(refreshed.updatedAt)
+    // Group order must not decide the winner.
+    expect(mergeTaskStoresByRecency([refreshed], [stale])[0]?.updatedAt).toBe(refreshed.updatedAt)
+  })
+
+  it("still falls back to statusChangedAt when no write stamp exists", () => {
+    const older = { id: "1", ...base, statusChangedAt: "2026-09-18T10:00:00.000Z" }
+    const newer = { id: "1", ...base, statusChangedAt: "2026-09-18T11:00:00.000Z" }
+
+    expect(mergeTaskStoresByRecency([newer], [older])[0]?.statusChangedAt).toBe(
+      newer.statusChangedAt
+    )
+  })
+
+  it("keeps one copy per id across stores", () => {
+    const merged = mergeTaskStoresByRecency(
+      [{ id: "1", ...base, updatedAt: "2026-09-18T10:00:00.000Z" }],
+      [
+        { id: "1", ...base, updatedAt: "2026-09-18T10:30:00.000Z" },
+        { id: "2", ...base, updatedAt: "2026-09-18T10:00:00.000Z" },
+      ]
+    )
+    expect(merged.map((task) => task.id)).toEqual(["1", "2"])
   })
 })

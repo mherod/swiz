@@ -62,7 +62,10 @@ import {
   needsReconciliation,
   overlayEventState,
 } from "../src/tasks/task-event-state.ts"
-import { isWithinUserMessageGrace } from "../src/tasks/task-governance-grace.ts"
+import {
+  isWithinUserMessageGrace,
+  USER_MESSAGE_GRACE_MS,
+} from "../src/tasks/task-governance-grace.ts"
 import {
   buildTaskGovernanceMessage,
   buildTaskGovernancePreview,
@@ -98,7 +101,7 @@ import {
   taskIdIsInDuplicateGroups,
 } from "../src/tasks/task-subject-duplicates.ts"
 import { detect, formatMessage } from "../src/tasks/task-subject-validation.ts"
-import { getTaskCurrentDurationMs } from "../src/tasks/task-timing.ts"
+import { getTaskCurrentDurationMs, getTaskLastUpdatedMs } from "../src/tasks/task-timing.ts"
 import { SWIZ_INCOMING_ROOT } from "../src/temp-paths.ts"
 import {
   isAnyProviderTaskCreateTool,
@@ -112,7 +115,10 @@ import {
   isTaskListTool,
   isWriteTool,
 } from "../src/tool-matchers.ts"
-import { getCurrentSessionTaskToolStats } from "../src/transcript-summary.ts"
+import {
+  getCurrentSessionTaskToolStats,
+  getToolsUsedForCurrentSession,
+} from "../src/transcript-summary.ts"
 import { scheduleAutoSteer } from "../src/utils/auto-steer-helpers.ts"
 import { hasFileInTree } from "../src/utils/file-utils.ts"
 import { messageFromUnknownError } from "../src/utils/hook-json-helpers.ts"
@@ -332,6 +338,160 @@ async function sessionHasHealthyPendingTaskBuffer(input: Record<string, any>): P
   }
 }
 
+interface OpenTaskRecency {
+  id: string
+  status: string
+  subject: string
+  updatedAt?: string | null
+  statusChangedAt?: string | null
+  startedAt?: number | null
+}
+
+export interface StaleOpenTaskPartition<T> {
+  /** Stale, but recent enough to still be plausibly in flight — these block. */
+  blocking: T[]
+  /** Past the abandoned ceiling — reported for cleanup, never blocking. */
+  abandoned: T[]
+}
+
+/**
+ * Split open tasks by how long they have gone without an update.
+ *
+ * A record with no usable timestamp counts as fresh, so a malformed or legacy row
+ * can never wedge task creation. A record past the abandoned ceiling also stops
+ * blocking: the project store is shared, so an abandoned or foreign row would
+ * otherwise deny every later session's first TaskCreate with no reachable remedy.
+ */
+export function partitionStaleOpenTasks<T extends OpenTaskRecency>(
+  allTasks: readonly T[],
+  nowMs: number = Date.now(),
+  limitMs: number = OPEN_TASK_UPDATE_RECENCY_LIMIT_MS,
+  ceilingMs: number = OPEN_TASK_ABANDONED_CEILING_MS
+): StaleOpenTaskPartition<T> {
+  const blocking: T[] = []
+  const abandoned: T[] = []
+  for (const task of allTasks) {
+    if (!isIncompleteTaskStatus(task.status)) continue
+    const lastUpdatedMs = getTaskLastUpdatedMs(task)
+    if (lastUpdatedMs === null) continue
+    const ageMs = nowMs - lastUpdatedMs
+    if (ageMs > ceilingMs) abandoned.push(task)
+    else if (ageMs > limitMs) blocking.push(task)
+  }
+  return { blocking, abandoned }
+}
+
+/** Open tasks stale enough to block task creation. */
+export function findStaleOpenTasks<T extends OpenTaskRecency>(
+  allTasks: readonly T[],
+  nowMs: number = Date.now(),
+  limitMs: number = OPEN_TASK_UPDATE_RECENCY_LIMIT_MS,
+  ceilingMs: number = OPEN_TASK_ABANDONED_CEILING_MS
+): T[] {
+  return partitionStaleOpenTasks(allTasks, nowMs, limitMs, ceilingMs).blocking
+}
+
+/**
+ * Creation attempts in the trailing tool window. The valve reads attempts rather
+ * than denials because a denied PreToolUse call still lands in the transcript as
+ * an attempted tool use, and counting from the tool sequence keeps the check a
+ * pure transcript scan with no enforcement state on disk.
+ */
+export function countRecentTaskCreateAttempts(
+  toolNames: readonly string[],
+  windowSize: number = OPEN_TASK_GATE_RELEASE_WINDOW
+): number {
+  const window = toolNames.slice(-Math.max(0, windowSize))
+  return window.filter((name) => isTaskCreateTool(name)).length
+}
+
+function formatTaskAges(tasks: readonly OpenTaskRecency[], nowMs: number): string {
+  return tasks
+    .map(
+      (task) =>
+        `  • #${task.id} (${task.status}): ${task.subject} — last updated ` +
+        `${formatDuration(Math.max(0, nowMs - (getTaskLastUpdatedMs(task) ?? nowMs)))} ago`
+    )
+    .join("\n")
+}
+
+function formatAbandonedNote(abandoned: readonly OpenTaskRecency[], nowMs: number): string {
+  if (abandoned.length === 0) return ""
+  const noun = abandoned.length === 1 ? "task is" : "tasks are"
+  return (
+    `\n\n${abandoned.length} open ${noun} past the ${Math.round(OPEN_TASK_ABANDONED_CEILING_MS / 60_000)}-minute ` +
+    `abandoned ceiling and no longer blocking, but still in the queue:\n${formatTaskAges(abandoned, nowMs)}\n` +
+    "Complete or cancel these when you get the chance."
+  )
+}
+
+export function buildStaleOpenTaskMessage(
+  staleTasks: readonly OpenTaskRecency[],
+  nowMs: number = Date.now(),
+  abandoned: readonly OpenTaskRecency[] = []
+): string {
+  const noun = staleTasks.length === 1 ? "task has" : "tasks have"
+  return (
+    `${staleTasks.length} open ${noun} not been updated in over ` +
+    `${Math.round(OPEN_TASK_UPDATE_RECENCY_LIMIT_MS / 60_000)} minutes:\n${formatTaskAges(staleTasks, nowMs)}\n\n` +
+    "Bring them current with TaskUpdate before creating another task — record progress in " +
+    "`description`, move finished work to `completed` with evidence, or cancel what is no longer real. " +
+    "Then retry this TaskCreate." +
+    formatAbandonedNote(abandoned, nowMs) +
+    "\n\nIf this gate is wrong about the work in hand, say so and it stands down for " +
+    `${Math.round(USER_MESSAGE_GRACE_MS / 60_000)} minutes.`
+  )
+}
+
+export function buildStaleGateReleaseMessage(
+  staleTasks: readonly OpenTaskRecency[],
+  attempts: number,
+  nowMs: number = Date.now()
+): string {
+  return (
+    `Task-recency gate released after ${attempts} creation attempts — it was blocking without ` +
+    `producing progress, so it is standing down for this call rather than wedging the workflow.\n` +
+    `${staleTasks.length} open task(s) are still stale:\n${formatTaskAges(staleTasks, nowMs)}\n\n` +
+    "Reconcile them with TaskUpdate — if a plain update is not clearing this, the queue and the " +
+    "gate disagree about what is open, which is worth reporting."
+  )
+}
+
+/**
+ * State gate: block new task creation while the existing open queue has gone
+ * stale. Stands down during a skill-owned workflow, like the other state gates,
+ * and releases after repeated attempts so it can never permanently wedge a
+ * workflow whose remedy it cannot see.
+ */
+async function checkOpenTaskUpdateRecency(
+  input: Record<string, any>
+): Promise<SwizHookOutput | null> {
+  try {
+    const sessionId = resolveSafeSessionId(input?.session_id as string | undefined)
+    if (!sessionId) return null
+    if (await skillOwnsWorkflow(input, input?.cwd as string | undefined)) return null
+
+    const allTasks = overlayEventState(await readTasksForInput(input, sessionId), sessionId)
+    const nowMs = Date.now()
+    const { blocking, abandoned } = partitionStaleOpenTasks(
+      allTasks as unknown as OpenTaskRecency[],
+      nowMs
+    )
+    if (blocking.length === 0) return null
+
+    const attempts = countRecentTaskCreateAttempts(await getToolsUsedForCurrentSession(input))
+    if (attempts >= OPEN_TASK_GATE_RELEASE_ATTEMPTS) {
+      const note = buildStaleGateReleaseMessage(blocking, attempts, nowMs)
+      return preToolUseAllowWithContext(note, note)
+    }
+
+    return preToolUseDeny(buildStaleOpenTaskMessage(blocking, nowMs, abandoned))
+  } catch {
+    // Fail open — a read failure must never wedge task creation.
+    return null
+  }
+}
+
 function allowCompoundSubjectWithBuffer(): SwizHookOutput {
   const note =
     "Compound subject allowed: session already has a healthy pending task buffer (≥2 pending tasks). " +
@@ -356,7 +516,20 @@ async function denyAutoSteerOrBlock(
   return preToolUseDeny(reason)
 }
 
-import { TASK_STALENESS_ENFORCEMENT_THRESHOLD as STALENESS_THRESHOLD } from "../src/tasks/task-governance-constants.ts"
+import {
+  OPEN_TASK_ABANDONED_CEILING_MS,
+  OPEN_TASK_GATE_RELEASE_ATTEMPTS,
+  OPEN_TASK_GATE_RELEASE_WINDOW,
+  OPEN_TASK_UPDATE_RECENCY_LIMIT_MS,
+  TASK_STALENESS_ENFORCEMENT_THRESHOLD as STALENESS_THRESHOLD,
+} from "../src/tasks/task-governance-constants.ts"
+
+export {
+  OPEN_TASK_ABANDONED_CEILING_MS,
+  OPEN_TASK_GATE_RELEASE_ATTEMPTS,
+  OPEN_TASK_GATE_RELEASE_WINDOW,
+  OPEN_TASK_UPDATE_RECENCY_LIMIT_MS,
+}
 
 const LARGE_CONTENT_LINE_THRESHOLD = 10
 const IN_PROGRESS_CAP = 4
@@ -1697,6 +1870,9 @@ export async function evaluateTaskCreatePath(
         "Replace it with concrete current-session work, start it now, or record a real blocker with evidence."
     )
   }
+  const staleOutcome = await checkOpenTaskUpdateRecency(input)
+  if (staleOutcome) return staleOutcome
+
   const duplicateOutcome = await checkTaskCreateSubjectGovernance(input, subject)
   if (duplicateOutcome) return duplicateOutcome
 
