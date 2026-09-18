@@ -353,6 +353,37 @@ describe("mergeTaskStoresByRecency", () => {
     )
   })
 
+  it("orders raw records written moments apart by statusChangedAt, not wall clock", () => {
+    // Records written outside the repository writer carry no `updatedAt`. Backfilling one
+    // from file mtime made two such copies tie on wall clock and pick a winner at random,
+    // which surfaced as an intermittent failure in cross-store discovery.
+    interface MergeFixture {
+      id: string
+      subject: string
+      status: string
+      statusChangedAt: string
+    }
+    const older: MergeFixture = {
+      id: "1",
+      subject: base.subject,
+      status: "in_progress",
+      statusChangedAt: "2026-09-18T10:00:00.000Z",
+    }
+    const newer: MergeFixture = {
+      id: "1",
+      subject: base.subject,
+      status: "cancelled",
+      statusChangedAt: "2026-09-18T10:00:01.000Z",
+    }
+
+    for (const groups of [
+      [[older], [newer]],
+      [[newer], [older]],
+    ]) {
+      expect(mergeTaskStoresByRecency(...groups)[0]?.status).toBe("cancelled")
+    }
+  })
+
   it("keeps one copy per id across stores", () => {
     const merged = mergeTaskStoresByRecency(
       [{ id: "1", ...base, updatedAt: "2026-09-18T10:00:00.000Z" }],

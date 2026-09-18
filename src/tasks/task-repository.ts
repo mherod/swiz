@@ -293,7 +293,12 @@ async function readTasksInDirectory(dir: string): Promise<Task[]> {
           const st = await stat(filePath)
           // Backfill timing fields for legacy tasks that predate explicit timestamps.
           if (!task.statusChangedAt) task.statusChangedAt = st.mtime.toISOString()
-          if (!task.updatedAt) task.updatedAt = st.mtime.toISOString()
+          // `updatedAt` is deliberately NOT backfilled from mtime. Doing so gave every
+          // legacy or externally written record a wall-clock stamp, and because the merge
+          // prefers `updatedAt`, two copies written moments apart tied on mtime and the
+          // winner became nondeterministic — losing the `statusChangedAt` ordering callers
+          // depend on. An absent `updatedAt` correctly falls back to `statusChangedAt`,
+          // which is itself mtime-backfilled above.
           backfillTaskTimingFields(task, st.mtimeMs)
           return task
         } catch {
