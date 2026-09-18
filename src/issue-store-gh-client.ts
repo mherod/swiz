@@ -23,6 +23,20 @@ import type {
 import { fetchGhJson } from "./issue-store.ts"
 import type { RestFallbackStats } from "./issue-store-rest-fallback.ts"
 
+/**
+ * Row budget for open issue/PR list fetches.
+ *
+ * The REST-primary path pages this out at 100 rows per request (GitHub's
+ * `per_page` ceiling); the gh CLI fallback paginates internally. A previous
+ * hardcoded 100 silently truncated the local store to the newest 100 open
+ * issues, so a repo with a larger backlog only ever synced its most recent
+ * slice.
+ */
+const OPEN_LIST_FETCH_LIMIT = "1000"
+
+/** Row budget for closed list fetches (minimal `number`-only stale-row purge). */
+const CLOSED_LIST_FETCH_LIMIT = "30"
+
 export class GhCliGitHubClient implements GitHubClient {
   constructor(
     private readonly restStats?: RestFallbackStats,
@@ -35,7 +49,7 @@ export class GhCliGitHubClient implements GitHubClient {
    * `syncUpstreamState`). All other record fields will be `undefined`.
    */
   async listIssues(cwd: string, state: "open" | "closed"): Promise<GitHubIssueRecord[] | null> {
-    const limit = state === "closed" ? "30" : "100"
+    const limit = state === "closed" ? CLOSED_LIST_FETCH_LIMIT : OPEN_LIST_FETCH_LIMIT
     const fields =
       state === "closed" ? "number" : "number,title,state,labels,author,assignees,updatedAt"
     return fetchGhJson<GitHubIssueRecord[]>(
@@ -55,7 +69,7 @@ export class GhCliGitHubClient implements GitHubClient {
     cwd: string,
     state: "open" | "closed"
   ): Promise<GitHubPullRequestRecord[] | null> {
-    const limit = state === "closed" ? "30" : "100"
+    const limit = state === "closed" ? CLOSED_LIST_FETCH_LIMIT : OPEN_LIST_FETCH_LIMIT
     const fields =
       state === "closed"
         ? "number"
