@@ -12,16 +12,24 @@ import type { SwizHook, SwizHookOutput } from "../src/SwizHook.ts"
 import { runSwizHookAsMain } from "../src/SwizHook.ts"
 import { toolHookInputSchema } from "../src/schemas.ts"
 import { isShellTool } from "../src/tool-matchers.ts"
-import { GIT_COMMIT_RE } from "../src/utils/shell-patterns.ts"
+import {
+  GIT_COMMIT_RE,
+  gitSubcommandRe,
+  stripQuotedShellStrings,
+} from "../src/utils/shell-patterns.ts"
 
-const REINDEX_COMMAND_RE = /\bgit\s+(?:-[^\s]+\s+)*(?:merge|rebase|pull|cherry-pick)\b/i
+const REINDEX_COMMAND_RE = gitSubcommandRe("(?:merge|rebase|pull|cherry-pick)\\b")
 
 export function isReindexTriggeringCommand(command: string): boolean {
   if (!command) return false
-  return GIT_COMMIT_RE.test(command) || REINDEX_COMMAND_RE.test(command)
+  const executable = stripQuotedShellStrings(command, { preserveQuotePairs: true })
+  return GIT_COMMIT_RE.test(executable) || REINDEX_COMMAND_RE.test(executable)
 }
 
-export async function evaluatePosttooluseJbcontextReindex(input: unknown): Promise<SwizHookOutput> {
+export async function evaluatePosttooluseJbcontextReindex(
+  input: unknown,
+  dependencies = { isJbcontextConfigured, triggerJbcontextIndex }
+): Promise<SwizHookOutput> {
   const parsed = toolHookInputSchema.safeParse(input)
   if (!parsed.success) return {}
 
@@ -33,10 +41,10 @@ export async function evaluatePosttooluseJbcontextReindex(input: unknown): Promi
   if (!isReindexTriggeringCommand(command)) return {}
 
   const targetDir = cwd ?? process.cwd()
-  const configured = await isJbcontextConfigured({ projectPath: targetDir })
+  const configured = await dependencies.isJbcontextConfigured({ projectPath: targetDir })
   if (!configured) return {}
 
-  await triggerJbcontextIndex({
+  await dependencies.triggerJbcontextIndex({
     projectPath: targetDir,
     silent: true,
   })
