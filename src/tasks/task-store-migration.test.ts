@@ -199,6 +199,11 @@ describe("flat store identity and ownership", () => {
     await writeTask(sessionStoreKey(project.key), { ...task, id: "7" }, cwd, root)
     expect(await readTasksAcrossStores(project.key, project.key, root)).toHaveLength(1)
     expect(await readTasksAcrossStores("another-session", project.key, root)).toHaveLength(1)
+    const projects = join(root, "transcripts")
+    expect(
+      (await findTaskAcrossSessions("7", cwd, root, projects)).map((match) => match.storeKey)
+    ).toEqual([project])
+    expect((await resolveTaskById("7", "missing-primary", cwd, root, projects)).task.id).toBe("7")
   })
 
   test.each([

@@ -351,7 +351,7 @@ export async function getSessions(
   }
 }
 
-/** Preserve namespaces while discovering project stores and native sessions. */
+/** Discover logical stores once, preferring the project address when both kinds alias it. */
 export async function getTaskStoreKeys(
   filterCwd?: string,
   tasksDir = createDefaultTaskStore().tasksDir,
@@ -368,11 +368,10 @@ export async function getTaskStoreKeys(
       )
     })
   )
+  const projectIds = new Set(existing.filter((key): key is string => key !== null))
   return [
-    ...existing
-      .filter((key): key is string => key !== null)
-      .map((key): TaskStoreKey => ({ kind: "project", key })),
-    ...sessions.map(sessionStoreKey),
+    ...[...projectIds].map((key): TaskStoreKey => ({ kind: "project", key })),
+    ...sessions.filter((id) => !projectIds.has(id)).map(sessionStoreKey),
   ]
 }
 
