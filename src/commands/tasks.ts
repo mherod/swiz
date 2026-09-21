@@ -643,9 +643,7 @@ async function resolveRepairDirectory(
   cwd: string
 ) {
   const storeKey = await resolveLegacyTaskStoreKey(sessionId, cwd, tasksDir)
-  return dryRun
-    ? readTaskStorePath(storeKey, tasksDir)
-    : prepareTaskStoreWrite(storeKey, tasksDir, cwd)
+  return dryRun ? readTaskStorePath(storeKey, tasksDir) : prepareTaskStoreWrite(storeKey, tasksDir)
 }
 
 async function runRepairTasks(rest: string[], cwd: string): Promise<void> {

@@ -53,7 +53,8 @@ describe("Task Audit Log Verification", () => {
     const filterCwd = join(home, "selected-project")
     const injectedRoot = join(home, "injected-tasks")
     const project = projectStoreKey(filterCwd)
-    const sibling = sessionStoreKey(project.key)
+    // Different logical names remain isolated; identical names deliberately alias in flat storage.
+    const sibling = sessionStoreKey(`native-${project.key}`)
     const original: Task = {
       id: "7",
       subject: "Target record",

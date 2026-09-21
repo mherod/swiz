@@ -34,9 +34,16 @@ export function taskStoreId(key: TaskStoreKey): string {
   return key.kind === "session" ? key.id : key.key
 }
 
-/** Native session paths stay interoperable with agents; project paths have a reserved parent. */
+/**
+ * Every store is a directory named for its logical id, directly inside the task store.
+ *
+ * Project keys and session ids with identical names intentionally alias the same records,
+ * metadata and audit log. Kind preserves caller intent, not physical isolation. Distinct names
+ * and roots remain separate. The former `.projects` namespace stays reserved so its migration
+ * leftovers are never mistaken for sessions.
+ */
 export function taskStoreDirName(key: TaskStoreKey): string {
-  return key.kind === "session" ? key.id : join(PROJECT_TASK_NAMESPACE, key.key)
+  return taskStoreId(key)
 }
 
 /**
@@ -54,14 +61,8 @@ export function isSafeSessionId(key: TaskStoreKey, tasksDir: string): boolean {
   const root = resolve(tasksDir)
   const dir = resolve(join(root, sessionId))
   const projects = join(root, PROJECT_TASK_NAMESPACE)
-  if (key.kind === "project") {
-    return (
-      !key.key.includes(sep) &&
-      key.key !== "." &&
-      key.key !== ".." &&
-      dir.startsWith(projects + sep)
-    )
-  }
+  if (key.kind === "project" && (key.key.includes(sep) || key.key === "." || key.key === ".."))
+    return false
   return dir.startsWith(root + sep) && dir !== projects && !dir.startsWith(projects + sep)
 }
 

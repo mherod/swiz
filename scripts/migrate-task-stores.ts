@@ -1,4 +1,4 @@
-/** Inspect legacy project task stores; --apply atomically moves metadata-confirmed directories. */
+/** Preview namespaced project stores; --apply folds them into the flat layout, preserving collisions. */
 import type { AgentSettingsId } from "../src/agent-paths.ts"
 import { createDefaultTaskStore, createTaskStoreForProvider } from "../src/task-roots.ts"
 import { migrateLegacyProjectStores } from "../src/tasks/task-store-layout.ts"

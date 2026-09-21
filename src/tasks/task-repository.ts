@@ -447,6 +447,9 @@ export async function readTaskRecordsAcrossStores(
     { storeKey: { kind: "project", key: projectKey }, queueScope: "project" },
   ]
   for (const id of await sessionCandidates(sessionId, Boolean(projectKey), tasksDir)) {
+    // Kind does not create a second store in the flat layout. A native writer
+    // may have last set storeKind=session on this same directory.
+    if (id === projectKey) continue
     const queueScope = await sessionBelongsToQueue(id, sessionId, projectKey, tasksDir)
     if (queueScope) keys.push({ storeKey: sessionStoreKey(id), queueScope })
   }
@@ -591,9 +594,9 @@ export async function refreshSessionMetaFromDisk(
 /**
  * Drop cached metadata for a store directory.
  *
- * The cache is keyed by `<tasksDir>\0<storeDirName>`, and a project store's
- * name is itself two path segments, so the entry cannot be recovered from
- * `basename(dir)`. Rejoining each key is exact for both layouts.
+ * The cache is keyed by `<tasksDir>\0<storeDirName>`. Rejoining each key
+ * matches the full root as well as the logical name, so invalidation cannot
+ * affect an identically named store in another provider root.
  */
 function invalidateSessionMetaForDir(dir: string): void {
   for (const key of [...sessionMetaCache.keys()]) {
@@ -708,7 +711,7 @@ export async function writeTaskBatch(
   tasksDir = createDefaultTaskStore().tasksDir
 ): Promise<TaskBatchWriteResult> {
   const sessionId = taskStoreDirName(storeKey)
-  const dir = await prepareTaskStoreWrite(storeKey, tasksDir, cwd)
+  const dir = await prepareTaskStoreWrite(storeKey, tasksDir)
   const auditPath = join(dir, AUDIT_LOG_FILENAME)
   const persistedOperationIds = await readAuditOperationIds(auditPath)
   let auditWrites = 0
@@ -750,7 +753,7 @@ export async function readSessionMeta(
   return readTaskStoreMeta(storeKey, tasksDir)
 }
 
-/** Typed metadata access must not reinterpret a native session as a project with the same ID. */
+/** Typed metadata access; identical logical names share the same flat store and cache entry. */
 export async function readTaskStoreMeta(
   storeKey: TaskStoreKey,
   tasksDir = createDefaultTaskStore().tasksDir,
@@ -765,8 +768,17 @@ export async function readTaskStoreMeta(
     const meta = JSON.parse(text) as SessionMeta
     sessionMetaCache.set(key, meta)
     return meta
-  } catch {
-    sessionMetaCache.set(key, null)
+  } catch (error) {
+    // Only a genuinely absent file is a durable "this store has no metadata".
+    // Every other failure — a conflicted store, a permission error, a torn
+    // write being parsed — is transient, and caching it for the process
+    // lifetime removes that store from every project queue the process builds
+    // afterwards: `sessionBelongsToQueue` reads a missing owner as "not mine".
+    // Nothing revalidates it, because the cache is only invalidated by writes
+    // from this same process. A daemon that was alive during a task-store
+    // outage therefore reported 9 tasks where a fresh process read 104, and the
+    // status line alternated between the two depending on which answered first.
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") sessionMetaCache.set(key, null)
     return null
   }
 }
@@ -778,7 +790,7 @@ export async function writeTask(
   tasksDir = createDefaultTaskStore().tasksDir
 ): Promise<void> {
   const sessionId = taskStoreDirName(storeKey)
-  const dir = await prepareTaskStoreWrite(storeKey, tasksDir, cwd)
+  const dir = await prepareTaskStoreWrite(storeKey, tasksDir)
   task.updatedAt = new Date().toISOString()
   await atomicWriteJson(join(dir, `${task.id}.json`), task)
   // Update lightweight index so status.ts can read openCount without scanning every task file.

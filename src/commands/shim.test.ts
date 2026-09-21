@@ -250,7 +250,9 @@ describe("shell shim runtime", () => {
             })
           ).toEqual({})
         }
-      })
+        // Spawns many real shells across two projects, so it exceeds the 5s
+        // default timeout whenever the suite runs under load.
+      }, 30_000)
     }
   }
 
