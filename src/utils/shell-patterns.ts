@@ -247,11 +247,18 @@ function _isForceToken(token: string): boolean {
   return token.slice(1).includes("f")
 }
 
+export interface ShellTokenSpan {
+  value: string
+  start: number
+  end: number
+}
+
 interface _TokState {
-  tokens: string[]
+  tokens: ShellTokenSpan[]
   token: string
   quote: '"' | "'" | null
   started: boolean
+  start: number
 }
 
 function _procQuoted(state: _TokState, ch: string): void {
@@ -267,7 +274,7 @@ function _procUnquoted(state: _TokState, ch: string, seg: string, i: number): nu
     state.token += seg[++i]!
   } else if (ch === " " || ch === "\t") {
     if (state.started || state.token) {
-      state.tokens.push(state.token)
+      state.tokens.push({ value: state.token, start: state.start, end: i })
       state.token = ""
       state.started = false
     }
@@ -277,15 +284,29 @@ function _procUnquoted(state: _TokState, ch: string, seg: string, i: number): nu
   return i
 }
 
-function _tokenize(segment: string): string[] {
-  const state: _TokState = { tokens: [], token: "", quote: null, started: false }
+/** Tokenize with source spans so consumers can mask data without rewriting shell syntax. */
+export function tokenizeShellSegmentWithSpans(segment: string): ShellTokenSpan[] {
+  const state: _TokState = {
+    tokens: [],
+    token: "",
+    quote: null,
+    started: false,
+    start: 0,
+  }
   for (let i = 0; i < segment.length; i++) {
     const ch = segment[i]!
+    if (!state.started && !state.token && ch !== " " && ch !== "\t") state.start = i
     if (state.quote) _procQuoted(state, ch)
     else i = _procUnquoted(state, ch, segment, i)
   }
-  if (state.started || state.token) state.tokens.push(state.token)
+  if (state.started || state.token) {
+    state.tokens.push({ value: state.token, start: state.start, end: segment.length })
+  }
   return state.tokens
+}
+
+function _tokenize(segment: string): string[] {
+  return tokenizeShellSegmentWithSpans(segment).map((token) => token.value)
 }
 
 /** Tokenize one shell segment while preserving quoted argument contents. */

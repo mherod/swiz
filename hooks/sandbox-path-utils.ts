@@ -6,9 +6,11 @@ import { getAllProviderSkillDirs } from "../src/provider-utils.ts"
 import { getAgentsSkillDir } from "../src/skill-utils.ts"
 import { isMarkdownPath } from "../src/tool-matchers.ts"
 import {
+  type ShellTokenSpan,
   splitShellSegments,
   stripQuotedShellStrings,
   tokenizeShellSegment,
+  tokenizeShellSegmentWithSpans,
 } from "../src/utils/shell-patterns.ts"
 
 const SAFE_READ_ONLY_COMMANDS = new Set([
@@ -51,6 +53,60 @@ const PROTECTED_TASK_STORAGE_RE =
 
 export function isProtectedTaskStoragePath(target: string): boolean {
   return PROTECTED_TASK_STORAGE_RE.test(target.normalize("NFKC").replace(/\\/g, "/"))
+}
+
+const ISSUE_TEXT_FLAGS = new Set(["--body", "-b", "--title", "-t"])
+/** Only unambiguous literal words qualify; expansions and redirects retain inspection. */
+const LITERAL_SHELL_WORD_RE = /^(?:'[^']*'|"[^"\\$`]*"|[^\s'"\\$`<>|&;(){}*?[\]~])+$/
+
+function isLiteralIssueSegment(segment: string, spans: ShellTokenSpan[]): boolean {
+  if (!spans.every(({ start, end }) => LITERAL_SHELL_WORD_RE.test(segment.slice(start, end)))) {
+    return false
+  }
+  const tokens = spans.map(({ value }) => value)
+  const start = commandTokenIndex(tokens)
+  return (
+    tokens[start] === "gh" &&
+    tokens[start + 1] === "issue" &&
+    ["create", "comment", "edit"].includes(tokens[start + 2] ?? "")
+  )
+}
+
+function maskLiteralIssueSegment(segment: string): string {
+  const spans = tokenizeShellSegmentWithSpans(segment)
+  if (!isLiteralIssueSegment(segment, spans)) return segment
+  const start = commandTokenIndex(spans.map(({ value }) => value))
+  const masked = segment.split("")
+  for (let index = start + 3; index < spans.length; index++) {
+    const token = spans[index]!
+    if (token.value === "--") break
+    const equals = token.value.indexOf("=")
+    const flag = equals < 0 ? token.value : token.value.slice(0, equals)
+    if (!ISSUE_TEXT_FLAGS.has(flag)) continue
+    const value = equals < 0 ? spans[++index] : token
+    if (!value) break
+    /** Retain a word placeholder, so neighboring syntax never joins together. */
+    masked.fill(" ", value.start, value.end)
+    masked[value.start] = "0"
+  }
+  return masked.join("")
+}
+
+/**
+ * Exclude literal issue prose from filesystem inspection in both shell guards.
+ * Preserve source syntax and inspect every unknown or executable word normally;
+ * body-file operands, other commands, substitutions and redirects are not exempt.
+ */
+export function maskLiteralIssueTextArguments(command: string): string {
+  let cursor = 0
+  const chunks: string[] = []
+  for (const segment of splitShellSegments(command)) {
+    const start = command.indexOf(segment, cursor)
+    chunks.push(command.slice(cursor, start), maskLiteralIssueSegment(segment))
+    cursor = start + segment.length
+  }
+  chunks.push(command.slice(cursor))
+  return chunks.join("")
 }
 
 /**

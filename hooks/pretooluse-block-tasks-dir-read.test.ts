@@ -15,11 +15,12 @@ async function runHook(filePath: string, toolName = "Read") {
   })
 }
 
-async function runBashHook(command: string) {
-  return await runHookInProcess("hooks/pretooluse-block-tasks-dir-bash.ts", {
+async function runBashHook(command: string, hook = "pretooluse-block-tasks-dir-bash") {
+  return await runHookInProcess(`hooks/${hook}.ts`, {
     tool_name: "Bash",
     tool_input: { command },
     session_id: "test-session",
+    cwd: tmpdir(),
   })
 }
 
@@ -147,9 +148,58 @@ describe("pretooluse-block-tasks-dir-bash", () => {
   })
 })
 
+describe.each([
+  "pretooluse-block-tasks-dir-bash",
+  "pretooluse-protect-sandbox",
+])("%s issue text (#943)", (hook) => {
+  test.each([
+    'gh issue create --title "Task failure" --body "Cannot read ~/.claude/tasks/session/1.json"',
+    "gh issue comment 943 --body 'Cannot read ~/.codex/tasks/session/1.json'",
+    "gh issue edit 943 --body='Cannot read ~/.gemini/tasks/session/1.json'",
+    "gh issue create -t 'Failure in ~/.cursor/tasks/' -b 'Details'",
+    "gh issue create --body '~/.claude/tasks/'",
+    "gh issue comment 943 --body 'Example: $(cat ~/.claude/tasks/1.json); `ls ~/.codex/tasks/`'",
+    "gh issue create --body 'First line\nSecond line: ~/.claude/tasks/1.json'",
+    "command gh issue comment 943 --body 'Cannot read ~/.claude/tasks/1.json'",
+    "gh issue create --title '🐛 Queue' --body '~/.claude/tasks/' && git status",
+    "gh issue comment 943 --body 'Task data'\n gh issue comment 943 --body '~/.claude/tasks/'",
+  ])("allows literal reporting text: %s", async (command) => {
+    const result = await runBashHook(command, hook)
+    expect(result.decision ?? "allow").toBe("allow")
+  })
+
+  test.each([
+    'cat "$HOME/.claude/tasks/1.json"',
+    'ls "$HOME/.codex/tasks/"',
+    'ls "$HOME/.claude/tasks"',
+    "gh issue create --body-file ~/.gemini/tasks/1.json",
+    "gh issue comment 943 --body-file=~/.cursor/tasks/1.json",
+    'gh issue create --body "$(cat ~/.claude/tasks/1.json)"',
+    'gh issue comment 943 --body "`cat ~/.claude/tasks/1.json`"',
+    "gh issue create --body 'Task failure' > ~/.claude/tasks/1.json",
+    "gh issue create --body 'Task failure' < ~/.claude/tasks/1.json",
+    "gh issue create --body 'Task failure'; cat ~/.claude/tasks/1.json",
+    "gh issue create --body 'Task failure' && cat ~/.claude/tasks/1.json",
+    "gh issue create --body 'Task failure' | tee ~/.claude/tasks/1.json",
+    "gh issue create --body 'Task failure' --body-file ~/.claude/tasks/1.json",
+    "gh issue create --title '🐛 Queue' --body '~/.claude/tasks/' ; cat ~/.claude/tasks/1.json",
+    "gh issue create --body 'Task failure' || cat ~/.claude/tasks/1.json",
+    "gh issue create --body 'Task failure'>~/.claude/tasks/1.json",
+    "gh issue create --body $(cat ~/.claude/tasks/1.json)",
+    "gh issue create --body 'Task failure' <(cat ~/.claude/tasks/1.json)",
+    "sh -c 'cat ~/.claude/tasks/1.json'",
+    "bun -e 'Bun.file(\"~/.claude/tasks/1.json\").text()'",
+    "unknown --body '~/.claude/tasks/1.json'",
+    "gh issue create -- --body '~/.claude/tasks/1.json'",
+  ])("denies protected operands or execution: %s", async (command) => {
+    const result = await runBashHook(command, hook)
+    expect(result.decision).toBe("deny")
+  })
+})
+
 describe("pretooluse-block-tasks-dir-bash accepted residual (issue #687)", () => {
-  // The Bash guard is a textual substring match by design: a shell command
-  // string is not a single resolvable path. The cases below name the shapes
+  // The Bash guard inspects visible paths: a shell command string is not a
+  // single resolvable path. The cases below name the indirection shapes
   // that evade it. They are intentionally ALLOWED — detection of out-of-band
   // writes is delegated to reader-side integrity checking (#688), not to
   // in-guard pattern matching. The first case is the literal-path control.

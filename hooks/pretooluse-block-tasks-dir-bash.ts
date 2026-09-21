@@ -10,8 +10,12 @@ import {
   type SwizToolHook,
 } from "../src/SwizHook.ts"
 import { shellHookInputSchema } from "../src/schemas.ts"
-import { stripQuotedShellStrings } from "../src/utils/shell-patterns.ts"
-import { isProtectedTaskStoragePath } from "./sandbox-path-utils.ts"
+import {
+  splitShellSegments,
+  stripQuotedShellStrings,
+  tokenizeShellSegment,
+} from "../src/utils/shell-patterns.ts"
+import { isProtectedTaskStoragePath, maskLiteralIssueTextArguments } from "./sandbox-path-utils.ts"
 
 const DENY_REASON =
   "Use `TaskList` to see all tasks or `TaskGet` with a task ID to inspect a specific one."
@@ -34,9 +38,14 @@ const pretooluseBlockTasksDirBash: SwizToolHook = {
     const command = parsed.data.tool_input?.command ?? ""
     if (!command) return preToolUseAllow("")
 
-    const stripped = stripQuotedShellStrings(command)
+    const inspected = maskLiteralIssueTextArguments(command)
+    const stripped = stripQuotedShellStrings(inspected)
 
-    if (isProtectedTaskStoragePath(command) || isProtectedTaskStoragePath(stripped)) {
+    if (
+      isProtectedTaskStoragePath(inspected) ||
+      isProtectedTaskStoragePath(stripped) ||
+      splitShellSegments(inspected).flatMap(tokenizeShellSegment).some(isProtectedTaskStoragePath)
+    ) {
       return preToolUseDeny(DENY_REASON)
     }
 

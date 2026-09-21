@@ -37,6 +37,7 @@ import {
   isProtectedTaskStoragePath,
   isSafeReadOnlyShellCommand,
   isSessionToolResultsPath,
+  maskLiteralIssueTextArguments,
   resolveCanonical,
   SAFE_READ_ONLY_INSPECTION_HINT,
 } from "./sandbox-path-utils.ts"
@@ -195,9 +196,10 @@ function collectShellPathCandidates(command: string, hasPathBuilder: boolean): S
 
 function candidateValues(rawToken: string): string[] {
   const token = rawToken.replace(/^[{}()]+|[;|&(){};]+$/g, "")
-  if (!token || token.startsWith("-")) return []
+  if (!token) return []
   const assignment = token.split("=")
-  return assignment.length === 2 ? [assignment[1]!] : [token]
+  if (assignment.length === 2) return [assignment[1]!]
+  return token.startsWith("-") ? [] : [token]
 }
 
 interface ShellPathContext {
@@ -280,6 +282,7 @@ async function shouldBlockShellCommand(
   allowCodexHome: boolean,
   sessionCwd: string
 ): Promise<BlockedShellPath | null> {
+  command = maskLiteralIssueTextArguments(command)
   const homeDir = getHomeDirWithFallback(homedir())
   if (!homeDir || !command) return null
   const canonicalHomeDir = await resolveCanonical(homeDir)
