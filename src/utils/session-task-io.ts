@@ -14,17 +14,16 @@ import { createDefaultTaskStore } from "../task-roots.ts"
 import {
   isIncompleteTaskStatus,
   isSafeSessionId,
-  mergeTaskStoresByRecency,
   projectStoreKey,
-  readTasks,
-  sessionDirPath,
+  readTaskRecordsAcrossStores,
   sessionStoreKey,
   type TaskStatus,
   type TaskStoreKey,
-  taskStoreDirName,
   writeAudit,
   writeTask,
 } from "../tasks/task-repository.ts"
+import { readTaskStorePath } from "../tasks/task-store-layout.ts"
+import { sessionDirPath, taskStoreId } from "../tasks/task-store-path.ts"
 import { messageFromUnknownError } from "./hook-json-helpers.ts"
 
 const defaultTaskExecutor: (args: string[]) => Promise<number> = async (args) => {
@@ -57,7 +56,11 @@ async function validateCreateTaskInputs(
     .update(JSON.stringify([sessionId, sentinelKey]))
     .digest("hex")
   const sentinel = join(sessionDirPath(storeKey, tasksDir), `.hook-dedup-${digest}.flag`)
-  if (await Bun.file(sentinel).exists()) return null
+  const existingSentinel = join(
+    await readTaskStorePath(storeKey, tasksDir),
+    `.hook-dedup-${digest}.flag`
+  )
+  if (await Bun.file(existingSentinel).exists()) return null
   return { sentinel }
 }
 
@@ -111,7 +114,7 @@ export async function createSessionTask(
 ): Promise<void> {
   const cwd = typeof cwdOrExecutor === "string" ? cwdOrExecutor : undefined
   const storeKey = cwd ? projectStoreKey(cwd) : sessionStoreKey(sessionId ?? "")
-  const directoryName = taskStoreDirName(storeKey)
+  const directoryName = taskStoreId(storeKey)
   const validated = await validateCreateTaskInputs(sessionId, sentinelKey, storeKey)
   if (!validated) return
   const { sentinel } = validated
@@ -129,7 +132,7 @@ export async function createSessionTask(
   // In-process path: direct disk write, no subprocess
   try {
     const { createTaskInProcess } = await import("../tasks/task-service.ts")
-    await createTaskInProcess({ sessionId: directoryName, subject, description, cwd })
+    await createTaskInProcess({ sessionId: directoryName, storeKey, subject, description, cwd })
     await writeSentinel(sentinel)
   } catch (err) {
     stderrLog(
@@ -157,17 +160,12 @@ export async function completeSessionTask(
   if (!isSafeSessionId(sessionStoreKey(sessionId), createDefaultTaskStore().tasksDir)) return false
 
   const cwd = options.cwd ?? process.cwd()
-  const storeKeys = [sessionStoreKey(sessionId), projectStoreKey(cwd)]
-  const groups = await Promise.all(
-    storeKeys.map(async (storeKey) =>
-      (await readTasks(taskStoreDirName(storeKey))).map((task) => ({ ...task, storeKey }))
-    )
-  )
-  const match = mergeTaskStoresByRecency(...groups).find(
-    (candidate) => candidate.subject === subject && isIncompleteTaskStatus(candidate.status)
+  const records = await readTaskRecordsAcrossStores(sessionId, projectStoreKey(cwd).key)
+  const match = records.find(
+    ({ task }) => task.subject === subject && isIncompleteTaskStatus(task.status)
   )
   if (!match) return false
-  const { storeKey, ...task } = match
+  const { storeKey, task } = match
 
   const { applyStatusTransition } = await import("../tasks/task-service.ts")
 

@@ -24,6 +24,7 @@ import {
   hasSkillUsedInProjectRecently,
   skillAdvice,
 } from "../src/skill-utils.ts"
+import { readHookTasks } from "../src/tasks/task-recovery.ts"
 import { isCodeChangeTool, isShellTool } from "../src/tool-matchers.ts"
 import { linesAfterLatestUserMessage } from "../src/transcript-utils.ts"
 import {
@@ -31,7 +32,6 @@ import {
   branchReferencesAlign,
   normalizeBranchReference,
 } from "../src/utils/branch-reference.ts"
-import { fetchSessionTasksFromDaemon } from "../src/utils/daemon-git-state.ts"
 import { resolveSessionLines } from "../src/utils/transcript.ts"
 import {
   getRepositoryWorkflowHookContext,
@@ -67,12 +67,7 @@ async function getActiveTasks(
   cwd: string,
   home?: string
 ): Promise<Array<{ subject: string; status: string }>> {
-  const daemonTasks = await fetchSessionTasksFromDaemon(sessionId, cwd)
-  // `null` means the daemon does not know the session; an empty array is a
-  // valid authoritative result and must not trigger a disk fallback.
-  if (daemonTasks !== null) return daemonTasks
-  const { readSessionTasks } = await import("../src/tasks/task-recovery.ts")
-  return await readSessionTasks(sessionId, home)
+  return await readHookTasks({ session_id: sessionId, cwd }, home)
 }
 
 async function findActiveTaskGate(

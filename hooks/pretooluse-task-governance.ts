@@ -62,7 +62,10 @@ import {
   needsReconciliation,
   overlayEventState,
 } from "../src/tasks/task-event-state.ts"
-import { isWithinUserMessageGrace } from "../src/tasks/task-governance-grace.ts"
+import {
+  isWithinUserMessageGrace,
+  USER_MESSAGE_GRACE_MS,
+} from "../src/tasks/task-governance-grace.ts"
 import {
   buildTaskGovernanceMessage,
   buildTaskGovernancePreview,
@@ -76,12 +79,21 @@ import {
 import { replaceTaskGovernanceSynonyms } from "../src/tasks/task-governance-rephrasing.ts"
 import { fetchIssueHints } from "../src/tasks/task-issue-hints.ts"
 import {
+  projectQueueTasks,
+  TASK_QUEUE_RECOVERY,
+  taskOwnershipSuffix,
+} from "../src/tasks/task-queue-view.ts"
+import {
   applyCacheTaskUpdate,
   formatTaskSubjectsForDisplay,
   isIncompleteTaskStatus,
   isTerminalTaskStatus,
 } from "../src/tasks/task-recovery.ts"
-import { readTasksAcrossStores } from "../src/tasks/task-repository.ts"
+import {
+  parseTaskId,
+  readTaskRecordsAcrossStores,
+  taskRecordReference,
+} from "../src/tasks/task-repository.ts"
 // validateLastTaskStanding removed — handleTaskCompletion now checks full governance thresholds
 import {
   CANONICAL_TASKLIST_SYNC_MAX_AGE_MS,
@@ -98,7 +110,11 @@ import {
   taskIdIsInDuplicateGroups,
 } from "../src/tasks/task-subject-duplicates.ts"
 import { detect, formatMessage } from "../src/tasks/task-subject-validation.ts"
-import { getTaskCurrentDurationMs } from "../src/tasks/task-timing.ts"
+import { getTaskCurrentDurationMs, getTaskLastUpdatedMs } from "../src/tasks/task-timing.ts"
+import {
+  checkInProgressLimit,
+  MAX_IN_PROGRESS_TASKS_PER_PROJECT,
+} from "../src/tasks/task-wip-limit.ts"
 import { SWIZ_INCOMING_ROOT } from "../src/temp-paths.ts"
 import {
   isAnyProviderTaskCreateTool,
@@ -112,7 +128,11 @@ import {
   isTaskListTool,
   isWriteTool,
 } from "../src/tool-matchers.ts"
-import { getCurrentSessionTaskToolStats } from "../src/transcript-summary.ts"
+import {
+  collectToolCallOutcomes,
+  getCurrentSessionTaskToolStats,
+  type ToolCallOutcome,
+} from "../src/transcript-summary.ts"
 import { scheduleAutoSteer } from "../src/utils/auto-steer-helpers.ts"
 import { hasFileInTree } from "../src/utils/file-utils.ts"
 import { messageFromUnknownError } from "../src/utils/hook-json-helpers.ts"
@@ -120,6 +140,7 @@ import {
   readNativeTaskToolAvailability,
   shouldEnforceTaskGovernance,
 } from "../src/utils/inline-hook-helpers.ts"
+import { resolveSessionLines } from "../src/utils/transcript.ts"
 
 // ─── Shared governance infrastructure ──────────────────────────────────────
 
@@ -176,6 +197,14 @@ function taskStoreForInput(input: Record<string, any>) {
   return home ? createTaskStoreForHookPayload(input, home) : createTaskStoreForHookPayload(input)
 }
 
+/** Distinguish unavailable bookkeeping from validation or unrelated hook failures. */
+class TaskStateReadError extends Error {
+  constructor(cause: unknown) {
+    super(messageFromUnknownError(cause), { cause })
+    this.name = "TaskStateReadError"
+  }
+}
+
 /**
  * Governance-facing task read.
  *
@@ -185,7 +214,23 @@ function taskStoreForInput(input: Record<string, any>) {
 async function readTasksForInput(input: Record<string, any>, sessionId: string) {
   const cwd = typeof input.cwd === "string" ? input.cwd : ""
   const projectKey = cwd ? projectKeyFromCwd(cwd) : undefined
-  return await readTasksAcrossStores(sessionId, projectKey, taskStoreForInput(input).tasksDir)
+  try {
+    const records = await readTaskRecordsAcrossStores(
+      sessionId,
+      projectKey,
+      taskStoreForInput(input).tasksDir
+    )
+    return projectQueueTasks(records).map((task, index) => {
+      const record = records[index]!
+      if (parseTaskId(record.task.id).prefix !== null) return task
+      // Native #1 can only name this session's #1. Keep other owners visible
+      // for project counts without treating them as native mutation targets.
+      const current = record.storeKey.kind === "session" && record.storeKey.id === sessionId
+      return { ...task, id: current ? record.task.id : taskRecordReference(record) }
+    })
+  } catch (cause) {
+    throw new TaskStateReadError(cause)
+  }
 }
 
 function hasTaskGovernanceSurface(input: Record<string, any>, _toolName?: string): boolean {
@@ -332,6 +377,184 @@ async function sessionHasHealthyPendingTaskBuffer(input: Record<string, any>): P
   }
 }
 
+interface OpenTaskRecency {
+  id: string
+  status: string
+  subject: string
+  updatedAt?: string | null
+  statusChangedAt?: string | null
+  startedAt?: number | null
+  ownership?: string
+}
+
+export interface StaleOpenTaskPartition<T> {
+  /** Stale, but recent enough to still be plausibly in flight — these block. */
+  blocking: T[]
+  /** Past the abandoned ceiling — reported for cleanup, never blocking. */
+  abandoned: T[]
+}
+
+/**
+ * Split open tasks by how long they have gone without an update.
+ *
+ * A record with no usable timestamp counts as fresh, so a malformed or legacy row
+ * can never wedge task creation. A record past the abandoned ceiling also stops
+ * blocking: the project store is shared, so an abandoned or foreign row would
+ * otherwise deny every later session's first TaskCreate with no reachable remedy.
+ */
+export function partitionStaleOpenTasks<T extends OpenTaskRecency>(
+  allTasks: readonly T[],
+  nowMs: number = Date.now(),
+  limitMs: number = OPEN_TASK_UPDATE_RECENCY_LIMIT_MS,
+  ceilingMs: number = OPEN_TASK_ABANDONED_CEILING_MS
+): StaleOpenTaskPartition<T> {
+  const blocking: T[] = []
+  const abandoned: T[] = []
+  for (const task of allTasks) {
+    if (!isIncompleteTaskStatus(task.status)) continue
+    const lastUpdatedMs = getTaskLastUpdatedMs(task)
+    if (lastUpdatedMs === null) continue
+    const ageMs = nowMs - lastUpdatedMs
+    if (ageMs > ceilingMs) abandoned.push(task)
+    else if (ageMs > limitMs) blocking.push(task)
+  }
+  return { blocking, abandoned }
+}
+
+/** Open tasks stale enough to block task creation. */
+export function findStaleOpenTasks<T extends OpenTaskRecency>(
+  allTasks: readonly T[],
+  nowMs: number = Date.now(),
+  limitMs: number = OPEN_TASK_UPDATE_RECENCY_LIMIT_MS,
+  ceilingMs: number = OPEN_TASK_ABANDONED_CEILING_MS
+): T[] {
+  return partitionStaleOpenTasks(allTasks, nowMs, limitMs, ceilingMs).blocking
+}
+
+/**
+ * Distinctive phrase from this gate's deny message, used to attribute a denial to
+ * this gate rather than to any other governance block. `staleGateMessageIsDetectable`
+ * in the dispatch tests asserts the builder and this pattern stay in step, so the
+ * two cannot drift apart silently.
+ */
+export const STALE_GATE_DENY_RE = /not been updated in over \d+ minutes/i
+
+/**
+ * Denials of *this* gate in the trailing tool window.
+ *
+ * Counting attempts instead treats a planning burst — several `TaskCreate` calls in
+ * a row, all of which succeeded — as evidence of a wedge, and releases the gate on
+ * the first genuinely stale task. Only a call whose recorded result was an error
+ * carrying this gate's message proves the agent was actually blocked and retried.
+ */
+export function countRecentStaleGateDenials(
+  outcomes: readonly ToolCallOutcome[],
+  windowSize: number = OPEN_TASK_GATE_RELEASE_WINDOW
+): number {
+  return outcomes
+    .slice(-Math.max(0, windowSize))
+    .filter(
+      (outcome) => isTaskCreateTool(outcome.name) && STALE_GATE_DENY_RE.test(outcome.resultText)
+    ).length
+}
+
+/** Transcript-derived denial count; 0 when no transcript is reachable, so the gate keeps enforcing. */
+async function readStaleGateDenialCount(input: Record<string, any>): Promise<number> {
+  const transcriptPath = typeof input?.transcript_path === "string" ? input.transcript_path : ""
+  const lines = await resolveSessionLines(input, transcriptPath)
+  if (!lines || lines.length === 0) return 0
+  return countRecentStaleGateDenials(collectToolCallOutcomes(lines))
+}
+
+function formatTaskAges(tasks: readonly OpenTaskRecency[], nowMs: number): string {
+  return tasks
+    .map(
+      (task) =>
+        `  • #${task.id} (${task.status}): ${task.subject}${taskOwnershipSuffix(task)} — last updated ` +
+        `${formatDuration(Math.max(0, nowMs - (getTaskLastUpdatedMs(task) ?? nowMs)))} ago`
+    )
+    .join("\n")
+}
+
+function formatAbandonedNote(abandoned: readonly OpenTaskRecency[], nowMs: number): string {
+  if (abandoned.length === 0) return ""
+  const noun = abandoned.length === 1 ? "task is" : "tasks are"
+  return (
+    `\n\n${abandoned.length} open ${noun} past the ${Math.round(OPEN_TASK_ABANDONED_CEILING_MS / 60_000)}-minute ` +
+    `abandoned ceiling and no longer blocking, but still in the queue:\n${formatTaskAges(abandoned, nowMs)}\n` +
+    TASK_QUEUE_RECOVERY
+  )
+}
+
+export function buildStaleOpenTaskMessage(
+  staleTasks: readonly OpenTaskRecency[],
+  nowMs: number = Date.now(),
+  abandoned: readonly OpenTaskRecency[] = []
+): string {
+  const noun = staleTasks.length === 1 ? "task has" : "tasks have"
+  return (
+    `${staleTasks.length} open ${noun} not been updated in over ` +
+    `${Math.round(OPEN_TASK_UPDATE_RECENCY_LIMIT_MS / 60_000)} minutes:\n${formatTaskAges(staleTasks, nowMs)}\n\n` +
+    "Bring owned work current with TaskUpdate before creating another task — record progress in " +
+    "`description`. " +
+    TASK_QUEUE_RECOVERY +
+    " " +
+    "Then retry this TaskCreate." +
+    formatAbandonedNote(abandoned, nowMs) +
+    "\n\nIf this gate is wrong about the work in hand, say so and it stands down for " +
+    `${Math.round(USER_MESSAGE_GRACE_MS / 60_000)} minutes.`
+  )
+}
+
+export function buildStaleGateReleaseMessage(
+  staleTasks: readonly OpenTaskRecency[],
+  denials: number,
+  nowMs: number = Date.now()
+): string {
+  return (
+    `Task-recency gate released after blocking ${denials} creation attempts — it was denying without ` +
+    `producing progress, so it is standing down for this call rather than wedging the workflow.\n` +
+    `${staleTasks.length} open task(s) are still stale:\n${formatTaskAges(staleTasks, nowMs)}\n\n` +
+    "Reconcile them with TaskUpdate — if a plain update is not clearing this, the queue and the " +
+    "gate disagree about what is open, which is worth reporting."
+  )
+}
+
+/**
+ * State gate: block new task creation while the existing open queue has gone
+ * stale. Stands down during a skill-owned workflow, like the other state gates,
+ * and releases after repeated attempts so it can never permanently wedge a
+ * workflow whose remedy it cannot see.
+ */
+async function checkOpenTaskUpdateRecency(
+  input: Record<string, any>
+): Promise<SwizHookOutput | null> {
+  try {
+    const sessionId = resolveSafeSessionId(input?.session_id as string | undefined)
+    if (!sessionId) return null
+    if (await skillOwnsWorkflow(input, input?.cwd as string | undefined)) return null
+
+    const allTasks = overlayEventState(await readTasksForInput(input, sessionId), sessionId)
+    const nowMs = Date.now()
+    const { blocking, abandoned } = partitionStaleOpenTasks(
+      allTasks as unknown as OpenTaskRecency[],
+      nowMs
+    )
+    if (blocking.length === 0) return null
+
+    const denials = await readStaleGateDenialCount(input)
+    if (denials >= OPEN_TASK_GATE_RELEASE_ATTEMPTS) {
+      const note = buildStaleGateReleaseMessage(blocking, denials, nowMs)
+      return preToolUseAllowWithContext(note, note)
+    }
+
+    return preToolUseDeny(buildStaleOpenTaskMessage(blocking, nowMs, abandoned))
+  } catch {
+    // Fail open — a read failure must never wedge task creation.
+    return null
+  }
+}
+
 function allowCompoundSubjectWithBuffer(): SwizHookOutput {
   const note =
     "Compound subject allowed: session already has a healthy pending task buffer (≥2 pending tasks). " +
@@ -356,10 +579,23 @@ async function denyAutoSteerOrBlock(
   return preToolUseDeny(reason)
 }
 
-import { TASK_STALENESS_ENFORCEMENT_THRESHOLD as STALENESS_THRESHOLD } from "../src/tasks/task-governance-constants.ts"
+import {
+  OPEN_TASK_ABANDONED_CEILING_MS,
+  OPEN_TASK_GATE_RELEASE_ATTEMPTS,
+  OPEN_TASK_GATE_RELEASE_WINDOW,
+  OPEN_TASK_UPDATE_RECENCY_LIMIT_MS,
+  TASK_STALENESS_ENFORCEMENT_THRESHOLD as STALENESS_THRESHOLD,
+} from "../src/tasks/task-governance-constants.ts"
+
+export {
+  OPEN_TASK_ABANDONED_CEILING_MS,
+  OPEN_TASK_GATE_RELEASE_ATTEMPTS,
+  OPEN_TASK_GATE_RELEASE_WINDOW,
+  OPEN_TASK_UPDATE_RECENCY_LIMIT_MS,
+}
 
 const LARGE_CONTENT_LINE_THRESHOLD = 10
-const IN_PROGRESS_CAP = 4
+const IN_PROGRESS_CAP = MAX_IN_PROGRESS_TASKS_PER_PROJECT
 function canStartInProgress(inProgressCount: number, cap = IN_PROGRESS_CAP): boolean {
   return inProgressCount < cap
 }
@@ -440,7 +676,7 @@ function evaluateTaskFileAccess(
 }
 
 function buildIncompleteTaskSummary(
-  allTasks: Array<{ id: string; status: string; subject: string }>
+  allTasks: Array<{ id: string; status: string; subject: string; ownership?: string }>
 ): {
   incompleteTasks: Array<{ id: string; status: string; subject: string }>
   inProgressTasks: Array<{ id: string; status: string; subject: string }>
@@ -533,11 +769,13 @@ async function checkInProgressCap(
   toolName: string,
   sessionId: string,
   cwd: string | undefined,
-  allTasks: Array<{ id: string; status: string; subject: string }>
+  allTasks: Array<{ id: string; status: string; subject: string; ownership?: string }>
 ): Promise<SwizHookOutput | undefined> {
   const inProgressTasks = allTasks.filter((t) => t.status === "in_progress")
   if (canStartInProgress(inProgressTasks.length)) return undefined
-  const taskList = inProgressTasks.map((t) => `  • #${t.id}: ${t.subject}`).join("\n")
+  const taskList =
+    inProgressTasks.map((t) => `  • #${t.id}: ${t.subject}${taskOwnershipSuffix(t)}`).join("\n") +
+    `\n${TASK_QUEUE_RECOVERY}`
   return await denyAutoSteerOrBlock(
     sessionId,
     cwd,
@@ -1112,10 +1350,30 @@ async function runRequireTasksChecks(parsed: ParsedInput): Promise<SwizHookOutpu
   })
 }
 
-function unexpectedHookFailureOutput(err: unknown): SwizHookOutput {
+function unexpectedHookFailureOutput(
+  err: unknown,
+  hookName: string,
+  input?: Record<string, any>
+): SwizHookOutput {
   const message = messageFromUnknownError(err)
+  if (err instanceof TaskStateReadError) {
+    const toolName = String(input?.tool_name ?? "")
+    const mutatesTasks =
+      isAnyProviderTaskCreateTool(toolName) || isAnyProviderTaskUpdateTool(toolName)
+    const reason =
+      `Task state unavailable (${hookName}): ${message}\n\n` +
+      (mutatesTasks
+        ? "This task mutation is blocked because the shared task state cannot be validated. "
+        : "Continuing this tool call with task-state checks unavailable. ") +
+      "Read, SendMessage and ordinary shell/file work remain available. " +
+      "For diagnosis, run `cat hooks/pretooluse-task-governance.ts` from the Swiz checkout. " +
+      "Coordinate shared-store recovery with its owner; do not delete or merge task directories to bypass this error."
+    return mutatesTasks
+      ? preToolUseDeny(reason)
+      : preToolUseAllowWithContext(reason, reason, { rephrase: false })
+  }
   return preToolUseDeny(
-    `STOP. \u26a0\ufe0f pretooluse-require-tasks encountered an unexpected error and is failing closed.\n\n` +
+    `STOP. \u26a0\ufe0f ${hookName} encountered an unexpected error and is failing closed.\n\n` +
       `Error: ${message}\n\n` +
       formatActionPlan(
         [
@@ -1169,13 +1427,13 @@ export const requireTasksHook: SwizToolHook = {
     try {
       return await evaluatePretooluseRequireTasks(input as Record<string, any>)
     } catch (err: unknown) {
-      return unexpectedHookFailureOutput(err)
+      return unexpectedHookFailureOutput(err, "pretooluse-require-tasks", input)
     }
   },
 }
 
 export const requireTasksRunAsMainOptions: RunSwizHookAsMainOptions = {
-  onStdinJsonError: unexpectedHookFailureOutput,
+  onStdinJsonError: (err) => unexpectedHookFailureOutput(err, "pretooluse-require-tasks"),
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1411,34 +1669,10 @@ async function checkInProgressTransitionCap(
   input: Record<string, any>
 ): Promise<SwizHookOutput | null> {
   const allTasks = await readTasksForInput(input, sessionId)
-  const inProgressCount = allTasks.filter((t) => t.status === "in_progress").length
   const currentTask = allTasks.find((t) => t.id === taskId)
-
-  // Allow transition to in_progress if:
-  // 1. The task is already in_progress (no-op), or
-  // 2. There is room under the configured in-progress cap.
-  if (!currentTask || currentTask.status === "in_progress") {
-    return null
-  }
-  if (canStartInProgress(inProgressCount)) {
-    return null
-  }
-
-  // Block: in-progress count is at or above the configured cap.
-  const inProgressTasks = allTasks
-    .filter((t) => t.status === "in_progress")
-    .map((t) => `  • #${t.id}: ${t.subject}`)
-    .join("\n")
-
-  return preToolUseDeny(
-    buildTaskGovernanceMessage({
-      kind: "in-progress-transition-cap",
-      taskId,
-      inProgressCount,
-      cap: getInProgressCap(),
-      taskList: inProgressTasks,
-    })
-  )
+  if (!currentTask) return null
+  const error = checkInProgressLimit(taskId, currentTask.status, "in_progress", allTasks)
+  return error ? preToolUseDeny(error) : null
 }
 
 type NativeTaskUpdateResult = SwizHookOutput | "early_exit" | "continue"
@@ -1697,6 +1931,9 @@ export async function evaluateTaskCreatePath(
         "Replace it with concrete current-session work, start it now, or record a real blocker with evidence."
     )
   }
+  const staleOutcome = await checkOpenTaskUpdateRecency(input)
+  if (staleOutcome) return staleOutcome
+
   const duplicateOutcome = await checkTaskCreateSubjectGovernance(input, subject)
   if (duplicateOutcome) return duplicateOutcome
 
@@ -1930,6 +2167,7 @@ async function buildTraceContext(rawInput: unknown): Promise<string> {
     const sessionId = resolveSafeSessionId(input?.session_id as string | undefined)
     return await formatTaskTraceContext(input, await readTaskCountsForTrace(sessionId, input))
   } catch (err) {
+    if (err instanceof TaskStateReadError) throw err
     return `Task state unavailable: ${(err as Error)?.message ?? err}`
   }
 }
@@ -1984,7 +2222,7 @@ const pretooluseTaskGovernance: SwizToolHook = {
         }),
       }
     } catch (err: unknown) {
-      return unexpectedHookFailureOutput(err)
+      return unexpectedHookFailureOutput(err, "pretooluse-task-governance", input)
     }
   },
 }

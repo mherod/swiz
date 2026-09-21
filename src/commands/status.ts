@@ -8,7 +8,12 @@ import { getHomeDir } from "../home.ts"
 import { readStateData, STATE_TRANSITIONS, TERMINAL_STATES } from "../settings.ts"
 import { HOOKS_DIR, isSwizCommand } from "../swiz-hook-commands.ts"
 import { createDefaultTaskStore } from "../task-roots.ts"
-import { isIncompleteTaskStatus } from "../tasks/task-repository.ts"
+import {
+  isIncompleteTaskStatus,
+  mergeTaskStoresByRecency,
+  readTasks,
+  readTasksAcrossStores,
+} from "../tasks/task-repository.ts"
 import type { Command } from "../types.ts"
 import { type ExecutionStatsSummary, readExecutionStats } from "../utils/execution-stats.ts"
 
@@ -272,38 +277,6 @@ async function getLiveCiStatus(
   }
 }
 
-type ReadSessionMeta = typeof import("../tasks/task-repository.ts").readSessionMeta
-
-async function countOpenTasksForSession(
-  sessionId: string,
-  tasksRoot: string,
-  readSessionMeta: ReadSessionMeta
-): Promise<number> {
-  // Fast path: read the lightweight .session-meta.json index written by writeTask.
-  const meta = await readSessionMeta(sessionId, tasksRoot)
-  if (meta !== null) return meta.openCount
-  // Fallback: index missing — read every task file (pre-index sessions or corruption).
-  const sessionDir = join(tasksRoot, sessionId)
-  let files: string[]
-  try {
-    files = await readdir(sessionDir)
-  } catch {
-    return 0
-  }
-  const taskFiles = files.filter((file) => file.endsWith(".json") && !file.startsWith("."))
-  const counts = await Promise.all(
-    taskFiles.map(async (file): Promise<number> => {
-      try {
-        const task = (await Bun.file(join(sessionDir, file)).json()) as { status?: string }
-        return isIncompleteTaskStatus(task.status ?? "") ? 1 : 0
-      } catch {
-        return 0
-      }
-    })
-  )
-  return counts.reduce((sum, count) => sum + count, 0)
-}
-
 async function collectIndexedSessionIds(projectsRoot: string, key: string): Promise<Set<string>> {
   const sessionIdsPath = join(projectsRoot, key)
   const ids = new Set<string>()
@@ -315,46 +288,18 @@ async function collectIndexedSessionIds(projectsRoot: string, key: string): Prom
   return ids
 }
 
-async function collectSessionIdsByMetaCwd(
-  cwd: string,
-  tasksRoot: string,
-  readSessionMeta: ReadSessionMeta
-): Promise<Set<string>> {
-  let taskDirEntries: string[]
-  try {
-    taskDirEntries = await readdir(tasksRoot)
-  } catch {
-    return new Set()
-  }
-  const matches = await Promise.all(
-    taskDirEntries.map(async (sessionId) => {
-      const meta = await readSessionMeta(sessionId, tasksRoot)
-      return meta?.cwd === cwd ? sessionId : null
-    })
-  )
-  return new Set(matches.filter((sessionId): sessionId is string => sessionId !== null))
-}
-
 async function getOpenTaskCount(cwd: string): Promise<number | null> {
   try {
-    const home = getHomeDir()
-    const { tasksDir: tasksRoot, projectsDir: projectsRoot } = createDefaultTaskStore(home)
+    const store = createDefaultTaskStore(getHomeDir())
     const { projectKeyFromCwd } = await import("../project-key.ts")
     const key = projectKeyFromCwd(cwd)
-
-    const indexedSessionIds = await collectIndexedSessionIds(projectsRoot, key)
-
-    const { readSessionMeta: readMeta } = await import("../tasks/task-repository.ts")
-    const sessionIds =
-      indexedSessionIds.size > 0
-        ? indexedSessionIds
-        : await collectSessionIdsByMetaCwd(cwd, tasksRoot, readMeta)
-
-    if (sessionIds.size === 0) return null
-    const counts = await Promise.all(
-      [...sessionIds].map((sessionId) => countOpenTasksForSession(sessionId, tasksRoot, readMeta))
-    )
-    return counts.reduce((sum, count) => sum + count, 0)
+    const indexed = await collectIndexedSessionIds(store.projectsDir, key)
+    const groups = await Promise.all([
+      readTasksAcrossStores("", key, store.tasksDir),
+      ...[...indexed].map((id) => readTasks(id, store.tasksDir)),
+    ])
+    const tasks = mergeTaskStoresByRecency(...groups)
+    return tasks.length ? tasks.filter((task) => isIncompleteTaskStatus(task.status)).length : null
   } catch {
     return null
   }

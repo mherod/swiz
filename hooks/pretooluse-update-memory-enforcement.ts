@@ -26,7 +26,7 @@ import {
   resolveSkillFilePathForHookPayload,
   resolveSkillRecencyOptions,
 } from "../src/skill-utils.ts"
-import { readSessionTasks } from "../src/tasks/task-recovery.ts"
+import { readHookTasks } from "../src/tasks/task-recovery.ts"
 import {
   extractFileEditTargetPaths,
   isEditTool,
@@ -112,11 +112,11 @@ async function isMemoryRecentlyUpdated(cwd: string): Promise<boolean> {
  * "in_progress". When true, enforcement is deferred — the agent is actively
  * working on a task and should not be interrupted by memory-update detours.
  */
-async function hasActiveTask(sessionId: string | undefined): Promise<boolean> {
-  if (!sessionId) return false
+async function hasActiveTask(input: ToolHookInput): Promise<boolean> {
+  if (!input.session_id) return false
   const home = getHomeDirOrNull()
   if (!home) return false
-  const tasks = await readSessionTasks(sessionId, home)
+  const tasks = await readHookTasks(input, home)
   return tasks.some((task) => task.status === "in_progress")
 }
 
@@ -197,11 +197,11 @@ async function shouldSkipAfterTrigger(
   lines: string[],
   triggerIndex: number,
   cwd: string,
-  sessionId: string | undefined
+  input: ToolHookInput
 ): Promise<boolean> {
   if (wasCompactedAfterTrigger(lines, triggerIndex)) return true
   if (await isMemoryRecentlyUpdated(cwd)) return true
-  return await hasActiveTask(sessionId)
+  return await hasActiveTask(input)
 }
 
 function isCurrentToolSatisfying(
@@ -274,7 +274,7 @@ async function evaluatePendingMemoryReminder(
   toolInput: Record<string, any>
 ): Promise<SwizHookOutput> {
   const { lines, lastTriggerIndex } = pendingReminder
-  if (await shouldSkipAfterTrigger(lines, lastTriggerIndex, cwd, input.session_id)) return {}
+  if (await shouldSkipAfterTrigger(lines, lastTriggerIndex, cwd, input)) return {}
   const location = await resolveProjectMemory(cwd)
   if (!location) return {}
 

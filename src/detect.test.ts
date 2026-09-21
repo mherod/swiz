@@ -1,6 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { AGENTS } from "./agents.ts"
-import { detectCurrentAgent, isCurrentAgent, isRunningInAgent } from "./detect.ts"
+import {
+  detectCurrentAgent,
+  detectJbcontext,
+  isCurrentAgent,
+  isJbcontextAvailable,
+  isJbcontextConfigured,
+  isRunningInAgent,
+} from "./detect.ts"
 
 describe("detect.ts", () => {
   const originalEnv = { ...process.env }
@@ -231,6 +238,27 @@ describe("detect.ts", () => {
       const result = isRunningInAgent()
       expect(typeof result).toBe("boolean")
       expect(result).toBe(true)
+    })
+  })
+
+  describe("jbcontext re-exports", () => {
+    it("exports isJbcontextAvailable as a callable function", () => {
+      expect(typeof isJbcontextAvailable).toBe("function")
+    })
+
+    it("exports isJbcontextConfigured as a callable function", () => {
+      expect(typeof isJbcontextConfigured).toBe("function")
+    })
+
+    it("exports detectJbcontext as a callable function", () => {
+      expect(typeof detectJbcontext).toBe("function")
+    })
+
+    it("detects jbcontext via re-exported functions", async () => {
+      const available = await isJbcontextAvailable({ binaryPath: "/nonexistent/path" })
+      expect(available).toBe(false)
+      const configured = await isJbcontextConfigured({ binaryPath: "/nonexistent/path" })
+      expect(configured).toBe(false)
     })
   })
 })

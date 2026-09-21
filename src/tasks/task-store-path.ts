@@ -27,9 +27,16 @@ export function projectStoreKey(cwd: string): Extract<TaskStoreKey, { kind: "pro
   return { kind: "project", key: projectKeyFromCwd(cwd) }
 }
 
-/** Preserve the flat layout until all readers have migrated (#831). */
-export function taskStoreDirName(key: TaskStoreKey): string {
+export const PROJECT_TASK_NAMESPACE = ".projects"
+
+/** Logical identity, also used by persisted task ID prefixes. Never include the namespace. */
+export function taskStoreId(key: TaskStoreKey): string {
   return key.kind === "session" ? key.id : key.key
+}
+
+/** Native session paths stay interoperable with agents; project paths have a reserved parent. */
+export function taskStoreDirName(key: TaskStoreKey): string {
+  return key.kind === "session" ? key.id : join(PROJECT_TASK_NAMESPACE, key.key)
 }
 
 /**
@@ -43,10 +50,19 @@ export function taskStoreDirName(key: TaskStoreKey): string {
  */
 export function isSafeSessionId(key: TaskStoreKey, tasksDir: string): boolean {
   const sessionId = taskStoreDirName(key)
-  if (!sessionId.trim()) return false
+  if (!taskStoreId(key).trim()) return false
   const root = resolve(tasksDir)
   const dir = resolve(join(root, sessionId))
-  return dir === root ? false : dir.startsWith(root + sep)
+  const projects = join(root, PROJECT_TASK_NAMESPACE)
+  if (key.kind === "project") {
+    return (
+      !key.key.includes(sep) &&
+      key.key !== "." &&
+      key.key !== ".." &&
+      dir.startsWith(projects + sep)
+    )
+  }
+  return dir.startsWith(root + sep) && dir !== projects && !dir.startsWith(projects + sep)
 }
 
 /**

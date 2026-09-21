@@ -305,6 +305,129 @@ describe("TranscriptIndexCache", () => {
     void rm(path, { force: true }).catch(() => {})
   })
 
+  test.each([
+    "rotation",
+    "identity-loss",
+  ])("rejects a %s hidden by equal size and mtime", async (kind) => {
+    const path = testTranscript("identity-hit")
+    const oldLine = JSON.stringify({
+      type: "user",
+      message: {
+        content: [{ type: "tool_result", tool_use_id: "old", content: "Resolve this block" }],
+      },
+    })
+    const newLine = oldLine.replace('"old"', '"new"')
+    let identity: { dev?: number; ino?: number } = { dev: 1, ino: 1 }
+    const cache = new TranscriptIndexCache({
+      readMetadata: async () => ({ size: oldLine.length + 1, mtimeMs: 1, ...identity }),
+    })
+    try {
+      await Bun.write(path, `${oldLine}\n`)
+      expect((await cache.get(path))?.blockedToolUseIds).toEqual(["old"])
+      await Bun.write(path, `${newLine}\n`)
+      identity = kind === "rotation" ? { dev: 1, ino: 2 } : {}
+      expect((await cache.get(path))?.blockedToolUseIds).toEqual(["new"])
+      expect((await cache.getSummary(path))?.sessionLines).toEqual([newLine])
+      expect(cache.coldRebuilds).toBe(2)
+    } finally {
+      await rm(path, { force: true })
+    }
+  })
+
+  test("retries a failed build without retaining its in-flight rejection", async () => {
+    const path = testTranscript("retry")
+    await Bun.write(path, '{"type":"user","message":{"content":"retry"}}\n')
+    const fresh = new TranscriptIndexCache()
+    const built = (await fresh.get(path))!
+    let attempts = 0
+    const cache = new TranscriptIndexCache({
+      readMetadata: async () => ({ size: built.size, mtimeMs: built.mtimeMs }),
+      buildIndex: async () => {
+        if (++attempts === 1) throw new Error("transient read failure")
+        return built
+      },
+    })
+    try {
+      expect(await cache.get(path)).toBeNull()
+      expect(await cache.get(path)).not.toBeNull()
+      expect(attempts).toBe(2)
+    } finally {
+      await rm(path, { force: true })
+    }
+  })
+
+  test("serializes different file versions before sharing their cursor", async () => {
+    const path = testTranscript("serialized")
+    await Bun.write(path, '{"type":"user","message":{"content":"hello"}}\n')
+    const built = (await new TranscriptIndexCache().get(path))!
+    const gate = Promise.withResolvers<void>()
+    const started = Promise.withResolvers<void>()
+    let version = 1
+    let active = 0
+    let peak = 0
+    let calls = 0
+    const cache = new TranscriptIndexCache({
+      readMetadata: async () => ({ size: built.size, mtimeMs: 1, dev: 1, ino: version }),
+      buildIndex: async () => {
+        calls++
+        peak = Math.max(peak, ++active)
+        started.resolve()
+        await gate.promise
+        active--
+        return built
+      },
+    })
+    try {
+      const first = cache.get(path)
+      await started.promise
+      version++
+      const second = cache.get(path)
+      await new Promise<void>((resolve) => setImmediate(resolve))
+      expect(calls).toBe(1)
+      gate.resolve()
+      expect(await first).not.toBeNull()
+      expect(await second).not.toBeNull()
+      expect(calls).toBe(2)
+      expect(peak).toBe(1)
+    } finally {
+      gate.resolve()
+      await rm(path, { force: true })
+    }
+  })
+
+  test.each([
+    { type: "system" },
+    { type: "compacted" },
+    { type: "event_msg", payload: { type: "context_compacted" } },
+  ])("clears every reducer at a canonical boundary: %j", async (boundary) => {
+    const path = testTranscript("boundary-reset")
+    const tool = JSON.stringify({
+      type: "assistant",
+      message: { content: [{ type: "tool_use", name: "Bash", input: { command: "ls" } }] },
+    })
+    const blocked = JSON.stringify({
+      type: "user",
+      message: {
+        content: [{ type: "tool_result", tool_use_id: "old", content: "Resolve this block" }],
+      },
+    })
+    const next = JSON.stringify({ type: "user", message: { content: "new session" } })
+    try {
+      await Bun.write(path, `${tool}\n${blocked}\n`)
+      const cache = new TranscriptIndexCache()
+      expect((await cache.get(path))?.blockedToolUseIds).toEqual(["old"])
+      await appendFile(path, `${JSON.stringify(boundary)}\n${next}\n`)
+      const summary = await cache.getSummary(path)
+      expect(summary?.sessionLines).toEqual([next])
+      expect(summary?.toolCallCount).toBe(0)
+      expect((await cache.get(path))?.blockedToolUseIds).toEqual([])
+      expect(summary).toEqual(await new TranscriptIndexCache().getSummary(path))
+      expect(cache.resets).toBe(1)
+    } finally {
+      await rm(path, { force: true })
+    }
+  })
+
   test("cold and incremental reads agree on the same final transcript", async () => {
     // Equivalence control: whatever the seeding path does, arriving at a given file by
     // append must match reading that same file cold.

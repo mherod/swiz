@@ -14,7 +14,7 @@
  */
 
 import { appendFile, mkdir } from "node:fs/promises"
-import { dirname, join } from "node:path"
+import { dirname } from "node:path"
 import { isDeepStrictEqual } from "node:util"
 import { z } from "zod"
 import { getHomeDirWithFallback } from "./home.ts"
@@ -36,14 +36,27 @@ import {
   renderUnblockedLine,
   truncateForLine,
 } from "./tasks/task-mcp-view.ts"
+import { mergeDuplicateTasksAcrossStores } from "./tasks/task-merge-duplicates.ts"
 import { pruneStaleCompletedTasks } from "./tasks/task-prune.ts"
-import { isSafeSessionId, readTasks, type Task } from "./tasks/task-repository.ts"
+import { projectQueueTasks, resolveQueueTask } from "./tasks/task-queue-view.ts"
+import {
+  isSafeSessionId,
+  projectStoreKey,
+  readTaskRecordsAcrossStores,
+  readTaskStore,
+  refreshSessionMetaFromDisk,
+  type StoredTask,
+  type Task,
+  type TaskStoreKey,
+  writeTask,
+} from "./tasks/task-repository.ts"
 import {
   completeTaskWithAutoTransition,
   createTaskInProcess,
   updateStatus,
   writeTaskUpdate,
 } from "./tasks/task-service.ts"
+import { readTaskStorePath } from "./tasks/task-store-layout.ts"
 import { swizMcpRepliesLogPath } from "./temp-paths.ts"
 import { messageFromUnknownError } from "./utils/hook-json-helpers.ts"
 
@@ -133,19 +146,56 @@ async function runReplyTool(input: McpToolInput, cwd: string): Promise<McpToolRe
 
 /**
  * Read the project-keyed store, deleting completed tasks past the retention
- * age (COMPLETED_TASK_PRUNE_AGE_MS). The MCP task tools are the one surface
- * allowed to prune this store: a task mutation or query here is an explicit
- * agent action. Passive read paths must stay non-destructive — the daemon
- * status line once deleted the tasks it was counting (see
- * readProjectStoreTasks in compliance-routes.ts).
+ * age (COMPLETED_TASK_PRUNE_AGE_MS) and collapsing duplicate open tasks that
+ * describe the same work. The MCP task tools are the one surface allowed to
+ * maintain this store: a task mutation or query here is an explicit agent
+ * action. Passive read paths must stay non-destructive — the daemon status
+ * line once deleted the tasks it was counting (see readProjectStoreTasks in
+ * compliance-routes.ts).
  */
 export async function readProjectTasksWithPrune(
   projectKey: string,
   tasksDir = createDefaultTaskStore().tasksDir
 ): Promise<Task[]> {
-  const tasks = await readTasks(projectKey, tasksDir)
-  if (!isSafeSessionId({ kind: "project", key: projectKey }, tasksDir)) return tasks
-  return pruneStaleCompletedTasks(join(tasksDir, projectKey), tasks)
+  const key: TaskStoreKey = { kind: "project", key: projectKey }
+  if (!isSafeSessionId(key, tasksDir)) return []
+  const tasks = await readTaskStore(key, tasksDir)
+  const dir = await readTaskStorePath(key, tasksDir)
+  return pruneStaleCompletedTasks(dir, tasks, undefined, undefined, () =>
+    refreshSessionMetaFromDisk(dir, "project")
+  )
+}
+
+/**
+ * Prune project-owned files, then collapse duplicates across the whole
+ * assembled queue.
+ *
+ * Order is the point. The duplicates worth merging are one hook stub per prior
+ * session, each alone in its own session store, so merging before the union
+ * sees a group of one everywhere and collapses nothing. Only after
+ * `readMcpTaskQueue` unions the project store with the affiliated session
+ * stores do the copies sit side by side.
+ */
+async function readProjectQueueWithPrune(
+  projectKey: string,
+  tasksDir = createDefaultTaskStore().tasksDir
+): Promise<StoredTask[]> {
+  await readProjectTasksWithPrune(projectKey, tasksDir)
+  const records = await readMcpTaskQueue(projectKey, tasksDir)
+  const merged = await mergeDuplicateTasksAcrossStores(
+    records.map(({ storeKey, task }) => ({ address: storeKey, task })),
+    {
+      dirFor: (storeKey) => readTaskStorePath(storeKey, tasksDir),
+      // Queue maintenance persists merged dependencies without a user status transition.
+      write: (storeKey, task) => writeTask(storeKey, task, undefined, tasksDir),
+    }
+  )
+  return merged.map(({ address, task }) => ({ storeKey: address, task }))
+}
+
+/** Read-only MCP projection, also used by the scope diagnostic without invoking retention. */
+export function readMcpTaskQueue(projectKey: string, tasksDir?: string): Promise<StoredTask[]> {
+  return readTaskRecordsAcrossStores(undefined, projectKey, tasksDir)
 }
 
 // ─── TaskCreate ─────────────────────────────────────────────────────────────
@@ -159,12 +209,13 @@ async function runTaskCreateTool(input: McpToolInput, cwd: string): Promise<McpT
     const projectKey = projectKeyFromCwd(cwd)
     const task = await createTaskInProcess({
       sessionId: projectKey,
+      storeKey: projectStoreKey(cwd),
       subject: input.subject,
       description: input.description,
       ...(typeof input.activeForm === "string" ? { activeForm: input.activeForm } : {}),
       cwd,
     })
-    const tasks = await readProjectTasksWithPrune(projectKey)
+    const tasks = projectQueueTasks(await readProjectQueueWithPrune(projectKey))
     const headline = `Created #${task.id} — ${truncateForLine(task.subject)}`
     const advice = await discoverRelatedTaskAdvice(cwd, task)
     return {
@@ -238,24 +289,30 @@ function applyTaskFieldUpdates(task: Task, input: TaskUpdateToolInput): string[]
 }
 
 async function persistTaskUpdate(
-  projectKey: string,
+  storeKey: TaskStoreKey,
   cwd: string,
   task: Task,
   input: TaskUpdateToolInput,
   fieldsUpdated: boolean
 ): Promise<void> {
-  if (input.status === undefined || input.status === task.status) {
-    if (fieldsUpdated) await writeTaskUpdate(projectKey, input.taskId, task)
+  // A combined start/field update is one guarded write: a capacity rejection
+  // must not leave the subject or description partially changed.
+  if (input.status === "in_progress" && task.status !== "in_progress") {
+    await writeTaskUpdate(storeKey, task.id, task, input.status, { filterCwd: cwd })
     return
   }
-  if (fieldsUpdated) await writeTaskUpdate(projectKey, input.taskId, task)
+  if (fieldsUpdated)
+    await writeTaskUpdate(storeKey, input.taskId, task, undefined, { filterCwd: cwd })
+  if (input.status === undefined || input.status === task.status) {
+    return
+  }
   if (input.status === "completed") {
-    await completeTaskWithAutoTransition(projectKey, input.taskId, {
+    await completeTaskWithAutoTransition(storeKey, input.taskId, {
       filterCwd: cwd,
       evidence: input.description,
     })
   } else {
-    await updateStatus(projectKey, input.taskId, input.status, { filterCwd: cwd })
+    await updateStatus(storeKey, input.taskId, input.status, { filterCwd: cwd })
   }
 }
 
@@ -307,11 +364,13 @@ async function runTaskUpdateTool(rawInput: McpToolInput, cwd: string): Promise<M
   }
   try {
     const projectKey = projectKeyFromCwd(cwd)
-    const tasksBefore = await readProjectTasksWithPrune(projectKey)
-    const task = tasksBefore.find((candidate) => candidate.id === input.taskId)
-    if (!task) {
+    const records = await readProjectQueueWithPrune(projectKey)
+    const tasksBefore = projectQueueTasks(records)
+    const record = resolveQueueTask(records, input.taskId)
+    if (!record) {
       return errorResult(renderUnknownTaskId(taskUpdateName, input.taskId, tasksBefore))
     }
+    const { task, storeKey } = record
     const previousStatus = task.status
     const movementBefore = taskMovementFields(task)
     // Snapshot before applyTaskFieldUpdates mutates `task` in place, so the unblock comparison
@@ -321,9 +380,16 @@ async function runTaskUpdateTool(rawInput: McpToolInput, cwd: string): Promise<M
       blockedBy: [...candidate.blockedBy],
     }))
     const fieldChanges = applyTaskFieldUpdates(task, input)
-    await persistTaskUpdate(projectKey, cwd, task, input, fieldChanges.length > 0)
-    const tasksAfter = await readTasks(projectKey)
-    const finalTask = tasksAfter.find((candidate) => candidate.id === input.taskId)
+    await persistTaskUpdate(
+      storeKey,
+      cwd,
+      task,
+      { ...input, taskId: task.id },
+      fieldChanges.length > 0
+    )
+    const recordsAfter = await readMcpTaskQueue(projectKey)
+    const tasksAfter = projectQueueTasks(recordsAfter)
+    const finalTask = resolveQueueTask(recordsAfter, input.taskId)?.task
     const headline = buildUpdateHeadline(
       input.taskId,
       finalTask?.subject ?? task.subject,
@@ -363,7 +429,7 @@ function taskMovementFields(task: Task): object {
 
 async function runTaskListTool(cwd: string): Promise<McpToolResult> {
   try {
-    const allTasks = await readProjectTasksWithPrune(projectKeyFromCwd(cwd))
+    const allTasks = projectQueueTasks(await readProjectQueueWithPrune(projectKeyFromCwd(cwd)))
     const headline =
       allTasks.length === 0 ? "No tasks in this project yet." : "Task queue for this project."
     return textResult(renderTaskToolResult(headline, allTasks))

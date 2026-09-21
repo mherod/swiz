@@ -2,7 +2,7 @@ import { debugLog } from "../../debug.ts"
 import { acquireGhSlot, observeGhApiIncludeOutput } from "../../gh-rate-limit.ts"
 import { getRepoSlug, issueState } from "../../git-helpers.ts"
 import { getIssueStore, isGraphQLRateLimited } from "../../issue-store.ts"
-import { syncUpstreamState } from "../../issue-store-sync.ts"
+import { syncUpstreamState, type UpstreamSyncResult } from "../../issue-store-sync.ts"
 
 const ONE_HOUR_MS = 60 * 60 * 1000
 
@@ -40,6 +40,16 @@ function resolveDependencies(overrides: IssueOperationDependencies = {}) {
   }
 }
 
+/** Surface domain refusals consistently from explicit and automatic CLI refreshes. */
+export function assertSyncAccepted(result: UpstreamSyncResult): void {
+  if (!result.refused) return
+  const { targetRepo, cwdRepo } = result.refused
+  throw new Error(
+    `Refusing to sync "${targetRepo}": current checkout origin is "${cwdRepo}". ` +
+      "Run from the target repository's checkout."
+  )
+}
+
 /** Sync upstream state if the local store hasn't been refreshed in the last hour. */
 export async function ensureFreshData(repo: string, cwd: string): Promise<void> {
   const store = getIssueStore()
@@ -47,7 +57,7 @@ export async function ensureFreshData(repo: string, cwd: string): Promise<void> 
   const fresh = store.listIssues(repo, ONE_HOUR_MS)
   if (fresh.length > 0) return
   console.log(`🔄 Data stale (>1h) — syncing ${repo}...`)
-  await syncUpstreamState(repo, cwd)
+  assertSyncAccepted(await syncUpstreamState(repo, cwd))
 }
 
 /** Close an issue via REST API fallback when GraphQL is rate-limited. */

@@ -338,12 +338,12 @@ describe("posttooluse-task-list-sync", () => {
     expect(exitCode).toBe(0)
     // No creates or updates, but count context is still emitted
     const parsed = JSON.parse(stdout)
-    expect(parsed.hookSpecificOutput.additionalContext).not.toContain(
-      "Tasks: 0 in_progress, 1 pending"
+    expect(parsed.hookSpecificOutput.additionalContext).toContain("1 skipped")
+    expect(parsed.hookSpecificOutput.additionalContext).toContain(
+      "Tasks: 0 in_progress, 1 pending, 1 incomplete (1 total)."
     )
-    expect(parsed.hookSpecificOutput.additionalContext).toMatch(
-      /No (active|engaged|ongoing|live|open|current|running) task yet/
-    )
+    expect(parsed.hookSpecificOutput.additionalContext).not.toContain("created")
+    expect(parsed.hookSpecificOutput.additionalContext).not.toContain("updated")
   })
 
   test("updates task file when status changes", async () => {

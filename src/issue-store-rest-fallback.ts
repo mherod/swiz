@@ -19,6 +19,20 @@ export interface RestFallbackMapping {
   endpoint: string
   /** Transforms the raw REST response body into the shape expected by the caller. */
   normalize?: (raw: unknown) => unknown
+  /**
+   * Page the endpoint out instead of issuing a single request. Rows from every
+   * page are concatenated and handed to `normalize` as one array, so the caller
+   * sees the same shape either way. Paging stops early as soon as a page comes
+   * back short, so small repos still cost exactly one request.
+   */
+  paginate?: RestPagination
+}
+
+export interface RestPagination {
+  /** Rows requested per page (GitHub caps `per_page` at 100). */
+  perPage: number
+  /** Hard ceiling on requests, derived from the caller's `--limit` budget. */
+  maxPages: number
 }
 
 export interface RestFallbackStats {
@@ -59,6 +73,35 @@ function buildRepoListEndpoint(
     per_page: String(getRestPerPage(args, fallbackPerPage)),
   })
   return `repos/{owner}/{repo}/${resource}?${params.toString()}`
+}
+
+/**
+ * Translate the caller's `--limit` row budget into a page plan.
+ *
+ * `repos/{owner}/{repo}/issues` returns pull requests alongside issues and
+ * `normalizeRestIssues` drops them afterwards, so a single page yields fewer
+ * issues than rows requested. Paging by the row budget keeps the store whole
+ * rather than losing one issue per open PR at the page boundary.
+ */
+function buildRepoListPagination(args: string[], fallbackPerPage = 100): RestPagination {
+  const perPage = getRestPerPage(args, fallbackPerPage)
+  const requested = Number.parseInt(getGhFlagValue(args, "--limit") ?? "", 10)
+  const budget = Number.isFinite(requested) && requested > 0 ? requested : fallbackPerPage
+  return { perPage, maxPages: Math.max(1, Math.ceil(budget / perPage)) }
+}
+
+/**
+ * Append (or replace) the `page` query param on a REST endpoint.
+ *
+ * Page 1 is left bare — GitHub defaults to it, and keeping the first page's
+ * URL identical to the pre-pagination one preserves every stored ETag key.
+ */
+function withPageParam(endpoint: string, page: number): string {
+  if (page <= 1) return endpoint
+  const [path, query = ""] = endpoint.split("?", 2)
+  const params = new URLSearchParams(query)
+  params.set("page", String(page))
+  return `${path}?${params.toString()}`
 }
 
 function buildWorkflowRunsEndpoint(args: string[], fallbackPerPage = 20): string {
@@ -446,12 +489,14 @@ export function ghListToRestFallback(args: string[]): RestFallbackMapping | null
     return {
       endpoint: buildRepoListEndpoint("issues", args),
       normalize: normalizeRestIssues,
+      paginate: buildRepoListPagination(args),
     }
   }
   if (args[0] === "pr" && args[1] === "list") {
     return {
       endpoint: buildRepoListEndpoint("pulls", args),
       normalize: normalizeRestPullRequests,
+      paginate: buildRepoListPagination(args),
     }
   }
   if (args[0] === "run" && args[1] === "list") {
@@ -548,12 +593,16 @@ function handleRestResponse<T>(
     return parseNormalizedBody<T>(cached.data, ctx.mapping.normalize)
   }
 
-  const isSuccess = typeof result.status === "number" && result.status >= 200 && result.status < 300
-  if (isSuccess) {
+  if (isRestSuccess(result.status)) {
     return handleRestSuccess<T>(result, ctx)
   }
 
   return null
+}
+
+/** True for a 2xx REST status. */
+function isRestSuccess(status: number | null | undefined): boolean {
+  return typeof status === "number" && status >= 200 && status < 300
 }
 
 async function resolveRestContext(
@@ -587,6 +636,11 @@ async function executeRestQuery<T>(
   stats?: RestFallbackStats,
   signal?: AbortSignal
 ): Promise<T | null> {
+  if (ctx.mapping.paginate) {
+    debugLog(`[swiz] REST_QUERY (paginated) for ${args.join(" ")}`)
+    return fetchPaginatedRest<T>(cwd, ctx, ctx.mapping.paginate, stats, signal)
+  }
+
   const cached = ctx.store.getHttpCache(ctx.repo, ctx.endpoint)
   debugLog(`[swiz] REST_QUERY for ${args.join(" ")} (cached etag: ${cached?.etag})`)
   if (stats) stats.requests++
@@ -599,6 +653,89 @@ async function executeRestQuery<T>(
     store: ctx.store,
     stats,
   })
+}
+
+/**
+ * Fetch one page and return its raw JSON body, honouring the per-endpoint
+ * ETag cache. Each page caches under its own `page=N` endpoint key.
+ */
+async function fetchRestPageBody(
+  endpoint: string,
+  cwd: string,
+  ctx: { repo: string; store: IssueStore },
+  stats?: RestFallbackStats,
+  signal?: AbortSignal
+): Promise<string | null> {
+  const cached = ctx.store.getHttpCache(ctx.repo, endpoint)
+  if (stats) stats.requests++
+  const result = await fetchViaRest(endpoint, cwd, cached?.etag, signal)
+  if (result === null || signal?.aborted) return null
+
+  if (result.status === 304 && cached) return notModifiedPageBody(endpoint, cached, stats)
+  if (!isRestSuccess(result.status)) return null
+
+  cacheRestPage(endpoint, result, ctx, stats)
+  return result.body
+}
+
+/** Serve a page from cache after a 304, recording the saved round trip. */
+function notModifiedPageBody(
+  endpoint: string,
+  cached: { data: string },
+  stats?: RestFallbackStats
+): string {
+  if (stats) stats.notModified++
+  debugLog(`[swiz] REST_CACHE_HIT (304 Not Modified) for ${endpoint}`)
+  return cached.data
+}
+
+/** Store a page's ETag payload under its own endpoint key, when one was sent. */
+function cacheRestPage(
+  endpoint: string,
+  result: { headers: Record<string, string>; body: string },
+  ctx: { repo: string; store: IssueStore },
+  stats?: RestFallbackStats
+): void {
+  const etag = result.headers.etag
+  if (!etag) return
+  if (stats) stats.writes++
+  debugLog(`[swiz] REST_CACHE_WRITE etag=${etag} for ${endpoint}`)
+  ctx.store.setHttpCache(ctx.repo, endpoint, etag, result.body)
+}
+
+/**
+ * Walk pages until one comes back short, then normalize the concatenated rows.
+ *
+ * Any page that fails aborts the whole read (returns null) so the caller falls
+ * back to the gh CLI, which paginates for itself. Returning the pages gathered
+ * so far would hand back a silently truncated backlog — the exact failure this
+ * pagination exists to remove.
+ */
+async function fetchPaginatedRest<T>(
+  cwd: string,
+  ctx: { repo: string; mapping: RestFallbackMapping; store: IssueStore; endpoint: string },
+  paginate: RestPagination,
+  stats?: RestFallbackStats,
+  signal?: AbortSignal
+): Promise<T | null> {
+  const rows: unknown[] = []
+  for (let page = 1; page <= paginate.maxPages; page++) {
+    if (signal?.aborted) return null
+    const body = await fetchRestPageBody(withPageParam(ctx.endpoint, page), cwd, ctx, stats, signal)
+    if (body === null) return null
+
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(body)
+    } catch {
+      return null
+    }
+    if (!Array.isArray(parsed)) return null
+
+    rows.push(...parsed)
+    if (parsed.length < paginate.perPage) break
+  }
+  return (ctx.mapping.normalize ? ctx.mapping.normalize(rows) : rows) as T
 }
 
 /**

@@ -8,7 +8,7 @@
 
 import { afterEach, describe, expect, test } from "bun:test"
 import { mkdirSync } from "node:fs"
-import { mkdtemp, rm, writeFile } from "node:fs/promises"
+import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { createDefaultTaskStore } from "../task-roots.ts"
@@ -33,7 +33,7 @@ async function seed(sessionId: string, tasks: Task[]): Promise<void> {
   process.env.HOME = home
   const dir = join(createDefaultTaskStore().tasksDir, sessionId)
   mkdirSync(dir, { recursive: true })
-  for (const t of tasks) await writeFile(join(dir, `${t.id}.json`), JSON.stringify(t, null, 2))
+  for (const t of tasks) await Bun.write(join(dir, `${t.id}.json`), JSON.stringify(t, null, 2))
 }
 
 /** Run `body` against a temp HOME, restoring the environment afterwards. */

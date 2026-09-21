@@ -24,7 +24,7 @@ import { sessionStoreKey } from "../../tasks/task-store-path.ts"
 import { formatBytes } from "../../utils/format.ts"
 import { getDaemonStatus } from "../daemon/daemon-admin.ts"
 import { findAntigravityCleanupGroups } from "./cleanup-antigravity.ts"
-import { CODEX_MIN_RETENTION_MS, findCodexCleanupGroups } from "./cleanup-codex.ts"
+import { findCodexCleanupGroups } from "./cleanup-codex.ts"
 import {
   type CodexProcessRuntime,
   createCodexProcessRuntime,
@@ -884,7 +884,7 @@ async function printCleanupReport(opts: CleanupReportOpts): Promise<CleanupTotal
   const totals = await printProjectTable(results)
 
   if (results.some((result) => result.provider === "codex")) {
-    console.log("    Codex: archived sessions only (48h minimum); unarchived sessions protected.")
+    console.log("    Codex: archived sessions only; unarchived sessions protected.")
   }
   console.log()
   printTaskCleanupSection(totals, oldTaskFiles, oldTaskBytes, cleanupArgs, taskCutoffMs)
@@ -1161,7 +1161,7 @@ export async function autoCleanup(codexRuntime = createCodexProcessRuntime()): P
     return
   }
 
-  console.log(`\n  ${BOLD}Cleaning up old session data (> 24h; Codex archives > 48h)...${RESET}`)
+  console.log(`\n  ${BOLD}Cleaning up old session data (> 24h; all Codex archives)...${RESET}`)
   await executeCleanup({
     results,
     claudeBackups,
@@ -1200,7 +1200,6 @@ async function gatherCleanupData(cleanupArgs: CleanupArgs, codexRuntime: CodexPr
   const tasksDir = join(claudeDir, "tasks")
 
   const cutoffMs = Date.now() - cleanupArgs.olderThanMs
-  const codexCutoffMs = Date.now() - (cleanupArgs.codexOlderThanMs ?? CODEX_MIN_RETENTION_MS)
   const taskCutoffMs = cleanupArgs.taskOlderThanMs ? Date.now() - cleanupArgs.taskOlderThanMs : null
 
   let results: ProjectResult[] = []
@@ -1217,7 +1216,7 @@ async function gatherCleanupData(cleanupArgs: CleanupArgs, codexRuntime: CodexPr
   // project path, so they are only scanned for unscoped cleanups.
   if (!cleanupArgs.projectFilter) {
     results = results.concat(await findAntigravityCleanupGroups(homeDir, cutoffMs))
-    codexGroups = await findCodexCleanupGroups(homeDir, codexCutoffMs)
+    codexGroups = await findCodexCleanupGroups(homeDir)
     results = results.concat(codexGroups)
   }
 
@@ -1240,7 +1239,7 @@ async function gatherCleanupData(cleanupArgs: CleanupArgs, codexRuntime: CodexPr
   if (stopped) {
     // Quitting may flush rollouts and tasks, changing which files satisfy the age cutoff.
     results = results.filter((result) => result.provider !== "codex")
-    codexGroups = await findCodexCleanupGroups(homeDir, codexCutoffMs)
+    codexGroups = await findCodexCleanupGroups(homeDir)
     results = results.concat(codexGroups)
     if (taskCutoffMs !== null) discoveredTaskFiles = await findOldTaskFiles(tasksDir, taskCutoffMs)
   }

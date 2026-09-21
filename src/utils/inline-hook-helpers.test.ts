@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test"
+import { afterEach, describe, expect, spyOn, test } from "bun:test"
 import { appendFile, mkdtemp } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -12,6 +12,7 @@ import {
   shouldEnforceTaskGovernance,
   toolSearchQueryTargetsTaskTools,
 } from "./inline-hook-helpers.ts"
+import { JsonlAppendCursor, type JsonlAppendRead } from "./jsonl.ts"
 
 describe("isNativeTaskToolName", () => {
   test("accepts bare native task tools", () => {
@@ -231,7 +232,7 @@ describe("readNativeTaskToolAvailability", () => {
     expect(await readNativeTaskToolAvailability(null, tmpdir())).toBe("unknown")
   })
 
-  test("caches a resolved verdict per session", async () => {
+  test("does not reuse absence when its evidence is missing", async () => {
     const dir = await writeCaptures([
       {
         session_id: "session-a",
@@ -240,10 +241,112 @@ describe("readNativeTaskToolAvailability", () => {
       },
     ])
     expect(await readNativeTaskToolAvailability("session-a", dir)).toBe("absent")
-    // Later reads short-circuit the cache even when the evidence is gone.
+    // Missing evidence must not keep governance disabled.
     expect(await readNativeTaskToolAvailability("session-a", join(tmpdir(), "swiz-gone"))).toBe(
-      "absent"
+      "unknown"
     )
+  })
+
+  test.each([
+    "preToolUse",
+    "postToolUse",
+  ])("preserves incomplete cold %s evidence until its newline arrives", async (event) => {
+    const dir = await mkdtemp(join(tmpdir(), "swiz-capture-partial-"))
+    const path = join(dir, `${event}.jsonl`)
+    const record = JSON.stringify({
+      session_id: "session-a",
+      _toolSearch: { query: "select:TaskCreate", matches: [] },
+    })
+    await Bun.write(path, record.slice(0, -3))
+    expect(await readNativeTaskToolAvailability("session-a", dir)).toBe("unknown")
+    await appendFile(path, record.slice(-3))
+    expect(await readNativeTaskToolAvailability("session-a", dir)).toBe("unknown")
+    await appendFile(path, "\n")
+    expect(await readNativeTaskToolAvailability("session-a", dir)).toBe("absent")
+    await appendFile(
+      path,
+      `${JSON.stringify({
+        session_id: "session-a",
+        _toolSearch: { query: "select:TaskCreate", matches: ["TaskCreate"] },
+      })}\n`
+    )
+    expect(await readNativeTaskToolAvailability("session-a", dir)).toBe("present")
+  })
+
+  test("withholds cold transcript fragments and completes them exactly once", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "swiz-transcript-partial-"))
+    const path = join(dir, "session.jsonl")
+    const record = JSON.stringify({
+      type: "assistant",
+      message: { content: [{ type: "tool_use", name: "TaskCreate", input: { subject: "é" } }] },
+    })
+    const encoded = new TextEncoder().encode(record)
+    const splitAt = encoded.indexOf(0xc3) + 1
+    await Bun.write(path, encoded.slice(0, splitAt))
+    expect(await readNativeTaskToolAvailabilityFromTranscript(path)).toBe("unknown")
+    await appendFile(path, encoded.slice(splitAt))
+    expect(await readNativeTaskToolAvailabilityFromTranscript(path)).toBe("unknown")
+    await appendFile(path, "\n")
+    expect(await readNativeTaskToolAvailabilityFromTranscript(path)).toBe("present")
+  })
+
+  test("new transcript presence overrides earlier capture absence", async () => {
+    const dir = await writeCaptures([
+      {
+        session_id: "session-a",
+        _toolSearch: { query: "select:TaskCreate", matches: [] },
+      },
+    ])
+    const path = join(dir, "session.jsonl")
+    await Bun.write(path, "")
+    expect(await readNativeTaskToolAvailability("session-a", dir, path)).toBe("absent")
+    await appendFile(
+      path,
+      '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"TaskList"}]}}\n'
+    )
+    expect(await readNativeTaskToolAvailability("session-a", dir, path)).toBe("present")
+  })
+
+  test("malformed transcript records cannot prove presence", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "swiz-transcript-malformed-"))
+    const path = join(dir, "session.jsonl")
+    await Bun.write(path, '{"name":"TaskList", broken\n')
+    expect(await readNativeTaskToolAvailabilityFromTranscript(path)).toBe("unknown")
+  })
+
+  test("shares capture cursors across sessions and reads only new bytes while unknown", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "swiz-native-ranges-"))
+    const transcript = join(dir, "session.jsonl")
+    const paths = [transcript, join(dir, "preToolUse.jsonl"), join(dir, "postToolUse.jsonl")]
+    for (const path of paths) await Bun.write(path, "{}\n")
+    const cold = spyOn(JsonlAppendCursor.prototype, "rebuild")
+    const reads = spyOn(JsonlAppendCursor.prototype, "read")
+    try {
+      const read = (session: string) => readNativeTaskToolAvailability(session, dir, transcript)
+      expect(await Promise.all([read("a"), read("b")])).toEqual(["unknown", "unknown"])
+      expect(cold).toHaveBeenCalledTimes(3)
+      const before = reads.mock.results.length
+      expect(await read("a")).toBe("unknown")
+      for (const result of reads.mock.results.slice(before)) {
+        expect(await result.value).toMatchObject({ kind: "hit", bytesRead: 0 })
+      }
+      const presence = `${JSON.stringify({ session_id: "a", _toolSearch: { query: "task", matches: ["TaskList"] } })}\n`
+      const absence = `${JSON.stringify({ session_id: "b", _toolSearch: { query: "task", matches: [] } })}\n`
+      await appendFile(paths[1]!, presence)
+      await appendFile(paths[2]!, absence)
+      const appendedAt = reads.mock.results.length
+      expect(await Promise.all([read("a"), read("b")])).toEqual(["present", "absent"])
+      const updates = (await Promise.all(
+        reads.mock.results.slice(appendedAt).map((result) => result.value)
+      )) as JsonlAppendRead[]
+      expect(updates.reduce((total, update) => total + update.bytesRead, 0)).toBe(
+        Buffer.byteLength(presence + absence)
+      )
+      expect(cold).toHaveBeenCalledTimes(3)
+    } finally {
+      cold.mockRestore()
+      reads.mockRestore()
+    }
   })
 
   test("keeps an unknown transcript verdict incremental until new task evidence arrives", async () => {

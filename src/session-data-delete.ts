@@ -20,11 +20,17 @@ export interface SessionDeletionResult {
   sessionIds: string[]
 }
 
-export async function defaultTrashPath(path: string): Promise<boolean> {
-  const proc = Bun.spawn(["trash", path], { stdout: "pipe", stderr: "pipe" })
-  await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()])
-  await proc.exited
-  return proc.exitCode === 0
+export async function defaultTrashPath(path: string, command = "trash"): Promise<boolean> {
+  // A missing `trash` CLI makes Bun.spawn throw rather than exit non-zero. Callers
+  // count a false return and advise installing it, so never let that escape.
+  try {
+    const proc = Bun.spawn([command, path], { stdout: "pipe", stderr: "pipe" })
+    await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()])
+    await proc.exited
+    return proc.exitCode === 0
+  } catch {
+    return false
+  }
 }
 
 export async function resolveSessionDeletionTargets(

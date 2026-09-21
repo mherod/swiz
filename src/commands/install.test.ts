@@ -523,4 +523,34 @@ describe("install.ts Cursor CLI shell execution dispatch entries", () => {
       expect(manifestEvents.has(canonicalEvent)).toBe(true)
     }
   })
+
+  it("install --mcp installs only MCP server without touching hook settings", async () => {
+    const home = await mkdtemp(join(tmpdir(), "swiz-install-mcp-only-"))
+    const claudePath = join(home, ".claude.json")
+    const claudeSettingsPath = join(home, ".claude", "settings.json")
+
+    // Dry run does not write
+    const dryResult = await runInstall(["--mcp", "--dry-run"], home)
+    expect(dryResult.exitCode).toBe(0)
+    expect(dryResult.stdout).toContain('MCP server "swiz":')
+    expect(dryResult.stdout).not.toContain("Claude Code →")
+    expect(await Bun.file(claudePath).exists()).toBe(false)
+
+    // Real install writes MCP server to .claude.json but leaves settings.json untouched
+    const result = await runInstall(["--mcp"], home)
+    expect(result.exitCode).toBe(0)
+    expect(result.stdout).toContain('MCP server "swiz":')
+    expect(result.stdout).not.toContain("Claude Code →")
+    expect(await Bun.file(claudePath).exists()).toBe(true)
+    const claudeMcp = await readJson<{ mcpServers: Record<string, unknown> }>(claudePath)
+    expect(claudeMcp.mcpServers.swiz).toEqual({ command: "swiz", args: ["mcp"] })
+    expect(await Bun.file(claudeSettingsPath).exists()).toBe(false)
+
+    // Real uninstall removes MCP server
+    const uninstResult = await runInstall(["--uninstall", "--mcp"], home)
+    expect(uninstResult.exitCode).toBe(0)
+    expect(uninstResult.stdout).toContain('MCP server "swiz":')
+    const claudeMcpAfter = await readJson<{ mcpServers: Record<string, unknown> }>(claudePath)
+    expect(claudeMcpAfter.mcpServers.swiz).toBeUndefined()
+  })
 })

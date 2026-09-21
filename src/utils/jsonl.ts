@@ -65,6 +65,10 @@ export class JsonlAppendCursor {
    * record lands exactly once, when its newline does.
    */
   seed(metadata: JsonlAppendMetadata, pendingTail: JsonlBuffer): void {
+    if (pendingTail.length > MAX_JSONL_APPEND_REMAINDER_BYTES) {
+      this.clear()
+      return
+    }
     this.offset = metadata.size
     this.metadata = { ...metadata }
     /** Own only the pending bytes, not a view retaining the entire cold read. */
@@ -92,8 +96,36 @@ export class JsonlAppendCursor {
       return { kind: "hit", lines: [], bytesRead: 0 }
     }
 
+    const file = typeof source === "string" ? Bun.file(source) : source
+    return this.readRange(file, metadata, onLine)
+  }
+
+  /** Stream a cold scan through the same bounded, newline-only byte reducer as appends. */
+  async *rebuild(file: Bun.BunFile, metadata: JsonlAppendMetadata): AsyncIterableIterator<string> {
+    this.reset({ ...metadata, size: 0 })
+    let completed = false
     try {
-      const file = typeof source === "string" ? Bun.file(source) : source
+      while (this.offset < metadata.size) {
+        const next = {
+          ...metadata,
+          size: Math.min(metadata.size, this.offset + DEFAULT_JSONL_TAIL_INITIAL_BYTES),
+        }
+        const update = await this.readRange(file, next)
+        if (update.kind === "cold") throw new Error("Incomplete or oversized JSONL cold read")
+        yield* update.lines
+      }
+      completed = true
+    } finally {
+      if (!completed) this.clear()
+    }
+  }
+
+  private async readRange(
+    file: Bun.BunFile,
+    metadata: JsonlAppendMetadata,
+    onLine?: JsonlLineVisitor
+  ): Promise<JsonlAppendRead> {
+    try {
       const bytes = new Uint8Array(await file.slice(this.offset, metadata.size).arrayBuffer())
       if (bytes.length !== metadata.size - this.offset) throw new Error("Short JSONL append read")
       const startOffset = this.offset - this.remainder.length
@@ -152,6 +184,18 @@ export class JsonlAppendCursor {
     // return the previous contents forever (#819).
     return next.size === this.offset && next.mtimeMs !== previous.mtimeMs
   }
+}
+
+/** Compare the complete observed version, including identity appearing or disappearing. */
+export function sameJsonlFileVersion(
+  left: JsonlAppendMetadata,
+  right: JsonlAppendMetadata
+): boolean {
+  return (
+    left.size === right.size &&
+    left.mtimeMs === right.mtimeMs &&
+    identityOf(left) === identityOf(right)
+  )
 }
 
 function identityOf(metadata: JsonlAppendMetadata): string | null {

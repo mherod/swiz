@@ -21,7 +21,7 @@ import {
 import { buildCountSummary, buildCountSummaryFromTasks } from "../src/tasks/task-count-summary.ts"
 import { getSessionEventState } from "../src/tasks/task-event-state.ts"
 import { fetchIssueHints } from "../src/tasks/task-issue-hints.ts"
-import { getSessionTasksDir, readSessionTasksFresh } from "../src/tasks/task-recovery.ts"
+import { readHookTasks } from "../src/tasks/task-recovery.ts"
 import { getTaskCurrentDurationMs } from "../src/tasks/task-timing.ts"
 
 type TimedTask = {
@@ -114,32 +114,20 @@ async function buildTaskContext(options: BuildTaskContextOptions): Promise<SwizH
   return buildContextHookOutput("PostToolUse", buildCountSummaryFromTasks(options.tasks, hints))
 }
 
-async function evaluateEventStateContext(
-  sessionId: string,
-  toolName: string | undefined,
-  hintsPromise: ReturnType<typeof fetchIssueHints>
-): Promise<SwizHookOutput | null> {
-  const eventState = getSessionEventState(sessionId)
-  if (!eventState || eventState.length === 0) return null
-  return await buildTaskContext({ sessionId, tasks: eventState, toolName, hintsPromise })
-}
-
 async function evaluateDiskTaskContext(
   sessionId: string,
   toolName: string | undefined,
   toolInput: Record<string, unknown>,
-  hintsPromise: ReturnType<typeof fetchIssueHints>
+  hintsPromise: ReturnType<typeof fetchIssueHints>,
+  input: Record<string, any>
 ): Promise<SwizHookOutput> {
-  if (!getSessionTasksDir(sessionId)) return {}
+  const diskTasks = await readHookTasks(input)
+  const byId = new Map(diskTasks.map((task) => [task.id, { id: task.id, status: task.status }]))
+  // Native events may precede their disk writes; overlay them without erasing project tasks.
+  for (const task of getSessionEventState(sessionId) ?? []) byId.set(task.id, task)
+  if (byId.size === 0 && toolName !== "TaskCreate") return {}
 
-  const diskTasks = await readSessionTasksFresh(sessionId)
-  if (diskTasks.length === 0 && toolName !== "TaskCreate") return {}
-
-  const tasks = applyMutationOverlay(
-    diskTasks.map((task) => ({ id: task.id, status: task.status })),
-    toolName ?? "",
-    toolInput
-  )
+  const tasks = applyMutationOverlay([...byId.values()], toolName ?? "", toolInput)
   if (tasks.length === 0) return {}
 
   return await buildTaskContext({
@@ -162,22 +150,13 @@ export async function evaluatePosttooluseTaskCountContext(input: unknown): Promi
   // Only used when pending count is low, but start early to avoid latency.
   const hintsPromise = fetchIssueHints(parsed.cwd)
 
-  // Primary path: in-memory event state maintained by upstream hooks
-  // (audit-sync, list-sync) in the same dispatch process. Zero disk I/O.
-  const eventStateContext = await evaluateEventStateContext(
-    sessionId,
-    parsed.tool_name,
-    hintsPromise
-  )
-  if (eventStateContext) return eventStateContext
-
-  // Fallback: disk read + mutation overlay for subprocess execution
-  // (when no event state exists, e.g. first tool call or standalone mode)
+  // The canonical disk queue owns scope; session events only overlay fresh mutations.
   return await evaluateDiskTaskContext(
     sessionId,
     parsed.tool_name,
     (parsed.tool_input ?? {}) as Record<string, unknown>,
-    hintsPromise
+    hintsPromise,
+    parsed
   )
 }
 

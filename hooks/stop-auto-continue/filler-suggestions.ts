@@ -11,7 +11,7 @@
 
 import { getUnpushedCommitCount, git } from "../../src/git-helpers.ts"
 import { isGitRepoForHookPayload } from "../../src/repository-capability.ts"
-import { readSessionTasks } from "../../src/tasks/task-recovery.ts"
+import { readHookTasks } from "../../src/tasks/task-recovery.ts"
 
 export interface FillerContext {
   cwd: string
@@ -44,8 +44,8 @@ async function getGitState(cwd: string, input: object): Promise<GitState | null>
   }
 }
 
-async function getNextIncompleteTask(sessionId: string): Promise<string> {
-  const tasks = await readSessionTasks(sessionId)
+async function getNextIncompleteTask(sessionId: string, ctx: FillerContext): Promise<string> {
+  const tasks = await readHookTasks({ ...ctx.input, cwd: ctx.cwd, session_id: sessionId })
   const next =
     tasks.find((t) => t.status === "in_progress") ?? tasks.find((t) => t.status === "pending")
   return next ? `Resume task #${next.id}: ${next.subject}.` : ""
@@ -86,7 +86,7 @@ export async function buildFillerSuggestion(ctx: FillerContext): Promise<string>
   if (gitSuggestion) return gitSuggestion
 
   if (sessionId) {
-    const next = await getNextIncompleteTask(sessionId)
+    const next = await getNextIncompleteTask(sessionId, ctx)
     if (next) return next
   }
 

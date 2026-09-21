@@ -11,8 +11,16 @@ import {
   readRecentAuditEntries,
   verifyAuditEntry,
 } from "./task-audit-verification.ts"
-import { readTasks, type Task } from "./task-repository.ts"
-import { writeTaskUpdate } from "./task-service.ts"
+import {
+  projectStoreKey,
+  readTaskStore,
+  readTasks,
+  sessionStoreKey,
+  type Task,
+  writeTask,
+} from "./task-repository.ts"
+import { completeTaskWithAutoTransition, updateStatus, writeTaskUpdate } from "./task-service.ts"
+import { sessionDirPath } from "./task-store-path.ts"
 
 describe("Task Audit Log Verification", () => {
   const testSessionId = `test-session-${Date.now()}`
@@ -38,6 +46,116 @@ describe("Task Audit Log Verification", () => {
     }
   })
 
+  it.each([
+    "string",
+    "typed",
+  ])("preserves caller cwd and injected roots for %s addresses (#933)", async (kind) => {
+    const filterCwd = join(home, "selected-project")
+    const injectedRoot = join(home, "injected-tasks")
+    const project = projectStoreKey(filterCwd)
+    const sibling = sessionStoreKey(project.key)
+    const original: Task = {
+      id: "7",
+      subject: "Target record",
+      description: "Before",
+      status: "pending",
+      blocks: [],
+      blockedBy: [],
+    }
+    await writeTask(project, { ...original }, filterCwd, injectedRoot)
+    await writeTask(sibling, { ...original, subject: "Sibling record" }, filterCwd, injectedRoot)
+    await writeTask(project, { ...original, subject: "Default root" }, filterCwd, tasksDir)
+    const defaultPath = join(sessionDirPath(project, tasksDir), "7.json")
+    const siblingPath = join(sessionDirPath(sibling, injectedRoot), "7.json")
+    const defaultBefore = await Bun.file(defaultPath).text()
+    const siblingBefore = await Bun.file(siblingPath).text()
+    const address = kind === "typed" ? project : project.key
+    const options = { filterCwd, tasksDir: injectedRoot }
+    const edited = { ...original, description: "Caller fields" }
+    await writeTaskUpdate(address, "7", edited, undefined, options)
+    expect((await readTaskStore(project, injectedRoot))[0]?.description).toBe("Caller fields")
+    await writeTaskUpdate(address, "7", edited, "in_progress", options)
+    await updateStatus(address, "7", "completed", { ...options, evidence: "test:injected root" })
+    const updated = (await readTaskStore(project, injectedRoot))[0]!
+    expect(updated.status).toBe("completed")
+    expect(updated.completionEvidence).toBe("test:injected root")
+    expect(await Bun.file(defaultPath).text()).toBe(defaultBefore)
+    expect(await Bun.file(siblingPath).text()).toBe(siblingBefore)
+    const meta = await Bun.file(
+      join(sessionDirPath(project, injectedRoot), ".session-meta.json")
+    ).json()
+    expect(meta.cwd).toBe(filterCwd)
+    const audit = await Bun.file(
+      join(sessionDirPath(project, injectedRoot), ".audit-log.jsonl")
+    ).text()
+    expect(
+      audit
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line).action)
+    ).toEqual(["field_update", "status_change", "status_change"])
+    expect(
+      await Bun.file(join(sessionDirPath(project, tasksDir), ".audit-log.jsonl")).exists()
+    ).toBe(false)
+    expect(
+      await Bun.file(join(sessionDirPath(sibling, injectedRoot), ".audit-log.jsonl")).exists()
+    ).toBe(false)
+  })
+
+  it.each([
+    "field",
+    "status",
+  ])("uses injected-root WIP checks for %s updates (#933)", async (mutation) => {
+    const filterCwd = join(home, "limited-project")
+    const injectedRoot = join(home, "limited-tasks")
+    const key = projectStoreKey(filterCwd)
+    const task: Task = {
+      id: "7",
+      subject: "Queued work",
+      description: "Before",
+      status: "pending",
+      blocks: [],
+      blockedBy: [],
+    }
+    for (let i = 1; i <= 4; i++) {
+      await writeTask(
+        key,
+        { ...task, id: String(i), status: "in_progress" },
+        filterCwd,
+        injectedRoot
+      )
+    }
+    await writeTask(key, task, filterCwd, injectedRoot)
+    const options = { filterCwd, tasksDir: injectedRoot }
+    const write =
+      mutation === "field"
+        ? writeTaskUpdate(key, task.id, task, "in_progress", options)
+        : updateStatus(key, task.id, "in_progress", options)
+    await expect(write).rejects.toThrow("already has 4 in_progress tasks")
+    expect((await readTaskStore(key, injectedRoot)).find((t) => t.id === task.id)?.status).toBe(
+      "pending"
+    )
+    expect(
+      await Bun.file(join(sessionDirPath(key, injectedRoot), ".audit-log.jsonl")).exists()
+    ).toBe(false)
+    // An evidenced completion can still take its transient hop at capacity, in this root.
+    await completeTaskWithAutoTransition(key, task.id, {
+      ...options,
+      evidence: "test:already verified",
+    })
+    expect((await readTaskStore(key, injectedRoot)).find((t) => t.id === task.id)?.status).toBe(
+      "completed"
+    )
+    expect(await readTaskStore(key, tasksDir)).toEqual([])
+    const audit = await Bun.file(join(sessionDirPath(key, injectedRoot), ".audit-log.jsonl")).text()
+    expect(
+      audit
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line).newStatus)
+    ).toEqual(["in_progress", "completed"])
+  })
+
   it("should log action: 'field_update' when status does not change", async () => {
     const sessionId = `${testSessionId}-field-update`
     const task: Task = {
@@ -52,6 +170,7 @@ describe("Task Audit Log Verification", () => {
     const testSessionDir = join(tasksDir, sessionId)
     await mkdir(testSessionDir, { recursive: true })
 
+    await writeTask(sessionStoreKey(sessionId), task)
     task.description = "Updated Description"
     await writeTaskUpdate(sessionId, "1", task)
 
@@ -79,6 +198,7 @@ describe("Task Audit Log Verification", () => {
     const testSessionDir = join(tasksDir, sessionId)
     await mkdir(testSessionDir, { recursive: true })
 
+    await writeTask(sessionStoreKey(sessionId), task)
     await writeTaskUpdate(sessionId, "2", task, "in_progress")
 
     const entry = await getLastAuditEntry(sessionId)
@@ -105,6 +225,7 @@ describe("Task Audit Log Verification", () => {
     const testSessionDir = join(tasksDir, sessionId)
     await mkdir(testSessionDir, { recursive: true })
 
+    await writeTask(sessionStoreKey(sessionId), task)
     await writeTaskUpdate(sessionId, "3", task)
     await writeTaskUpdate(sessionId, "3", task, "in_progress")
 
@@ -130,6 +251,7 @@ describe("Task Audit Log Verification", () => {
     const testSessionDir = join(tasksDir, sessionId)
     await mkdir(testSessionDir, { recursive: true })
 
+    await writeTask(sessionStoreKey(sessionId), task)
     await writeTaskUpdate(sessionId, "4", task)
     await writeTaskUpdate(sessionId, "4", task, "in_progress")
     await writeTaskUpdate(sessionId, "4", task, "completed")
@@ -219,6 +341,7 @@ describe("Task Audit Log Verification", () => {
         blocks: [],
         blockedBy: [],
       }
+      await writeTask(sessionStoreKey(sessionId), task)
       await writeTaskUpdate(sessionId, "1", task, "in_progress")
 
       // Corrupt the task file
@@ -262,6 +385,7 @@ describe("Task Audit Log Verification", () => {
         blocks: [],
         blockedBy: [],
       }
+      await writeTask(sessionStoreKey(sessionId), task)
       await writeTaskUpdate(sessionId, "2", task)
       await writeTaskUpdate(sessionId, "2", task, "in_progress")
       await writeTaskUpdate(sessionId, "2", task, "completed")

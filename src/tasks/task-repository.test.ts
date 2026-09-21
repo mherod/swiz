@@ -6,6 +6,7 @@ import { useTempDir } from "../utils/test-utils.ts"
 import { readAuditLog } from "./task-audit-verification.ts"
 import {
   isSafeSessionId,
+  mergeTaskStoresByRecency,
   projectStoreKey,
   readSessionMeta,
   readTasks,
@@ -36,11 +37,11 @@ describe("typed task store keys", () => {
     expectTypeOf(projectStoreKey("/project").kind).toEqualTypeOf<"project">()
   })
 
-  it("keeps both kinds at exactly the old paths without migrating directories or IDs", async () => {
+  it("keeps native session paths while separating project paths without changing IDs", async () => {
     const base = await tmp.create()
     const cwd = "/workspace/project"
     const keys = [sessionStoreKey("abcd-session"), projectStoreKey(cwd)]
-    const names = ["abcd-session", projectKeyFromCwd(cwd)]
+    const names = ["abcd-session", join(".projects", projectKeyFromCwd(cwd))]
     for (const [index, key] of keys.entries()) {
       const name = names[index]!
       expect(taskStoreDirName(key)).toBe(name)
@@ -59,7 +60,7 @@ describe("typed task store keys", () => {
       await writeTask(key, task, undefined, base)
       expect(await Bun.file(join(base, name, "user-1.json")).json()).toEqual(task)
     }
-    expect((await readdir(base)).sort()).toEqual(names.sort())
+    expect((await readdir(base)).sort()).toEqual([".projects", "abcd-session"])
   })
 
   it("classifies first writes from explicit cwd without guessing from a directory prefix", async () => {
@@ -315,5 +316,82 @@ describe("writeTask atomicity", () => {
       .split("\n")
       .map((line) => JSON.parse(line) as { taskId: string })
     expect(auditLines.map((entry) => entry.taskId)).toEqual(tasks.map((task) => task.id))
+  })
+})
+
+describe("mergeTaskStoresByRecency", () => {
+  const base = { subject: "shared task", status: "in_progress" as const }
+
+  it("prefers the copy written most recently, not the one whose status moved last", () => {
+    // A description-only TaskUpdate bumps updatedAt and leaves statusChangedAt alone.
+    // Tie-breaking on statusChangedAt kept returning the stale duplicate, which made the
+    // task-recency gate unsatisfiable: recording progress could not change what it read.
+    const stale = {
+      id: "1",
+      ...base,
+      statusChangedAt: "2026-09-18T10:00:00.000Z",
+      updatedAt: "2026-09-18T10:00:00.000Z",
+    }
+    const refreshed = {
+      id: "1",
+      ...base,
+      statusChangedAt: "2026-09-18T10:00:00.000Z",
+      updatedAt: "2026-09-18T10:30:00.000Z",
+    }
+
+    expect(mergeTaskStoresByRecency([stale], [refreshed])[0]?.updatedAt).toBe(refreshed.updatedAt)
+    // Group order must not decide the winner.
+    expect(mergeTaskStoresByRecency([refreshed], [stale])[0]?.updatedAt).toBe(refreshed.updatedAt)
+  })
+
+  it("still falls back to statusChangedAt when no write stamp exists", () => {
+    const older = { id: "1", ...base, statusChangedAt: "2026-09-18T10:00:00.000Z" }
+    const newer = { id: "1", ...base, statusChangedAt: "2026-09-18T11:00:00.000Z" }
+
+    expect(mergeTaskStoresByRecency([newer], [older])[0]?.statusChangedAt).toBe(
+      newer.statusChangedAt
+    )
+  })
+
+  it("orders raw records written moments apart by statusChangedAt, not wall clock", () => {
+    // Records written outside the repository writer carry no `updatedAt`. Backfilling one
+    // from file mtime made two such copies tie on wall clock and pick a winner at random,
+    // which surfaced as an intermittent failure in cross-store discovery.
+    interface MergeFixture {
+      id: string
+      subject: string
+      status: string
+      statusChangedAt: string
+    }
+    const older: MergeFixture = {
+      id: "1",
+      subject: base.subject,
+      status: "in_progress",
+      statusChangedAt: "2026-09-18T10:00:00.000Z",
+    }
+    const newer: MergeFixture = {
+      id: "1",
+      subject: base.subject,
+      status: "cancelled",
+      statusChangedAt: "2026-09-18T10:00:01.000Z",
+    }
+
+    for (const groups of [
+      [[older], [newer]],
+      [[newer], [older]],
+    ]) {
+      expect(mergeTaskStoresByRecency(...groups)[0]?.status).toBe("cancelled")
+    }
+  })
+
+  it("keeps one copy per id across stores", () => {
+    const merged = mergeTaskStoresByRecency(
+      [{ id: "1", ...base, updatedAt: "2026-09-18T10:00:00.000Z" }],
+      [
+        { id: "1", ...base, updatedAt: "2026-09-18T10:30:00.000Z" },
+        { id: "2", ...base, updatedAt: "2026-09-18T10:00:00.000Z" },
+      ]
+    )
+    expect(merged.map((task) => task.id)).toEqual(["1", "2"])
   })
 })

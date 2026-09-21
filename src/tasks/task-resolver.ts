@@ -19,10 +19,23 @@ import {
   legacySessionPrefix,
   parseTaskId,
   readSessionMeta,
+  readTaskStore,
+  readTaskStoreMeta,
   readTasks,
+  resolveLegacyTaskStoreKey,
+  type StoredTask,
   sessionPrefix,
+  sessionStoreKey,
   type Task,
+  type TaskStoreKey,
 } from "./task-repository.ts"
+
+import {
+  listProjectStoreKeys,
+  listSessionStoreIds,
+  readTaskStorePath,
+} from "./task-store-layout.ts"
+import { taskStoreDirName, taskStoreId } from "./task-store-path.ts"
 
 export type { Task }
 
@@ -113,7 +126,7 @@ async function partitionByMeta(
   const remaining: string[] = []
   const attributedElsewhere = new Set<string>()
   for (const sessionId of candidates) {
-    const meta = await readSessionMeta(sessionId, tasksDir)
+    const meta = await readTaskStoreMeta(sessionStoreKey(sessionId), tasksDir)
     if (meta?.cwd === filterCwd) {
       matched.add(sessionId)
     } else if (!meta?.cwd) {
@@ -321,7 +334,7 @@ export async function getSessions(
   projectsDir = createDefaultTaskStore().projectsDir
 ): Promise<string[]> {
   try {
-    const entries = await readdir(tasksDir)
+    const entries = await listSessionStoreIds(tasksDir)
     const matched = filterCwd
       ? await matchSessionsByCwd(entries, filterCwd, projectsDir, tasksDir)
       : null
@@ -338,6 +351,41 @@ export async function getSessions(
   }
 }
 
+/** Preserve namespaces while discovering project stores and native sessions. */
+export async function getTaskStoreKeys(
+  filterCwd?: string,
+  tasksDir = createDefaultTaskStore().tasksDir,
+  projectsDir = createDefaultTaskStore().projectsDir
+): Promise<TaskStoreKey[]> {
+  const sessions = await getSessions(filterCwd, tasksDir, projectsDir)
+  const projects = filterCwd ? [projectKeyFromCwd(filterCwd)] : await listProjectStoreKeys(tasksDir)
+  const existing = await Promise.all(
+    projects.map(async (key) => {
+      const dir = await readTaskStorePath({ kind: "project", key }, tasksDir)
+      return await stat(dir).then(
+        () => key,
+        () => null
+      )
+    })
+  )
+  return [
+    ...existing
+      .filter((key): key is string => key !== null)
+      .map((key): TaskStoreKey => ({ kind: "project", key })),
+    ...sessions.map(sessionStoreKey),
+  ]
+}
+
+/** Compatibility projection for callers whose input contract is still a string address. */
+export async function getTaskStoreAddresses(
+  filterCwd?: string,
+  tasksDir = createDefaultTaskStore().tasksDir,
+  projectsDir = createDefaultTaskStore().projectsDir
+): Promise<string[]> {
+  const keys = await getTaskStoreKeys(filterCwd, tasksDir, projectsDir)
+  return [...new Set(keys.map(taskStoreId))]
+}
+
 // ─── Hint builders ───────────────────────────────────────────────────────────
 
 /**
@@ -345,11 +393,14 @@ export async function getSessions(
  * Appended to "task not found" errors so agents can quickly identify the right ID.
  */
 export async function buildRecentTasksHint(
-  sessionId: string,
+  sessionId: string | TaskStoreKey,
   tasksDir = createDefaultTaskStore().tasksDir
 ): Promise<string> {
   try {
-    const tasks = await readTasks(sessionId, tasksDir)
+    const tasks =
+      typeof sessionId === "string"
+        ? await readTasks(sessionId, tasksDir)
+        : await readTaskStore(sessionId, tasksDir)
     if (tasks.length === 0) return ""
     const recent = tasks.slice(-5)
     const lines = recent.map((t) => `  #${t.id} [${t.status}]: ${t.subject}`).join("\n")
@@ -365,15 +416,19 @@ export async function buildRecentTasksHint(
  * session without needing to run `swiz tasks`.
  */
 export async function buildRecentSessionsHint(
-  sessions: string[],
+  sessions: Array<string | TaskStoreKey>,
   tasksDir = createDefaultTaskStore().tasksDir
 ): Promise<string> {
   if (sessions.length === 0) return ""
   const recent = sessions.slice(0, 5)
   const lines = await Promise.all(
-    recent.map(async (sessionId) => {
+    recent.map(async (address) => {
+      const sessionId = typeof address === "string" ? address : taskStoreDirName(address)
       try {
-        const tasks = await readTasks(sessionId, tasksDir)
+        const tasks =
+          typeof address === "string"
+            ? await readTasks(address, tasksDir)
+            : await readTaskStore(address, tasksDir)
         const preview = tasks
           .slice(-3)
           .map((t) => `    #${t.id} [${t.status}]: ${t.subject}`)
@@ -399,13 +454,13 @@ export async function findTaskAcrossSessions(
   filterCwd?: string,
   tasksDir = createDefaultTaskStore().tasksDir,
   projectsDir = createDefaultTaskStore().projectsDir
-): Promise<{ sessionId: string; task: Task }[]> {
-  const sessions = await getSessions(filterCwd, tasksDir, projectsDir)
-  const matches: { sessionId: string; task: Task }[] = []
-  for (const sessionId of sessions) {
-    const tasks = await readTasks(sessionId, tasksDir)
+): Promise<StoredTask[]> {
+  const stores = await getTaskStoreKeys(filterCwd, tasksDir, projectsDir)
+  const matches: StoredTask[] = []
+  for (const storeKey of stores) {
+    const tasks = await readTaskStore(storeKey, tasksDir)
     const task = tasks.find((t) => t.id === taskId)
-    if (task) matches.push({ sessionId, task })
+    if (task) matches.push({ storeKey, task })
   }
   return matches
 }
@@ -413,7 +468,7 @@ export async function findTaskAcrossSessions(
 /** List task-dir entries, returning [] on failure. */
 async function safeReadTaskDirEntries(tasksDir: string): Promise<string[]> {
   try {
-    return await readdir(tasksDir)
+    return await listSessionStoreIds(tasksDir)
   } catch {
     return []
   }
@@ -449,66 +504,68 @@ async function findInOrphanByPrefix(
   filterCwd: string | undefined,
   tasksDir: string,
   projectsDir: string
-): Promise<{ sessionId: string; task: Task } | null> {
+): Promise<StoredTask | null> {
   if (!filterCwd) return null
   const candidates = await candidateOrphanEntries(filterCwd, tasksDir, projectsDir)
   const orphanSession =
     candidates.find((s) => sessionPrefix(s) === prefix) ??
     candidates.find((s) => legacySessionPrefix(s) === prefix)
   if (!orphanSession) return null
-  const tasks = await readTasks(orphanSession, tasksDir)
+  const storeKey = sessionStoreKey(orphanSession)
+  const tasks = await readTaskStore(storeKey, tasksDir)
   const task = tasks.find((t) => t.id === taskId)
   if (!task) return null
   debugLog(
     `  ${DIM}Task #${taskId} resolved via compaction-recovery fallback in orphan session ${orphanSession.slice(0, 8)}...${RESET}`
   )
-  return { sessionId: orphanSession, task }
+  return { storeKey, task }
 }
 
 /** Of the given sessions, those that actually hold a task with this id. */
 async function sessionsHoldingTask(
-  sessionIds: string[],
+  storeKeys: TaskStoreKey[],
   taskId: string,
   tasksDir: string
-): Promise<string[]> {
-  const holders: string[] = []
-  for (const sessionId of sessionIds) {
-    const tasks = await readTasks(sessionId, tasksDir)
-    if (tasks.some((t) => t.id === taskId)) holders.push(sessionId)
+): Promise<TaskStoreKey[]> {
+  const holders: TaskStoreKey[] = []
+  for (const storeKey of storeKeys) {
+    const tasks = await readTaskStore(storeKey, tasksDir)
+    if (tasks.some((t) => t.id === taskId)) holders.push(storeKey)
   }
   return holders
 }
 
 function findSessionsMatchingPrefix(
-  sessions: string[],
+  sessions: TaskStoreKey[],
   prefix: string
-): { prefixMatches: string[]; isLegacyFallback: boolean } {
-  const primaryMatches = sessions.filter((s) => sessionPrefix(s) === prefix)
+): { prefixMatches: TaskStoreKey[]; isLegacyFallback: boolean } {
+  const primaryMatches = sessions.filter((s) => sessionPrefix(taskStoreId(s)) === prefix)
   if (primaryMatches.length > 0) {
     return { prefixMatches: primaryMatches, isLegacyFallback: false }
   }
-  const legacyMatches = sessions.filter((s) => legacySessionPrefix(s) === prefix)
+  const legacyMatches = sessions.filter((s) => legacySessionPrefix(taskStoreId(s)) === prefix)
   return { prefixMatches: legacyMatches, isLegacyFallback: legacyMatches.length > 0 }
 }
 
-function assertUnambiguousHolders(taskId: string, prefix: string, holders: string[]): void {
+function assertUnambiguousHolders(taskId: string, prefix: string, holders: TaskStoreKey[]): void {
   if (holders.length > 1) {
     throw new Error(
       `Task #${taskId} is ambiguous — prefix "${prefix}" matches ${holders.length} sessions that each hold it:\n` +
-        holders.map((s) => `  ${s}`).join("\n") +
+        holders.map((s) => `  ${taskStoreDirName(s)}`).join("\n") +
         `\nRe-run with --session <id> to choose one.`
     )
   }
 }
 
 async function resolveFromMatchingSession(
-  matchingSession: string,
+  storeKey: TaskStoreKey,
   taskId: string,
   prefix: string,
   tasksDir: string,
   isNonPrimaryOrLegacy: boolean
-): Promise<{ sessionId: string; task: Task }> {
-  const tasks = await readTasks(matchingSession, tasksDir)
+): Promise<StoredTask> {
+  const matchingSession = taskStoreDirName(storeKey)
+  const tasks = await readTaskStore(storeKey, tasksDir)
   const task = tasks.find((t) => t.id === taskId)
   if (task) {
     if (isNonPrimaryOrLegacy) {
@@ -516,9 +573,9 @@ async function resolveFromMatchingSession(
         `  ${DIM}Task #${taskId} resolved via prefix to session ${matchingSession.slice(0, 8)}...${RESET}`
       )
     }
-    return { sessionId: matchingSession, task }
+    return { storeKey, task }
   }
-  const recentHint = await buildRecentTasksHint(matchingSession, tasksDir)
+  const recentHint = await buildRecentTasksHint(storeKey, tasksDir)
   throw new Error(
     `Task #${taskId} not found in session ${matchingSession.slice(0, 8)}... (prefix "${prefix}" matched but task file is missing).` +
       `\nUse --session ${matchingSession.slice(0, 8)} with a different task ID, or recreate the task.${recentHint}`
@@ -529,21 +586,22 @@ async function resolveFromMatchingSession(
 async function resolvePrefixedTaskId(opts: {
   taskId: string
   prefix: string
-  primarySessionId: string
+  primaryStoreKey: TaskStoreKey
   filterCwd: string | undefined
   tasksDir: string
   projectsDir: string
-}): Promise<{ sessionId: string; task: Task }> {
-  const { taskId, prefix, primarySessionId, filterCwd, tasksDir, projectsDir } = opts
+}): Promise<StoredTask> {
+  const { taskId, prefix, primaryStoreKey, filterCwd, tasksDir, projectsDir } = opts
+  const primarySessionId = taskStoreId(primaryStoreKey)
   const isPrimaryPrefix =
     sessionPrefix(primarySessionId) === prefix || legacySessionPrefix(primarySessionId) === prefix
   if (isPrimaryPrefix) {
-    const tasks = await readTasks(primarySessionId, tasksDir)
+    const tasks = await readTaskStore(primaryStoreKey, tasksDir)
     const task = tasks.find((t) => t.id === taskId)
-    if (task) return { sessionId: primarySessionId, task }
+    if (task) return { storeKey: primaryStoreKey, task }
   }
 
-  const sessions = await getSessions(filterCwd, tasksDir, projectsDir)
+  const sessions = await getTaskStoreKeys(filterCwd, tasksDir, projectsDir)
   const { prefixMatches, isLegacyFallback } = findSessionsMatchingPrefix(sessions, prefix)
   const holders = await sessionsHoldingTask(prefixMatches, taskId, tasksDir)
   assertUnambiguousHolders(taskId, prefix, holders)
@@ -555,7 +613,7 @@ async function resolvePrefixedTaskId(opts: {
       taskId,
       prefix,
       tasksDir,
-      matchingSession !== primarySessionId || isLegacyFallback
+      taskStoreDirName(matchingSession) !== taskStoreDirName(primaryStoreKey) || isLegacyFallback
     )
   }
 
@@ -574,17 +632,18 @@ async function findInOrphanUnprefixed(
   filterCwd: string | undefined,
   tasksDir: string,
   projectsDir: string
-): Promise<{ sessionId: string; task: Task }[]> {
+): Promise<StoredTask[]> {
   if (!filterCwd) return []
   const candidates = await candidateOrphanEntries(filterCwd, tasksDir, projectsDir)
   for (const s of candidates) {
-    const tasks = await readTasks(s, tasksDir)
+    const storeKey = sessionStoreKey(s)
+    const tasks = await readTaskStore(storeKey, tasksDir)
     const task = tasks.find((t) => t.id === taskId)
     if (task) {
       debugLog(
         `  ${DIM}Task #${taskId} found via compaction-recovery fallback in orphan session ${s.slice(0, 8)}...${RESET}`
       )
-      return [{ sessionId: s, task }]
+      return [{ storeKey, task }]
     }
   }
   return []
@@ -595,18 +654,15 @@ async function findInOrphanUnprefixed(
  * then falls back to scanning all project sessions. Every command that
  * operates on a task by ID must use this single entry point.
  */
-function handleMultipleMatches(
-  taskId: string,
-  matches: { sessionId: string; task: Task }[]
-): { sessionId: string; task: Task } {
+function handleMultipleMatches(taskId: string, matches: StoredTask[]): StoredTask {
   if (matches.length === 1) {
     debugLog(
-      `  ${DIM}Task #${taskId} found in session ${matches[0]!.sessionId.slice(0, 8)}... (not current session)${RESET}`
+      `  ${DIM}Task #${taskId} found in session ${taskStoreDirName(matches[0]!.storeKey)} (not current session)${RESET}`
     )
     return matches[0]!
   }
   const sessionList = matches
-    .map((m) => `  - ${m.sessionId.slice(0, 8)}... [${m.task.status}]: ${m.task.subject}`)
+    .map((m) => `  - ${taskStoreDirName(m.storeKey)} [${m.task.status}]: ${m.task.subject}`)
     .join("\n")
   throw new Error(
     `Task #${taskId} exists in ${matches.length} sessions. Use --session <id> to disambiguate:\n${sessionList}`
@@ -615,14 +671,14 @@ function handleMultipleMatches(
 
 async function resolveUnprefixedTask(
   taskId: string,
-  primarySessionId: string,
+  primaryStoreKey: TaskStoreKey,
   filterCwd: string | undefined,
   tasksDir: string,
   projectsDir: string
-): Promise<{ sessionId: string; task: Task }> {
-  const tasks = await readTasks(primarySessionId, tasksDir)
+): Promise<StoredTask> {
+  const tasks = await readTaskStore(primaryStoreKey, tasksDir)
   const task = tasks.find((t) => t.id === taskId)
-  if (task) return { sessionId: primarySessionId, task }
+  if (task) return { storeKey: primaryStoreKey, task }
 
   let matches = await findTaskAcrossSessions(taskId, filterCwd, tasksDir, projectsDir)
   if (matches.length === 0) {
@@ -630,29 +686,33 @@ async function resolveUnprefixedTask(
   }
   if (matches.length > 0) return handleMultipleMatches(taskId, matches)
 
-  const recentHint = await buildRecentTasksHint(primarySessionId, tasksDir)
+  const recentHint = await buildRecentTasksHint(primaryStoreKey, tasksDir)
   throw new Error(`Task #${taskId} not found in any session for this project.${recentHint}`)
 }
 
 export async function resolveTaskById(
   taskId: string,
-  primarySessionId: string,
+  primarySessionId: string | TaskStoreKey,
   filterCwd?: string,
   tasksDir = createDefaultTaskStore().tasksDir,
   projectsDir = createDefaultTaskStore().projectsDir
-): Promise<{ sessionId: string; task: Task }> {
+): Promise<StoredTask> {
+  const primaryStoreKey =
+    typeof primarySessionId === "string"
+      ? await resolveLegacyTaskStoreKey(primarySessionId, filterCwd, tasksDir)
+      : primarySessionId
   const { prefix } = parseTaskId(taskId)
   if (prefix !== null) {
     return resolvePrefixedTaskId({
       taskId,
       prefix,
-      primarySessionId,
+      primaryStoreKey,
       filterCwd,
       tasksDir,
       projectsDir,
     })
   }
-  return resolveUnprefixedTask(taskId, primarySessionId, filterCwd, tasksDir, projectsDir)
+  return resolveUnprefixedTask(taskId, primaryStoreKey, filterCwd, tasksDir, projectsDir)
 }
 
 /**
@@ -669,7 +729,7 @@ export async function getOrphanSessionIds(
   const allIndexed = await getAllProjectSessionIds(projectsDir)
   let entries: string[]
   try {
-    entries = await readdir(tasksDir)
+    entries = await listSessionStoreIds(tasksDir)
   } catch {
     return new Set()
   }
@@ -694,7 +754,7 @@ export async function collectIncompleteTasks(
   tasksDir = createDefaultTaskStore().tasksDir,
   projectsDir = createDefaultTaskStore().projectsDir
 ): Promise<{ sessionId: string; task: Task }[]> {
-  const sessions = await getSessions(filterCwd, tasksDir, projectsDir)
+  const sessions = await getTaskStoreAddresses(filterCwd, tasksDir, projectsDir)
   const results: { sessionId: string; task: Task }[] = []
   for (const sessionId of sessions) {
     // Fast skip: if session meta reports zero open tasks, skip the full read.

@@ -1,6 +1,7 @@
 export interface TaskTimingLike {
   status: string
   statusChangedAt?: string | null
+  updatedAt?: string | null
   completionTimestamp?: string | null
   startedAt?: number | null
   completedAt?: number | null
@@ -46,6 +47,29 @@ export function getTaskCurrentDurationMs(
   if (startedAtMs === null) return Math.max(0, baseElapsedMs)
 
   return Math.max(0, baseElapsedMs + Math.max(0, nowMs - startedAtMs))
+}
+
+/**
+ * Epoch ms of the task's most recent recorded activity, preferring the
+ * write-stamped `updatedAt` and falling back to the newest valid status,
+ * start or completion timestamp for legacy records. Recency gates and
+ * status-agnostic pruning share this definition. Returns null when the
+ * record carries no usable timestamp, so callers can fail open.
+ */
+export function getTaskLastUpdatedMs(
+  task: Pick<
+    TaskTimingLike,
+    "status" | "updatedAt" | "statusChangedAt" | "startedAt" | "completedAt"
+  >
+): number | null {
+  const updatedAtMs = parseIsoTimestampMs(task.updatedAt)
+  if (updatedAtMs !== null) return updatedAtMs
+  const candidates = [
+    parseIsoTimestampMs(task.statusChangedAt),
+    isFiniteNumber(task.startedAt) ? task.startedAt : null,
+    isFiniteNumber(task.completedAt) ? task.completedAt : null,
+  ].filter((value): value is number => value !== null)
+  return candidates.length === 0 ? null : Math.max(...candidates)
 }
 
 export function backfillTaskTimingFields<T extends TaskTimingLike>(

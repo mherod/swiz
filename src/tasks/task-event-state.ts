@@ -18,6 +18,7 @@
  */
 
 import { debugLog } from "../debug.ts"
+import type { TaskStoreKey } from "./task-store-path.ts"
 import {
   type DuplicateSubjectGroup,
   findDuplicateSubjectGroups,
@@ -274,14 +275,23 @@ export async function readSessionTasksFreshest(sessionId: string): Promise<Event
  * field is replaced with the fresher value from event state when available.
  * Mutates the input array in place and returns it for convenience.
  */
-export function overlayEventState<T extends { id: string; status: string }>(
-  tasks: T[],
+function belongsToEventSession(
+  storeKey: TaskStoreKey | undefined,
+  taskId: string,
   sessionId: string
-): T[] {
+): boolean {
+  if (!storeKey) return true
+  return storeKey.kind === "session" ? storeKey.id === sessionId : taskId.includes("-")
+}
+
+export function overlayEventState<
+  T extends { id: string; status: string; storeKey?: TaskStoreKey },
+>(tasks: T[], sessionId: string): T[] {
   const eventState = sessionTasks.get(sessionId)
   if (!eventState || eventState.length === 0) return tasks
   const statusById = new Map(eventState.map((e) => [e.id, e.status]))
   for (const t of tasks) {
+    if (!belongsToEventSession(t.storeKey, t.id, sessionId)) continue
     const freshStatus = statusById.get(t.id)
     if (freshStatus && freshStatus !== t.status) {
       if (!isValidTransition(t.status, freshStatus)) {

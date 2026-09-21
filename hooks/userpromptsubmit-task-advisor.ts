@@ -16,7 +16,7 @@ import {
   buildUserPromptTaskContext,
   getTaskToolName,
 } from "../src/tasks/task-governance-messages.ts"
-import { isIncompleteTaskStatus, readSessionTasks } from "../src/tasks/task-recovery.ts"
+import { isIncompleteTaskStatus, readHookTasks } from "../src/tasks/task-recovery.ts"
 
 export async function evaluateUserpromptsubmitTaskAdvisor(input: unknown): Promise<SwizHookOutput> {
   const raw = typeof input === "object" && input !== null ? (input as Record<string, any>) : {}
@@ -32,7 +32,7 @@ export async function evaluateUserpromptsubmitTaskAdvisor(input: unknown): Promi
   // so prescribing task-queue remedies here is noise the agent is expected to ignore.
   if (await hasActiveSkillForHookPayload(raw)) return {}
 
-  const tasks = await readSessionTasks(sessionId, home)
+  const tasks = await readHookTasks(hookInput, home)
   const pendingCount = tasks.filter((t) => isIncompleteTaskStatus(t.status)).length
 
   const countContext = buildCountSummaryFromTasks(tasks)

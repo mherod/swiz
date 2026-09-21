@@ -6,7 +6,7 @@ One manifest of TypeScript hook scripts gets installed across Claude Code, Curso
 
 When `swiz idea` and `swiz continue` are used together, the system can enter a **self-directed loop** — a closed-loop state where the agent's own outputs become the next inputs, expanding the project without external prompts. See [docs/ai-providers.md](docs/ai-providers.md#self-directed-loop) for the canonical terminology.
 
-**162 hooks. 17 event types. Every agent. Zero compromises.**
+**165 hooks. 17 event types. Every agent. Zero compromises.**
 
 ## Install
 
@@ -229,7 +229,7 @@ PreToolUse hooks intercept tool calls *before* they execute. A blocking hook her
 | `pretooluse-measure-test-time.ts`              | Identifies full test suite runs and writes start times to temporary sentinel files. Excludes single file or limited directory test runs to focus on complete suite evaluations. |
 | `pretooluse-measure-lint-time.ts`              | Identifies full lint suite runs and writes start times to temporary sentinel files. Excludes single file or limited directory lint runs to focus on complete suite evaluations. |
 
-### PostToolUse (34)
+### PostToolUse (35)
 
 PostToolUse hooks run after a tool completes. They can feed error context back to the agent or inject advisory information.
 
@@ -266,17 +266,19 @@ PostToolUse hooks run after a tool completes. They can feed error context back t
 | `posttooluse-auto-steer.ts` | Consumes any scheduled steer message and types it into the active terminal session after a tool call using AppleScript automation. Scheduled steers are humanised into a natural paragraph at enqueue (falling back to the raw text, e.g. "Continue"). Supports iTerm2 (`write text`) and Terminal.app (`do script`). Runs async. |
 | `posttooluse-mid-session-prompt.ts` | After 3+ hours of session activity, checks for drift signals (>10 uncommitted files, stale last commit with dirty tree, new review-requested PRs) and softly suggests /mid-session-checkin via additionalContext. Opt-in via `enforceMidSessionCheckin` setting (default off). Cooldown: 30 minutes. |
 | `posttooluse-session-edits.ts` | Records files edited during the session into the `session_edits` table in IssueStore. |
+| `posttooluse-jbcontext-reindex.ts` | After git commit, merge, rebase, or pull, triggers background indexing via `jbcontext index --silent`. Keeps semantic search synchronized with recent changes without blocking agent execution. |
 | `posttooluse-measure-test-time.ts`            | Reads start time sentinels written by the preToolUse hook, computes the test run duration, updates average stats in `.swiz/test-execution-stats.json`, and reports the updated average via systemMessage. |
 | `posttooluse-measure-lint-time.ts`            | Reads start time sentinels written by the preToolUse hook, computes the lint run duration, updates average stats in `.swiz/lint-execution-stats.json`, and reports the updated average via systemMessage. |
 | `posttooluse-agent-message-graph.ts` | Records inter-agent `SendMessage` sends to `~/.swiz/agent-messages.jsonl` so sessions and projects that collaborate can be associated. Stores sender session and cwd, the recipient address as written, and the body size — never the body. Recipient addresses are resolved to projects lazily by the reader, keeping the hook a cheap append. |
 
-### SessionStart (9)
+### SessionStart (10)
 
 | Hook | What it does |
 |------|-------------|
 | `sessionstart-self-heal.ts` | Detects manifest drift by hashing `src/manifest.ts` and comparing to a stored hash. Automatically runs `swiz install` if they differ, keeping agent configs in sync after `git pull`. After a **full** `swiz install --uninstall` or `swiz uninstall` (all agents), self-heal pauses until you run `swiz install` again so manifest drift cannot undo an intentional removal. |
 | `sessionstart-environment-detects.ts` | Injects a structured snapshot of swiz detections at session start: process-level agent guess, SessionStart payload fields (`agent_type`, `model`, `source`, …), project stacks, frameworks/ecosystems, CI config signals, terminal/shell, and `isRunningInAgent()`. |
 | `sessionstart-health-snapshot.ts` | Captures a baseline of project health (lint state, test state, git state) at session start so the agent knows what it's walking into. |
+| `sessionstart-jbcontext-warmup.ts` | Probes jbcontext configuration at session start. If unindexed, triggers background semantic index warmup; if indexed, emits active index status context into the session. |
 | `sessionstart-state-context.ts` | Injects the current project state (e.g., `in-development`, `awaiting-feedback`) and allowed transitions into the session context so the agent always knows its lifecycle position. |
 | `sessionstart-websearch-suggester.ts` | Reminds the agent that WebSearch is available for unfamiliar errors, framework version-specific behaviours, and security/best-practice validation. Claude-only — no-ops for agents without a WebSearch surface. |
 | `sessionstart-morning-standup-prompt.ts` | Suggests `/morning-standup` once per cwd per calendar day so the day's shortlist gets lined up before work begins. Soft suggestion only. Opt-in via `enforceMorningStandup` setting (default off). |
@@ -307,13 +309,14 @@ PermissionRequest fires when a tool call needs a permission decision, giving the
 |------|-------------|
 | `permissionrequest-infraction-record.ts` | Records each permission request per session, keyed the same way the infraction scanner keys blocked attempts, and escalates an advisory when the same action repeatedly needs permission instead of being re-attempted blindly. |
 
-### UserPromptSubmit (4)
+### UserPromptSubmit (5)
 
 | Hook | What it does |
 |------|-------------|
 | `userpromptsubmit-git-context.ts` | Injects current git branch and status into every prompt. The agent always knows where it is in the repo. |
 | `userpromptsubmit-task-advisor.ts` | Surfaces active tasks before each prompt so the agent stays focused on what it was supposed to be doing. |
 | `userpromptsubmit-skill-steps.ts` | When the user's message starts with a `/skill-name` invocation, extracts steps from the skill's SKILL.md and creates pending tasks. Renders content before extraction and applies quality filtering. |
+| `userpromptsubmit-jbcontext-search.ts` | Performs semantic code search via jbcontext using the user's prompt and injects the top relevant code snippets into prompt context. |
 | `speak-narrator.ts` | Catches up on any unspoken assistant text when the user submits a prompt. Ensures narration stays current even during idle periods. Runs async. |
 
 ### Notification (1)

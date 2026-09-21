@@ -16,6 +16,7 @@ async function probe(body: string): Promise<void> {
     import { projectKeyFromCwd } from ${modulePath("src/project-key.ts")}
     import { createDefaultTaskStore } from ${modulePath("src/task-roots.ts")}
     import { readTasks, writeTask, writeAudit, sessionStoreKey, projectStoreKey } from ${modulePath("src/tasks/task-repository.ts")}
+    import { readAuditLog } from ${modulePath("src/tasks/task-audit-verification.ts")}
     import { createTaskInProcess } from ${modulePath("src/tasks/task-service.ts")}
     import { completeSessionTask } from ${modulePath("src/utils/session-task-io.ts")}
     import { mergeActionPlanIntoTasks } from ${modulePath("src/action-plan.ts")}
@@ -78,7 +79,7 @@ describe("hook task addressing (#868)", () => {
         check(await completeSessionTask(sessionId, subject, { cwd, evidence: "test: checklist passed" }), "settlement failed for " + key)
         const settled = (await readTasks(key)).find(item => item.id === task.id)
         check(settled.status === "completed", "wrong store was updated")
-        const trail = await Bun.file(join(tasksRoot, key, ".audit-log.jsonl")).text()
+        const trail = JSON.stringify(await readAuditLog(key, tasksRoot))
         check(trail.includes('"newStatus":"in_progress"') && trail.includes('"newStatus":"completed"'), "transition audit missing")
       }
     `)

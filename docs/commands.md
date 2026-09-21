@@ -55,7 +55,7 @@ forces Codex to quit. Output is appended to `~/Library/Logs/Swiz/doctor-clean.lo
 and errors to `~/Library/Logs/Swiz/doctor-clean.error.log`.
 
 `swiz install --dry-run` previews the job without writing or loading it.
-`--json` and scoped installs such as `--codex`, `--daemon`, `--merge-tool`, and
+`--json` and scoped installs such as `--codex`, `--daemon`, `--merge-tool`, `--mcp`, and
 `--status-line` leave this user-wide job unchanged. Full `swiz install --uninstall`
 unloads the job and moves its plist to Trash; logs are retained. Other platforms
 skip the LaunchAgent integration.
@@ -124,13 +124,11 @@ skip the LaunchAgent integration.
 | `usage` | `src/commands/usage.ts` | Summarize Claude usage data from `~/.claude.json` |
 
 `swiz doctor clean --dry-run` previews cleanup with a 30-day default for other
-providers and a 48-hour default for Codex archives. Codex cleanup only selects
-rollouts under `~/.codex/archived_sessions/` last modified more than 48 hours ago.
+providers. Codex cleanup selects all rollouts under `~/.codex/archived_sessions/`.
 Unarchived rollouts under `~/.codex/sessions/` are always retained, including their
 associated task files, even with `--force`, `--skip-trash`, or `--task-older-than`.
-`--older-than 7d` requests a longer retention window; shorter windows never lower
-the 48-hour Codex minimum. `doctor --fix` uses the same Codex policy while keeping
-its 24-hour automatic cleanup window for other providers.
+Other providers respect explicit `--older-than` values. `doctor --fix` uses the same
+Codex policy while keeping its 24-hour automatic cleanup window for other providers.
 
 Omit `--dry-run` to move selected files to Trash; `--skip-trash` permanently deletes
 them instead. Retained Codex rollouts and their task files are left intact,

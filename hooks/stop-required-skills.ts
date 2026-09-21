@@ -24,7 +24,7 @@ import {
   resolveSkillRecencyOptions,
 } from "../src/skill-utils.ts"
 import { stopActionId } from "../src/stop-actions.ts"
-import { isIncompleteTaskStatus, readTasks } from "../src/tasks/task-repository.ts"
+import { isIncompleteTaskStatus, readHookTasks } from "../src/tasks/task-recovery.ts"
 import {
   type CurrentSessionUsageEvent,
   collectCurrentSessionUsageEvents,
@@ -174,7 +174,7 @@ async function hasPreCompactionSkill(
 
 async function countIncompleteSessionTasks(input: StopHookInput): Promise<number> {
   if (!input.session_id) return 0
-  const tasks = await readTasks(input.session_id)
+  const tasks = await readHookTasks(input)
   return tasks.filter((task) => isIncompleteTaskStatus(task.status)).length
 }
 

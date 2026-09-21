@@ -4,6 +4,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { projectKeyFromCwd } from "../project-key.ts"
 import { sessionPrefix } from "../session-id.ts"
+import { sessionStoreKey } from "./task-repository.ts"
 import { resolveTaskById } from "./task-resolver.ts"
 
 // #824: sessionPrefix derives a 4-hex SHA-256 hash for path-derived store keys so distinct
@@ -96,7 +97,7 @@ describe("cross-project task resolution", () => {
     await seedMcpStore(fx, KEY_B, PROJECT_B, taskBId, "project B task")
 
     const resolved = await resolveTaskById(taskAId, KEY_A, PROJECT_A, fx.tasksDir, fx.projectsDir)
-    expect(resolved.sessionId).toBe(KEY_A)
+    expect(resolved.storeKey).toEqual({ kind: "project", key: KEY_A })
     expect(resolved.task.subject).toBe("project A task")
   })
 
@@ -105,7 +106,7 @@ describe("cross-project task resolution", () => {
     await seedMcpStore(fx, KEY_A, PROJECT_A, "user-1", "legacy project A task")
 
     const resolved = await resolveTaskById("user-1", KEY_A, PROJECT_A, fx.tasksDir, fx.projectsDir)
-    expect(resolved.sessionId).toBe(KEY_A)
+    expect(resolved.storeKey).toEqual({ kind: "project", key: KEY_A })
     expect(resolved.task.subject).toBe("legacy project A task")
   })
 
@@ -148,7 +149,7 @@ describe("cross-project task resolution", () => {
     await seedMcpStore(fx, KEY_A, PROJECT_A, "user-1", "project A task")
 
     const resolved = await resolveTaskById("user-1", KEY_A, PROJECT_A, fx.tasksDir, fx.projectsDir)
-    expect(resolved.sessionId).toBe(KEY_A)
+    expect(resolved.storeKey).toEqual({ kind: "project", key: KEY_A })
   })
 
   test("still recovers an unattributable orphan in this project", async () => {
@@ -170,6 +171,6 @@ describe("cross-project task resolution", () => {
     )
 
     const resolved = await resolveTaskById("aaaa-9", KEY_A, PROJECT_A, fx.tasksDir, fx.projectsDir)
-    expect(resolved.sessionId).toBe(orphan)
+    expect(resolved.storeKey).toEqual(sessionStoreKey(orphan))
   })
 })

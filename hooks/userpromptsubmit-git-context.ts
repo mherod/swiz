@@ -15,6 +15,7 @@ import {
   appendSessionFileOwnershipContext,
   resolveSessionFileOwnership,
 } from "../src/utils/session-file-ownership.ts"
+import { readSessionLines } from "../src/utils/transcript.ts"
 
 async function resolveBehaviorContext(
   cwd: string,
@@ -60,10 +61,48 @@ function combineContext(...parts: string[]): string {
   return parts.filter(Boolean).join("\n")
 }
 
+/** Marker that `buildBehaviorSteeringContext` prefixes its block with. */
+const STEERING_CONTEXT_MARKER = "Operating instructions:"
+
+/**
+ * The steering block is static for the life of a session, so re-injecting it on
+ * every prompt is pure repetition — only the volatile lines (git state, task
+ * counts) earn per-turn cost. Emit it once per session instead.
+ *
+ * `readSessionLines` returns only lines after the last compaction boundary, so a
+ * compacted session — where the agent no longer sees the original block — gets it
+ * re-emitted automatically. No sentinel file required.
+ */
+export async function shouldEmitSteeringContext(transcriptPath?: string): Promise<boolean> {
+  if (!transcriptPath) return true
+  const lines = await readSessionLines(transcriptPath)
+  if (lines.length === 0) return true
+  return !lines.some((line) => line.includes(STEERING_CONTEXT_MARKER))
+}
+
+/**
+ * Resolve the behaviour context, dropping the static steering block when this
+ * session has already been given it. `gitOptions` is always retained — it drives
+ * the branch-policy decision on every turn, not just the first.
+ */
+async function resolveSteeringGatedBehaviorContext(
+  cwd: string,
+  sessionId?: string,
+  transcriptPath?: string
+): Promise<Awaited<ReturnType<typeof resolveBehaviorContext>>> {
+  const resolved = await resolveBehaviorContext(cwd, sessionId)
+  if (await shouldEmitSteeringContext(transcriptPath)) return resolved
+  return { ...resolved, context: "" }
+}
+
 export async function evaluateUserpromptsubmitGitContext(input: unknown): Promise<SwizHookOutput> {
   const hookInput = userPromptSubmitHookInputSchema.parse(input)
   const cwd = hookInput.cwd ?? process.cwd()
-  const behavior = await resolveBehaviorContext(cwd, hookInput.session_id)
+  const behavior = await resolveSteeringGatedBehaviorContext(
+    cwd,
+    hookInput.session_id,
+    hookInput.transcript_path
+  )
   const hasExplicitBranchPolicy = Boolean(
     behavior.gitOptions.trunkMode || behavior.gitOptions.strictNoDirectMain
   )

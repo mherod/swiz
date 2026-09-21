@@ -45,7 +45,7 @@ alwaysApply: false
 - **Task completion**: `TaskUpdate` `taskId` + `status: completed`; evidence in `description`: `commit:`, `pr:`, `file:`, `test:`, `note:`.
 - **DON'T**: Assume CI success from partial output or from `gh run watch` alone. Confirm every job: `gh run view <run-id> --json conclusion,status,jobs`.
 - Treat `gh issue create` and task completion as atomic; recover with `TaskUpdate`.
-- After each `CLAUDE.md` edit run `wc -w CLAUDE.md`: the lefthook `memory` step hard-fails commits above project `memory-word-threshold` (3500 via `swiz settings show --project`, not `/compact-memory`'s laxer analyzer). Offset additions with trims in the same pass.
+- After each `CLAUDE.md` edit run `wc -w CLAUDE.md`: the lefthook `memory` step hard-fails commits above project `memory-word-threshold` (2000 via `swiz settings show --project`, not `/compact-memory`'s 5000 analyzer default). Offset additions with trims in the same pass.
 - Before adding a `CLAUDE.md` rule, scan nearby rules for conflicts.
 - Before issue labeling, run `gh label list`; use requested literal labels when present.
 - After `gh issue create`, run `/refine-issue <number>` and apply readiness label.
@@ -74,11 +74,12 @@ alwaysApply: false
 ## Push and CI
 - **DO**: Run `swiz settings show --project` before `/commit`, `/push`, or `/rebase-and-merge-into-main`; its effective project settings are the branch-policy authority.
 - **DO**: With project `trunk-mode` enabled and `strict-no-direct-main` disabled, stay on default branch and push directly. Contributor/PR activity or unknown collaboration heuristics affect timing but cannot force a feature branch; remote or branch-protection rejection is authoritative.
+- **DO**: With `trunk-mode` disabled, prove solo before committing to the default branch: owner type, 24h contributors, open-PR authors (excluding self and `app/*` bots) via `gh`. Any positive signal or `gh` failure selects a feature branch. Decide before `git commit`, not at push.
 - CI `paths-ignore`: `.claude/**`, `docs/**` — only those paths skip; markdown triggers CI.
 - Pre-push checklist:
-  0. Run `/push` before every push and reconcile its heuristics with `swiz settings show --project`; explicit project trunk mode wins the branch-model decision.
+  0. Run `/push` before every push.
   1. `git branch --show-current`; `gh pr list --state open --head $(git branch --show-current)`.
-  2. `git push origin <permitted-branch>` (lefthook pre-push runs full `bun test`); with project trunk mode enabled, the permitted branch is the configured default branch.
+  2. `git push origin <permitted-branch>` (lefthook pre-push runs scoped `bun test`); with project trunk mode enabled, the permitted branch is the configured default branch.
   3. **CI** run id from `gh run list --commit "$SHA" --limit 15`—row `[0]` may be Dependabot (**MEMORY.md**).
   4. `gh run watch <run-id> --exit-status`.
   5. `gh run view <run-id> --json conclusion,status,jobs --jq '{conclusion,status,jobs:[.jobs[]|{name,conclusion,status}]}'`.

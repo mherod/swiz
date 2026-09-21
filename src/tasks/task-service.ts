@@ -1,8 +1,8 @@
-import { readdir, readFile, stat } from "node:fs/promises"
+import { readFile, stat } from "node:fs/promises"
 import { join } from "node:path"
 import { resolveTranslationAgent } from "../agent-paths.ts"
 import { type AgentDef, translateMatcher } from "../agents.ts"
-import { DIM, RESET } from "../ansi.ts"
+import { RESET } from "../ansi.ts"
 import { verifyTaskSubject } from "../commands/tasks.ts"
 import { getGitClient } from "../git/client.ts"
 import {
@@ -22,15 +22,19 @@ import {
   isIncompleteTaskStatus,
   legacySessionPrefix,
   parseTaskId,
+  readTaskStore,
   readTasks,
   resolveLegacyTaskStoreKey,
   STATUS_STYLE,
   sessionPrefix,
   type Task,
+  type TaskStoreKey,
   writeAudit,
   writeTask,
 } from "./task-repository.ts"
-import { collectIncompleteTasks, resolveTaskById } from "./task-resolver.ts"
+import { collectIncompleteTasks, getTaskStoreKeys, resolveTaskById } from "./task-resolver.ts"
+import { readTaskStorePath } from "./task-store-layout.ts"
+import { taskStoreId } from "./task-store-path.ts"
 import { detect, formatMessage } from "./task-subject-validation.ts"
 
 export { compareTaskIds, legacySessionPrefix, parseTaskId, sessionPrefix }
@@ -61,6 +65,8 @@ export function findCollidingTask(
 
 export interface CreateTaskOptions {
   sessionId: string
+  /** Explicit address for callers that already know the store kind. */
+  storeKey?: TaskStoreKey
   subject: string
   description: string
   /** Present continuous form for spinner display (e.g., 'Fixing login bug') */
@@ -77,6 +83,7 @@ export interface CreateTaskOptions {
  */
 export async function createTaskInProcess(opts: CreateTaskOptions): Promise<Task> {
   const { sessionId, subject, description, cwd = process.cwd() } = opts
+  const storeKey = opts.storeKey ?? (await resolveLegacyTaskStoreKey(sessionId, cwd))
 
   if (!opts.skipSubjectValidation) {
     const detection = detect(subject)
@@ -85,7 +92,7 @@ export async function createTaskInProcess(opts: CreateTaskOptions): Promise<Task
     }
   }
 
-  const tasks = await readTasks(sessionId)
+  const tasks = await readTaskStore(storeKey)
 
   const incomplete = tasks.filter((t) => isIncompleteTaskStatus(t.status))
   const collision = findCollidingTask(subject, incomplete)
@@ -95,7 +102,7 @@ export async function createTaskInProcess(opts: CreateTaskOptions): Promise<Task
     )
   }
 
-  const prefix = sessionPrefix(sessionId)
+  const prefix = sessionPrefix(taskStoreId(storeKey))
   const maxSeq = tasks.reduce((m, t) => {
     const parsed = parseTaskId(t.id)
     const seq = parsed.prefix === prefix || parsed.prefix === null ? parsed.seq : 0
@@ -118,7 +125,6 @@ export async function createTaskInProcess(opts: CreateTaskOptions): Promise<Task
     blockedBy: [],
   }
 
-  const storeKey = await resolveLegacyTaskStoreKey(sessionId, cwd)
   await writeTask(storeKey, task, cwd)
   await writeAudit(storeKey, {
     timestamp: new Date().toISOString(),
@@ -228,9 +234,10 @@ export async function mergeIntoTasks(
 export async function createTask(
   sessionId: string,
   subject: string,
-  description: string
+  description: string,
+  cwd?: string
 ): Promise<void> {
-  const task = await createTaskInProcess({ sessionId, subject, description })
+  const task = await createTaskInProcess({ sessionId, subject, description, cwd })
   const { emoji, color } = STATUS_STYLE.pending
   console.log(`\n  ${emoji} Created #${task.id}: ${color}pending${RESET}`)
   console.log(`     ${subject}\n`)
@@ -307,19 +314,23 @@ function isValidRecoveredSubject(entry: unknown, taskId: string): entry is Recor
   )
 }
 
-async function collectSessionMtimes(tasksDir: string): Promise<{ dir: string; mtime: number }[]> {
-  let sessionDirs: string[]
+async function collectSessionMtimes(
+  tasksDir: string
+): Promise<{ storeKey: TaskStoreKey; mtime: number }[]> {
+  let storeKeys: TaskStoreKey[]
   try {
-    sessionDirs = await readdir(tasksDir)
+    storeKeys = await getTaskStoreKeys(undefined, tasksDir)
   } catch {
     return []
   }
 
-  const withMtime: { dir: string; mtime: number }[] = []
-  for (const dir of sessionDirs) {
+  const withMtime: { storeKey: TaskStoreKey; mtime: number }[] = []
+  for (const storeKey of storeKeys) {
     try {
-      const { mtimeMs } = await stat(join(tasksDir, dir, ".audit-log.jsonl"))
-      withMtime.push({ dir, mtime: mtimeMs })
+      const { mtimeMs } = await stat(
+        join(await readTaskStorePath(storeKey, tasksDir), ".audit-log.jsonl")
+      )
+      withMtime.push({ storeKey, mtime: mtimeMs })
     } catch {}
   }
   withMtime.sort((a, b) => b.mtime - a.mtime)
@@ -350,8 +361,8 @@ async function recoverSubjectFromAuditLogs(
   tasksDir: string
 ): Promise<string | null> {
   const withMtime = await collectSessionMtimes(tasksDir)
-  for (const { dir } of withMtime.slice(0, AUDIT_RECOVERY_MAX_SESSIONS)) {
-    const auditPath = join(tasksDir, dir, ".audit-log.jsonl")
+  for (const { storeKey } of withMtime.slice(0, AUDIT_RECOVERY_MAX_SESSIONS)) {
+    const auditPath = join(await readTaskStorePath(storeKey, tasksDir), ".audit-log.jsonl")
     const subject = await searchAuditLogForTask(auditPath, taskId)
     if (subject) return subject
   }
@@ -394,21 +405,29 @@ export async function ensureFileBackedTask({
 
   const stubTask = buildStubTask(taskId, resolved.subject, { description, activeForm, status })
   const storeKey = await resolveLegacyTaskStoreKey(sessionId, filterCwd ?? process.cwd())
-  await writeTask(storeKey, stubTask, process.cwd())
-  await writeAudit(storeKey, {
-    timestamp: new Date().toISOString(),
+  await withInProgressReservation(
     taskId,
-    action: "create",
-    newStatus: stubTask.status,
-    subject: resolved.subject,
-  })
+    "pending",
+    status,
+    async () => {
+      await writeTask(storeKey, stubTask, filterCwd ?? process.cwd())
+      await writeAudit(storeKey, {
+        timestamp: new Date().toISOString(),
+        taskId,
+        action: "create",
+        newStatus: stubTask.status,
+        subject: resolved.subject,
+      })
+    },
+    { filterCwd, storeKey }
+  )
 
   console.log(`  ℹ️  Task #${taskId} not in file store — created stub (${resolved.source})`)
   return true
 }
 
 import { validateTransition } from "./task-transitions.ts"
-import { assertInProgressLimit } from "./task-wip-limit.ts"
+import { withInProgressReservation } from "./task-wip-limit.ts"
 export { validateTransition }
 
 /**
@@ -486,25 +505,56 @@ export function applyStatusTransition(
   applyTaskTimestamps(task, newStatus, nowIso, nowMs)
 }
 
+export interface TaskMutationContext {
+  filterCwd?: string
+  tasksDir?: string
+}
+
+export interface TaskMutationResult {
+  task: Task
+  oldStatus: Task["status"]
+  action: "field_update" | "status_change"
+  evidence?: string
+}
+
+/** Persist task data and its audit entry in the same caller-selected store. */
+async function persistTaskMutation(
+  storeKey: TaskStoreKey,
+  result: TaskMutationResult,
+  { filterCwd, tasksDir }: TaskMutationContext
+): Promise<TaskMutationResult> {
+  const { task, oldStatus, action, evidence } = result
+  await writeTask(storeKey, task, filterCwd ?? process.cwd(), tasksDir)
+  await writeAudit(
+    storeKey,
+    {
+      timestamp: new Date().toISOString(),
+      taskId: task.id,
+      action,
+      oldStatus,
+      newStatus: task.status,
+      evidence,
+      subject: task.subject,
+    },
+    tasksDir
+  )
+  return result
+}
+
 export async function updateStatus(
-  sessionId: string,
+  sessionId: string | TaskStoreKey,
   taskId: string,
   newStatus: Task["status"],
-  options: {
+  options: TaskMutationContext & {
     evidence?: string
     verifyText?: string
-    filterCwd?: string
     skipLastTaskGuard?: boolean
     /** Skip the project in-progress cap. Only for transient hops (see {@link completeTaskWithAutoTransition}). */
     skipWipLimit?: boolean
   } = {}
-): Promise<void> {
-  const { evidence, verifyText, filterCwd } = options
-  const { sessionId: effectiveSessionId, task } = await resolveTaskById(
-    taskId,
-    sessionId,
-    filterCwd
-  )
+): Promise<TaskMutationResult> {
+  const { evidence, verifyText } = options
+  const { storeKey, task } = await resolveTaskAddress(taskId, sessionId, options)
 
   if (verifyText) {
     const verifyError = verifyTaskSubject(task.subject, verifyText)
@@ -525,39 +575,21 @@ export async function updateStatus(
 
   const oldStatus = task.status
 
-  // A project may hold at most MAX_IN_PROGRESS_TASKS_PER_PROJECT in_progress tasks. Unlike the
-  // last-task-standing rule above, this one is a rejection: the cheap way out is to finish or
-  // cancel an open task, which is the behaviour the cap exists to produce.
-  if (!options.skipWipLimit) {
-    await assertInProgressLimit(taskId, oldStatus, newStatus, filterCwd)
+  const persist = async () => {
+    const now = new Date().toISOString()
+    applyStatusTransition(task, newStatus, now)
+    if (newStatus === "completed" && evidence) {
+      task.completionEvidence = evidence
+      task.completionTimestamp = now
+    }
+    return persistTaskMutation(
+      storeKey,
+      { task, oldStatus, action: "status_change", evidence },
+      options
+    )
   }
-
-  const now = new Date().toISOString()
-  const nowMs = Date.now()
-
-  applyStatusTransition(task, newStatus, now, nowMs)
-  if (newStatus === "completed" && evidence) {
-    task.completionEvidence = evidence
-    task.completionTimestamp = now
-  }
-
-  const storeKey = await resolveLegacyTaskStoreKey(effectiveSessionId, filterCwd ?? process.cwd())
-  await writeTask(storeKey, task, process.cwd())
-  await writeAudit(storeKey, {
-    timestamp: new Date().toISOString(),
-    taskId,
-    action: "status_change",
-    oldStatus,
-    newStatus,
-    evidence,
-    subject: task.subject,
-  })
-
-  const { emoji, color } = STATUS_STYLE[newStatus]
-  console.log(`\n  ${emoji} #${taskId}: ${oldStatus} → ${color}${newStatus}${RESET}`)
-  console.log(`     ${task.subject}`)
-  if (evidence) console.log(`     ${DIM}Evidence: ${evidence}${RESET}`)
-  console.log()
+  if (options.skipWipLimit) return persist()
+  return withInProgressReservation(taskId, oldStatus, newStatus, persist, { ...options, storeKey })
 }
 
 /**
@@ -571,18 +603,17 @@ export async function updateStatus(
  * the phantom-prone jump is gated.
  */
 export async function completeTaskWithAutoTransition(
-  sessionId: string,
+  sessionId: string | TaskStoreKey,
   taskId: string,
-  options: {
+  options: TaskMutationContext & {
     evidence?: string
     verifyText?: string
-    filterCwd?: string
     skipLastTaskGuard?: boolean
   } = {}
-): Promise<void> {
-  const { filterCwd } = options
+): Promise<TaskMutationResult> {
+  const { filterCwd, tasksDir } = options
 
-  const { task } = await resolveTaskById(taskId, sessionId, filterCwd)
+  const { task, storeKey } = await resolveTaskAddress(taskId, sessionId, options)
   if (task.status === "pending") {
     const settings = await readSwizSettings()
     if (!settings.taskAutoTransition) {
@@ -600,9 +631,9 @@ export async function completeTaskWithAutoTransition(
     }
     // Transient hop on the way to completed — it never widens the WIP front, so the
     // project in-progress cap must not refuse a completion that is already evidenced.
-    await updateStatus(sessionId, taskId, "in_progress", { filterCwd, skipWipLimit: true })
+    await updateStatus(storeKey, taskId, "in_progress", { filterCwd, tasksDir, skipWipLimit: true })
   }
-  await updateStatus(sessionId, taskId, "completed", options)
+  return updateStatus(storeKey, taskId, "completed", options)
 }
 
 // ─── State update ─────────────────────────────────────────────────────────────
@@ -671,42 +702,40 @@ export async function validatePushPreFlightTaskState(filterCwd?: string): Promis
 
 // ─── Task field update ────────────────────────────────────────────────────────
 
+/** Update an existing task without emitting transport-specific output. */
 export async function writeTaskUpdate(
-  sessionId: string,
+  sessionId: string | TaskStoreKey,
   taskId: string,
   task: Task,
-  newStatus?: Task["status"]
-): Promise<void> {
-  const storeKey = await resolveLegacyTaskStoreKey(sessionId, process.cwd())
-  if (newStatus) {
-    const oldStatus = task.status
-    await assertInProgressLimit(taskId, oldStatus, newStatus)
-    const nowIso = new Date().toISOString()
-    applyStatusTransition(task, newStatus, nowIso, Date.now())
-    await writeTask(storeKey, task, process.cwd())
-    await writeAudit(storeKey, {
-      timestamp: new Date().toISOString(),
-      taskId,
-      action: "status_change",
-      oldStatus,
-      newStatus,
-      subject: task.subject,
-    })
-    const { emoji, color } = STATUS_STYLE[newStatus]
-    console.log(`\n  ${emoji} #${taskId}: ${oldStatus} → ${color}${newStatus}${RESET}`)
-    console.log(`     ${task.subject}`)
-    return
+  newStatus?: Task["status"],
+  options: TaskMutationContext = {}
+): Promise<TaskMutationResult> {
+  const { storeKey } = await resolveTaskAddress(taskId, sessionId, options)
+  const oldStatus = task.status
+  const persist = async () => {
+    if (newStatus) applyStatusTransition(task, newStatus)
+    return persistTaskMutation(
+      storeKey,
+      { task, oldStatus, action: newStatus ? "status_change" : "field_update" },
+      options
+    )
   }
-
-  await writeTask(storeKey, task, process.cwd())
-  await writeAudit(storeKey, {
-    timestamp: new Date().toISOString(),
-    taskId,
-    action: "field_update",
-    oldStatus: task.status,
-    newStatus: task.status,
-    subject: task.subject,
+  return withInProgressReservation(taskId, oldStatus, newStatus ?? oldStatus, persist, {
+    ...options,
+    storeKey,
   })
-  console.log(`\n  ✏️  #${taskId}: updated`)
-  console.log(`     ${task.subject}`)
+}
+
+/** Typed callers have already resolved ownership: never repeat a cross-store lookup. */
+async function resolveTaskAddress(
+  taskId: string,
+  address: string | TaskStoreKey,
+  { filterCwd, tasksDir }: TaskMutationContext
+) {
+  if (typeof address === "string") {
+    return resolveTaskById(taskId, address, filterCwd, tasksDir)
+  }
+  const task = (await readTaskStore(address, tasksDir)).find((candidate) => candidate.id === taskId)
+  if (!task) throw new Error(`Task #${taskId} not found in the resolved ${address.kind} store.`)
+  return { task, storeKey: address }
 }

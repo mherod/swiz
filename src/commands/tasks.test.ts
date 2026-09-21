@@ -2,6 +2,8 @@ import { afterAll, beforeAll, describe, expect, it } from "bun:test"
 import { mkdir, readFile, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { sessionStoreKey } from "../tasks/task-repository.ts"
+import { taskStoreId } from "../tasks/task-store-path.ts"
 import { projectKeyFromCwd } from "../transcript-utils.ts"
 import { acquireEnvLock, releaseEnvLockFn, runCommandInProcess } from "../utils/test-utils.ts"
 import {
@@ -301,7 +303,7 @@ describe("findTaskAcrossSessions", () => {
     // Task #120 exists only in SESSION_B
     const results = await findTaskAcrossSessions("120", undefined, TASKS, PROJECTS)
     expect(results.length).toBe(1)
-    expect(results[0]!.sessionId).toBe(SESSION_B)
+    expect(results[0]!.storeKey).toEqual(sessionStoreKey(SESSION_B))
     expect(results[0]!.task.id).toBe("120")
     expect(results[0]!.task.subject).toBe("Push and verify CI")
   })
@@ -310,7 +312,7 @@ describe("findTaskAcrossSessions", () => {
     // Task #1 exists in all three sessions
     const results = await findTaskAcrossSessions("1", undefined, TASKS, PROJECTS)
     expect(results.length).toBe(3)
-    const sessionIds = results.map((r) => r.sessionId).sort()
+    const sessionIds = results.map((r) => taskStoreId(r.storeKey)).sort()
     expect(sessionIds).toEqual([SESSION_A, SESSION_B, SESSION_C].sort())
   })
 
@@ -348,14 +350,14 @@ describe("resolveTaskById", () => {
   it("resolves from primary session when task exists there", async () => {
     // Task #1 exists in SESSION_A
     const result = await resolveTaskById("1", SESSION_A, undefined, TASKS, PROJECTS)
-    expect(result.sessionId).toBe(SESSION_A)
+    expect(result.storeKey).toEqual(sessionStoreKey(SESSION_A))
     expect(result.task.id).toBe("1")
   })
 
   it("falls back to another session when task is not in primary", async () => {
     // Task #120 only exists in SESSION_B — pass SESSION_A as primary
     const result = await resolveTaskById("120", SESSION_A, undefined, TASKS, PROJECTS)
-    expect(result.sessionId).toBe(SESSION_B)
+    expect(result.storeKey).toEqual(sessionStoreKey(SESSION_B))
     expect(result.task.id).toBe("120")
     expect(result.task.subject).toBe("Push and verify CI")
   })
@@ -381,7 +383,7 @@ describe("resolveTaskById", () => {
   it("prefers primary session over fallback for same task ID", async () => {
     // Task #1 exists in all sessions — primary should win
     const result = await resolveTaskById("1", SESSION_C, undefined, TASKS, PROJECTS)
-    expect(result.sessionId).toBe(SESSION_C)
+    expect(result.storeKey).toEqual(sessionStoreKey(SESSION_C))
   })
 
   it("throws disambiguation error when task ID collides across sessions", async () => {
@@ -406,7 +408,7 @@ describe("resolveTaskById", () => {
   it("resolves prefixed task ID directly via session prefix", async () => {
     const prefixC = sessionPrefix(SESSION_C)
     const result = await resolveTaskById(`${prefixC}-10`, SESSION_A, undefined, TASKS, PROJECTS)
-    expect(result.sessionId).toBe(SESSION_C)
+    expect(result.storeKey).toEqual(sessionStoreKey(SESSION_C))
     expect(result.task.subject).toBe("Prefixed task in session C")
   })
 
@@ -519,7 +521,7 @@ describe("resolveTaskById", () => {
 
     // Unprefixed: task #1 in SESSION_A resolves correctly under FILTER_CWD
     const unprefixedResult = await resolveTaskById("1", SESSION_A, FILTER_CWD, TASKS, PROJECTS)
-    expect(unprefixedResult.sessionId).toBe(SESSION_A)
+    expect(unprefixedResult.storeKey).toEqual(sessionStoreKey(SESSION_A))
     expect(unprefixedResult.task.id).toBe("1")
 
     // Prefixed: cccc-10 in SESSION_C resolves correctly under FILTER_CWD (SESSION_C is in scope)
@@ -531,7 +533,7 @@ describe("resolveTaskById", () => {
       TASKS,
       PROJECTS
     )
-    expect(prefixedResult.sessionId).toBe(SESSION_C)
+    expect(prefixedResult.storeKey).toEqual(sessionStoreKey(SESSION_C))
     expect(prefixedResult.task.subject).toBe("Prefixed task in session C")
   })
 })

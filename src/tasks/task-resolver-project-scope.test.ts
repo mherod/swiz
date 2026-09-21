@@ -3,7 +3,7 @@ import { mkdir, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { projectKeyFromCwd } from "../project-key.ts"
-import { getSessions } from "./task-resolver.ts"
+import { getSessions, getTaskStoreAddresses } from "./task-resolver.ts"
 
 // #826: session selection admitted *any* directory absent from every project's transcript list.
 // The MCP store is keyed by projectKeyFromCwd(cwd) and never produces a .jsonl, so it is
@@ -67,11 +67,11 @@ async function seedNativeSession(fx: Fixture, sessionId: string, cwd: string): P
 }
 
 describe("getSessions project scoping", () => {
-  test("includes this project's own MCP store", async () => {
+  test("excludes this project's legacy MCP store from native sessions", async () => {
     const fx = await makeFixture()
     await seedMcpStore(fx, KEY_A, PROJECT_A)
     const sessions = await getSessions(PROJECT_A, fx.tasksDir, fx.projectsDir)
-    expect(sessions).toContain(KEY_A)
+    expect(sessions).not.toContain(KEY_A)
   })
 
   test("excludes another project's MCP store when filterCwd is set", async () => {
@@ -79,18 +79,21 @@ describe("getSessions project scoping", () => {
     await seedMcpStore(fx, KEY_A, PROJECT_A)
     await seedMcpStore(fx, KEY_B, PROJECT_B)
     const sessions = await getSessions(PROJECT_A, fx.tasksDir, fx.projectsDir)
-    expect(sessions).toContain(KEY_A)
+    expect(sessions).not.toContain(KEY_A)
     expect(sessions).not.toContain(KEY_B)
   })
 
-  test("includes both MCP stores when no filterCwd is given", async () => {
+  test("keeps both MCP stores out of native session discovery without narrowing all-store lookup", async () => {
     // --all-projects must remain the way to widen scope.
     const fx = await makeFixture()
     await seedMcpStore(fx, KEY_A, PROJECT_A)
     await seedMcpStore(fx, KEY_B, PROJECT_B)
     const sessions = await getSessions(undefined, fx.tasksDir, fx.projectsDir)
-    expect(sessions).toContain(KEY_A)
-    expect(sessions).toContain(KEY_B)
+    expect(sessions).not.toContain(KEY_A)
+    expect(sessions).not.toContain(KEY_B)
+    expect(await getTaskStoreAddresses(undefined, fx.tasksDir, fx.projectsDir)).toEqual(
+      expect.arrayContaining([KEY_A, KEY_B])
+    )
   })
 
   test("keeps native sessions scoped to their own project", async () => {

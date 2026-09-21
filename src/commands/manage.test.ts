@@ -33,7 +33,7 @@ async function runManage(
 }
 
 describe("parseManageArgs", () => {
-  it("parses list defaults to all agents including claude-desktop", () => {
+  it("parses list defaults to all agents including claude-desktop and windsurf", () => {
     const parsed = parseManageArgs(["mcp", "list"])
     expect(parsed.action).toBe("list")
     expect(parsed.targetAgents).toEqual([
@@ -45,7 +45,19 @@ describe("parseManageArgs", () => {
       "gemini",
       "junie",
       "ai",
+      "windsurf",
     ])
+  })
+
+  it("parses install and uninstall actions", () => {
+    const install = parseManageArgs(["mcp", "install", "--windsurf"])
+    expect(install.action).toBe("install")
+    expect(install.targetAgents).toEqual(["windsurf"])
+
+    const uninstall = parseManageArgs(["mcp", "uninstall", "--windsurf", "--dry-run"])
+    expect(uninstall.action).toBe("uninstall")
+    expect(uninstall.targetAgents).toEqual(["windsurf"])
+    expect(uninstall.dryRun).toBe(true)
   })
 
   it("parses --claude-desktop flag", () => {
@@ -598,5 +610,36 @@ describe("manage mcp --claude-desktop (global Claude Desktop config)", () => {
     expect(list.stdout).toContain("Claude Code")
     expect(list.stdout).toContain(join(home, ".claude.json"))
     expect(list.stdout).toContain("code-server: node")
+  })
+
+  it("mcp install and uninstall registers and removes swiz across target agents", async () => {
+    const home = await makeTempHome()
+    const windsurfPath = join(home, ".codeium", "windsurf", "mcp_config.json")
+
+    // Dry-run install
+    const dryInstall = await runManage(["mcp", "install", "--windsurf", "--dry-run"], home)
+    expect(dryInstall.exitCode).toBe(0)
+    expect(dryInstall.stdout).toContain("+ (would register) Windsurf")
+    expect(await Bun.file(windsurfPath).exists()).toBe(false)
+
+    // Real install
+    const install = await runManage(["mcp", "install", "--windsurf"], home)
+    expect(install.exitCode).toBe(0)
+    expect(install.stdout).toContain("✓ Windsurf")
+    expect(await Bun.file(windsurfPath).exists()).toBe(true)
+    const json = await (await Bun.file(windsurfPath)).json()
+    expect(json.mcpServers.swiz).toEqual({ command: "swiz", args: ["mcp"] })
+
+    // Second install no-ops (already registered)
+    const secondInstall = await runManage(["mcp", "install", "--windsurf"], home)
+    expect(secondInstall.exitCode).toBe(0)
+    expect(secondInstall.stdout).toContain("(already registered)")
+
+    // Real uninstall
+    const uninstall = await runManage(["mcp", "uninstall", "--windsurf"], home)
+    expect(uninstall.exitCode).toBe(0)
+    expect(uninstall.stdout).toContain("✗ Windsurf")
+    const afterUninstall = await (await Bun.file(windsurfPath)).json()
+    expect(afterUninstall.mcpServers.swiz).toBeUndefined()
   })
 })

@@ -4,7 +4,7 @@
  *       ID utilities (parseTaskId, compareTaskIds), and STATUS_STYLE.
  */
 
-import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises"
+import { readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { z } from "zod"
 import { debugLog } from "../debug.ts"
@@ -14,6 +14,11 @@ import { CappedMap } from "../utils/capped-map.ts"
 import { appendJsonlEntry, parseJsonl } from "../utils/jsonl.ts"
 import { isSessionTaskJsonFile } from "./task-file-utils.ts"
 import {
+  prepareTaskStoreWrite,
+  readTaskStorePath,
+  resolveLegacyTaskStoreKey,
+} from "./task-store-layout.ts"
+import {
   isSafeSessionId,
   projectStoreKey,
   sessionDirPath,
@@ -21,6 +26,9 @@ import {
   type TaskStoreKey,
   taskStoreDirName,
 } from "./task-store-path.ts"
+
+export { resolveLegacyTaskStoreKey } from "./task-store-layout.ts"
+
 import { backfillTaskTimingFields } from "./task-timing.ts"
 
 const AUDIT_LOG_FILENAME = ".audit-log.jsonl"
@@ -64,6 +72,12 @@ export interface Task {
   completedAt?: number | null
   /** ISO timestamp of last status change (used for elapsed-time tracking) */
   statusChangedAt?: string
+  /**
+   * ISO timestamp of the last persisted write of any kind. Unlike
+   * `statusChangedAt`, a description-only update refreshes this, so recency
+   * gates can be satisfied without forcing a status transition.
+   */
+  updatedAt?: string
   /** Cumulative milliseconds spent in in_progress status */
   elapsedMs?: number
   /** Deterministic fingerprint of the normalized subject for deduplication. */
@@ -211,11 +225,10 @@ export async function readTasks(
   sessionId: string,
   tasksDir = createDefaultTaskStore().tasksDir
 ): Promise<Task[]> {
-  // Reads prefer an empty result over a throw: a traversing id names no legitimate session, and
-  // callers here (status lines, governance gates) must not crash on a malformed payload.
-  if (!isSafeSessionId(sessionStoreKey(sessionId), tasksDir)) return []
-  const dir = join(tasksDir, sessionId)
+  return readTaskStore(await resolveLegacyTaskStoreKey(sessionId, undefined, tasksDir), tasksDir)
+}
 
+async function readTasksInDirectory(dir: string): Promise<Task[]> {
   // Junie fallback: if events.jsonl exists, parse tasks from AgentPlanUpdatedEvent
   const eventsPath = join(dir, "events.jsonl")
   try {
@@ -272,9 +285,20 @@ export async function readTasks(
         try {
           const filePath = join(dir, f)
           const task = JSON.parse(await readFile(filePath, "utf-8")) as Task
+          if (!task.id || !task.subject || !taskStatusSchema.safeParse(task.status).success)
+            return null
+          task.description ??= ""
+          task.blocks ??= []
+          task.blockedBy ??= []
           const st = await stat(filePath)
           // Backfill timing fields for legacy tasks that predate explicit timestamps.
           if (!task.statusChangedAt) task.statusChangedAt = st.mtime.toISOString()
+          // `updatedAt` is deliberately NOT backfilled from mtime. Doing so gave every
+          // legacy or externally written record a wall-clock stamp, and because the merge
+          // prefers `updatedAt`, two copies written moments apart tied on mtime and the
+          // winner became nondeterministic — losing the `statusChangedAt` ordering callers
+          // depend on. An absent `updatedAt` correctly falls back to `statusChangedAt`,
+          // which is itself mtime-backfilled above.
           backfillTaskTimingFields(task, st.mtimeMs)
           return task
         } catch {
@@ -299,20 +323,37 @@ function statusChangedAtMs(task: { statusChangedAt?: string }): number {
 }
 
 /**
- * Union task lists from several stores, keeping one copy per id — the one whose status changed most
- * recently, so a completion recorded through either surface wins over a stale duplicate.
+ * Last write of any kind as epoch ms, preferring `updatedAt` and falling back to `statusChangedAt`.
+ *
+ * Tie-breaking on `statusChangedAt` alone loses every field-only update: recording progress in a
+ * task's `description` moves `updatedAt` but not `statusChangedAt`, so the refreshed copy tied with
+ * the stale one and the duplicate that happened to be seen first kept winning. That made the
+ * recency gate in `pretooluse-task-governance` unsatisfiable for any task present in both stores —
+ * the remedy it prescribes (record progress) could not change the answer it reads.
+ */
+function lastWriteMs(task: { updatedAt?: string; statusChangedAt?: string }): number {
+  if (task.updatedAt) {
+    const parsed = Date.parse(task.updatedAt)
+    if (!Number.isNaN(parsed)) return parsed
+  }
+  return statusChangedAtMs(task)
+}
+
+/**
+ * Union task lists from several stores, keeping one copy per id — the one written most recently, so
+ * a completion or a progress note recorded through either surface wins over a stale duplicate.
  *
  * Generic over the task shape because the daemon's cache serves `SessionTask` while the repository
- * serves `Task`; both carry `id` and an optional ISO `statusChangedAt`, which is all the merge needs.
+ * serves `Task`; both carry `id` and the optional ISO stamps, which is all the merge needs.
  */
-export function mergeTaskStoresByRecency<T extends { id: string; statusChangedAt?: string }>(
-  ...groups: ReadonlyArray<readonly T[]>
-): T[] {
+export function mergeTaskStoresByRecency<
+  T extends { id: string; statusChangedAt?: string; updatedAt?: string },
+>(...groups: ReadonlyArray<readonly T[]>): T[] {
   const byId = new Map<string, T>()
   for (const group of groups) {
     for (const task of group) {
       const existing = byId.get(task.id)
-      if (!existing || statusChangedAtMs(task) > statusChangedAtMs(existing)) {
+      if (!existing || lastWriteMs(task) > lastWriteMs(existing)) {
         byId.set(task.id, task)
       }
     }
@@ -338,18 +379,127 @@ export async function readTasksAcrossStores(
   projectKey: string | undefined,
   tasksDir = createDefaultTaskStore().tasksDir
 ): Promise<Task[]> {
-  if (!projectKey || projectKey === sessionId) return await readTasks(sessionId, tasksDir)
+  return (await readTaskRecordsAcrossStores(sessionId, projectKey, tasksDir)).map(
+    ({ task }) => task
+  )
+}
 
-  const [sessionTasks, projectTasks] = await Promise.all([
-    readTasks(sessionId, tasksDir),
-    readTasks(projectKey, tasksDir),
-  ])
+/** A task's persistence address travels with it through lookup and mutation. */
+export interface StoredTask {
+  storeKey: TaskStoreKey
+  task: Task
+  /** Only an unattributed explicitly supplied native session widens the project queue. */
+  queueScope?: "project" | "current-session"
+}
 
-  return mergeTaskStoresByRecency(sessionTasks, projectTasks)
+/** Copyable, unambiguous task reference; descriptions and transcript data are never included. */
+export function taskRecordReference({ storeKey, task }: StoredTask): string {
+  return `${storeKey.kind}:${storeKey.kind === "session" ? storeKey.id : storeKey.key}#${task.id}`
+}
+
+/** Bare native IDs are local to their store; prefixed IDs retain the existing mirror semantics. */
+function mergeStoredTasksByRecency(groups: StoredTask[][]): StoredTask[] {
+  const byIdentity = new Map<string, StoredTask>()
+  for (const record of groups.flat()) {
+    const identity =
+      parseTaskId(record.task.id).prefix === null ? taskRecordReference(record) : record.task.id
+    const existing = byIdentity.get(identity)
+    if (!existing || lastWriteMs(record.task) > lastWriteMs(existing.task)) {
+      byIdentity.set(identity, record)
+    }
+  }
+  return [...byIdentity.values()].sort((a, b) => compareTaskIds(a.task.id, b.task.id))
+}
+
+/** Explicit single-store reader for native session snapshots and targeted mutations. */
+export async function readTaskStore(
+  storeKey: TaskStoreKey,
+  tasksDir = createDefaultTaskStore().tasksDir
+): Promise<Task[]> {
+  if (!isSafeSessionId(storeKey, tasksDir)) return []
+  const dir = await readTaskStorePath(storeKey, tasksDir)
+  const tasks = await readTasksInDirectory(dir)
+  // A concurrent migration can rename the legacy directory after path resolution.
+  // Re-read the destination rather than briefly projecting an empty queue.
+  if (storeKey.kind === "project" && dir !== sessionDirPath(storeKey, tasksDir)) {
+    const current = await readTaskStorePath(storeKey, tasksDir)
+    if (current !== dir) return readTasksInDirectory(current)
+  }
+  return tasks
+}
+
+/**
+ * Project queue shared by MCP and hooks. Include positively attributed legacy sessions,
+ * plus the explicit current session when it has no ownership metadata yet. Unknown historical
+ * directories are not evidence of project ownership. Never use this union for store pruning.
+ */
+export async function readTaskRecordsAcrossStores(
+  sessionId: string | undefined,
+  projectKey: string | undefined,
+  tasksDir = createDefaultTaskStore().tasksDir
+): Promise<StoredTask[]> {
+  if (!projectKey) {
+    if (!sessionId) return []
+    const storeKey = await resolveLegacyTaskStoreKey(sessionId, undefined, tasksDir)
+    return (await readTaskStore(storeKey, tasksDir)).map((task) => ({ storeKey, task }))
+  }
+  const keys: Array<{ storeKey: TaskStoreKey; queueScope: StoredTask["queueScope"] }> = [
+    { storeKey: { kind: "project", key: projectKey }, queueScope: "project" },
+  ]
+  for (const id of await sessionCandidates(sessionId, Boolean(projectKey), tasksDir)) {
+    const queueScope = await sessionBelongsToQueue(id, sessionId, projectKey, tasksDir)
+    if (queueScope) keys.push({ storeKey: sessionStoreKey(id), queueScope })
+  }
+  const groups = await Promise.all(
+    keys.map(async ({ storeKey, queueScope }) =>
+      (await readTaskStore(storeKey, tasksDir)).map((task) => ({ task, storeKey, queueScope }))
+    )
+  )
+  return mergeStoredTasksByRecency(groups)
+}
+
+async function sessionCandidates(
+  sessionId: string | undefined,
+  includeHistory: boolean,
+  tasksDir: string
+) {
+  const candidates = new Set<string>(sessionId ? [sessionId] : [])
+  if (includeHistory) {
+    const entries = await readdir(tasksDir, { withFileTypes: true }).catch(() => [])
+    for (const entry of entries) if (entry.isDirectory()) candidates.add(entry.name)
+  }
+  return candidates
+}
+
+/** Legacy path keys are project addresses, including ones with damaged cwd metadata. */
+function isLegacyProjectAddress(
+  id: string,
+  sessionId: string | undefined,
+  projectKey: string | undefined,
+  owner: string | undefined
+) {
+  return id === projectKey || owner === id || (id.startsWith("-") && id !== sessionId)
+}
+
+async function sessionBelongsToQueue(
+  id: string,
+  sessionId: string | undefined,
+  projectKey: string | undefined,
+  tasksDir: string
+) {
+  if (!isSafeSessionId(sessionStoreKey(id), tasksDir)) return false
+  const meta = await readTaskStoreMeta(sessionStoreKey(id), tasksDir, true)
+  const owner = typeof meta?.cwd === "string" ? projectStoreKey(meta.cwd).key : undefined
+  if (meta?.storeKind !== "session" && isLegacyProjectAddress(id, sessionId, projectKey, owner))
+    return false
+  if (owner) return owner === projectKey ? ("project" as const) : false
+  return id === sessionId ? ("current-session" as const) : false
 }
 
 /** Lightweight per-session metadata index for O(1) open-task-count lookups. */
 export interface SessionMeta {
+  /** Explicit kind for newly written stores; legacy ownership is inferred from cwd. */
+  storeKind?: TaskStoreKey["kind"]
   /** Number of tasks with status "pending" or "in_progress". */
   openCount: number
   /** ISO timestamp of last update. */
@@ -383,23 +533,27 @@ async function countOpenTasks(dir: string, files: string[]): Promise<number> {
 }
 
 async function resolveMetaCwd(dir: string, cwd?: string): Promise<string | undefined> {
-  if (cwd) return cwd
   try {
     const existing = JSON.parse(
       await readFile(join(dir, SESSION_META_FILE), "utf-8")
     ) as SessionMeta
-    return existing.cwd
+    return typeof existing.cwd === "string" ? existing.cwd : cwd
   } catch {
-    return undefined
+    return cwd
   }
 }
 
-async function updateSessionMeta(dir: string, cwd?: string): Promise<void> {
+async function updateSessionMeta(
+  dir: string,
+  storeKind: TaskStoreKey["kind"],
+  cwd?: string
+): Promise<void> {
   try {
     const files = await readdir(dir)
     const openCount = await countOpenTasks(dir, files)
     const effectiveCwd = await resolveMetaCwd(dir, cwd)
     const meta: SessionMeta = {
+      storeKind,
       openCount,
       updatedAt: new Date().toISOString(),
       ...(effectiveCwd !== undefined ? { cwd: effectiveCwd } : {}),
@@ -410,13 +564,56 @@ async function updateSessionMeta(dir: string, cwd?: string): Promise<void> {
   }
 }
 
-async function updateSessionMetaFromTasks(
+/**
+ * Refresh the metadata index from what is currently on disk, then drop the
+ * memoized entry for that store.
+ *
+ * Pruning uses this rather than `updateSessionMetaFromTasks`: the surviving
+ * list a prune holds is a snapshot taken before deletion, so a task written
+ * between the snapshot and the refresh is missing from it. Publishing that
+ * snapshot can persist `openCount: 0` while a live open task exists, and
+ * `collectIncompleteTasks` treats zero as authoritative and skips the full
+ * directory read. Recounting costs one `readdir` and cannot undercount a
+ * concurrent write.
+ *
+ * `updateSessionMeta` swallows its own write failures, so a read-only or
+ * locked store still leaves the caller with its pruned view.
+ */
+export async function refreshSessionMetaFromDisk(
   dir: string,
-  tasks: readonly Task[],
+  storeKind: TaskStoreKey["kind"],
+  cwd?: string
+): Promise<void> {
+  await updateSessionMeta(dir, storeKind, cwd)
+  invalidateSessionMetaForDir(dir)
+}
+
+/**
+ * Drop cached metadata for a store directory.
+ *
+ * The cache is keyed by `<tasksDir>\0<storeDirName>`, and a project store's
+ * name is itself two path segments, so the entry cannot be recovered from
+ * `basename(dir)`. Rejoining each key is exact for both layouts.
+ */
+function invalidateSessionMetaForDir(dir: string): void {
+  for (const key of [...sessionMetaCache.keys()]) {
+    const separator = key.indexOf("\0")
+    if (separator === -1) continue
+    const tasksDir = key.slice(0, separator)
+    const storeDirName = key.slice(separator + 1)
+    if (join(tasksDir, storeDirName) === dir) sessionMetaCache.delete(key)
+  }
+}
+
+export async function updateSessionMetaFromTasks(
+  dir: string,
+  tasks: readonly { status: string }[],
+  storeKind: TaskStoreKey["kind"],
   cwd?: string
 ): Promise<void> {
   const effectiveCwd = await resolveMetaCwd(dir, cwd)
   const meta: SessionMeta = {
+    storeKind,
     openCount: tasks.filter((task) => isIncompleteTaskStatus(task.status)).length,
     updatedAt: new Date().toISOString(),
     ...(effectiveCwd !== undefined ? { cwd: effectiveCwd } : {}),
@@ -511,8 +708,7 @@ export async function writeTaskBatch(
   tasksDir = createDefaultTaskStore().tasksDir
 ): Promise<TaskBatchWriteResult> {
   const sessionId = taskStoreDirName(storeKey)
-  const dir = sessionDirPath(storeKey, tasksDir)
-  await mkdir(dir, { recursive: true })
+  const dir = await prepareTaskStoreWrite(storeKey, tasksDir, cwd)
   const auditPath = join(dir, AUDIT_LOG_FILENAME)
   const persistedOperationIds = await readAuditOperationIds(auditPath)
   let auditWrites = 0
@@ -524,11 +720,15 @@ export async function writeTaskBatch(
     if (operationId) persistedOperationIds.add(operationId)
   }
 
+  const writtenAt = new Date().toISOString()
   const taskWrites = await writeBoundedTaskFiles(
     dir,
-    writes.map((write) => write.task)
+    writes.map((write) => {
+      write.task.updatedAt = writtenAt
+      return write.task
+    })
   )
-  await updateSessionMetaFromTasks(dir, finalTasks, cwd)
+  await updateSessionMetaFromTasks(dir, finalTasks, storeKey.kind, cwd)
   sessionMetaCache.delete(metaCacheKey(sessionId, tasksDir))
   return {
     ...taskWrites,
@@ -546,11 +746,22 @@ export async function readSessionMeta(
   sessionId: string,
   tasksDir = createDefaultTaskStore().tasksDir
 ): Promise<SessionMeta | null> {
-  const key = metaCacheKey(sessionId, tasksDir)
-  if (sessionMetaCache.has(key)) return sessionMetaCache.get(key)!
-  if (!isSafeSessionId(sessionStoreKey(sessionId), tasksDir)) return null
+  const storeKey = await resolveLegacyTaskStoreKey(sessionId, undefined, tasksDir)
+  return readTaskStoreMeta(storeKey, tasksDir)
+}
+
+/** Typed metadata access must not reinterpret a native session as a project with the same ID. */
+export async function readTaskStoreMeta(
+  storeKey: TaskStoreKey,
+  tasksDir = createDefaultTaskStore().tasksDir,
+  fresh = false
+): Promise<SessionMeta | null> {
+  if (!isSafeSessionId(storeKey, tasksDir)) return null
+  const key = metaCacheKey(taskStoreDirName(storeKey), tasksDir)
+  if (!fresh && sessionMetaCache.has(key)) return sessionMetaCache.get(key)!
+  const dir = await readTaskStorePath(storeKey, tasksDir)
   try {
-    const text = await readFile(join(tasksDir, sessionId, SESSION_META_FILE), "utf-8")
+    const text = await readFile(join(dir, SESSION_META_FILE), "utf-8")
     const meta = JSON.parse(text) as SessionMeta
     sessionMetaCache.set(key, meta)
     return meta
@@ -560,22 +771,6 @@ export async function readSessionMeta(
   }
 }
 
-/**
- * Classify an address obtained from the legacy flat-directory readers.
- * Metadata is authoritative; cwd is a fallback for a store's first write.
- * Remove this compatibility boundary when reader addresses become typed (#831).
- */
-export async function resolveLegacyTaskStoreKey(
-  directoryName: string,
-  cwd?: string,
-  tasksDir = createDefaultTaskStore().tasksDir
-): Promise<TaskStoreKey> {
-  const metadataCwd = (await readSessionMeta(directoryName, tasksDir))?.cwd
-  const ownerCwd = typeof metadataCwd === "string" ? metadataCwd : cwd
-  const project = ownerCwd ? projectStoreKey(ownerCwd) : undefined
-  return project?.key === directoryName ? project : sessionStoreKey(directoryName)
-}
-
 export async function writeTask(
   storeKey: TaskStoreKey,
   task: Task,
@@ -583,11 +778,11 @@ export async function writeTask(
   tasksDir = createDefaultTaskStore().tasksDir
 ): Promise<void> {
   const sessionId = taskStoreDirName(storeKey)
-  const dir = sessionDirPath(storeKey, tasksDir)
-  await mkdir(dir, { recursive: true })
+  const dir = await prepareTaskStoreWrite(storeKey, tasksDir, cwd)
+  task.updatedAt = new Date().toISOString()
   await atomicWriteJson(join(dir, `${task.id}.json`), task)
   // Update lightweight index so status.ts can read openCount without scanning every task file.
-  await updateSessionMeta(dir, cwd)
+  await updateSessionMeta(dir, storeKey.kind, cwd)
   // Invalidate in-process cache so subsequent reads reflect the write.
   sessionMetaCache.delete(metaCacheKey(sessionId, tasksDir))
   // Write-through to the global TaskStateCache (daemon path) so hooks and
@@ -622,7 +817,7 @@ export async function revertTaskStatusOnDisk(
   tasksDir = createDefaultTaskStore().tasksDir
 ): Promise<boolean> {
   const sessionId = taskStoreDirName(storeKey)
-  const dir = sessionDirPath(storeKey, tasksDir)
+  const dir = await prepareTaskStoreWrite(storeKey, tasksDir)
   const filePath = join(dir, `${taskId}.json`)
   let task: Task
   try {
@@ -665,8 +860,7 @@ export async function writeAudit(
 ): Promise<void> {
   const sessionId = taskStoreDirName(storeKey)
   try {
-    const dir = sessionDirPath(storeKey, tasksDir)
-    await mkdir(dir, { recursive: true })
+    const dir = await prepareTaskStoreWrite(storeKey, tasksDir)
     await appendJsonlEntry(join(dir, ".audit-log.jsonl"), entry)
   } catch (e) {
     debugLog(`writeAudit: failed to write audit entry for session ${sessionId}:`, e)

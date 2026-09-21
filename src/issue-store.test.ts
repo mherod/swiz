@@ -2937,3 +2937,136 @@ describe("IssueStore event-sourced sync (#521)", () => {
     expect(await fetchGhJson(["issue", "list"], "/tmp", undefined, controller.signal)).toBeNull()
   })
 })
+
+describe("open list pagination", () => {
+  /** Build `count` REST issue rows starting at `start`; every `prEvery`-th row is a PR. */
+  function buildRestRows(start: number, count: number, prEvery = 0): unknown[] {
+    return Array.from({ length: count }, (_, i) => {
+      const number = start + i
+      const row: Record<string, unknown> = {
+        number,
+        title: `Issue ${number}`,
+        state: "open",
+        updated_at: "2024-06-01T00:00:00Z",
+        user: { login: "alice" },
+        assignees: [],
+        labels: [],
+      }
+      if (prEvery > 0 && i % prEvery === 0) {
+        row.pull_request = { url: `https://api.github.com/pulls/${number}` }
+      }
+      return row
+    })
+  }
+
+  function pageOf(endpoint: string): number {
+    const query = endpoint.split("?", 2)[1] ?? ""
+    return Number.parseInt(new URLSearchParams(query).get("page") ?? "1", 10)
+  }
+
+  test("derives a page plan from the --limit row budget", () => {
+    const paged = ghListToRestFallback(["issue", "list", "--state", "open", "--limit", "1000"])!
+    expect(paged.paginate).toEqual({ perPage: 100, maxPages: 10 })
+
+    const single = ghListToRestFallback(["issue", "list", "--state", "closed", "--limit", "30"])!
+    expect(single.paginate).toEqual({ perPage: 30, maxPages: 1 })
+  })
+
+  test("concatenates pages until one comes back short, and PR rows do not cost issue slots", async () => {
+    const store = createStore()
+    const releaseMutex = await lockBunSpawn()
+    const originalSpawn = Bun.spawn
+    const requestedPages: number[] = []
+
+    // Page 1 carries 10 PR rows among its 100; without paging past them those
+    // 10 issues would be lost at the boundary.
+    const pages: Record<number, unknown[]> = {
+      1: buildRestRows(1, 100, 10),
+      2: buildRestRows(101, 100),
+      3: buildRestRows(201, 50),
+    }
+
+    // @ts-expect-error - Mocking Bun.spawn
+    Bun.spawn = (args: string[]) => {
+      const endpoint = args[args.length - 1] ?? ""
+      const page = pageOf(endpoint)
+      requestedPages.push(page)
+      return createMockSpawnResult(JSON.stringify(pages[page] ?? []))
+    }
+
+    try {
+      const { tryRestFallback } = await import("./issue-store-rest-fallback.ts")
+      const result = await tryRestFallback<any[]>(
+        ["issue", "list", "--state", "open", "--limit", "1000"],
+        "/tmp",
+        store
+      )
+
+      expect(requestedPages).toEqual([1, 2, 3])
+      // 100 rows - 10 PRs, then 100, then the short final page of 50.
+      expect(result).not.toBeNull()
+      expect(result!.length).toBe(240)
+      expect(result!.some((issue) => issue.number === 250)).toBe(true)
+      expect(result!.some((issue) => issue.number === 1)).toBe(false)
+    } finally {
+      Bun.spawn = originalSpawn
+      releaseMutex()
+    }
+  })
+
+  test("stops after one request when the first page is already short", async () => {
+    const store = createStore()
+    const releaseMutex = await lockBunSpawn()
+    const originalSpawn = Bun.spawn
+    let requests = 0
+
+    // @ts-expect-error - Mocking Bun.spawn
+    Bun.spawn = () => {
+      requests++
+      return createMockSpawnResult(JSON.stringify(buildRestRows(1, 3)))
+    }
+
+    try {
+      const { tryRestFallback } = await import("./issue-store-rest-fallback.ts")
+      const result = await tryRestFallback<any[]>(
+        ["issue", "list", "--state", "open", "--limit", "1000"],
+        "/tmp",
+        store
+      )
+
+      expect(requests).toBe(1)
+      expect(result!.length).toBe(3)
+    } finally {
+      Bun.spawn = originalSpawn
+      releaseMutex()
+    }
+  })
+
+  test("returns null when a later page fails rather than a truncated backlog", async () => {
+    const store = createStore()
+    const releaseMutex = await lockBunSpawn()
+    const originalSpawn = Bun.spawn
+
+    // @ts-expect-error - Mocking Bun.spawn
+    Bun.spawn = (args: string[]) => {
+      const page = pageOf(args[args.length - 1] ?? "")
+      if (page === 1) return createMockSpawnResult(JSON.stringify(buildRestRows(1, 100)))
+      return createMockSpawnResult("", "server error", 1)
+    }
+
+    try {
+      const { tryRestFallback } = await import("./issue-store-rest-fallback.ts")
+      const result = await tryRestFallback<any[]>(
+        ["issue", "list", "--state", "open", "--limit", "1000"],
+        "/tmp",
+        store
+      )
+
+      // Null hands the read to the gh CLI fallback, which paginates for itself.
+      expect(result).toBeNull()
+    } finally {
+      Bun.spawn = originalSpawn
+      releaseMutex()
+    }
+  })
+})

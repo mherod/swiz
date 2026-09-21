@@ -380,7 +380,7 @@ export const doctorCommand: Command<DoctorCommandOptions> = {
     },
     {
       flags: "--older-than <time>",
-      description: "Cleanup window (default: 30d; Codex archives: 48h default and minimum)",
+      description: "Cleanup window (default: 30d; all Codex archives are removed)",
     },
     { flags: "--task-older-than <time>", description: "Separate window for task files" },
     { flags: "--project <name>", description: "Filter by project name or path" },

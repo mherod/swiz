@@ -1,77 +1,87 @@
-// ─── Work-in-progress limit ──────────────────────────────────────────────────
-//
-// A project may hold at most MAX_IN_PROGRESS_TASKS_PER_PROJECT tasks in
-// `in_progress` at once. The cap is project-scoped, not session-scoped: several
-// sessions can share one repository, and the cost of a wide WIP front (stale
-// tasks, fabricated parallelism in the dashboard totals) is paid per project.
-//
-// This module imports only the resolver, so it cannot participate in a cycle
-// with task-service.ts.
+/** Project capacity uses exactly the same attributed records as TaskList. */
+import { resolve } from "node:path"
+import { projectKeyFromCwd } from "../project-key.ts"
+import { createDefaultTaskStore } from "../task-roots.ts"
+import { getLockPathForFile, withFileLock } from "../utils/file-lock.ts"
+import { projectQueueTasks, TASK_QUEUE_RECOVERY, taskOwnershipSuffix } from "./task-queue-view.ts"
+import { readTaskRecordsAcrossStores, type TaskStoreKey } from "./task-repository.ts"
 
-import { collectIncompleteTasks } from "./task-resolver.ts"
-
-/** Maximum number of simultaneously `in_progress` tasks for one project. */
 export const MAX_IN_PROGRESS_TASKS_PER_PROJECT = 4
 
 interface WipTask {
   id: string
   status: string
   subject?: string
+  ownership?: string
 }
 
-/**
- * Pure core: returns an error string when moving `taskId` to `newStatus` would
- * push the project past the in-progress cap, or null when the transition is
- * allowed.
- *
- * Only transitions *into* `in_progress` can breach the cap; a task already
- * in_progress would be re-counted as itself and so is always allowed to stay.
- */
+/** Only a transition into in_progress consumes a slot; same-status updates remain legal. */
 export function checkInProgressLimit(
   taskId: string,
   currentStatus: string,
   newStatus: string,
   projectTasks: ReadonlyArray<WipTask>
 ): string | null {
-  if (newStatus !== "in_progress") return null
-  if (currentStatus === "in_progress") return null
-
-  const others = projectTasks.filter((t) => t.id !== taskId && t.status === "in_progress")
+  if (newStatus !== "in_progress" || currentStatus === "in_progress") return null
+  // The transitioning task is pending. Filtering by bare ID here would also hide
+  // another session's unrelated in-progress #1.
+  const others = projectTasks.filter((task) => task.status === "in_progress")
   if (others.length < MAX_IN_PROGRESS_TASKS_PER_PROJECT) return null
-
   const listed = others
     .slice(0, MAX_IN_PROGRESS_TASKS_PER_PROJECT)
-    .map((t) => `  #${t.id}${t.subject ? `: ${t.subject}` : ""}`)
+    .map(
+      (task) =>
+        `  #${task.id}${task.subject ? `: ${task.subject}` : ""}${taskOwnershipSuffix(task)}`
+    )
     .join("\n")
   return (
     `Cannot move #${taskId} to in_progress: this project already has ${others.length} ` +
-    `in_progress task${others.length === 1 ? "" : "s"} ` +
-    `(limit ${MAX_IN_PROGRESS_TASKS_PER_PROJECT}).\n${listed}\n` +
-    `Complete or cancel one of them first.`
+    `in_progress tasks (limit ${MAX_IN_PROGRESS_TASKS_PER_PROJECT}).\n${listed}\n${TASK_QUEUE_RECOVERY}`
   )
 }
 
-/**
- * Project-scoped guard used by the transition paths. Reads the incomplete tasks
- * for `filterCwd` and throws when the cap would be breached.
- */
+export interface WipOrigin {
+  filterCwd?: string
+  tasksDir?: string
+  storeKey?: TaskStoreKey
+}
+
+function wipProjectKey(origin: WipOrigin): string {
+  return origin.storeKey?.kind === "project"
+    ? origin.storeKey.key
+    : projectKeyFromCwd(origin.filterCwd ?? process.cwd())
+}
+
 export async function assertInProgressLimit(
   taskId: string,
   currentStatus: string,
   newStatus: string,
-  filterCwd?: string
+  origin: WipOrigin = {}
 ): Promise<void> {
   if (newStatus !== "in_progress" || currentStatus === "in_progress") return
-
-  const incomplete = await collectIncompleteTasks(filterCwd ?? process.cwd())
-  const seen = new Set<string>()
-  const projectTasks: WipTask[] = []
-  for (const { task } of incomplete) {
-    if (seen.has(task.id)) continue
-    seen.add(task.id)
-    projectTasks.push({ id: task.id, status: task.status, subject: task.subject })
-  }
-
-  const error = checkInProgressLimit(taskId, currentStatus, newStatus, projectTasks)
+  const { storeKey, tasksDir } = origin
+  const records = await readTaskRecordsAcrossStores(
+    storeKey?.kind === "session" ? storeKey.id : undefined,
+    wipProjectKey(origin),
+    tasksDir
+  )
+  const error = checkInProgressLimit(taskId, currentStatus, newStatus, projectQueueTasks(records))
   if (error) throw new Error(error)
+}
+
+/** Serialize the capacity check and persisted write across project sessions/processes. */
+export async function withInProgressReservation<T>(
+  taskId: string,
+  currentStatus: string,
+  newStatus: string,
+  write: () => Promise<T>,
+  origin: WipOrigin
+): Promise<T> {
+  if (newStatus !== "in_progress" || currentStatus === "in_progress") return write()
+  const root = resolve(origin.tasksDir ?? createDefaultTaskStore().tasksDir)
+  const lock = getLockPathForFile(`${root}\0${wipProjectKey(origin)}\0wip`)
+  return withFileLock(lock, async () => {
+    await assertInProgressLimit(taskId, currentStatus, newStatus, { ...origin, tasksDir: root })
+    return write()
+  })
 }

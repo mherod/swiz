@@ -11,6 +11,7 @@ import {
   JsonlAppendCursor,
   type JsonlAppendMetadata,
   readJsonlTailTextFromFile,
+  sameJsonlFileVersion,
   splitJsonlLines,
   tryParseJsonLine,
 } from "../../../utils/jsonl.ts"
@@ -36,6 +37,16 @@ interface IncrementalTranscriptIndex {
   index: TranscriptIndex
   accumulator: SummaryAccumulator
   cursor: JsonlAppendCursor
+}
+
+interface CachedTranscriptIndex {
+  index: TranscriptIndex
+  metadata: JsonlAppendMetadata
+}
+
+interface IndexComputation {
+  metadata: JsonlAppendMetadata
+  promise: Promise<TranscriptIndex | null>
 }
 
 const MAX_TRANSCRIPT_INDEX_ENTRIES = 50
@@ -157,18 +168,20 @@ function isSessionBoundary(line: string): boolean {
 }
 
 export class TranscriptIndexCache {
-  private entries = new LRUCache<string, TranscriptIndex>({ max: MAX_TRANSCRIPT_INDEX_ENTRIES })
-  private summaryEntries = new LRUCache<string, TranscriptIndex>({
+  private entries = new LRUCache<string, CachedTranscriptIndex>({
+    max: MAX_TRANSCRIPT_INDEX_ENTRIES,
+  })
+  private summaryEntries = new LRUCache<string, CachedTranscriptIndex>({
     max: MAX_TRANSCRIPT_INDEX_ENTRIES,
     maxSize: MAX_CACHED_SESSION_LINE_CHARS,
-    sizeCalculation: sessionLineCharCount,
+    sizeCalculation: (entry) => sessionLineCharCount(entry.index),
   })
   private incrementalEntries = new LRUCache<string, IncrementalTranscriptIndex>({
     max: MAX_TRANSCRIPT_INDEX_ENTRIES,
     maxSize: MAX_CACHED_SESSION_LINE_CHARS,
     sizeCalculation: (entry) => sessionLineCharCount(entry.index),
   })
-  private inFlight = new Map<string, Promise<TranscriptIndex | null>>()
+  private inFlight = new Map<string, IndexComputation>()
   private _hits = 0
   private _misses = 0
   private _appendedBytes = 0
@@ -182,16 +195,16 @@ export class TranscriptIndexCache {
       const metadata = await this.readMetadata(transcriptPath)
       if (!metadata) return null
       const cached = this.entries.get(transcriptPath)
-      // Mtime alone misses appends that land within the filesystem's mtime
-      // granularity, so an unchanged file is (mtimeMs, size)-identical (#819).
-      if (cached && cached.mtimeMs === metadata.mtimeMs && cached.size === metadata.size) {
-        cached.computedAt = Date.now()
+      if (cached && sameJsonlFileVersion(cached.metadata, metadata)) {
+        cached.index.computedAt = Date.now()
         this._hits++
-        return cached
+        return cached.index
       }
 
       const built = await this.getOrBuild(transcriptPath, metadata)
-      return built ? (this.entries.get(transcriptPath) ?? compactTranscriptIndex(built)) : null
+      return built
+        ? (this.entries.get(transcriptPath)?.index ?? compactTranscriptIndex(built))
+        : null
     } catch {
       return null
     }
@@ -202,10 +215,10 @@ export class TranscriptIndexCache {
       const metadata = await this.readMetadata(transcriptPath)
       if (!metadata) return null
       const cached = this.summaryEntries.get(transcriptPath)
-      if (cached && cached.mtimeMs === metadata.mtimeMs && cached.size === metadata.size) {
-        cached.computedAt = Date.now()
+      if (cached && sameJsonlFileVersion(cached.metadata, metadata)) {
+        cached.index.computedAt = Date.now()
         this._hits++
-        return cached.summary
+        return cached.index.summary
       }
 
       const built = await this.getOrBuild(transcriptPath, metadata)
@@ -225,9 +238,14 @@ export class TranscriptIndexCache {
     transcriptPath: string,
     metadata: JsonlAppendMetadata
   ): Promise<TranscriptIndex | null> {
-    const inFlightKey = `${transcriptPath}\0${metadata.size}\0${metadata.mtimeMs}`
-    const existing = this.inFlight.get(inFlightKey)
-    if (existing) return await existing
+    const existing = this.inFlight.get(transcriptPath)
+    if (existing) {
+      if (sameJsonlFileVersion(existing.metadata, metadata)) return await existing.promise
+      // A newer observation must not mutate the same cursor while an older read is pending.
+      await existing.promise.catch(() => null)
+      const latest = await this.readMetadata(transcriptPath)
+      return latest ? this.getOrBuild(transcriptPath, latest) : null
+    }
 
     this._misses++
     let computation: Promise<TranscriptIndex | null>
@@ -236,18 +254,19 @@ export class TranscriptIndexCache {
       : this.buildOrAppendIndex(transcriptPath, metadata)
     computation = build
       .then((index) => {
-        if (index && this.inFlight.get(inFlightKey) === computation) {
-          this.entries.set(transcriptPath, compactTranscriptIndex(index))
-          if (this.dependencies.buildIndex) this.summaryEntries.set(transcriptPath, index)
+        if (index && this.inFlight.get(transcriptPath)?.promise === computation) {
+          this.entries.set(transcriptPath, { index: compactTranscriptIndex(index), metadata })
+          if (this.dependencies.buildIndex)
+            this.summaryEntries.set(transcriptPath, { index, metadata })
         }
         return index
       })
       .finally(() => {
-        if (this.inFlight.get(inFlightKey) === computation) {
-          this.inFlight.delete(inFlightKey)
+        if (this.inFlight.get(transcriptPath)?.promise === computation) {
+          this.inFlight.delete(transcriptPath)
         }
       })
-    this.inFlight.set(inFlightKey, computation)
+    this.inFlight.set(transcriptPath, { metadata, promise: computation })
     return await computation
   }
 
@@ -407,10 +426,10 @@ export class TranscriptIndexCache {
 
   pruneOlderThan(cutoffMs: number): void {
     for (const [path, entry] of this.entries) {
-      if (entry.computedAt < cutoffMs) this.entries.delete(path)
+      if (entry.index.computedAt < cutoffMs) this.entries.delete(path)
     }
     for (const [path, entry] of this.summaryEntries) {
-      if (entry.computedAt < cutoffMs) this.summaryEntries.delete(path)
+      if (entry.index.computedAt < cutoffMs) this.summaryEntries.delete(path)
     }
     for (const [path, entry] of this.incrementalEntries) {
       if (entry.index.computedAt < cutoffMs) this.incrementalEntries.delete(path)

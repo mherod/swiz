@@ -7,7 +7,7 @@ import { format, formatDistanceToNow } from "date-fns"
 import { BOLD, DIM, RESET, YELLOW } from "../ansi.ts"
 import { formatDuration } from "../format-duration.ts"
 import { isIncompleteTaskStatus, readTasks, STATUS_STYLE, type Task } from "./task-repository.ts"
-import { getOrphanSessionIds, getSessions } from "./task-resolver.ts"
+import { getOrphanSessionIds, getTaskStoreAddresses } from "./task-resolver.ts"
 import { getTaskCompletedAtMs, getTaskCurrentDurationMs } from "./task-timing.ts"
 
 export type { Task }
@@ -122,9 +122,10 @@ export async function listTasks(
   sessionId: string,
   label: string,
   dateFormat: DateFormat = "relative",
-  recovered = false
+  recovered = false,
+  queue?: Task[]
 ): Promise<void> {
-  const tasks = await readTasks(sessionId)
+  const tasks = queue ?? (await readTasks(sessionId))
   const recoveredTag = recovered ? ` ${YELLOW}[recovered]${RESET}` : ""
   console.log(
     `\n  ${BOLD}Tasks${RESET} ${DIM}(${label}: ${sessionId.slice(0, 8)}...)${RESET}${recoveredTag}\n`
@@ -175,7 +176,10 @@ export async function listAllSessionsTasks(
   dateFormat: DateFormat = "relative",
   recoveredOnly = false
 ): Promise<void> {
-  const [sessions, orphanIds] = await Promise.all([getSessions(filterCwd), getOrphanSessionIds()])
+  const [sessions, orphanIds] = await Promise.all([
+    getTaskStoreAddresses(filterCwd),
+    getOrphanSessionIds(),
+  ])
   const filteredSessions = recoveredOnly ? sessions.filter((s) => orphanIds.has(s)) : sessions
   const label = recoveredOnly
     ? "recovered sessions"

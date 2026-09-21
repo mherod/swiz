@@ -12,7 +12,12 @@ setDefaultTimeout(30_000)
 import { writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { parse as parseYaml } from "yaml"
-import { neutralAgentEnv, runHook, useTempDir, writeTask } from "../src/utils/test-utils.ts"
+import {
+  neutralAgentEnv,
+  runHook,
+  useTempDir,
+  writeRawTaskFixture,
+} from "../src/utils/test-utils.ts"
 
 // ─── Shared test infrastructure ─────────────────────────────────────────────
 
@@ -77,8 +82,8 @@ describe("missing HOME env var triggers early return", () => {
 describe("path-traversal sessionId payloads are neutralized", () => {
   test("pretooluse-require-tasks: traversal sessionId does not escape tasks dir", async () => {
     const homeDir = await createTempHome()
-    // Create a task in the legitimate location
-    await writeTask(homeDir, "../../etc/passwd", {
+    // Deliberately bypass writer containment to seed an escaped path inside the temp home.
+    await writeRawTaskFixture(homeDir, "../../etc/passwd", {
       id: "1",
       subject: "Legit task",
       status: "in_progress",
@@ -93,12 +98,9 @@ describe("path-traversal sessionId payloads are neutralized", () => {
       },
       { HOME: homeDir }
     )
-    // join() normalizes the path — the hook should function (deny or allow)
-    // but NOT access ../../etc/passwd from the HOME root
+    // The hook must reject the traversal even though a raw fixture exists there.
     expect(result.exitCode).toBe(0)
-    // The task exists at the normalized path, so it should NOT deny
-    // (join resolves ../../ relative to the tasks dir)
-    expect(typeof result.stdout).toBe("string")
+    expect(result.decision).toBeUndefined()
   })
 
   test("pretooluse-require-tasks: sessionId with slashes resolves safely", async () => {
