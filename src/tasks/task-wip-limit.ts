@@ -4,7 +4,11 @@ import { projectKeyFromCwd } from "../project-key.ts"
 import { createDefaultTaskStore } from "../task-roots.ts"
 import { getLockPathForFile, withFileLock } from "../utils/file-lock.ts"
 import { projectQueueTasks, TASK_QUEUE_RECOVERY, taskOwnershipSuffix } from "./task-queue-view.ts"
-import { readTaskRecordsAcrossStores, type TaskStoreKey } from "./task-repository.ts"
+import {
+  readTaskRecordsAcrossStores,
+  readTaskStoreMeta,
+  type TaskStoreKey,
+} from "./task-repository.ts"
 
 export const MAX_IN_PROGRESS_TASKS_PER_PROJECT = 4
 
@@ -52,6 +56,13 @@ function wipProjectKey(origin: WipOrigin): string {
     : projectKeyFromCwd(origin.filterCwd ?? process.cwd())
 }
 
+/** Cross-project maintenance follows the target's owner when no explicit scope is supplied. */
+async function resolveWipOrigin(origin: WipOrigin): Promise<WipOrigin> {
+  if (origin.filterCwd || origin.storeKey?.kind !== "session") return origin
+  const meta = await readTaskStoreMeta(origin.storeKey, origin.tasksDir, true)
+  return { ...origin, filterCwd: meta?.cwd ?? process.cwd() }
+}
+
 export async function assertInProgressLimit(
   taskId: string,
   currentStatus: string,
@@ -59,6 +70,7 @@ export async function assertInProgressLimit(
   origin: WipOrigin = {}
 ): Promise<void> {
   if (newStatus !== "in_progress" || currentStatus === "in_progress") return
+  origin = await resolveWipOrigin(origin)
   const { storeKey, tasksDir } = origin
   const records = await readTaskRecordsAcrossStores(
     storeKey?.kind === "session" ? storeKey.id : undefined,
@@ -78,6 +90,9 @@ export async function withInProgressReservation<T>(
   origin: WipOrigin
 ): Promise<T> {
   if (newStatus !== "in_progress" || currentStatus === "in_progress") return write()
+  // Resolve once before choosing the lock so explicitly scoped and metadata-
+  // scoped callers for the same project serialize through the same reservation.
+  origin = await resolveWipOrigin(origin)
   const root = resolve(origin.tasksDir ?? createDefaultTaskStore().tasksDir)
   const lock = getLockPathForFile(`${root}\0${wipProjectKey(origin)}\0wip`)
   return withFileLock(lock, async () => {
