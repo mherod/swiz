@@ -272,13 +272,15 @@ describe("default install integration", () => {
     })
   }
 
+  // A full default install, so it runs past the 5s default timeout on a loaded
+  // machine. It was failing on elapsed time rather than on any assertion.
   test("default install registers daily cleanup", async () => {
     const f = await fixture()
     const result = await runInstall([], f)
     expect(result.exitCode).toBe(0)
     expect(result.stdout).toContain("Cleanup LaunchAgent: install")
     expect(f.state.loaded).toBe(true)
-  })
+  }, 30_000)
 
   test("default dry-run previews cleanup without creating it", async () => {
     const f = await fixture()

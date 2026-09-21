@@ -18,9 +18,10 @@ describe("MCP add/remove previews", () => {
     const home = await tmp.create()
     const result = await run(["add", "preview", "--command", "bun", "--dry-run"], home)
     expect(result.exitCode).toBe(0)
-    expect(result.stdout.match(/Would add/g)).toHaveLength(8)
+    expect(result.stdout.match(/Would add/g)).toHaveLength(9)
     expect(result.stdout).toContain(join(home, ".codex", "config.toml"))
     expect(result.stdout).toContain(join(home, ".cursor", "mcp.json"))
+    expect(result.stdout).toContain(join(home, ".codeium", "windsurf", "mcp_config.json"))
     expect(await readdir(home)).toEqual([])
   })
 

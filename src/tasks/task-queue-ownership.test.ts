@@ -77,6 +77,40 @@ test("distinct owners with the same bare ID all occupy capacity", async () => {
   )
 })
 
+test.each([
+  "status",
+  "combined",
+])("cross-project %s uses target ownership without filterCwd", async (mode) => {
+  const f = await fixture()
+  for (let i = 0; i < 4; i++) await f.seed(f.project, `active-${i}`, "in_progress", f.cwd)
+  const target = sessionStoreKey("remote-session")
+  const pending = await f.seed(target, "next", "pending", f.cwd)
+  const path = join(sessionDirPath(target, f.tasksDir), "next.json")
+  const before = await Bun.file(path).text()
+  const mutation =
+    mode === "status"
+      ? updateStatus(target, "next", "in_progress", { tasksDir: f.tasksDir })
+      : writeTaskUpdate(
+          target,
+          "next",
+          { ...pending, description: "must not persist" },
+          "in_progress",
+          { tasksDir: f.tasksDir }
+        )
+  await expect(mutation).rejects.toThrow("already has 4")
+  expect(await Bun.file(path).text()).toBe(before)
+})
+
+test("cross-project start ignores capacity in the ambient repository", async () => {
+  const f = await fixture()
+  const ambient = projectStoreKey(process.cwd())
+  for (let i = 0; i < 4; i++) await f.seed(ambient, `ambient-${i}`, "in_progress", process.cwd())
+  const target = sessionStoreKey("remote-session")
+  await f.seed(target, "next", "pending", f.cwd)
+  await updateStatus(target, "next", "in_progress", { tasksDir: f.tasksDir })
+  expect((await readTaskStore(target, f.tasksDir))[0]?.status).toBe("in_progress")
+})
+
 test("stale zero metadata cannot hide blockers and diagnostics preserve ownership", async () => {
   const f = await fixture()
   const key = sessionStoreKey("owned-session")
@@ -105,7 +139,7 @@ test("concurrent project sessions cannot both take the last available slot", asy
   await f.seed(b, "b-next", "pending", f.cwd)
   const results = await Promise.allSettled([
     updateStatus(a, "a-next", "in_progress", f.context),
-    updateStatus(b, "b-next", "in_progress", f.context),
+    updateStatus(b, "b-next", "in_progress", { tasksDir: f.tasksDir }),
   ])
   expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1)
   expect(

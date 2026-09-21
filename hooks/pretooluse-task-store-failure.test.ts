@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test"
-import { mkdir, mkdtemp, readdir, rm } from "node:fs/promises"
+import { mkdir, mkdtemp, readdir, rm, symlink } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { projectKeyFromCwd } from "../src/project-key.ts"
@@ -21,13 +21,15 @@ beforeAll(async () => {
   const key = projectKeyFromCwd(cwd)
   const root = join(home, ".claude", "tasks")
   stores = [join(root, key), join(root, ".projects", key)]
-  for (const dir of stores) {
-    await mkdir(dir, { recursive: true })
-    await Bun.write(
-      join(dir, "1.json"),
-      JSON.stringify({ id: "1", subject: dir, status: "pending" })
-    )
-  }
+  const namespaced = stores[1]!
+  await mkdir(namespaced, { recursive: true })
+  await Bun.write(
+    join(namespaced, "1.json"),
+    JSON.stringify({ id: "1", subject: namespaced, status: "pending" })
+  )
+  // Coexisting valid directories now have a readable flat winner. A symlink
+  // at the flat address is still refused and exercises actual read failure.
+  await symlink(namespaced, stores[0]!)
 })
 
 afterAll(async () => {
@@ -82,7 +84,7 @@ describe("task-store failure isolation", () => {
     )
     expect(result.hookSpecificOutput?.permissionDecision).toBe("allow")
     expect(result.hookSpecificOutput?.additionalContext).toContain("Task state unavailable")
-    expect(result.hookSpecificOutput?.additionalContext).toContain("Conflicting task stores")
+    expect(result.hookSpecificOutput?.additionalContext).toContain("Task store is not a directory")
     expect(await Promise.all(stores.map((dir) => Bun.file(join(dir, "1.json")).text()))).toEqual(
       before
     )
@@ -171,11 +173,41 @@ describe("task-store failure isolation", () => {
     const brokenHome = join(home, "invalid-namespace")
     const root = join(brokenHome, ".claude", "tasks")
     await mkdir(root, { recursive: true })
-    await Bun.write(join(root, ".projects"), "not a directory")
+    const invalidStore = join(root, projectKeyFromCwd(cwd))
+    await Bun.write(invalidStore, "not a directory")
     const result = output(await governance.run({ ...payload("Read"), _taskHome: brokenHome }))
     expect(result.hookSpecificOutput?.permissionDecision).toBe("allow")
     expect(result.hookSpecificOutput?.additionalContext).toContain("Task store is not a directory")
-    expect(await Bun.file(join(root, ".projects")).text()).toBe("not a directory")
+    expect(await Bun.file(invalidStore).text()).toBe("not a directory")
+  })
+
+  test("coexisting valid stores keep task tooling available without a read failure", async () => {
+    const validHome = join(home, "valid-coexistence")
+    const root = join(validHome, ".claude", "tasks")
+    const key = projectKeyFromCwd(cwd)
+    for (const dir of [join(root, key), join(root, ".projects", key)]) {
+      await Bun.write(
+        join(dir, "1.json"),
+        JSON.stringify({
+          id: "1",
+          subject: dir,
+          status: "pending",
+        })
+      )
+    }
+    for (const tool of ["TaskList", "TaskUpdate"]) {
+      const result = output(
+        await governance.run({
+          ...payload(tool, { taskId: "1", subject: "Inspect fixture" }),
+          _taskHome: validHome,
+        })
+      )
+      expect(result.hookSpecificOutput?.permissionDecision).toBe("allow")
+      expect(result.hookSpecificOutput?.permissionDecisionReason).not.toContain(
+        "Task state unavailable"
+      )
+    }
+    expect(await readdir(join(root, ".projects", key))).toEqual(["1.json"])
   })
 
   test("an unrelated exception with conflict-like text is not treated as a read failure", async () => {

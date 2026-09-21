@@ -64,17 +64,26 @@ function clean(home: string, args: string[] = [], runtime = idleRuntime) {
   })
 }
 
-async function cleanWithTrash(home: string, args: string[], env: Record<string, string>) {
+async function cleanWithTrash(
+  home: string,
+  args: string[],
+  env: Record<string, string>,
+  script?: string
+) {
   // Set PATH at process startup so Bun resolves the fixture executable rather
   // than reusing the test runner's cached lookup of the system trash command.
   const proc = Bun.spawn(
     [
       process.execPath,
-      join(import.meta.dir, "../../../index.ts"),
-      "doctor",
-      "clean",
-      "--older-than=48h",
-      ...args,
+      ...(script
+        ? ["-e", script]
+        : [
+            join(import.meta.dir, "../../../index.ts"),
+            "doctor",
+            "clean",
+            "--older-than=48h",
+            ...args,
+          ]),
     ],
     {
       cwd: home,
@@ -125,21 +134,30 @@ describe("Codex session cleanup", () => {
     const home = await tmp.create()
     const files = [await rollout(home, false, OLD), await rollout(home, true, NOW - 36 * HOUR_MS)]
     const task = await oldTask(home, files[0]!.id)
-    const inspect = mock(async () => [])
-    const runtime = { ...idleRuntime, inspect }
-    const result = await runCommandInProcess(
-      {
-        name: "auto-cleanup",
-        description: "Test automatic cleanup",
-        run: () => autoCleanup(runtime),
-      },
+    const trash = join(home, "fixture-trash")
+    const bin = join(home, "bin")
+    await mkdir(trash)
+    await mkdir(bin)
+    await Bun.write(join(bin, "trash"), '#!/bin/sh\nexec /bin/mv "$1" "$SWIZ_TEST_TRASH_DIR/"\n')
+    await chmod(join(bin, "trash"), 0o755)
+    const result = await cleanWithTrash(
+      home,
       [],
-      { cwd: home, env: { HOME: home } }
+      { PATH: `${bin}:${process.env.PATH}`, SWIZ_TEST_TRASH_DIR: trash },
+      `import { autoCleanup } from ${JSON.stringify(join(import.meta.dir, "cleanup.ts"))};
+      let inspections = 0;
+      await autoCleanup({
+        inspect: async () => { inspections++; return []; },
+        quitApps: async () => {}, terminate: async () => {}, wait: async () => {},
+      });
+      console.log("inspection-count=" + inspections);`
     )
     expect(result.exitCode).toBe(0)
-    expect(inspect).toHaveBeenCalledTimes(2)
+    expect(result.stdout).toContain("inspection-count=2")
+    expect(result.stdout).not.toContain("could not be trashed")
     expect(await Bun.file(files[0]!.path).text()).toBe(files[0]!.original)
     expect(await Bun.file(files[1]!.path).exists()).toBe(false)
+    expect(await Bun.file(join(trash, basename(files[1]!.path))).text()).toBe(files[1]!.original)
     expect(await Bun.file(task).exists()).toBe(true)
   })
 

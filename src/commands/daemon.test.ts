@@ -68,6 +68,7 @@ describe("buildSnapshotResolver", () => {
     projectStateMtimeMs: 200,
     globalSettingsMtimeMs: 300,
     ghCacheMtimeMs: 400,
+    taskStoreMtimeMs: 500,
     githubBucket: 10,
   }
 
@@ -250,6 +251,7 @@ describe("hasSnapshotInvalidated", () => {
     projectStateMtimeMs: 200,
     globalSettingsMtimeMs: 300,
     ghCacheMtimeMs: 400,
+    taskStoreMtimeMs: 500,
     githubBucket: 10,
   }
 
@@ -279,6 +281,10 @@ describe("hasSnapshotInvalidated", () => {
 
   it("invalidates on github refresh bucket change", () => {
     expect(hasSnapshotInvalidated(base, { ...base, githubBucket: 11 })).toBeTrue()
+  })
+
+  it("invalidates when the task store changes, so task counts cannot go stale", () => {
+    expect(hasSnapshotInvalidated(base, { ...base, taskStoreMtimeMs: 501 })).toBeTrue()
   })
 })
 
