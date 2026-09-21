@@ -1,6 +1,7 @@
-import { describe, expect, test } from "bun:test"
+import { beforeAll, describe, expect, test } from "bun:test"
 import { hookOutputSchema } from "../src/schemas.ts"
 import { hasActiveSkillForHookPayload } from "../src/skill-utils.ts"
+import { useTempDir } from "../src/utils/test-utils.ts"
 import { evaluatePretooluseRequireTasks } from "./pretooluse-task-governance.ts"
 
 // A skill drives its own ordered workflow. When a task-governance state gate fires mid-skill it
@@ -8,6 +9,12 @@ import { evaluatePretooluseRequireTasks } from "./pretooluse-task-governance.ts"
 // unreachable without abandoning the skill. These cases lock in the stand-down.
 
 const STALE_TIMESTAMP = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
+const temp = useTempDir("swiz-active-skill-")
+let taskHome: string
+
+beforeAll(async () => {
+  taskHome = await temp.create()
+})
 
 function skillEvent(skill: string, timestamp: string, turnIndex: number) {
   return { kind: "skill", value: skill, turnIndex, timestamp }
@@ -19,6 +26,8 @@ function emptyQueueInput(options: { skills?: string[]; timestamp?: string } = {}
   return {
     session_id: `escape-hatch-${Math.random().toString(36).slice(2)}`,
     cwd: process.cwd(),
+    _taskHome: taskHome,
+    _lastUserMessageAt: 0,
     transcript_path: "/definitely/unavailable/transcript.jsonl",
     tool_name: "Bash",
     tool_input: { command: "echo probe" },
