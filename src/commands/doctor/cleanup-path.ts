@@ -79,7 +79,7 @@ export async function decodeProjectPath(
 export interface CleanupArgs {
   olderThanMs: number
   olderThanLabel: string
-  /** Explicit session window; Codex has its own 48-hour default and minimum. */
+  /** Explicit session window for providers that support custom retention windows. */
   codexOlderThanMs?: number
   taskOlderThanMs: number | null
   taskOlderThanLabel: string | null
