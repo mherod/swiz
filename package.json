@@ -22,7 +22,7 @@
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.64",
-    "@ai-sdk/google": "3.0.119",
+    "@ai-sdk/google": "4.0.75",
     "@anthropic-ai/claude-agent-sdk": "^0.2.87",
     "@modelcontextprotocol/sdk": "1.27.1",
     "@openrouter/ai-sdk-provider": "3.0.0",
