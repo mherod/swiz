@@ -20,11 +20,20 @@ import {
 } from "./mcp-config.ts"
 
 type ManageSubject = "mcp"
-type ManageAction = "list" | "add" | "remove" | "validate" | "show" | "merge" | "sync"
-type AgentId = AgentSettingsId | "claude-desktop" | "junie" | "ai"
+type ManageAction =
+  | "list"
+  | "show"
+  | "add"
+  | "remove"
+  | "validate"
+  | "merge"
+  | "sync"
+  | "install"
+  | "uninstall"
+type AgentId = AgentSettingsId | "claude-desktop" | "junie" | "ai" | "windsurf"
 type AgentScope = "global" | "project"
 
-interface AgentConfig {
+export interface AgentConfig {
   id: AgentId
   scope: AgentScope
   flag: `--${AgentId}`
@@ -50,7 +59,7 @@ interface ParsedManageArgs {
   skipNonPortable: boolean
 }
 
-const GLOBAL_AGENTS: AgentConfig[] = [
+export const GLOBAL_AGENTS: AgentConfig[] = [
   {
     id: "antigravity",
     scope: "global",
@@ -108,10 +117,17 @@ const GLOBAL_AGENTS: AgentConfig[] = [
     displayName: "AI",
     resolvePath: (home) => join(home, ".ai", "mcp", "mcp.json"),
   },
+  {
+    id: "windsurf",
+    scope: "global",
+    flag: "--windsurf",
+    displayName: "Windsurf",
+    resolvePath: (home) => join(home, ".codeium", "windsurf", "mcp_config.json"),
+  },
 ]
 
 /** Project-level MCP config files, resolved relative to the project root (cwd). */
-const PROJECT_AGENTS: AgentConfig[] = [
+export const PROJECT_AGENTS: AgentConfig[] = [
   {
     id: "antigravity",
     scope: "project",
@@ -161,6 +177,13 @@ const PROJECT_AGENTS: AgentConfig[] = [
     displayName: "AI (project)",
     resolvePath: (cwd) => join(cwd, ".ai", "mcp", "mcp.json"),
   },
+  {
+    id: "windsurf",
+    scope: "project",
+    flag: "--windsurf",
+    displayName: "Windsurf (project)",
+    resolvePath: (cwd) => join(cwd, ".codeium", "windsurf", "mcp_config.json"),
+  },
 ]
 
 /** Returns the appropriate agent list for the given scope. */
@@ -170,7 +193,7 @@ function agentList(project: boolean): AgentConfig[] {
 
 function usage(): string {
   return [
-    "Usage: swiz manage mcp <list|show|add|remove|validate|merge|sync> [options]",
+    "Usage: swiz manage mcp <list|show|add|remove|validate|merge|sync|install|uninstall> [options]",
     "       swiz manage hooks <validate|repair> --codex [--project] [--dry-run]",
     "Examples:",
     "  swiz manage mcp list --agy",
@@ -306,6 +329,8 @@ const VALID_MCP_ACTIONS = new Set<ManageAction>([
   "validate",
   "merge",
   "sync",
+  "install",
+  "uninstall",
 ])
 const ACTIONS_REQUIRING_NAME = new Set<ManageAction>(["add", "remove", "show"])
 
@@ -378,8 +403,8 @@ function validateManageOptions(action: ManageAction, state: ManageParseState): v
     throw new Error("Claude Desktop has no project MCP configuration")
   if (action === "sync" && state.sourceAgentFlags.size)
     throw new Error("sync uses participating agents as sources; use merge for --from")
-  if (state.dryRun && !["add", "remove", "sync", "merge"].includes(action))
-    throw new Error("--dry-run supports add, remove, sync and merge only")
+  if (state.dryRun && !["add", "remove", "sync", "merge", "install", "uninstall"].includes(action))
+    throw new Error("--dry-run supports add, remove, sync, merge, install and uninstall only")
 }
 
 function validateAddTransport(state: ManageParseState): void {
@@ -911,6 +936,40 @@ export interface ManageCommandOptions {
   detectAgents?: () => Promise<string[]>
 }
 
+async function runMcpInstallAction(parsed: ParsedManageArgs, base: string): Promise<void> {
+  const { updated, skipped } = await installSwizAsMcpServer(
+    parsed.targetAgents,
+    base,
+    parsed.project,
+    parsed.dryRun
+  )
+  console.log(`\nMCP server "swiz":`)
+  for (const entry of updated) {
+    console.log(`  ${parsed.dryRun ? "+ (would register)" : "✓"} ${entry}`)
+  }
+  for (const entry of skipped) {
+    console.log(`  · ${entry} (already registered)`)
+  }
+  console.log()
+}
+
+async function runMcpUninstallAction(parsed: ParsedManageArgs, base: string): Promise<void> {
+  const { removed } = await uninstallSwizAsMcpServer(
+    parsed.targetAgents,
+    base,
+    parsed.project,
+    parsed.dryRun
+  )
+  console.log(`\nMCP server "swiz":`)
+  for (const entry of removed) {
+    console.log(`  ${parsed.dryRun ? "- (would remove)" : "✗"} ${entry}`)
+  }
+  if (removed.length === 0) {
+    console.log("  (no registrations found to remove)")
+  }
+  console.log()
+}
+
 async function runManageAction(
   parsed: ParsedManageArgs,
   base: string,
@@ -924,6 +983,8 @@ async function runManageAction(
     validate: () => validateMcpServers(parsed, base, which),
     merge: () => mergeMcpServers(parsed, base),
     sync: () => mergeMcpServers(parsed, base),
+    install: () => runMcpInstallAction(parsed, base),
+    uninstall: () => runMcpUninstallAction(parsed, base),
   }
   await actions[parsed.action]()
 }
@@ -932,7 +993,7 @@ export const manageCommand: Command<ManageCommandOptions> = {
   name: "manage",
   description: "Manage shared swiz resources (MCP, etc.)",
   usage:
-    "swiz manage mcp <list|show|add|remove|validate|merge|sync> [options] | swiz manage hooks <validate|repair> --codex [--project] [--dry-run]",
+    "swiz manage mcp <list|show|add|remove|validate|merge|sync|install|uninstall> [options] | swiz manage hooks <validate|repair> --codex [--project] [--dry-run]",
   options: [
     {
       flags: "hooks validate --codex",
@@ -946,13 +1007,24 @@ export const manageCommand: Command<ManageCommandOptions> = {
       flags: "mcp sync",
       description: "Sync enabled servers across agents; preserve disabled entries locally",
     },
-    { flags: "--dry-run", description: "Preview add, remove, sync or merge without writes" },
+    {
+      flags: "--dry-run",
+      description: "Preview add, remove, sync, merge, install or uninstall without writes",
+    },
     {
       flags: "--skip-non-portable",
       description: "Sync portable definitions while preserving incompatible entries",
     },
     { flags: "mcp list", description: "List configured MCP servers across target agents" },
     { flags: "mcp show <name>", description: "Show a single MCP server definition" },
+    {
+      flags: "mcp install",
+      description: "Register swiz as an MCP server across target agents",
+    },
+    {
+      flags: "mcp uninstall",
+      description: "Remove swiz MCP server registration from target agents",
+    },
     {
       flags: "mcp add <name> --command <cmd> [--arg ...] [--env KEY=VALUE]",
       description: "Add or update an MCP server entry",
@@ -968,7 +1040,8 @@ export const manageCommand: Command<ManageCommandOptions> = {
       description: "Merge MCP servers from source agent(s) into target agents",
     },
     {
-      flags: "--cursor --claude --claude-desktop --gemini --junie --ai --antigravity --agy --codex",
+      flags:
+        "--cursor --claude --claude-desktop --gemini --junie --ai --antigravity --agy --codex --windsurf",
       description: "Limit action to selected agents",
     },
     {

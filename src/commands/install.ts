@@ -59,6 +59,8 @@ function parseInstallRunOptions(args: string[], homeDir: string | null): Install
   const rawPort = portIdx !== -1 ? Number(args[portIdx + 1]) : Number.NaN
   const daemonPort = daemon && Number.isFinite(rawPort) ? rawPort : DAEMON_PORT
 
+  const mcpOnly = args.includes("--mcp") || args.includes("--mcp-only")
+
   return {
     jsonOutput,
     dryRun: jsonOutput || args.includes("--dry-run"),
@@ -67,6 +69,7 @@ function parseInstallRunOptions(args: string[], homeDir: string | null): Install
     statusLine: args.includes("--status-line"),
     daemon,
     daemonPort,
+    mcpOnly,
     targets: getAgentByFlag(args).map((agent) => ({
       ...agent,
       settingsPath: homeDir ? getAgentSettingsPath(agent.id, homeDir) : agent.settingsPath,
@@ -77,11 +80,29 @@ function parseInstallRunOptions(args: string[], homeDir: string | null): Install
 /** True when `install --uninstall` should remove every swiz integration (no scope flags). */
 function isFullUninstall(args: string[], opts: InstallRunOptions): boolean {
   return (
-    opts.uninstall && !opts.mergeTool && !opts.statusLine && !opts.daemon && !hasAnyAgentFlag(args)
+    opts.uninstall &&
+    !opts.mergeTool &&
+    !opts.statusLine &&
+    !opts.daemon &&
+    !opts.mcpOnly &&
+    !hasAnyAgentFlag(args)
+  )
+}
+
+/** True when the invocation targets one integration rather than the whole install. */
+function isScopedInvocation(args: string[], opts: InstallRunOptions): boolean {
+  return (
+    opts.jsonOutput ||
+    opts.mergeTool ||
+    opts.statusLine ||
+    opts.daemon ||
+    opts.mcpOnly ||
+    hasAnyAgentFlag(args)
   )
 }
 
 function shouldInstallHooks(args: string[], opts: InstallRunOptions): boolean {
+  if (opts.mcpOnly) return false
   return (!opts.mergeTool && !opts.daemon) || hasAnyAgentFlag(args)
 }
 
@@ -91,15 +112,7 @@ async function runCleanupAgentStep(
   options: CleanupAgentOptions
 ): Promise<void> {
   // Scoped installs/uninstalls must not change this user-wide maintenance job.
-  if (
-    opts.jsonOutput ||
-    opts.mergeTool ||
-    opts.statusLine ||
-    opts.daemon ||
-    hasAnyAgentFlag(args)
-  ) {
-    return
-  }
+  if (isScopedInvocation(args, opts)) return
   const action = opts.uninstall
     ? await uninstallCleanupLaunchAgent(opts.dryRun, options)
     : await installCleanupLaunchAgent(opts.dryRun, options)
@@ -157,7 +170,7 @@ async function uninstallShellShimStep(args: string[], opts: InstallRunOptions): 
 }
 
 async function installSwizMcpServerStep(args: string[], opts: InstallRunOptions): Promise<void> {
-  if (!shouldInstallHooks(args, opts)) return
+  if (!shouldInstallHooks(args, opts) && !opts.mcpOnly) return
   const home = getHomeDirOrNull()
   if (!home) return
   const targets = getScopedMcpTargets(args, opts)
@@ -175,7 +188,7 @@ async function installSwizMcpServerStep(args: string[], opts: InstallRunOptions)
 }
 
 async function uninstallSwizMcpServerStep(args: string[], opts: InstallRunOptions): Promise<void> {
-  if (!isFullUninstall(args, opts) && !hasAnyAgentFlag(args)) return
+  if (!isFullUninstall(args, opts) && !hasAnyAgentFlag(args) && !opts.mcpOnly) return
   const home = getHomeDirOrNull()
   if (!home) return
   const targets = getScopedMcpTargets(args, opts)
@@ -379,6 +392,11 @@ async function runUninstallMode(
   cleanupOptions: CleanupAgentOptions
 ): Promise<void> {
   console.log(`\n  swiz install --uninstall${opts.dryRun ? " (dry run)" : ""}\n`)
+  if (opts.mcpOnly) {
+    await uninstallSwizMcpServerStep(args, opts)
+    if (opts.dryRun) console.log("  No changes written.\n")
+    return
+  }
   await runCleanupAgentStep(args, opts, cleanupOptions)
   await runOptionalUninstallSteps(args, opts)
   await uninstallSwizMcpServerStep(args, opts)
@@ -396,6 +414,11 @@ async function runInstallMode(
   cleanupOptions: CleanupAgentOptions
 ): Promise<void> {
   console.log(`\n  swiz install${opts.dryRun ? " (dry run)" : ""}\n`)
+  if (opts.mcpOnly) {
+    await installSwizMcpServerStep(args, opts)
+    if (opts.dryRun) console.log("  No changes written.\n")
+    return
+  }
   await runOptionalInstallSteps(opts)
   await installProjectHooks(opts.dryRun)
   await installSwizMcpServerStep(args, opts)
@@ -409,7 +432,7 @@ async function runInstallMode(
 export const installCommand: Command<InstallCommandOptions> = {
   name: "install",
   description: "Install swiz hooks into agent settings",
-  usage: `swiz install [${AGENTS.map((a) => `--${a.id}`).join("] [")}] [--dry-run] [--merge-tool] [--daemon [--port <n>]] [--uninstall]`,
+  usage: `swiz install [${AGENTS.map((a) => `--${a.id}`).join("] [")}] [--dry-run] [--mcp] [--merge-tool] [--daemon [--port <n>]] [--uninstall]`,
   options: [
     ...AGENTS.map((a) => ({ flags: `--${a.id}`, description: `Install for ${a.name} only` })),
     { flags: "--dry-run", description: "Preview changes without writing to disk" },
@@ -417,6 +440,10 @@ export const installCommand: Command<InstallCommandOptions> = {
       flags: "--uninstall",
       description:
         "Remove all swiz integration (hooks, mergetool, status-line, daemon, cleanup); add flags below to limit scope",
+    },
+    {
+      flags: "--mcp",
+      description: "Install or uninstall only the swiz MCP server across target agents",
     },
     { flags: "--merge-tool", description: "Configure swiz as the global Git mergetool" },
     { flags: "--status-line", description: "Install swiz status-line into Claude Code settings" },

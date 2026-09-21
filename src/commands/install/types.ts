@@ -9,4 +9,5 @@ export interface InstallRunOptions {
   daemon: boolean
   daemonPort: number
   targets: AgentDef[]
+  mcpOnly?: boolean
 }

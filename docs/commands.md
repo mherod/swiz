@@ -55,7 +55,7 @@ forces Codex to quit. Output is appended to `~/Library/Logs/Swiz/doctor-clean.lo
 and errors to `~/Library/Logs/Swiz/doctor-clean.error.log`.
 
 `swiz install --dry-run` previews the job without writing or loading it.
-`--json` and scoped installs such as `--codex`, `--daemon`, `--merge-tool`, and
+`--json` and scoped installs such as `--codex`, `--daemon`, `--merge-tool`, `--mcp`, and
 `--status-line` leave this user-wide job unchanged. Full `swiz install --uninstall`
 unloads the job and moves its plist to Trash; logs are retained. Other platforms
 skip the LaunchAgent integration.

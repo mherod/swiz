@@ -1,8 +1,8 @@
 # MCP configuration management
 
-`swiz manage mcp` supports Claude Code, Claude Desktop, Cursor, Gemini,
+`swiz manage mcp` supports Claude Code, Claude Desktop, Cursor, Windsurf, Gemini,
 Junie, AI, Antigravity CLI and Codex. Antigravity accepts `--antigravity`
-or `--agy`; Codex uses `--codex`.
+or `--agy`; Codex uses `--codex`; Windsurf uses `--windsurf`.
 
 ```sh
 swiz manage mcp list --agy
@@ -11,6 +11,9 @@ swiz manage mcp show example --antigravity
 swiz manage mcp validate --agy
 swiz manage mcp remove example --agy
 swiz manage mcp add example --command bun --agy --project
+swiz manage mcp install --windsurf
+swiz manage mcp uninstall --cursor --project
+swiz install --mcp
 swiz install --antigravity --dry-run
 swiz install --antigravity
 ```
@@ -19,10 +22,22 @@ swiz install --antigravity
 | --- | --- | --- |
 | Antigravity CLI | `~/.gemini/config/mcp_config.json` | `.agents/mcp_config.json` |
 | Codex | `~/.codex/config.toml` | `.codex/config.toml` |
+| Claude Desktop | `~/Library/Application Support/Claude/claude_desktop_config.json` | *(global only)* |
+| Cursor | `~/.cursor/mcp.json` | `.cursor/mcp.json` |
+| Windsurf | `~/.codeium/windsurf/mcp_config.json` | `.codeium/windsurf/mcp_config.json` |
 
 Antigravity MCP files are separate from its hooks configuration. JSON targets
 use `mcpServers`; Codex uses TOML `mcp_servers`. Project paths are relative to
 the command's working directory. Claude Desktop has no project target.
+
+## Installing and Uninstalling Swiz MCP Server
+
+Swiz provides dedicated actions to install or remove the Swiz MCP server without altering hooks or shell shims:
+
+- `swiz manage mcp install [--targets...] [--project] [--dry-run]` registers the Swiz MCP server in agent MCP configurations.
+- `swiz manage mcp uninstall [--targets...] [--project] [--dry-run]` removes the Swiz MCP server from agent MCP configurations.
+- `swiz install --mcp` (or `--mcp-only`) installs only the MCP server across detected agents, leaving hooks and LaunchAgents untouched.
+- `swiz install --uninstall --mcp` removes only the MCP server without stripping other settings.
 
 ## Synchronizing agents
 
@@ -63,3 +78,4 @@ only registers the `swiz` stdio server and never implicitly syncs other entries.
 
 Formats: [Antigravity MCP documentation](https://www.antigravity.google/docs/mcp)
 and [Codex MCP documentation](https://developers.openai.com/codex/mcp).
+
