@@ -93,6 +93,50 @@ async function createMockGitProject(suffix: string) {
 }
 
 describe("shell shim runtime", () => {
+  for (const shellPath of ["/bin/bash", ...(ZSH_PATH ? [ZSH_PATH] : [])]) {
+    test(`${shellPath} permits read-only awk with the command-pattern policy`, async () => {
+      const project = await tmp.create("swiz-shim-awk-")
+      await Bun.write(join(project, "input data.txt"), "first 1\nsecond 2\n")
+      await Bun.write(join(project, "Library/LaunchAgents/com.swiz.daemon.plist"), "fixture")
+      const env = { HOME: project, ZDOTDIR: project, BASH_ENV: "", SWIZ_BYPASS: "" }
+      const cases = [
+        ["awk '{print $1}' 'input data.txt'", "first\nsecond\n"],
+        ["awk -v minimum=1 '$2 > minimum {print $1}' 'input data.txt'", "second\n"],
+        ["printf 'left:right\\n' | awk -F: '{print $2}' | cat", "right\n"],
+      ] as const
+      for (const [command, expected] of cases) {
+        const result = await runSourcedShim(project, command, env, shellPath)
+        expect(result.exitCode, result.stderr).toBe(0)
+        expect(result.stdout).toBe(expected)
+        expect(result.stderr).toBe("")
+        expect(
+          await evaluatePretooluseBannedCommands({
+            cwd: project,
+            tool_name: "Bash",
+            tool_input: { command },
+          })
+        ).toEqual({})
+      }
+      const failure = await runSourcedShim(project, "awk 'BEGIN {exit 7}'", env, shellPath)
+      expect(failure.exitCode).toBe(7)
+
+      // Redirects and pipelines belong to the full-command hook, not argv in the shim.
+      for (const command of [
+        "awk '{print $1}' 'input data.txt' > output.txt",
+        "awk '{print $1}' 'input data.txt' | tee -i output.txt",
+      ]) {
+        expect(
+          await evaluatePretooluseBannedCommands({
+            cwd: project,
+            tool_name: "Bash",
+            tool_input: { command },
+          })
+        ).toMatchObject({ hookSpecificOutput: { permissionDecision: "deny" } })
+      }
+      expect(await Bun.file(join(project, "input data.txt")).text()).toBe("first 1\nsecond 2\n")
+    })
+  }
+
   for (const pm of ["npm", "pnpm"] as const) {
     for (const shellPath of ["/bin/bash", ...(ZSH_PATH ? [ZSH_PATH] : [])]) {
       test(`${pm}/${shellPath} ownership permits Bun runtime commands in both guard layers`, async () => {

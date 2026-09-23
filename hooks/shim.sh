@@ -576,8 +576,9 @@ sed() {
 }
 
 awk() {
-  _swiz_guard awk "Edit tool" \
-    "Use the Edit/StrReplace tool for file processing. Awk is unreliable for edits." "$@" && return 1
+  # Read-only awk is allowed by pretooluse-banned-commands.ts. Shell redirects
+  # and downstream tee commands are not part of "$@"; the hook checks those
+  # against the full command. Keep this wrapper to replace an older sourced shim.
   command awk "$@"
 }
 
