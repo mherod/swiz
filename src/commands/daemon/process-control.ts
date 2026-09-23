@@ -13,25 +13,53 @@ import {
   SWIZ_DAEMON_LABEL,
 } from "../../launch-agents.ts"
 
-export async function listDaemonPids(port: number): Promise<number[]> {
-  const proc = Bun.spawn(["lsof", "-ti", `tcp:${port}`], {
+async function runLsof(command: string[]) {
+  const proc = Bun.spawn(command, {
     stdout: "pipe",
     stderr: "pipe",
+    timeout: 2000,
   })
-  const [out] = await Promise.all([
+  const [stdout, stderr] = await Promise.all([
     new Response(proc.stdout).text(),
     new Response(proc.stderr).text(),
   ])
-  await proc.exited
-  if (proc.exitCode !== 0) return []
-  return [
-    ...new Set(
-      out
-        .split("\n")
-        .map((line) => Number(line.trim()))
-        .filter((pid) => pid > 0)
-    ),
-  ]
+  return { exitCode: await proc.exited, stdout, stderr }
+}
+
+function parseListenerPids(result: Awaited<ReturnType<typeof runLsof>>): number[] {
+  const output = result.stdout.trim()
+  const diagnostic = result.stderr.trim()
+  if (result.exitCode === 1 && !output && !diagnostic) return []
+  if (result.exitCode !== 0 || diagnostic) {
+    throw new Error(`lsof exited ${result.exitCode}: ${diagnostic || "no diagnostic output"}`)
+  }
+  if (!output) return []
+  const rows = output.split("\n").map((line) => line.trim())
+  const pids = rows.map(Number)
+  if (
+    rows.some((row) => !/^\d+$/.test(row)) ||
+    pids.some((pid) => !Number.isSafeInteger(pid) || pid <= 0)
+  ) {
+    throw new Error("lsof returned invalid process IDs")
+  }
+  return [...new Set(pids)]
+}
+
+export async function listDaemonPids(port: number, run = runLsof): Promise<number[]> {
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    throw new Error(`Invalid TCP listener port: ${port}`)
+  }
+  try {
+    // -a intersects the port and state; +w restores diagnostics suppressed by -t.
+    return parseListenerPids(
+      await run(["lsof", "-nP", "-t", "+w", "-a", `-iTCP:${port}`, "-sTCP:LISTEN"])
+    )
+  } catch (error) {
+    throw new Error(
+      `Cannot discover TCP listeners on port ${port}: ${error instanceof Error ? error.message : String(error)}`,
+      { cause: error }
+    )
+  }
 }
 
 function tryKill(pid: number, signal?: string): void {
@@ -42,30 +70,51 @@ function tryKill(pid: number, signal?: string): void {
   }
 }
 
+interface PortRestartOperations {
+  listPids: (port: number) => Promise<number[]>
+  kill: (pid: number, signal?: NodeJS.Signals) => void
+  wait: (milliseconds: number) => Promise<unknown>
+}
+
+/** Stop other listeners, returning their initial count for the CLI's restart summary. */
 export async function restartDaemonOnPort(
   port: number,
-  selfPid: number = process.pid
-): Promise<void> {
-  const existing = (await listDaemonPids(port)).filter((pid) => pid !== selfPid)
-  if (existing.length === 0) return
+  selfPid: number = process.pid,
+  operations: Partial<PortRestartOperations> = {}
+): Promise<number> {
+  const listPids = operations.listPids ?? listDaemonPids
+  const kill = operations.kill ?? tryKill
+  const wait = operations.wait ?? Bun.sleep
+  const otherListeners = async () => (await listPids(port)).filter((pid) => pid !== selfPid)
+  const existing = await otherListeners()
+  if (existing.length === 0) return 0
 
   for (const pid of existing) {
-    tryKill(pid)
+    kill(pid)
   }
+  await waitForPortRelease(port, otherListeners, kill, wait)
+  return existing.length
+}
 
+async function waitForPortRelease(
+  port: number,
+  otherListeners: () => Promise<number[]>,
+  kill: PortRestartOperations["kill"],
+  wait: PortRestartOperations["wait"]
+): Promise<void> {
   // Give processes a short grace period to exit before forcing.
   for (let attempt = 0; attempt < 6; attempt++) {
-    await Bun.sleep(200)
-    const remaining = (await listDaemonPids(port)).filter((pid) => pid !== selfPid)
+    await wait(200)
+    const remaining = await otherListeners()
     if (remaining.length === 0) return
     if (attempt === 5) {
       for (const pid of remaining) {
-        tryKill(pid, "SIGKILL")
+        kill(pid, "SIGKILL")
       }
     }
   }
 
-  const finalRemaining = (await listDaemonPids(port)).filter((pid) => pid !== selfPid)
+  const finalRemaining = await otherListeners()
   if (finalRemaining.length > 0) {
     throw new Error(
       `Failed to restart daemon: port ${port} still in use by ${finalRemaining.join(", ")}`
@@ -80,6 +129,7 @@ export interface RestartDaemonResult {
 }
 
 interface RestartDaemonOptions {
+  portOperations?: Partial<PortRestartOperations>
   runtime?: LaunchAgentRuntime
   plistPath?: string
   timeoutMs?: number
@@ -167,11 +217,10 @@ export async function restartDaemon(
     }
   }
 
-  const existing = (await listDaemonPids(port)).filter((pid) => pid !== selfPid)
-  await restartDaemonOnPort(port, selfPid)
+  const stoppedCount = await restartDaemonOnPort(port, selfPid, options.portOperations)
   return {
     mode: "port",
-    hadRunning: existing.length > 0,
-    stoppedCount: existing.length,
+    hadRunning: stoppedCount > 0,
+    stoppedCount,
   }
 }

@@ -3,10 +3,239 @@ import { chmodSync } from "node:fs"
 import { join } from "node:path"
 import { type LaunchAgentRuntime, SWIZ_DAEMON_LABEL } from "../../launch-agents.ts"
 import { useTempDir } from "../../utils/test-utils"
-import { restartDaemon } from "./process-control.ts"
+import { listDaemonPids, restartDaemon, restartDaemonOnPort } from "./process-control.ts"
 
 const temporary = useTempDir("swiz-restart-")
 const indexPath = join(import.meta.dir, "../../../index.ts")
+
+test
+  .skipIf(!["darwin", "linux"].includes(process.platform) || !Bun.which("lsof"))
+  .each(["127.0.0.1", "::1"])(
+  "selects only the %s listener while a separate client is connected",
+  async (hostname) => {
+    const cwd = await temporary.create()
+    const sockets = new Set<Bun.Socket<undefined>>()
+    const listener = Bun.listen({
+      hostname,
+      port: 0,
+      socket: {
+        open(socket) {
+          sockets.add(socket)
+        },
+        data(socket) {
+          socket.write("ready")
+        },
+        close(socket) {
+          sockets.delete(socket)
+        },
+      },
+    })
+    const client = Bun.spawn(
+      [
+        process.execPath,
+        "--eval",
+        `
+    const socket = await Bun.connect({
+      hostname: ${JSON.stringify(hostname)}, port: ${listener.port},
+      socket: {
+        open(socket) { socket.write("connect") },
+        data() { process.stdout.write("ready\\n") },
+        close() {},
+      },
+    });
+    await Bun.stdin.text();
+    socket.end();
+  `,
+      ],
+      {
+        cwd,
+        env: { ...process.env, HOME: cwd, AI_TEST_NO_BACKEND: "1" },
+        stdin: "pipe",
+        stdout: "pipe",
+        stderr: "pipe",
+        timeout: 8000,
+      }
+    )
+    const errors = new Response(client.stderr).text()
+    const ready = client.stdout.getReader()
+    try {
+      const chunk = await ready.read()
+      expect(new TextDecoder().decode(chunk.value)).toBe("ready\n")
+      const pids = await listDaemonPids(listener.port)
+      expect(pids).toEqual([process.pid])
+      expect(pids).not.toContain(client.pid)
+      const signals: Array<[number, string | undefined]> = []
+      const operations = {
+        kill: (pid: number, signal?: NodeJS.Signals) => {
+          signals.push([pid, signal])
+        },
+        wait: async () => {},
+      }
+      // The real selector is exercised on every pass, but every signal is a spy.
+      expect(await restartDaemonOnPort(listener.port, process.pid, operations)).toBe(0)
+      expect(signals).toEqual([])
+      await expect(restartDaemonOnPort(listener.port, 0, operations)).rejects.toThrow(
+        "still in use"
+      )
+      expect(signals).toEqual([
+        [process.pid, undefined],
+        [process.pid, "SIGKILL"],
+      ])
+      operations.kill = (pid, signal) => {
+        signals.push([pid, signal])
+        listener.stop()
+      }
+      expect(await restartDaemonOnPort(listener.port, 0, operations)).toBe(1)
+      expect(signals.at(-1)).toEqual([process.pid, undefined])
+      expect(signals.some(([pid]) => pid === client.pid)).toBe(false)
+      expect(client.exitCode).toBeNull()
+    } finally {
+      await client.stdin.end()
+      for (const socket of sockets) socket.end()
+      listener.stop()
+      await ready.cancel()
+      expect(await client.exited).toBe(0)
+      expect(await errors).toBe("")
+    }
+  },
+  10_000
+)
+
+test.each([
+  { exitCode: 0, stdout: "42\n42\n84\n", expected: [42, 84] },
+  { exitCode: 1, stdout: "", expected: [] },
+  { exitCode: 0, stdout: "", expected: [] },
+])("parses listener rows: %j", async ({ exitCode, stdout, expected }) => {
+  const commands: string[][] = []
+  expect(
+    await listDaemonPids(1234, async (command) => {
+      commands.push(command)
+      return { exitCode, stdout, stderr: "" }
+    })
+  ).toEqual([...expected])
+  expect(commands).toEqual([["lsof", "-nP", "-t", "+w", "-a", "-iTCP:1234", "-sTCP:LISTEN"]])
+})
+
+test.each([
+  { exitCode: 1, stdout: "", stderr: "permission denied", message: "permission denied" },
+  { exitCode: 2, stdout: "", stderr: "", message: "lsof exited 2" },
+  { exitCode: 1, stdout: "42\n", stderr: "", message: "lsof exited 1" },
+  { exitCode: 0, stdout: "42\n", stderr: "incomplete results", message: "incomplete results" },
+  { exitCode: 0, stdout: "42\ninvalid\n", stderr: "", message: "invalid process IDs" },
+  { exitCode: 0, stdout: "0\n", stderr: "", message: "invalid process IDs" },
+  { exitCode: 0, stdout: "1.5\n", stderr: "", message: "invalid process IDs" },
+])("rejects uncertain listener discovery: %j", async (result) => {
+  const discovery = listDaemonPids(1234, async () => result)
+  await expect(discovery).rejects.toThrow("Cannot discover TCP listeners on port 1234")
+  await expect(discovery).rejects.toThrow(result.message)
+})
+
+test("reports an unavailable lsof executable", async () => {
+  await expect(
+    listDaemonPids(1234, async () => {
+      throw new Error("Executable not found: lsof")
+    })
+  ).rejects.toThrow("Cannot discover TCP listeners on port 1234: Executable not found: lsof")
+})
+
+test.each(["denied", "timeout"])("CLI fails when listener discovery is %s", async (scenario) => {
+  const cwd = await temporary.create()
+  const lsof = join(cwd, "lsof")
+  await Bun.write(
+    lsof,
+    scenario === "denied"
+      ? '#!/bin/sh\nprintf "permission denied\\n" >&2\nexit 1\n'
+      : "#!/bin/sh\nexec /bin/sleep 10\n"
+  )
+  chmodSync(lsof, 0o755)
+  const proc = Bun.spawn([process.execPath, indexPath, "daemon", "--restart", "--port", "1234"], {
+    cwd,
+    env: {
+      ...process.env,
+      HOME: cwd,
+      PATH: `${cwd}:${process.env.PATH}`,
+      SWIZ_DIRECT: "1",
+      AI_TEST_NO_BACKEND: "1",
+    },
+    stdout: "pipe",
+    stderr: "pipe",
+    timeout: 8000,
+  })
+  const [stdout, stderr] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+  ])
+  expect(await proc.exited).toBe(1)
+  expect(stdout).toBe("")
+  expect(stderr).toContain("Cannot discover TCP listeners on port 1234")
+  expect(stderr).toContain(scenario === "denied" ? "permission denied" : "lsof exited")
+}, 10_000)
+
+test.each([
+  0,
+  -1,
+  65536,
+  1.5,
+  Number.NaN,
+])("rejects invalid port %s before querying", async (port) => {
+  await expect(
+    listDaemonPids(port, async () => {
+      throw new Error("must not query")
+    })
+  ).rejects.toThrow("Invalid TCP listener port")
+})
+
+test("uses fresh listener identities and excludes self during forced retry", async () => {
+  let queries = 0
+  const signals: Array<[number, string | undefined]> = []
+  const waits: number[] = []
+  const stopped = await restartDaemonOnPort(1234, 999, {
+    listPids: async () => {
+      queries++
+      return queries === 1 ? [101, 999] : queries < 8 ? [202, 999] : [999]
+    },
+    kill: (pid, signal) => {
+      signals.push([pid, signal])
+    },
+    wait: async (ms) => {
+      waits.push(ms)
+    },
+  })
+  expect(stopped).toBe(1)
+  expect(signals).toEqual([
+    [101, undefined],
+    [202, "SIGKILL"],
+  ])
+  expect(queries).toBe(8)
+  expect(waits).toEqual(Array(6).fill(200))
+})
+
+test.each([1, 2, 8])("propagates discovery failure on query %s", async (failureAt) => {
+  let queries = 0
+  const signals: Array<[number, string | undefined]> = []
+  await expect(
+    restartDaemonOnPort(1234, 999, {
+      listPids: async () => {
+        if (++queries === failureAt) throw new Error("listener query failed")
+        return [101, 999]
+      },
+      kill: (pid, signal) => {
+        signals.push([pid, signal])
+      },
+      wait: async () => {},
+    })
+  ).rejects.toThrow("listener query failed")
+  expect(signals).toEqual(
+    failureAt === 1
+      ? []
+      : failureAt === 2
+        ? [[101, undefined]]
+        : [
+            [101, undefined],
+            [101, "SIGKILL"],
+          ]
+  )
+})
 
 async function fixture() {
   const cwd = await temporary.create()
@@ -194,7 +423,9 @@ test("preserves port fallback when no LaunchAgent plist is installed", async () 
   expect(await proc.exited).toBe(0)
   expect(stderr).toBe("")
   expect(JSON.parse(stdout)).toEqual({ mode: "port", hadRunning: false, stoppedCount: 0 })
-  expect(await Bun.file(join(cwd, "lsof.log")).text()).toBe("-ti tcp:1234\n-ti tcp:1234\n")
+  expect(await Bun.file(join(cwd, "lsof.log")).text()).toBe(
+    "-nP -t +w -a -iTCP:1234 -sTCP:LISTEN\n"
+  )
 })
 
 test.each([
