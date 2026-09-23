@@ -1297,6 +1297,25 @@ describe("pretooluse-banned-commands", () => {
   })
 
   describe("git rule edge cases", () => {
+    test.each([
+      [String.raw`git -C "some\"directory" push --force`, "--force-with-lease"],
+      [String.raw`git -C "some\"directory" commit --no-verify -m message`, "--no-verify"],
+      [String.raw`git --work-tree="some\"directory" push -f`, "--force-with-lease"],
+      [String.raw`git -c core.quotePath="some\"value" push --no-verify`, "--no-verify"],
+    ])("denies escaped-quote global option values (#952): %s", async (command, reason) => {
+      const result = await runHook(command!)
+      expect(result.decision).toBe("deny")
+      expect(result.reason).toContain(reason!)
+    })
+
+    test.each([
+      String.raw`git -C "some\"directory" push -- --force`,
+      String.raw`git -C "some\"directory" commit -- --no-verify`,
+      String.raw`echo "example \"git push --force\" and git commit --no-verify"`,
+    ])("allows inert flags with escaped quotes (#952): %s", async (command) => {
+      expect((await runHook(command)).decision).toBeUndefined()
+    })
+
     test("git push --no-verify is blocked", async () => {
       const result = await runHook("git push --no-verify origin main")
       expect(result.decision).toBe("deny")

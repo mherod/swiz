@@ -261,9 +261,18 @@ interface _TokState {
   start: number
 }
 
-function _procQuoted(state: _TokState, ch: string): void {
+const DOUBLE_QUOTE_ESCAPES = new Set(["$", "`", '"', "\\", "\n"])
+
+function _procQuoted(state: _TokState, ch: string, seg: string, i: number): number {
+  const next = seg[i + 1]
+  if (state.quote === '"' && ch === "\\" && next && DOUBLE_QUOTE_ESCAPES.has(next)) {
+    // A quoted line continuation contributes no character to the argument.
+    if (next !== "\n") state.token += next
+    return i + 1
+  }
   if (ch === state.quote) state.quote = null
   else state.token += ch
+  return i
 }
 
 function _procUnquoted(state: _TokState, ch: string, seg: string, i: number): number {
@@ -296,7 +305,7 @@ export function tokenizeShellSegmentWithSpans(segment: string): ShellTokenSpan[]
   for (let i = 0; i < segment.length; i++) {
     const ch = segment[i]!
     if (!state.started && !state.token && ch !== " " && ch !== "\t") state.start = i
-    if (state.quote) _procQuoted(state, ch)
+    if (state.quote) i = _procQuoted(state, ch, segment, i)
     else i = _procUnquoted(state, ch, segment, i)
   }
   if (state.started || state.token) {
@@ -305,13 +314,9 @@ export function tokenizeShellSegmentWithSpans(segment: string): ShellTokenSpan[]
   return state.tokens
 }
 
-function _tokenize(segment: string): string[] {
-  return tokenizeShellSegmentWithSpans(segment).map((token) => token.value)
-}
-
 /** Tokenize one shell segment while preserving quoted argument contents. */
 export function tokenizeShellSegment(segment: string): string[] {
-  return _tokenize(segment)
+  return tokenizeShellSegmentWithSpans(segment).map((token) => token.value)
 }
 
 function _skipGitOpts(tokens: string[], i: number): number {
@@ -335,7 +340,7 @@ function _commandStart(tokens: string[], command: string): number | null {
 }
 
 function _parseGitInvocation(segment: string): _ParsedGitInvocation | null {
-  const tokens = _tokenize(segment)
+  const tokens = tokenizeShellSegment(segment)
   const gitIndex = _commandStart(tokens, "git")
   if (gitIndex === null) return null
 
@@ -485,7 +490,7 @@ export function findGitCommitAttribution(command: string): GitCommitAttribution 
 /** Detect a flag on a real `gh` invocation, ignoring quoted examples and args after `--`. */
 export function hasGhFlag(command: string, flag: string): boolean {
   for (const segment of splitShellSegments(command)) {
-    const tokens = _tokenize(segment)
+    const tokens = tokenizeShellSegment(segment)
     const ghIndex = _commandStart(tokens, "gh")
     if (ghIndex === null) continue
     if (_hasLongFlag(tokens.slice(ghIndex + 1), flag)) return true
