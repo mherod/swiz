@@ -43,6 +43,8 @@ export interface GitAttempt {
   /** True when git executed and answered the question, even if the answer was "unset". */
   ran: boolean
   stdout: string
+  /** Git diagnostics, or the error message if the process could not start. */
+  stderr: string
   exitCode: number
 }
 
@@ -60,9 +62,19 @@ export async function gitAttempt(args: string[], cwd: string): Promise<GitAttemp
   try {
     const proc = getGitClient().runSync(args, { cwd })
     const exitCode = proc.exitCode
-    return { ran: exitCode === 0 || exitCode === 1, stdout: proc.stdout.trim(), exitCode }
-  } catch {
-    return { ran: false, stdout: "", exitCode: -1 }
+    return {
+      ran: exitCode === 0 || exitCode === 1,
+      stdout: proc.stdout.trim(),
+      stderr: proc.stderr.trim(),
+      exitCode,
+    }
+  } catch (error) {
+    return {
+      ran: false,
+      stdout: "",
+      stderr: error instanceof Error ? error.message : String(error),
+      exitCode: -1,
+    }
   }
 }
 
