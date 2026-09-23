@@ -152,9 +152,9 @@ export async function installCleanupLaunchAgent(
   if (!status.current) {
     await writeWithBackup(status.plistPath, buildCleanupLaunchAgentPlist(options))
   }
-  const exitCode = await bootstrapLaunchAgent(status.plistPath, options.runtime)
-  if (exitCode !== 0 || !(await isGuiLaunchAgentLoaded(SWIZ_CLEANUP_LABEL, options.runtime))) {
-    throw new Error(`Could not load ${status.plistPath} (launchctl exit ${exitCode})`)
+  await bootstrapLaunchAgent(status.plistPath, options.runtime)
+  if (!(await isGuiLaunchAgentLoaded(SWIZ_CLEANUP_LABEL, options.runtime))) {
+    throw new Error(`Could not load ${status.plistPath} (job not registered after bootstrap)`)
   }
   return action
 }

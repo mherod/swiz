@@ -83,6 +83,8 @@ test("health and memory HTTP routes bypass expensive pruning during pressure", a
       signal: AbortSignal.timeout(1000),
     })
     expect(await health.text()).toBe("ok")
+    expect(health.headers.get("x-swiz-daemon-pid")).toBe(String(process.pid))
+    expect(health.headers.get("cache-control")).toBe("no-store")
     const response = await fetch(new URL("/memory", server.url), {
       signal: AbortSignal.timeout(1000),
     })

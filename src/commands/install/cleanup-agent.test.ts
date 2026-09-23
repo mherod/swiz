@@ -35,16 +35,23 @@ async function fixture() {
     async run(command) {
       commands.push(command)
       if (command[0] === "plutil") {
-        return { exitCode: state.config ? 0 : 1, stdout: JSON.stringify(state.config) }
+        return { exitCode: state.config ? 0 : 1, stdout: JSON.stringify(state.config), stderr: "" }
       }
-      if (command[1] === "print") return { exitCode: state.loaded ? 0 : 1, stdout: "" }
+      if (command[1] === "print")
+        return {
+          exitCode: state.loaded ? 0 : 113,
+          stdout: "",
+          stderr: state.loaded
+            ? ""
+            : `Could not find service "${SWIZ_CLEANUP_LABEL}" in domain for user gui: 501`,
+        }
       if (command[1] === "bootout") {
         if (state.unloadExit === 0) state.loaded = false
-        return { exitCode: state.unloadExit, stdout: "" }
+        return { exitCode: state.unloadExit, stdout: "", stderr: "" }
       }
       if (command[1] === "bootstrap") {
         if (state.loadExit === 0 && state.registers) state.loaded = true
-        return { exitCode: state.loadExit, stdout: "" }
+        return { exitCode: state.loadExit, stdout: "", stderr: "" }
       }
       throw new Error(`Unexpected command: ${command.join(" ")}`)
     },

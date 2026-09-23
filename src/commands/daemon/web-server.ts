@@ -289,7 +289,9 @@ export function startDaemonWebServer(ctx: DaemonWebServerContext): DaemonWebServ
   const server = Bun.serve({
     port: ctx.port,
     routes: {
-      "/health": new Response("ok"),
+      "/health": new Response("ok", {
+        headers: { "x-swiz-daemon-pid": String(process.pid), "cache-control": "no-store" },
+      }),
       "/memory": () => memoryPressureResponse("/memory", ctx.globalMetrics)!,
       "/": async (req) => {
         if (req.method !== "GET") return notFound()

@@ -7,6 +7,7 @@ export const SWIZ_CLEANUP_LABEL = "com.swiz.doctor-clean"
 export interface LaunchAgentCommandResult {
   exitCode: number
   stdout: string
+  stderr: string
 }
 
 export interface LaunchAgentRuntime {
@@ -20,19 +21,21 @@ const launchAgentRuntime: LaunchAgentRuntime = {
     const proc = Bun.spawn(command, {
       stdout: "pipe",
       stderr: "pipe",
+      timeout: 10_000,
     })
-    const [stdout] = await Promise.all([
+    const [stdout, stderr] = await Promise.all([
       new Response(proc.stdout).text(),
       new Response(proc.stderr).text(),
     ])
     await proc.exited
-    return { exitCode: proc.exitCode ?? 1, stdout }
+    return { exitCode: proc.exitCode ?? 1, stdout, stderr }
   },
   kill(pid, signal) {
     process.kill(pid, signal)
   },
   getUid() {
-    return process.getuid?.() ?? 501
+    if (!process.getuid) throw new Error("Cannot determine the current user's launchctl GUI domain")
+    return process.getuid()
   },
 }
 
@@ -73,16 +76,69 @@ export async function isGuiLaunchAgentLoaded(
   label: string,
   runtime: LaunchAgentRuntime = launchAgentRuntime
 ): Promise<boolean> {
-  const result = await runtime.run(["launchctl", "print", `gui/${runtime.getUid()}/${label}`])
-  return result.exitCode === 0
+  return (await inspectGuiLaunchAgent(label, runtime)).loaded
+}
+
+export interface GuiLaunchAgentStatus {
+  target: string
+  loaded: boolean
+  pid: number | null
+  lastExitCode: number | null
+}
+
+function launchctlError(command: string[], result: LaunchAgentCommandResult): Error {
+  const detail = result.stderr.trim() || result.stdout.trim() || "no diagnostic output"
+  return new Error(`${command.join(" ")} failed (exit ${result.exitCode}): ${detail}`)
+}
+
+/** Only an explicit missing service is absence; domain and permission failures are errors. */
+export async function inspectGuiLaunchAgent(
+  label: string,
+  runtime: LaunchAgentRuntime = launchAgentRuntime
+): Promise<GuiLaunchAgentStatus> {
+  const target = `gui/${runtime.getUid()}/${label}`
+  const command = ["launchctl", "print", target]
+  const result = await runtime.run(command)
+  if (result.exitCode !== 0) {
+    if (result.exitCode === 113 && result.stderr.includes(`Could not find service "${label}"`)) {
+      return { target, loaded: false, pid: null, lastExitCode: null }
+    }
+    throw launchctlError(command, result)
+  }
+  const pid = result.stdout.match(/^\s*pid = (\d+)\s*$/m)?.[1]
+  const lastExit = result.stdout.match(/^\s*last exit code = (-?\d+)\s*$/m)?.[1]
+  return {
+    target,
+    loaded: true,
+    pid: pid && Number(pid) > 0 ? Number(pid) : null,
+    lastExitCode: lastExit === undefined ? null : Number(lastExit),
+  }
+}
+
+/** Replace a registered service and return launchd's reported replacement PID. */
+export async function kickstartLaunchAgent(
+  label: string,
+  runtime: LaunchAgentRuntime = launchAgentRuntime
+): Promise<number> {
+  const command = ["launchctl", "kickstart", "-k", "-p", `gui/${runtime.getUid()}/${label}`]
+  const result = await runtime.run(command)
+  if (result.exitCode !== 0) throw launchctlError(command, result)
+  const pid = Number(result.stdout.trim())
+  if (!Number.isSafeInteger(pid) || pid <= 0) {
+    throw new Error(`${command.join(" ")} did not report a replacement PID`)
+  }
+  return pid
 }
 
 export async function bootstrapLaunchAgent(
   plistPath: string,
   runtime: LaunchAgentRuntime = launchAgentRuntime
-): Promise<number> {
-  return (await runtime.run(["launchctl", "bootstrap", `gui/${runtime.getUid()}`, plistPath]))
-    .exitCode
+): Promise<void> {
+  const command = ["launchctl", "bootstrap", `gui/${runtime.getUid()}`, plistPath]
+  const result = await runtime.run(command)
+  if (result.exitCode !== 0) {
+    throw new Error(`Could not load ${plistPath}: ${launchctlError(command, result).message}`)
+  }
 }
 
 export async function loadLaunchAgent(
