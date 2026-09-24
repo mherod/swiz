@@ -28,6 +28,7 @@ export interface GitContextLineOptions {
   strictNoDirectMain?: boolean
   defaultBranch?: string
   peerOnlyChanges?: boolean
+  peerOwnedChanges?: boolean
 }
 
 function plural(count: number, singular: string, pluralForm = `${singular}s`): string {
@@ -49,10 +50,17 @@ function describeUpstream(upstream: string | null, upstreamGone: boolean): strin
   return " with no upstream. We should set an upstream before relying on push or pull status."
 }
 
-function describeWorkingTree(uncommitted: number, peerOnlyChanges = false): string {
+function describeWorkingTree(
+  uncommitted: number,
+  peerOnlyChanges = false,
+  peerOwnedChanges = false
+): string {
   if (uncommitted === 0) return " The working tree is clean."
   if (peerOnlyChanges) {
     return ` ${plural(uncommitted, "uncommitted file")} belonging to other active sessions. Leave their work untouched.`
+  }
+  if (peerOwnedChanges) {
+    return ` ${plural(uncommitted, "uncommitted file")}, including work owned by another active session. A commit is not required to stop. Leave peer files untouched.`
   }
   return [
     ` ${plural(uncommitted, "uncommitted file")}.`,
@@ -167,7 +175,7 @@ export function buildGitContextLine(
 
   let line = branch === "(detached)" ? "HEAD is detached" : `On branch ${branch}`
   line += describeUpstream(upstream, upstreamGone)
-  line += describeWorkingTree(uncommitted, options.peerOnlyChanges)
+  line += describeWorkingTree(uncommitted, options.peerOnlyChanges, options.peerOwnedChanges)
   line += describeSyncState(ahead, behind, hasBranchPolicyConflict(options))
   line += describeUnpushedCommitSummaries(ahead, unpushedCommitSummaries)
 

@@ -28,6 +28,7 @@ import {
   hasOnlyPeerOwnedChanges,
   resolveSessionFileOwnershipResult,
   type SessionFileOwnership,
+  type SessionFileOwnershipResult,
 } from "../../src/utils/session-file-ownership.ts"
 import type { GitContext, GitStatus } from "./types.ts"
 
@@ -102,11 +103,12 @@ async function buildStopGitSummary(
   options: {
     effective: Awaited<ReturnType<typeof resolveEffectiveSettings>>
     peerOnlyChanges: boolean
+    peerOwnedChanges: boolean
   }
 ): Promise<string> {
-  const { effective, peerOnlyChanges } = options
+  const { effective, peerOnlyChanges, peerOwnedChanges } = options
   const constructiveSummary = buildConstructiveGitSummary(
-    peerOnlyChanges ? { ...gitStatus, total: 0 } : gitStatus,
+    peerOwnedChanges ? { ...gitStatus, total: 0 } : gitStatus,
     upstream
   )
   const unpushedCommitSummaries = await getVisibleUnpushedCommitSummaries(cwd, gitStatus)
@@ -118,6 +120,7 @@ async function buildStopGitSummary(
       strictNoDirectMain: effective.strictNoDirectMain,
       defaultBranch: effective.defaultBranch,
       peerOnlyChanges,
+      peerOwnedChanges,
     },
     unpushedCommitSummaries
   )
@@ -133,6 +136,10 @@ function gitStatusWarrantsStopHook(gitStatus: GitStatus): boolean {
   const { total, ahead, behind } = gitStatus
   if (total > 0) return true
   return ahead > 0 || behind > 0 || gitStatus.upstreamGone
+}
+
+function hasPeerOwnedChanges(files: string[], ownership: SessionFileOwnershipResult): boolean {
+  return ownership.known && files.some((file) => ownership.ownership.editedByOthers.includes(file))
 }
 
 /**
@@ -161,7 +168,8 @@ export async function resolveGitContext(input: StopHookInput): Promise<GitContex
   // same ownership snapshot — the plan previously ignored it (issue #841).
   const ownership = await resolveSessionFileOwnershipResult(cwd, input.session_id, gitStatus.lines)
   const peerOnlyChanges = hasOnlyPeerOwnedChanges(gitStatus.lines, ownership)
-  const hasUncommitted = gitStatus.total > 0 && !peerOnlyChanges
+  const peerOwnedChanges = hasPeerOwnedChanges(gitStatus.lines, ownership)
+  const hasUncommitted = gitStatus.total > 0 && !peerOwnedChanges
   const attribution = ownership.known
     ? ownership.ownership
     : { editedByUs: [], editedByOthers: [], unattributed: [...gitStatus.lines] }
@@ -170,7 +178,7 @@ export async function resolveGitContext(input: StopHookInput): Promise<GitContex
     gitStatus.total > 0 ? attribution : null,
     gitStatus as GitStatus,
     upstream,
-    { effective, peerOnlyChanges }
+    { effective, peerOnlyChanges, peerOwnedChanges }
   )
 
   return {
