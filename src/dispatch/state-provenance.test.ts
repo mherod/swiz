@@ -6,7 +6,7 @@ import { readStateData, writeProjectState } from "../settings.ts"
 import { getLockPathForFile } from "../utils/file-lock.ts"
 import { useTempDir } from "../utils/test-utils.ts"
 import { executeDispatch } from "./execute.ts"
-import { projectStateProvenance } from "./state-provenance.ts"
+import { injectProjectStateProvenance, projectStateProvenance } from "./state-provenance.ts"
 
 const { create } = useTempDir("state-provenance-")
 const timestamp = "2026-09-07T10:00:00.000Z"
@@ -55,6 +55,49 @@ test("legacy same-state entries are not announced as peer changes", () => {
   // Control: a real peer transition into the same state is still announced.
   expect(projectStateProvenance(payload("reviewing"))).toContain(
     'session "session-A": reviewing → developing'
+  )
+})
+
+test("a peer transition is announced once per session across tool events", () => {
+  const sessionId = `session-dedupe-${Date.now()}`
+  const payload = (overrides: Record<string, unknown> = {}) =>
+    JSON.stringify({
+      session_id: sessionId,
+      cwd: "/repo",
+      _projectState: "reviewing",
+      _projectStateTransition: { from: "developing", to: "reviewing", timestamp, sessionId: "A" },
+      ...overrides,
+    })
+  const inject = (event: string, payloadStr: string) => {
+    const response: Record<string, any> = { hookSpecificOutput: { additionalContext: "base" } }
+    injectProjectStateProvenance(response, event, payloadStr)
+    return response
+  }
+
+  const first = inject("preToolUse", payload())
+  expect(first.systemMessage).toContain('session "A": developing → reviewing')
+  expect(first.hookSpecificOutput.additionalContext).toContain("developing → reviewing")
+
+  for (const event of ["preToolUse", "postToolUse"]) {
+    const repeat = inject(event, payload())
+    expect(repeat.systemMessage).toBeUndefined()
+    expect(repeat.hookSpecificOutput.additionalContext).toBe("base")
+  }
+
+  // Controls: a new transition, another session, and another project are each announced.
+  const next = inject(
+    "preToolUse",
+    payload({
+      _projectState: "developing",
+      _projectStateTransition: { from: "reviewing", to: "developing", timestamp, sessionId: "A" },
+    })
+  )
+  expect(next.systemMessage).toContain("reviewing → developing")
+  expect(
+    inject("preToolUse", payload({ session_id: `${sessionId}-other` })).systemMessage
+  ).toContain("developing → reviewing")
+  expect(inject("preToolUse", payload({ cwd: "/other-repo" })).systemMessage).toContain(
+    "developing → reviewing"
   )
 })
 
