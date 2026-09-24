@@ -147,7 +147,7 @@ function satisfiedGitResult(ctx: GitContext): GitWorkflowCollectResult {
   return {
     kind: "ok",
     context: appendSessionFileOwnershipContext(
-      "Only other active sessions have uncommitted changes. Leave their files untouched.",
+      "Another active session owns uncommitted changes. A commit is not required to stop. Leave peer files untouched.",
       ctx.ownership.ownership
     ),
   }

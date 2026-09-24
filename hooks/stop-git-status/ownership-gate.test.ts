@@ -25,7 +25,7 @@ const discover = spyOn(ownership, "resolveSessionFileOwnershipResult")
 const backgroundPush = spyOn(background, "detectBackgroundPush")
 const pushCooldown = spyOn(cooldown, "isPushCooldownActive")
 spyOn(cooldown, "markPushPrompted").mockResolvedValue(undefined)
-spyOn(taskIo, "createSessionTask").mockResolvedValue(undefined)
+const createTask = spyOn(taskIo, "createSessionTask").mockResolvedValue(undefined)
 spyOn(taskIo, "completeSessionTask").mockResolvedValue(true)
 spyOn(taskResolver, "getSessionIdsForProject").mockResolvedValue(new Set(["self"]))
 spyOn(actionPlan, "mergeActionPlanIntoTasks").mockResolvedValue(0)
@@ -73,10 +73,11 @@ beforeEach(async () => {
     gates: { git: true, ci: true, issues: false },
   })
   ci.mockReset().mockResolvedValue(null)
+  createTask.mockClear()
 })
 afterAll(() => mock.restore())
 
-describe("peer-only stop exemption", () => {
+describe("peer-owned stop exemption", () => {
   test("idle delivery does not block for a clean branch that only needs pulling", async () => {
     snapshot = { ...snapshot, ahead: 0, behind: 1, upstream: "origin/main", total: 0, lines: [] }
     const payload = { ...input(), _stopContinuationMode: "delivery" }
@@ -172,13 +173,6 @@ describe("peer-only stop exemption", () => {
       { known: true, ownership: { editedByUs: [], editedByOthers: [], unattributed: ["peer.ts"] } },
     ],
     [
-      "mixed",
-      {
-        known: true,
-        ownership: { editedByUs: ["mine.ts"], editedByOthers: ["peer.ts"], unattributed: [] },
-      },
-    ],
-    [
       "incomplete coverage",
       {
         known: true,
@@ -189,12 +183,6 @@ describe("peer-only stop exemption", () => {
     ["failed query", { known: false, reason: "query-failed" }],
   ] as const) {
     test(`${name} remains blocking`, async () => {
-      if (name === "mixed") {
-        await Bun.write(join(cwd, "mine.ts"), "my work\n")
-        const mixed = await readStatus(cwd)
-        if (!mixed) throw new Error("missing mixed fixture status")
-        snapshot = mixed
-      }
       discover.mockResolvedValue(structuredClone(result) as ownership.SessionFileOwnershipResult)
       expect((await collectGitWorkflowStop(input())).kind).toBe("block")
       const output = hookOutputSchema.parse(await evaluateStopGitStatus(input()))
@@ -203,18 +191,69 @@ describe("peer-only stop exemption", () => {
     })
   }
 
+  for (const autoContinue of [false, true]) {
+    for (const bucket of ["editedByUs", "unattributed"] as const) {
+      test(`allows peer and ${bucket} changes with auto-continue=${autoContinue}`, async () => {
+        await Bun.write(join(cwd, "mine.ts"), "my work\n")
+        await git(["add", "--", "peer.ts"])
+        const mixed = await readStatus(cwd)
+        if (!mixed) throw new Error("missing mixed fixture status")
+        snapshot = mixed
+        discover.mockResolvedValue({
+          known: true,
+          ownership: {
+            editedByUs: [],
+            editedByOthers: ["peer.ts"],
+            unattributed: [],
+            [bucket]: ["mine.ts"],
+          },
+        })
+        const base = input()
+        const payload = {
+          ...base,
+          _effectiveSettings: { ...base._effectiveSettings, autoContinue },
+        }
+        const before = await git(["status", "--porcelain=v2"])
+        expect((await collectGitWorkflowStop(payload)).kind).toBe("ok")
+        const output = hookOutputSchema.parse(await evaluateStopGitStatus(payload))
+        expect(output.decision).toBeUndefined()
+        expect(output.systemMessage).toContain("peer.ts")
+        expect(output.systemMessage).toContain("mine.ts")
+        expect(output.systemMessage).not.toContain("Only other active sessions")
+        expect(output.systemMessage).toContain("A commit is not required to stop")
+        expect((await collectShipChecklistStopParsed(payload))?.blocked).toBe(false)
+        expect(createTask).not.toHaveBeenCalled()
+        expect(await git(["status", "--porcelain=v2"])).toBe(before)
+        expect(await Bun.file(join(cwd, "peer.ts")).text()).toBe("peer work\n")
+        expect(await Bun.file(join(cwd, "mine.ts")).text()).toBe("my work\n")
+      })
+    }
+  }
+
   for (const counts of [
     { ahead: 1, behind: 0 },
     { ahead: 0, behind: 1 },
     { ahead: 1, behind: 1 },
   ]) {
     test(`preserves remote obligation ${JSON.stringify(counts)}`, async () => {
-      snapshot = { ...snapshot, ...counts, upstream: "origin/main" }
+      snapshot = {
+        ...snapshot,
+        ...counts,
+        upstream: "origin/main",
+        total: 2,
+        lines: ["peer.ts", "mine.ts"],
+      }
+      discover.mockResolvedValue({
+        known: true,
+        ownership: { editedByUs: ["mine.ts"], editedByOthers: ["peer.ts"], unattributed: [] },
+      })
       expect((await collectGitWorkflowStop(input())).kind).toBe("block")
       const output = hookOutputSchema.parse(await evaluateStopGitStatus(input()))
       expect(output.decision).toBe("block")
       expect(output.reason).not.toContain("Commit your changes")
       expect(output.reason).not.toContain("git add")
+      expect(output.reason).not.toContain("We should commit")
+      expect(output.reason).toContain("A commit is not required to stop")
     })
   }
 
