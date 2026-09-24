@@ -42,7 +42,11 @@ async function fetchRuns(branch: string, cwd: string): Promise<CIRun[]> {
   const repo = await getRepoSlug(cwd)
   if (repo) {
     const cached = await getIssueStoreReader().getCiBranchRuns<CIRun>(repo, branch)
-    if (cached) return cached.filter((r) => r.event !== "dynamic" && r.event !== "workflow_run")
+    // Partial sync snapshots cannot identify the newest run per workflow.
+    // Refresh them rather than treating an unnamed historical failure as current.
+    if (cached?.every((run) => run.workflowName && run.createdAt && run.event)) {
+      return cached.filter((r) => r.event !== "dynamic" && r.event !== "workflow_run")
+    }
   }
 
   const runs = await ghJson<CIRun[]>(

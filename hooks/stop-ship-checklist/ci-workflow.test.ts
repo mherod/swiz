@@ -33,6 +33,55 @@ import {
 
 const tempDirs = useTempDir("idle-delivery-ci-")
 
+for (const conclusion of ["success", "failure"]) {
+  test(`refreshes incomplete cached CI metadata before reporting ${conclusion}`, async () => {
+    const cwd = await tempDirs.create()
+    await gitHelpers.git(["init", "-b", "main"], cwd)
+    await gitHelpers.git(
+      ["remote", "add", "origin", "https://github.com/example/idle-test.git"],
+      cwd
+    )
+    const hasGh = spyOn(gitHelpers, "hasGhCli").mockReturnValue(true)
+    const reader = spyOn(issueStore, "getIssueStoreReader").mockReturnValue({
+      getCiBranchRuns: () =>
+        Promise.resolve([
+          makeRun({
+            status: "completed",
+            conclusion: "failure",
+            workflowName: "",
+            createdAt: "",
+            event: "",
+          }),
+          makeRun({
+            databaseId: 2,
+            status: "completed",
+            conclusion: "success",
+            workflowName: "",
+            createdAt: "",
+            event: "",
+          }),
+        ]),
+    } as unknown as ReturnType<typeof issueStore.getIssueStoreReader>)
+    const writer = spyOn(issueStore, "getIssueStore").mockReturnValue({
+      upsertCiBranchRuns: () => {},
+    } as unknown as ReturnType<typeof issueStore.getIssueStore>)
+    const fresh = spyOn(gitHelpers, "ghJsonViaDaemon").mockResolvedValue([
+      makeRun({ databaseId: 3, status: "completed", conclusion }),
+    ])
+    try {
+      const result = await collectCiWorkflow({ cwd }, true)
+      expect(fresh).toHaveBeenCalledTimes(1)
+      if (conclusion === "success") expect(result).toBeNull()
+      else expect(result?.action?.reason).toBe("Failing checks: CI (failure).")
+    } finally {
+      fresh.mockRestore()
+      writer.mockRestore()
+      reader.mockRestore()
+      hasGh.mockRestore()
+    }
+  })
+}
+
 test("idle delivery checks failing CI on main without changing normal feature-branch scope", async () => {
   const cwd = await tempDirs.create()
   await gitHelpers.git(["init", "-b", "main"], cwd)
