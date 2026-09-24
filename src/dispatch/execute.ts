@@ -902,8 +902,8 @@ async function prepareAndFilterDispatchGroups(
   if (filteredGroups.length === 0) return null
 
   if (shouldAllowExplicitStop(ctx)) {
-    // Git workflow obligations still apply when the autonomous work loop is off.
-    // Keep the standalone git gate; the ship checklist would also run CI/issues.
+    // The git hook narrows itself to uncommitted changes when auto-continue is off.
+    // Other stop hooks, including the full ship checklist, remain skipped.
     const gitGroups = filteredGroups
       .map((group) => ({
         ...group,

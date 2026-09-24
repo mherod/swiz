@@ -119,7 +119,7 @@ function pushSubStepsForPolicy(
  * session's authorship (issue #841) — the plan then stages only paths this
  * session's edit ledger owns, and names what it deliberately leaves.
  */
-function buildCommitSteps(
+export function buildCommitSteps(
   payload?: Record<string, unknown>,
   ownership?: SessionFileOwnership | null
 ): [string, ActionPlanItem[]] {

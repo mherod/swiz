@@ -77,6 +77,62 @@ beforeEach(async () => {
 afterAll(() => mock.restore())
 
 describe("peer-only stop exemption", () => {
+  for (const remoteState of [
+    { ahead: 1, behind: 0, upstream: "origin/main", upstreamGone: false },
+    { ahead: 0, behind: 1, upstream: "origin/main", upstreamGone: false },
+    { ahead: 1, behind: 1, upstream: "origin/main", upstreamGone: false },
+    { ahead: 0, behind: 0, upstream: "origin/main", upstreamGone: true },
+    { ahead: 0, behind: 0, upstream: null, upstreamGone: false },
+  ]) {
+    test(`auto-continue off ignores clean remote state ${JSON.stringify(remoteState)}`, async () => {
+      await git(["remote", "add", "origin", "https://example.com/test/repo.git"])
+      snapshot = { ...snapshot, ...remoteState, total: 0, lines: [] }
+      backgroundPush.mockResolvedValue(true)
+      const payload = input()
+      const output = hookOutputSchema.parse(
+        await evaluateStopGitStatus({
+          ...payload,
+          _effectiveSettings: { ...payload._effectiveSettings, autoContinue: false },
+        })
+      )
+      expect(output.decision).toBeUndefined()
+      expect(JSON.stringify(output)).not.toMatch(/push|pull|publish/i)
+      expect(backgroundPush).not.toHaveBeenCalled()
+    })
+  }
+
+  test("auto-continue off preserves peer-only dirt without remote obligations", async () => {
+    snapshot = { ...snapshot, ahead: 1, behind: 1, upstream: "origin/main" }
+    const payload = input()
+    const output = hookOutputSchema.parse(
+      await evaluateStopGitStatus({
+        ...payload,
+        _effectiveSettings: { ...payload._effectiveSettings, autoContinue: false },
+      })
+    )
+    expect(output.decision).toBeUndefined()
+    expect(output.systemMessage).toContain("peer.ts")
+    expect(JSON.stringify(output)).not.toMatch(/push|pull|publish/i)
+  })
+
+  test("auto-continue off asks only for a commit when dirty and diverged", async () => {
+    snapshot = { ...snapshot, ahead: 1, behind: 1, upstream: "origin/main" }
+    discover.mockResolvedValue({
+      known: true,
+      ownership: { editedByUs: ["peer.ts"], editedByOthers: [], unattributed: [] },
+    })
+    const payload = input()
+    const output = hookOutputSchema.parse(
+      await evaluateStopGitStatus({
+        ...payload,
+        _effectiveSettings: { ...payload._effectiveSettings, autoContinue: false },
+      })
+    )
+    expect(output.decision).toBe("block")
+    expect(output.reason).toContain("git commit")
+    expect(output.reason).not.toMatch(/push|pull|publish|rebase/i)
+  })
+
   test("allows collector and standalone stop while naming and preserving peer files", async () => {
     const before = await git(["status", "--porcelain=v2"])
     const collected = await collectGitWorkflowStop(input())

@@ -46,7 +46,7 @@ async function runStopHook(cwd: string) {
     cwd,
     session_id: "detached-main-test",
     _agent: "claude",
-    _effectiveSettings: buildEffectiveTestSettings(),
+    _effectiveSettings: buildEffectiveTestSettings({ autoContinue: true }),
   })
 }
 
@@ -130,7 +130,10 @@ describe("stop-git-status detached main worktree", () => {
     expect(await resolveGitContext({ session_id: "self" })).toBeNull()
     const collected = await collectGitWorkflowStop({ session_id: "self" })
     const evaluated = stopHookOutputSchema.parse(
-      await evaluateStopGitStatus({ session_id: "self" })
+      await evaluateStopGitStatus({
+        session_id: "self",
+        _effectiveSettings: buildEffectiveTestSettings({ autoContinue: true }),
+      })
     )
     expect(collected.kind).toBe("hookOutput")
     expect(evaluated.reason).toContain("missing-cwd")

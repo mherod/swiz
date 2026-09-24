@@ -10,6 +10,7 @@ import { git } from "../../src/git-helpers.ts"
 import type { SwizHookOutput } from "../../src/SwizHook.ts"
 import type { StopHookInput } from "../../src/schemas.ts"
 import { withStopAction } from "../../src/stop-actions.ts"
+import { getEffectiveSwizSettingsForToolHook } from "../../src/utils/hook-effective-settings.ts"
 import { blockStopObj } from "../../src/utils/hook-response.ts"
 import {
   appendSessionFileOwnershipContext,
@@ -17,7 +18,7 @@ import {
   resolvePeerHeldFiles,
 } from "../../src/utils/session-file-ownership.ts"
 import { createSessionTask } from "../../src/utils/session-task-io.ts"
-import { buildGitWorkflowSections } from "./action-plan.ts"
+import { buildCommitSteps, buildGitWorkflowSections } from "./action-plan.ts"
 import { detectBackgroundPush } from "./background-push-detector.ts"
 import { resolveGitContext } from "./context.ts"
 import { buildGitStopAction } from "./next-action.ts"
@@ -230,10 +231,36 @@ export async function collectGitWorkflowStop(
   return await collectGitWorkflowStopAfterDetachedCheck(input)
 }
 
-/**
- * Main evaluation: check git status and return blocking output or empty object.
- */
-export async function evaluateStopGitStatus(input: StopHookInput): Promise<SwizHookOutput> {
+/** With auto-continue disabled, require only preservation of this session's dirty files. */
+async function evaluateUncommittedChanges(input: StopHookInput): Promise<SwizHookOutput> {
+  const ctx = await resolveGitContext(input)
+  if (!ctx) return {}
+  if (!ctx.hasUncommitted) {
+    const result = satisfiedGitResult(ctx)
+    return result.kind === "ok" && result.context ? { systemMessage: result.context } : {}
+  }
+
+  // Omit remote-state prose as well as actions: neither should request a push or pull.
+  let reason = buildUncommittedReason(ctx.gitStatus, ctx.upstream, 0)
+  let steps: ReturnType<typeof buildGitWorkflowSections>
+  if (ctx.ownership.known) {
+    reason = appendSessionFileOwnershipContext(reason, ctx.ownership.ownership)
+    const [header, subSteps] = buildCommitSteps(input, ctx.ownership.ownership)
+    steps = [header, ...subSteps]
+  } else {
+    steps = [buildOwnershipHoldReason(ctx.ownership)]
+  }
+  await createSessionTask(
+    ctx.sessionId,
+    "stop-git-workflow-task-created",
+    "Commit uncommitted changes",
+    `Commit this session's uncommitted changes in ${ctx.cwd}.`,
+    ctx.cwd
+  )
+  return blockStopObj(reason + formatActionPlan(steps))
+}
+
+async function evaluateFullGitWorkflow(input: StopHookInput): Promise<SwizHookOutput> {
   const detachedMainWorktree = await collectDetachedMainWorktreeStop(input)
   if (detachedMainWorktree?.kind === "hookOutput") return detachedMainWorktree.output
   if (detachedMainWorktree?.kind === "block") {
@@ -265,4 +292,17 @@ export async function evaluateStopGitStatus(input: StopHookInput): Promise<SwizH
     r.cwd
   )
   return withStopAction(blockStopObj(r.summary + formatActionPlan(r.steps)), r.action)
+}
+
+/**
+ * Main evaluation: check git status and return blocking output or empty object.
+ */
+export async function evaluateStopGitStatus(input: StopHookInput): Promise<SwizHookOutput> {
+  const effective = await getEffectiveSwizSettingsForToolHook({
+    cwd: input.cwd ?? process.cwd(),
+    session_id: input.session_id,
+    payload: input,
+  })
+  if (effective.autoContinue === false) return await evaluateUncommittedChanges(input)
+  return await evaluateFullGitWorkflow(input)
 }
