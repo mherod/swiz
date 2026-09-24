@@ -10,8 +10,21 @@ import {
   resolveSkillRecencyOptions,
 } from "./skill-utils.ts"
 
-const activeSkillsContextCache = new Map<string, Promise<string | null>>()
+interface ActiveSkillsResolution {
+  skills: string[]
+  windowText: string
+  skillFiles: ResolvedSkillFile[]
+}
+
+const activeSkillsContextCache = new Map<string, Promise<ActiveSkillsResolution | null>>()
 const ACTIVE_SKILLS_CONTEXT_CACHE_MAX = 128
+
+/** What each session has already been told, so unchanged skill state stays quiet. */
+const emittedActiveSkillsBySession = new Map<
+  string,
+  { skillsKey: string; skillPaths: Set<string> }
+>()
+const EMITTED_ACTIVE_SKILLS_MAX = 256
 
 const activeSkillsEnrichmentSchema = z.looseObject({
   _currentSessionToolUsage: z
@@ -113,11 +126,68 @@ export function formatActiveSkillsContext(
   return skillFiles.length > 0 ? `${active}\n${formatSkillFileReadFallback(skillFiles)}` : active
 }
 
+function rememberEmittedActiveSkills(
+  sessionId: string,
+  entry: { skillsKey: string; skillPaths: Set<string> }
+): void {
+  emittedActiveSkillsBySession.delete(sessionId)
+  emittedActiveSkillsBySession.set(sessionId, entry)
+  if (emittedActiveSkillsBySession.size > EMITTED_ACTIVE_SKILLS_MAX) {
+    const oldest = emittedActiveSkillsBySession.keys().next().value
+    if (oldest !== undefined) emittedActiveSkillsBySession.delete(oldest)
+  }
+}
+
+/**
+ * Narrow a resolution to what this session has not been shown yet: nothing when
+ * the active set is unchanged and every SKILL.md hint was already surfaced.
+ * Payloads without a session id cannot be tracked and always emit.
+ */
+function unseenActiveSkills(
+  input: ToolHookInput,
+  resolution: ActiveSkillsResolution | null
+): ActiveSkillsResolution | null {
+  const sessionId = input.session_id?.trim()
+  if (!sessionId) return resolution
+  if (!resolution) {
+    // An emptied set (skills aged out, or compaction dropped their evidence)
+    // must re-announce the next activation, even of the same skills.
+    emittedActiveSkillsBySession.delete(sessionId)
+    return null
+  }
+  const skillsKey = [...resolution.skills].sort().join("\0")
+  const prior = emittedActiveSkillsBySession.get(sessionId)
+  if (prior && prior.skillsKey === skillsKey) {
+    const unseenFiles = resolution.skillFiles.filter((file) => !prior.skillPaths.has(file.path))
+    if (unseenFiles.length === 0) return null
+    for (const file of unseenFiles) prior.skillPaths.add(file.path)
+    return { ...resolution, skillFiles: unseenFiles }
+  }
+  rememberEmittedActiveSkills(sessionId, {
+    skillsKey,
+    skillPaths: new Set(resolution.skillFiles.map((file) => file.path)),
+  })
+  return resolution
+}
+
 export async function resolveActiveSkillsContext(
   input: ToolHookInput,
   options: { includeVerifiedSkillPaths?: boolean } = {}
 ): Promise<string | null> {
   const includeVerifiedSkillPaths = options.includeVerifiedSkillPaths === true
+  const resolution = unseenActiveSkills(
+    input,
+    await resolveActiveSkills(input, includeVerifiedSkillPaths)
+  )
+  return resolution
+    ? formatActiveSkillsContext(resolution.skills, resolution.windowText, resolution.skillFiles)
+    : null
+}
+
+function resolveActiveSkills(
+  input: ToolHookInput,
+  includeVerifiedSkillPaths: boolean
+): Promise<ActiveSkillsResolution | null> {
   const cacheKey = activeSkillsCacheKey(input, includeVerifiedSkillPaths)
   if (cacheKey) {
     const cached = activeSkillsContextCache.get(cacheKey)
@@ -136,7 +206,7 @@ export async function resolveActiveSkillsContext(
 async function resolveActiveSkillsContextUncached(
   input: ToolHookInput,
   includeVerifiedSkillPaths: boolean
-): Promise<string | null> {
+): Promise<ActiveSkillsResolution | null> {
   try {
     const hookInput: ToolHookInput = toolHookInputSchema.parse(input)
     const cwd = hookInput.cwd ?? process.cwd()
@@ -151,7 +221,7 @@ async function resolveActiveSkillsContextUncached(
           return !alreadyReadOrInvoked && path ? [{ name, path }] : []
         })
       : []
-    return formatActiveSkillsContext(skills, windowText, skillFiles)
+    return { skills, windowText, skillFiles }
   } catch {
     return null
   }
