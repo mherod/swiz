@@ -18,6 +18,21 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
     },
   },
   {
+    key: "idleDeliveryMinutes",
+    aliases: ["idle-delivery-minutes", "idledeliveryminutes", "idle_delivery_minutes"],
+    kind: "numeric",
+    scopes: ["global", "project"],
+    default: 0,
+    zodSchema: z.number().int().min(0).max(1440),
+    docs: {
+      description:
+        "Allow delivery stop checks after this many minutes without macOS input (0 = off)",
+      effectExplanation:
+        "With auto-continue disabled, the next stop check may require publishing existing work and resolving CI once the Mac has been idle this long. Active or unavailable idle detection keeps commit-only checks. Does not start issue work or wake stopped sessions. Explicit auto-continue remains unchanged.",
+      valuePlaceholder: "minutes",
+    },
+  },
+  {
     key: "prMergeMode",
     aliases: ["pr-merge-mode", "prmergemode", "pr_merge_mode", "pr-merge", "prmerge"],
     kind: "boolean",

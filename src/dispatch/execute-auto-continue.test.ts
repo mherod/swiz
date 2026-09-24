@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test"
 import { join } from "node:path"
 import stopGitStatus from "../../hooks/stop-git-status.ts"
+import { resolveShipChecklistContext } from "../../hooks/stop-ship-checklist/context.ts"
+import stopShipChecklist from "../../hooks/stop-ship-checklist.ts"
 import type { SwizHook } from "../SwizHook.ts"
 import {
   getSwizSettingsPath,
@@ -99,10 +101,27 @@ describe("git stop gate without auto-continue", () => {
     expect(committed.decision).toBeUndefined()
     expect(committed.reason).not.toMatch(/push|pull|publish/i)
 
-    // The same real hook retains its publish requirement when auto-continue is enabled.
-    await writeSwizSettings({ ...defaults, autoContinue: true, gitStatusGate: true }, { home })
     const createTask = spyOn(taskIo, "createSessionTask").mockResolvedValue(undefined)
     try {
+      await writeSwizSettings(
+        { ...defaults, autoContinue: false, idleDeliveryMinutes: 5 },
+        { home }
+      )
+      for (const seconds of [300, 0]) {
+        const idle = await executeDispatch({
+          canonicalEvent: "stop",
+          hookEventName: "Stop",
+          payloadStr: JSON.stringify({ cwd: project, session_id: crypto.randomUUID() }),
+          manifestProvider: async () => [{ event: "stop", hooks: [{ hook: stopGitStatus }] }],
+          replayPendingMutations: async () => {},
+          idleSecondsProvider: async () => seconds,
+          daemonContext: true,
+        })
+        expect(idle.response.decision).toBe(seconds === 300 ? "block" : undefined)
+        if (seconds === 300) expect(idle.response.reason).toMatch(/push|publish/i)
+      }
+      // Explicit auto-continue still enables the normal workflow.
+      await writeSwizSettings({ ...defaults, autoContinue: true, gitStatusGate: true }, { home })
       const enabled = await executeDispatch({
         canonicalEvent: "stop",
         hookEventName: "Stop",
@@ -209,5 +228,76 @@ describe("git stop gate without auto-continue", () => {
         expect(result.response.continue).toBe(true)
       }
     })
+  }
+})
+
+describe("idle delivery stop selection", () => {
+  for (const daemonContext of [false, true]) {
+    for (const sample of [null, 0, 299.999, 300, 600]) {
+      test(`delivery scope for ${sample}s idle (daemon=${daemonContext})`, async () => {
+        const defaults = await readSwizSettings({ home })
+        await writeSwizSettings(
+          {
+            ...defaults,
+            autoContinue: false,
+            idleDeliveryMinutes: 5,
+            gitStatusGate: true,
+            githubCiGate: true,
+            personalRepoIssuesGate: true,
+          },
+          { home }
+        )
+        const ran: string[] = []
+        const delivery = sample !== null && sample >= 300
+        const gitHook: SwizHook = {
+          ...stopGitStatus,
+          run: (input) => {
+            ran.push("git")
+            expect(input._stopContinuationMode).toBe(delivery ? "delivery" : "commit")
+            return {}
+          },
+        }
+        const shipHook: SwizHook = {
+          ...stopShipChecklist,
+          run: async (input) => {
+            ran.push("ship")
+            const context = await resolveShipChecklistContext(input)
+            expect(context?.gates).toEqual({ git: true, ci: true, issues: false })
+            expect(context?.deliveryOnly).toBe(true)
+            return { decision: "block", reason: "Verify CI on main" }
+          },
+        }
+        const issueHook: SwizHook = {
+          name: "test-issue-work",
+          event: "stop",
+          run: () => {
+            ran.push("issues")
+            return { decision: "block", reason: "Pick another issue" }
+          },
+        }
+        const result = await executeDispatch({
+          canonicalEvent: "stop",
+          hookEventName: "Stop",
+          daemonContext,
+          payloadStr: JSON.stringify({ cwd: project, _stopContinuationMode: "all" }),
+          idleSecondsProvider: async () => sample,
+          repositoryCapabilityProvider: async () => ({
+            canonicalRoot: project,
+            repoKey: project,
+            isRepo: true,
+            repoSlug: null,
+            hasGhCli: false,
+            resolvedAt: Date.now(),
+          }),
+          manifestProvider: async () => [
+            { event: "stop", hooks: [{ hook: gitHook }, { hook: shipHook }, { hook: issueHook }] },
+          ],
+          replayPendingMutations: async () => {},
+        })
+        expect(ran).toEqual(delivery ? ["git", "ship"] : ["git"])
+        expect(result.response.decision).toBe(delivery ? "block" : undefined)
+        expect(result.response.reason).not.toContain("another issue")
+      })
+    }
   }
 })

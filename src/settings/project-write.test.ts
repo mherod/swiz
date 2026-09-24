@@ -3,10 +3,51 @@ import { mkdir } from "node:fs/promises"
 import { dirname, join } from "node:path"
 import { settingsCommand } from "../commands/settings.ts"
 import { runCommandInProcess, useTempDir } from "../utils/test-utils.ts"
-import { getProjectSettingsPath, writeProjectSettings } from "./persistence.ts"
+import {
+  DEFAULT_SETTINGS,
+  getProjectSettingsPath,
+  readProjectSettings,
+  swizSettingsSchema,
+  writeProjectSettings,
+} from "./persistence.ts"
+import { getEffectiveSwizSettings } from "./resolution.ts"
 import { SettingsStore } from "./store.ts"
 
 const temp = useTempDir("project-write-")
+
+test("idle delivery CLI preserves project threshold, explicit zero, and settings precedence", async () => {
+  const cwd = await temp.create()
+  const global = { ...DEFAULT_SETTINGS, idleDeliveryMinutes: 10 }
+  for (const value of [5, 0]) {
+    const result = await runCommandInProcess(
+      settingsCommand,
+      ["set", "idle-delivery-minutes", String(value), "--project", "--json"],
+      { cwd, env: { HOME: cwd } }
+    )
+    expect(result.exitCode).toBe(0)
+    const project = await readProjectSettings(cwd, { strict: true })
+    expect(project?.idleDeliveryMinutes).toBe(value)
+    expect(getEffectiveSwizSettings(global, undefined, project).idleDeliveryMinutes).toBe(value)
+  }
+  expect(getEffectiveSwizSettings(global).idleDeliveryMinutes).toBe(10)
+  expect(swizSettingsSchema.parse({}).idleDeliveryMinutes).toBe(0)
+  expect((await Bun.file(`${getProjectSettingsPath(cwd)}.bak`).json()).idleDeliveryMinutes).toBe(5)
+})
+
+test("idle delivery rejects invalid CLI thresholds and ignores invalid persisted values", async () => {
+  const cwd = await temp.create()
+  for (const value of [-1, 0.5, 1441]) {
+    const result = await runCommandInProcess(
+      settingsCommand,
+      ["set", "idle-delivery-minutes", String(value), "--project", "--json"],
+      { cwd, env: { HOME: cwd } }
+    )
+    expect(result.exitCode).not.toBe(0)
+    expect(swizSettingsSchema.parse({ idleDeliveryMinutes: value }).idleDeliveryMinutes).toBe(0)
+    await Bun.write(getProjectSettingsPath(cwd), JSON.stringify({ idleDeliveryMinutes: value }))
+    expect((await readProjectSettings(cwd, { strict: true }))?.idleDeliveryMinutes).toBeUndefined()
+  }
+})
 
 async function fixture(content: string, backup = "previous recovery copy") {
   const cwd = await temp.create()

@@ -27,6 +27,7 @@ import {
   resolveProjectHooks,
   type StateHistoryEntry,
 } from "../settings.ts"
+import { type IdleSecondsProvider, resolveStopContinuationMode } from "../stop-continuation.ts"
 import { syncCodexUpdatePlanFromTranscriptSummary } from "../tasks/codex-update-plan.ts"
 import { isMarkdownOnlyFileReadPayload, isSkillMdOnlyFileEditPayload } from "../tool-matchers.ts"
 import {
@@ -401,6 +402,8 @@ export interface DispatchRequest {
    *  `process.env.HOME`. Lets tests inject settings without mutating shared
    *  global env (avoids `--concurrent` races). Unset in production. */
   settingsHomeOverride?: string
+  /** Injectable device input idle probe; production samples macOS at each stop event. */
+  idleSecondsProvider?: IdleSecondsProvider
 }
 
 export interface DispatchResult {
@@ -714,10 +717,27 @@ async function injectEffectiveSettings(
   enrichedCtx.payload._projectStateTransition = stateData?.stateHistory.at(-1) ?? null
 }
 
-function shouldAllowExplicitStop(ctx: DispatchContext): boolean {
-  if (!isStopLikeDispatchEvent(ctx.canonicalEvent)) return false
-  const effective = (ctx.payload as EnrichedDispatchPayload)._effectiveSettings
-  return effective?.autoContinue === false
+async function applyStopContinuationPolicy(
+  ctx: DispatchContext,
+  groups: HookGroup[],
+  idleSecondsProvider?: IdleSecondsProvider
+): Promise<HookGroup[]> {
+  if (!isStopLikeDispatchEvent(ctx.canonicalEvent)) return groups
+  const effective = (ctx.payload as EnrichedDispatchPayload)._effectiveSettings!
+  const mode = await resolveStopContinuationMode(effective, idleSecondsProvider)
+  // Always replace inbound state: each stop gets a fresh device activity decision.
+  ctx.payload._stopContinuationMode = mode
+  if (mode === "all") return groups
+  const allowed = new Set(["stop-git-status.ts"])
+  if (mode === "delivery") allowed.add("stop-ship-checklist.ts")
+  const retained = groups
+    .map((group) => ({
+      ...group,
+      hooks: group.hooks.filter((hook) => allowed.has(hookIdentifier(hook))),
+    }))
+    .filter((group) => group.hooks.length > 0)
+  log(`   ⏭ stop continuation: ${mode}, retaining ${countHooks(retained)} hook(s)`)
+  return retained
 }
 
 async function prepareDispatchGroups(
@@ -901,20 +921,8 @@ async function prepareAndFilterDispatchGroups(
   await injectEffectiveSettings(ctx, projectSettings ?? null)
   if (filteredGroups.length === 0) return null
 
-  if (shouldAllowExplicitStop(ctx)) {
-    // The git hook narrows itself to uncommitted changes when auto-continue is off.
-    // Other stop hooks, including the full ship checklist, remain skipped.
-    const gitGroups = filteredGroups
-      .map((group) => ({
-        ...group,
-        hooks: group.hooks.filter((hook) => hookIdentifier(hook) === "stop-git-status.ts"),
-      }))
-      .filter((group) => group.hooks.length > 0)
-    log(`   ⏭ autoContinue disabled, retaining ${countHooks(gitGroups)} git status hook(s)`)
-    return gitGroups.length > 0 ? gitGroups : null
-  }
-
-  return filteredGroups
+  const retained = await applyStopContinuationPolicy(ctx, filteredGroups, req.idleSecondsProvider)
+  return retained.length > 0 ? retained : null
 }
 
 function buildFilteredSkipResponse(

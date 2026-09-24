@@ -77,6 +77,21 @@ beforeEach(async () => {
 afterAll(() => mock.restore())
 
 describe("peer-only stop exemption", () => {
+  test("idle delivery does not block for a clean branch that only needs pulling", async () => {
+    snapshot = { ...snapshot, ahead: 0, behind: 1, upstream: "origin/main", total: 0, lines: [] }
+    const payload = { ...input(), _stopContinuationMode: "delivery" }
+    expect((await collectGitWorkflowStop(payload, true)).kind).toBe("ok")
+    expect(hookOutputSchema.parse(await evaluateStopGitStatus(payload)).decision).toBeUndefined()
+  })
+
+  test("idle delivery ignores detached worktree repair without local delivery work", async () => {
+    await git(["switch", "--detach", "HEAD"])
+    snapshot = { ...snapshot, branch: "(detached)", total: 0, lines: [] }
+    const payload = { ...input(), _stopContinuationMode: "delivery" }
+    expect((await collectGitWorkflowStop(payload, true)).kind).toBe("ok")
+    expect(hookOutputSchema.parse(await evaluateStopGitStatus(payload)).decision).toBeUndefined()
+  })
+
   for (const remoteState of [
     { ahead: 1, behind: 0, upstream: "origin/main", upstreamGone: false },
     { ahead: 0, behind: 1, upstream: "origin/main", upstreamGone: false },

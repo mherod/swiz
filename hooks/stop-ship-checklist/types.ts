@@ -37,6 +37,7 @@ export interface ShipChecklistContext {
   cwd: string
   sessionId: string | undefined
   gates: WorkflowGates
+  deliveryOnly?: boolean
   // Additional state may be added here as needed (branch, repo slug, etc.)
 }
 

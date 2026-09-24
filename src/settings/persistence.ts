@@ -293,6 +293,8 @@ function parseDefaultBranch(value: unknown): string | undefined {
 }
 
 function applySchemaFields(obj: Record<string, any>, result: ProjectSwizSettings): void {
+  const idleDeliveryMinutes = z.number().int().min(0).max(1440).safeParse(obj.idleDeliveryMinutes)
+  if (idleDeliveryMinutes.success) result.idleDeliveryMinutes = idleDeliveryMinutes.data
   for (const key of ["divergenceAdvisoryThreshold", "divergenceSteerThreshold"] as const) {
     const parsed = z.number().int().min(1).safeParse(obj[key])
     if (parsed.success) result[key] = parsed.data

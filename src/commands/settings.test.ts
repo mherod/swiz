@@ -1190,6 +1190,7 @@ describe("SETTINGS_REGISTRY", () => {
     // All settings must be present with no gaps between the registry and CLI behavior.
     const expectedKeys = [
       "autoContinue",
+      "idleDeliveryMinutes",
       "prMergeMode",
       "critiquesEnabled",
       "pushGate",

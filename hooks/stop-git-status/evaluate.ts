@@ -10,7 +10,7 @@ import { git } from "../../src/git-helpers.ts"
 import type { SwizHookOutput } from "../../src/SwizHook.ts"
 import type { StopHookInput } from "../../src/schemas.ts"
 import { withStopAction } from "../../src/stop-actions.ts"
-import { getEffectiveSwizSettingsForToolHook } from "../../src/utils/hook-effective-settings.ts"
+import { stopContinuationModeForHook } from "../../src/stop-continuation.ts"
 import { blockStopObj } from "../../src/utils/hook-response.ts"
 import {
   appendSessionFileOwnershipContext,
@@ -130,7 +130,8 @@ function hasUnresolvedUpstream(ctx: GitContext): boolean {
   return ctx.gitStatus.upstreamGone || (ctx.hasRemote && !ctx.gitStatus.upstream)
 }
 
-function hasOutstandingGitWork(ctx: GitContext): boolean {
+function hasOutstandingGitWork(ctx: GitContext, deliveryOnly: boolean): boolean {
+  if (deliveryOnly) return hasPendingDelivery(ctx)
   const { ahead, behind, branch } = ctx.gitStatus
   return (
     ctx.hasUncommitted ||
@@ -157,11 +158,12 @@ function satisfiedGitResult(ctx: GitContext): GitWorkflowCollectResult {
  * Used by stop-ship-checklist to merge git, CI, and issues into one action plan.
  */
 async function collectGitWorkflowStopAfterDetachedCheck(
-  input: StopHookInput
+  input: StopHookInput,
+  deliveryOnly = false
 ): Promise<GitWorkflowCollectResult> {
   const ctx = await resolveGitContext(input)
   if (!ctx) return { kind: "ok" }
-  if (!hasOutstandingGitWork(ctx)) return satisfiedGitResult(ctx)
+  if (!hasOutstandingGitWork(ctx, deliveryOnly)) return satisfiedGitResult(ctx)
 
   const {
     hasUncommitted,
@@ -224,11 +226,22 @@ async function collectGitWorkflowStopAfterDetachedCheck(
 }
 
 export async function collectGitWorkflowStop(
-  input: StopHookInput
+  input: StopHookInput,
+  deliveryOnly = false
 ): Promise<GitWorkflowCollectResult> {
+  if (deliveryOnly) return await collectGitWorkflowStopAfterDetachedCheck(input, true)
   const detachedMainWorktree = await collectDetachedMainWorktreeStop(input)
   if (detachedMainWorktree) return detachedMainWorktree
   return await collectGitWorkflowStopAfterDetachedCheck(input)
+}
+
+/** Pulling an otherwise clean branch or repairing another worktree is not idle delivery. */
+function hasPendingDelivery(ctx: GitContext): boolean {
+  return (
+    ctx.hasUncommitted ||
+    ctx.gitStatus.ahead > 0 ||
+    (ctx.gitStatus.branch !== "(detached)" && hasUnresolvedUpstream(ctx))
+  )
 }
 
 /** With auto-continue disabled, require only preservation of this session's dirty files. */
@@ -260,7 +273,7 @@ async function evaluateUncommittedChanges(input: StopHookInput): Promise<SwizHoo
   return blockStopObj(`${reason}\n\n${formatActionPlan(steps)}`)
 }
 
-async function evaluateFullGitWorkflow(input: StopHookInput): Promise<SwizHookOutput> {
+async function evaluateDetachedMainWorktree(input: StopHookInput): Promise<SwizHookOutput | null> {
   const detachedMainWorktree = await collectDetachedMainWorktreeStop(input)
   if (detachedMainWorktree?.kind === "hookOutput") return detachedMainWorktree.output
   if (detachedMainWorktree?.kind === "block") {
@@ -275,11 +288,20 @@ async function evaluateFullGitWorkflow(input: StopHookInput): Promise<SwizHookOu
       `${detachedMainWorktree.summary}\n\n${formatActionPlan(detachedMainWorktree.steps)}`
     )
   }
+  return null
+}
+
+async function evaluateFullGitWorkflow(
+  input: StopHookInput,
+  deliveryOnly: boolean
+): Promise<SwizHookOutput> {
+  const detached = deliveryOnly ? null : await evaluateDetachedMainWorktree(input)
+  if (detached) return detached
 
   const pushShortCircuit = await checkPushCooldownOrInFlight(input)
   if (pushShortCircuit !== null) return pushShortCircuit
 
-  const r = await collectGitWorkflowStopAfterDetachedCheck(input)
+  const r = await collectGitWorkflowStopAfterDetachedCheck(input, deliveryOnly)
   if (r.kind === "ok") return r.context ? { systemMessage: r.context } : {}
   if (r.kind === "hookOutput") return r.output
 
@@ -298,11 +320,7 @@ async function evaluateFullGitWorkflow(input: StopHookInput): Promise<SwizHookOu
  * Main evaluation: check git status and return blocking output or empty object.
  */
 export async function evaluateStopGitStatus(input: StopHookInput): Promise<SwizHookOutput> {
-  const effective = await getEffectiveSwizSettingsForToolHook({
-    cwd: input.cwd ?? process.cwd(),
-    session_id: input.session_id,
-    payload: input,
-  })
-  if (effective.autoContinue === false) return await evaluateUncommittedChanges(input)
-  return await evaluateFullGitWorkflow(input)
+  const mode = await stopContinuationModeForHook(input)
+  if (mode === "commit") return await evaluateUncommittedChanges(input)
+  return await evaluateFullGitWorkflow(input, mode === "delivery")
 }

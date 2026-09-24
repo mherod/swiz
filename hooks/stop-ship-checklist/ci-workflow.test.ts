@@ -14,14 +14,47 @@
  *   AC4: No behavior change for the no-CI-runs fast path — zero sleeps, one
  *        fetch, early return
  */
-import { describe, expect, test } from "bun:test"
+import { describe, expect, spyOn, test } from "bun:test"
+import * as gitHelpers from "../../src/git-helpers.ts"
+import * as issueStore from "../../src/issue-store.ts"
+import {
+  resolveCurrentFeatureBranch,
+  resolveCurrentGitHubBranch,
+} from "../../src/utils/git-utils.ts"
+import { useTempDir } from "../../src/utils/test-utils.ts"
 import {
   type CIRun,
+  collectCiWorkflow,
   MAX_POLL_MS,
   POLL_INTERVAL_MS,
   type PollDeps,
   pollUntilComplete,
 } from "./ci-workflow.ts"
+
+const tempDirs = useTempDir("idle-delivery-ci-")
+
+test("idle delivery checks failing CI on main without changing normal feature-branch scope", async () => {
+  const cwd = await tempDirs.create()
+  await gitHelpers.git(["init", "-b", "main"], cwd)
+  await gitHelpers.git(["remote", "add", "origin", "https://github.com/example/idle-test.git"], cwd)
+  const hasGh = spyOn(gitHelpers, "hasGhCli").mockReturnValue(true)
+  const reader = spyOn(issueStore, "getIssueStoreReader").mockReturnValue({
+    getCiBranchRuns: () =>
+      Promise.resolve([makeRun({ status: "completed", conclusion: "failure" })]),
+  } as unknown as ReturnType<typeof issueStore.getIssueStoreReader>)
+  try {
+    expect(await resolveCurrentGitHubBranch(cwd)).toBe("main")
+    expect(await resolveCurrentFeatureBranch(cwd)).toBeNull()
+    expect(await collectCiWorkflow({ cwd })).toBeNull()
+    const result = await collectCiWorkflow({ cwd }, true)
+    expect(result?.kind).toBe("ci")
+    expect(result?.summary).toContain("GitHub CI is failing on branch 'main'")
+    expect(result?.action?.title).toBe("Resolve failing CI on main")
+  } finally {
+    reader.mockRestore()
+    hasGh.mockRestore()
+  }
+})
 
 // ─── CIRun fixtures ─────────────────────────────────────────────────────────
 

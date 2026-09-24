@@ -123,6 +123,7 @@ export function resolveMemoryThresholds(
 /** Keys where project settings can override global settings. */
 const PROJECT_OVERRIDABLE_KEYS = [
   "autoContinue",
+  "idleDeliveryMinutes",
   "ambitionMode",
   "auditStrictness",
   "collaborationMode",

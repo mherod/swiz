@@ -13,7 +13,12 @@ const agentEnvKeys = [
 async function fixture(repo = true) {
   const home = await realpath(await temporary.create())
   const cwd = join(home, "website")
-  await mkdir(repo ? join(cwd, ".git") : cwd, { recursive: true })
+  await mkdir(cwd, { recursive: true })
+  if (repo) {
+    const init = Bun.spawn(["git", "init", "--quiet", cwd], { stdout: "ignore", stderr: "pipe" })
+    const error = await new Response(init.stderr).text()
+    if ((await init.exited) !== 0) throw new Error(error)
+  }
   return { home, cwd }
 }
 
@@ -75,7 +80,19 @@ describe("settings outside agent environments", () => {
 
   test("Git worktrees with a .git file use project scope", async () => {
     const context = await fixture(false)
-    await Bun.write(join(context.cwd, ".git"), `gitdir: ${join(context.home, "git-worktree")}\n`)
+    const init = Bun.spawn(
+      [
+        "git",
+        "init",
+        "--quiet",
+        "--separate-git-dir",
+        join(context.home, "git-worktree"),
+        context.cwd,
+      ],
+      { stdout: "ignore", stderr: "pipe" }
+    )
+    const error = await new Response(init.stderr).text()
+    if ((await init.exited) !== 0) throw new Error(error)
     const result = await runSettings(["set", "collab-mode", "team"], context)
     expect(result.exitCode).toBe(0)
     expect(result.stdout).toContain("(project)")

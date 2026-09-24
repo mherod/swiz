@@ -8,20 +8,19 @@
 
 import { isGitRepoForHookPayload } from "../../src/repository-capability.ts"
 import type { StopHookInput } from "../../src/schemas.ts"
-import {
-  getEffectiveSwizSettings,
-  readProjectSettings,
-  readSwizSettings,
-} from "../../src/settings.ts"
+import type { EffectiveSwizSettings } from "../../src/settings.ts"
+import { stopContinuationModeForHook } from "../../src/stop-continuation.ts"
+import { getEffectiveSwizSettingsForToolHook } from "../../src/utils/hook-effective-settings.ts"
 import type { ShipChecklistContext, WorkflowGates } from "./types.ts"
 
 function resolveWorkflowGates(
-  settings: ReturnType<typeof getEffectiveSwizSettings>
+  settings: EffectiveSwizSettings,
+  deliveryOnly: boolean
 ): WorkflowGates {
   return {
     git: settings.gitStatusGate ?? true,
     ci: settings.githubCiGate ?? false,
-    issues: settings.personalRepoIssuesGate ?? false,
+    issues: !deliveryOnly && (settings.personalRepoIssuesGate ?? false),
   }
 }
 
@@ -45,21 +44,15 @@ export async function resolveShipChecklistContext(
 
   // Load settings to determine which gates are active
   try {
-    const [globalSettings, projectSettings] = await Promise.all([
-      readSwizSettings(),
-      readProjectSettings(cwd),
-    ])
-
-    const effective = getEffectiveSwizSettings(globalSettings, input.session_id, projectSettings)
-
-    // Disabling auto-continue makes an explicit stop final. Ship gates remain
-    // available when auto-continue is enabled, but must not manufacture a new
-    // work cycle after the user has opted out.
-    if (effective.autoContinue === false) {
-      return null
-    }
-
-    const gates = resolveWorkflowGates(effective)
+    const effective = await getEffectiveSwizSettingsForToolHook({
+      cwd,
+      session_id: input.session_id,
+      payload: input,
+    })
+    const mode = await stopContinuationModeForHook({ ...input, _effectiveSettings: effective })
+    if (mode === "commit") return null
+    const deliveryOnly = mode === "delivery"
+    const gates = resolveWorkflowGates(effective, deliveryOnly)
 
     // Fail-open: if all gates are disabled, no evaluation needed
     if (!hasEnabledGate(gates)) return null
@@ -68,6 +61,7 @@ export async function resolveShipChecklistContext(
       cwd,
       sessionId: input.session_id,
       gates,
+      deliveryOnly,
     }
   } catch {
     // Fail-open: settings loading errors don't block stop

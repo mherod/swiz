@@ -11,7 +11,10 @@ import { getIssueStore, getIssueStoreReader } from "../../src/issue-store.ts"
 import type { StopHookInput } from "../../src/schemas.ts"
 import { skillExistsForHookPayload } from "../../src/skill-utils.ts"
 import { stopActionId } from "../../src/stop-actions.ts"
-import { resolveCurrentFeatureBranch } from "../../src/utils/git-utils.ts"
+import {
+  resolveCurrentFeatureBranch,
+  resolveCurrentGitHubBranch,
+} from "../../src/utils/git-utils.ts"
 
 import type { WorkflowStep } from "./types.ts"
 
@@ -205,11 +208,16 @@ function buildActiveResult(
  *
  * Fail-open: returns null on missing prerequisites (no branch, no GitHub remote, no gh CLI).
  */
-export async function collectCiWorkflow(input: StopHookInput): Promise<WorkflowStep | null> {
+export async function collectCiWorkflow(
+  input: StopHookInput,
+  includeDefaultBranch = false
+): Promise<WorkflowStep | null> {
   const cwd = input.cwd ?? process.cwd()
 
   try {
-    const branch = await resolveCurrentFeatureBranch(cwd)
+    const branch = await (includeDefaultBranch
+      ? resolveCurrentGitHubBranch(cwd)
+      : resolveCurrentFeatureBranch(cwd))
     if (!branch) return null
 
     const relevant = await pollUntilComplete(branch, cwd)

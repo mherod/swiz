@@ -98,6 +98,8 @@ export interface SettingDef {
 export interface ProjectSwizSettings {
   /** Per-project auto-continue override. */
   autoContinue?: boolean
+  /** Input idle minutes before delivery-only stop checks apply; 0 disables. */
+  idleDeliveryMinutes?: number
   profile?: PolicyProfile
   trivialMaxFiles?: number
   trivialMaxLines?: number
@@ -188,6 +190,8 @@ export type StatusLineSegment = (typeof ALL_STATUS_LINE_SEGMENTS)[number]
 
 export interface SwizSettings {
   autoContinue: boolean
+  /** macOS input idle threshold for delivery-only stop checks; 0 disables. */
+  idleDeliveryMinutes: number
   critiquesEnabled: boolean
   ambitionMode: AmbitionMode
   collaborationMode: CollaborationMode
@@ -319,6 +323,7 @@ export const sessionSwizSettingsSchema = z.object({
 
 export const projectSettingsSchema = z.object({
   autoContinue: z.boolean().optional(),
+  idleDeliveryMinutes: z.number().int().min(0).max(1440).optional(),
   profile: policyProfileSchema.optional(),
   trivialMaxFiles: z.number().int().min(1).optional(),
   trivialMaxLines: z.number().int().min(1).optional(),

@@ -107,14 +107,20 @@ export async function getDefaultBranch(cwd: string): Promise<string> {
  * never re-implement this guard chain locally.
  */
 export async function resolveCurrentFeatureBranch(cwd: string): Promise<string | null> {
-  if (!(await isGitRepo(cwd))) return null
-  if (!hasGhCli()) return null
-  if (!(await isGitHubRemote(cwd))) return null
-  const branch = await git(["branch", "--show-current"], cwd)
+  const branch = await resolveCurrentGitHubBranch(cwd)
   if (!branch) return null
   const defaultBranch = await getDefaultBranch(cwd)
   if (isDefaultBranch(branch, defaultBranch)) return null
   return branch
+}
+
+/** Current attached branch on a GitHub repository, including trunk for idle delivery CI. */
+export async function resolveCurrentGitHubBranch(cwd: string): Promise<string | null> {
+  if (!(await isGitRepo(cwd))) return null
+  if (!hasGhCli()) return null
+  if (!(await isGitHubRemote(cwd))) return null
+  const branch = await git(["branch", "--show-current"], cwd)
+  return branch || null
 }
 
 // ── Git status parsing ────────────────────────────────────────────────────────

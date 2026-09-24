@@ -103,8 +103,8 @@ export async function collectShipChecklistStopParsed(
 
   // Collect all three workflows in parallel
   const [gitResult, ciResult, issuesResult] = await Promise.all([
-    context.gates.git ? collectGitWorkflowStop(input) : Promise.resolve(null),
-    context.gates.ci ? collectCiWorkflow(input) : Promise.resolve(null),
+    context.gates.git ? collectGitWorkflowStop(input, context.deliveryOnly) : Promise.resolve(null),
+    context.gates.ci ? collectCiWorkflow(input, context.deliveryOnly) : Promise.resolve(null),
     context.gates.issues ? collectPersonalRepoIssuesStopParsed(input) : Promise.resolve(null),
   ])
 
