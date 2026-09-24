@@ -257,7 +257,7 @@ async function evaluateUncommittedChanges(input: StopHookInput): Promise<SwizHoo
     `Commit this session's uncommitted changes in ${ctx.cwd}.`,
     ctx.cwd
   )
-  return blockStopObj(reason + formatActionPlan(steps))
+  return blockStopObj(`${reason}\n\n${formatActionPlan(steps)}`)
 }
 
 async function evaluateFullGitWorkflow(input: StopHookInput): Promise<SwizHookOutput> {
