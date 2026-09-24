@@ -902,8 +902,16 @@ async function prepareAndFilterDispatchGroups(
   if (filteredGroups.length === 0) return null
 
   if (shouldAllowExplicitStop(ctx)) {
-    log(`   ⏭ autoContinue disabled, allowing explicit stop`)
-    return null
+    // Git workflow obligations still apply when the autonomous work loop is off.
+    // Keep the standalone git gate; the ship checklist would also run CI/issues.
+    const gitGroups = filteredGroups
+      .map((group) => ({
+        ...group,
+        hooks: group.hooks.filter((hook) => hookIdentifier(hook) === "stop-git-status.ts"),
+      }))
+      .filter((group) => group.hooks.length > 0)
+    log(`   ⏭ autoContinue disabled, retaining ${countHooks(gitGroups)} git status hook(s)`)
+    return gitGroups.length > 0 ? gitGroups : null
   }
 
   return filteredGroups
