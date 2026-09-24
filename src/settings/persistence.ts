@@ -493,6 +493,9 @@ export async function writeProjectState(
   const appendTransition = async (): Promise<void> => {
     const existing = await readStateData(cwd)
     const previousState = existing?.state ?? null
+    // A same-state write is not a transition: recording it would reset the
+    // current-state age and re-announce a stale change to peer sessions.
+    if (previousState === state) return
     const history = existing?.stateHistory ?? []
     history.push({
       from: previousState,

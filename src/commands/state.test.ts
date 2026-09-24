@@ -95,13 +95,8 @@ describe("readProjectState / writeProjectState", () => {
 
   test("concurrent writers preserve every stateHistory entry (issue #848)", async () => {
     const dir = await createTempDir()
-    const states = [
-      "planning",
-      "developing",
-      "reviewing",
-      "addressing-feedback",
-      "developing",
-    ] as const
+    // Distinct states: a repeat could land adjacent to itself and be skipped as a no-op.
+    const states = ["planning", "developing", "reviewing", "addressing-feedback"] as const
     await Promise.all(states.map((state) => writeProjectState(dir, state)))
     const stateData = await Bun.file(join(dir, ".swiz", "state.json")).json()
     const history = stateData.stateHistory as Array<{ from: string | null; to: string }>
@@ -245,6 +240,23 @@ describe("state transition history", () => {
     expect(settings?.stateHistory?.[2]?.to).toBe("developing")
     expect(settings?.stateHistory?.[3]?.from).toBe("developing")
     expect(settings?.stateHistory?.[3]?.to).toBe("reviewing")
+  })
+
+  test("same-state writes do not append history entries", async () => {
+    const dir = await createTempDir()
+    await writeProjectState(dir, "developing")
+    const first = (await readStateData(dir))?.stateHistory?.[0]
+    await writeProjectState(dir, "developing", "session-A")
+    await writeProjectState(dir, "reviewing")
+    await writeProjectState(dir, "reviewing", "session-B")
+
+    const settings = await readStateData(dir)
+    expect(settings?.state).toBe("reviewing")
+    expect(settings?.stateHistory?.map((e) => [e.from, e.to])).toEqual([
+      [null, "developing"],
+      ["developing", "reviewing"],
+    ])
+    expect(settings?.stateHistory?.[0]).toEqual(first!)
   })
 
   test("all history entries have timestamps", async () => {

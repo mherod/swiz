@@ -17,6 +17,8 @@ export function projectStateProvenance(payloadStr: string): string | null {
       return `Shared project state: ${payload._projectState}; source unknown (transition unavailable).`
     }
     if (entry.sessionId && entry.sessionId === payload.session_id) return null
+    // Legacy histories hold same-state entries; announcing those reports no change.
+    if (entry.from === entry.to) return null
     const actor = entry.sessionId ? `session ${JSON.stringify(entry.sessionId)}` : "source unknown"
     return `Shared project state changed by ${actor}: ${entry.from ?? "unset"} → ${entry.to} at ${entry.timestamp}.`
   } catch {

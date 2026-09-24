@@ -44,6 +44,20 @@ test("same-session context stays unchanged and malformed provenance stays unknow
   ).toContain("source unknown")
 })
 
+test("legacy same-state entries are not announced as peer changes", () => {
+  const payload = (from: string) =>
+    JSON.stringify({
+      session_id: "session-B",
+      _projectState: "developing",
+      _projectStateTransition: { from, to: "developing", timestamp, sessionId: "session-A" },
+    })
+  expect(projectStateProvenance(payload("developing"))).toBeNull()
+  // Control: a real peer transition into the same state is still announced.
+  expect(projectStateProvenance(payload("reviewing"))).toContain(
+    'session "session-A": reviewing → developing'
+  )
+})
+
 test("filtered hooks still expose peer state provenance without changing filtering", async () => {
   const cwd = await create()
   await writeProjectState(cwd, "reviewing", "session-A")
