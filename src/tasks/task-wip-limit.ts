@@ -38,9 +38,16 @@ export function checkInProgressLimit(
         `  #${task.id}${task.subject ? `: ${task.subject}` : ""}${taskOwnershipSuffix(task)}`
     )
     .join("\n")
+  // Finished pending work is not stuck behind the cap: the evidenced one-step close never takes a
+  // slot, so name it rather than leave cancellation as the only visible exit (#930).
+  const finishedWork =
+    currentStatus === "pending"
+      ? `\nIf the work for #${taskId} is already finished, complete it directly with the evidence ` +
+        "in the update's description instead; that does not take an in_progress slot (needs taskAutoTransition, on by default)."
+      : ""
   return (
     `Cannot move #${taskId} to in_progress: this project already has ${others.length} ` +
-    `in_progress tasks (limit ${MAX_IN_PROGRESS_TASKS_PER_PROJECT}).\n${listed}\n${TASK_QUEUE_RECOVERY}`
+    `in_progress tasks (limit ${MAX_IN_PROGRESS_TASKS_PER_PROJECT}).\n${listed}\n${TASK_QUEUE_RECOVERY}${finishedWork}`
   )
 }
 

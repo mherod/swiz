@@ -4,6 +4,11 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { syncCodexUpdatePlanSnapshot } from "../src/tasks/codex-update-plan.ts"
 import {
+  applyTaskListEvent,
+  getSessionEventState,
+  pruneSession,
+} from "../src/tasks/task-event-state.ts"
+import {
   buildEffectiveTestSettings,
   writeRawTaskFixture,
   writeTask,
@@ -786,6 +791,129 @@ describe("checkInProgressTransitionCap boundary (via evaluateNativeTaskUpdatePat
       const parsed = input as unknown as Parameters<typeof evaluateNativeTaskUpdatePath>[2]
       const result = await evaluateNativeTaskUpdatePath(input, toolInput, parsed)
       expect(permissionDecision(result)).not.toBe("deny")
+    } finally {
+      await cleanupSession(sessionId)
+    }
+  })
+})
+
+/**
+ * #930: at the WIP cap a finished pending task had no legal completion. The direct close was
+ * refused as a shortcut and the in_progress step by the cap, so the work could only be recorded
+ * as cancelled. The one-step close now follows the service contract instead: auto-transition on
+ * and evidence in the update.
+ */
+describe("pending completion at the WIP cap (via evaluateNativeTaskUpdatePath)", () => {
+  const CAP = getInProgressCap()
+  const FINISHED = "finished"
+  const EVIDENCE = "commit:abc1234 test:bun test pass"
+
+  /** Two further pending tasks satisfy the completion threshold, so any denial is the gate's. */
+  async function seedFinishedWorkAtCap(sessionId: string): Promise<void> {
+    await seedInProgressTasks(sessionId, CAP)
+    for (const [id, subject] of [
+      [FINISHED, "Finished checkout fix"],
+      ["p1", "Write release notes"],
+      ["p2", "Audit logging config"],
+    ] as const) {
+      await writeTask(TASK_HOME, sessionId, { id, subject, status: "pending" })
+    }
+  }
+
+  async function updateFinished(
+    sessionId: string,
+    fields: Record<string, string>,
+    settings = buildEffectiveTestSettings()
+  ) {
+    const toolInput = { taskId: FINISHED, ...fields }
+    const input = {
+      session_id: sessionId,
+      tool_name: "TaskUpdate",
+      tool_input: toolInput,
+      _taskHome: TASK_HOME,
+      _effectiveSettings: settings,
+    }
+    const parsed = input as unknown as Parameters<typeof evaluateNativeTaskUpdatePath>[2]
+    return await evaluateNativeTaskUpdatePath(input, toolInput, parsed)
+  }
+
+  test("completes evidenced finished work and records the hop as two legal edges", async () => {
+    const sessionId = uniqueSessionId("cap-complete-evidenced")
+    try {
+      await cleanupSession(sessionId)
+      await seedFinishedWorkAtCap(sessionId)
+      applyTaskListEvent(sessionId, [
+        ...Array.from({ length: CAP }, (_, i) => ({
+          id: String(i + 1),
+          status: "in_progress",
+          subject: `Task ${i + 1}`,
+        })),
+        { id: FINISHED, status: "pending", subject: "Finished checkout fix" },
+      ])
+
+      const result = await updateFinished(sessionId, { status: "completed", description: EVIDENCE })
+
+      expect(permissionDecision(result)).not.toBe("deny")
+      // A direct pending → completed would be reverted to pending by event state.
+      const tracked = getSessionEventState(sessionId)?.find((task) => task.id === FINISHED)
+      expect(tracked?.status).toBe("completed")
+    } finally {
+      pruneSession(sessionId)
+      await cleanupSession(sessionId)
+    }
+  })
+
+  test("control: the in_progress step for the same task is still capped", async () => {
+    const sessionId = uniqueSessionId("cap-complete-control")
+    try {
+      await cleanupSession(sessionId)
+      await seedFinishedWorkAtCap(sessionId)
+      const result = await updateFinished(sessionId, { status: "in_progress" })
+      expect(permissionDecision(result)).toBe("deny")
+      expect(decisionReason(result)).toContain("Cannot move #finished to in_progress")
+    } finally {
+      await cleanupSession(sessionId)
+    }
+  })
+
+  for (const [label, fields] of [
+    ["no description", { status: "completed" }],
+    ["a whitespace-only description", { status: "completed", description: "  \n" }],
+  ] as const) {
+    test(`refuses ${label} and names the evidenced retry instead of cancellation`, async () => {
+      const sessionId = uniqueSessionId("cap-complete-no-evidence")
+      try {
+        await cleanupSession(sessionId)
+        await seedFinishedWorkAtCap(sessionId)
+        const result = await updateFinished(sessionId, fields)
+        const reason = decisionReason(result) ?? ""
+        expect(permissionDecision(result)).toBe("deny")
+        expect(reason).toContain("records no evidence of finished work")
+        expect(reason).toContain("retry this TaskUpdate with the evidence in its description")
+        expect(reason).not.toContain("tasks back to pending")
+        expect(reason).not.toMatch(/\bcancel/i)
+      } finally {
+        await cleanupSession(sessionId)
+      }
+    })
+  }
+
+  test("disabled auto-transition refuses even with evidence and forbids cancelling real work", async () => {
+    const sessionId = uniqueSessionId("cap-complete-disabled")
+    try {
+      await cleanupSession(sessionId)
+      await seedFinishedWorkAtCap(sessionId)
+      const result = await updateFinished(
+        sessionId,
+        { status: "completed", description: EVIDENCE },
+        buildEffectiveTestSettings({ taskAutoTransition: false })
+      )
+      const reason = decisionReason(result) ?? ""
+      expect(permissionDecision(result)).toBe("deny")
+      expect(reason).toContain("task auto-transition is disabled")
+      expect(reason).toContain("Do not cancel real work to free a slot")
+      expect(reason).not.toContain("retry this TaskUpdate with the evidence")
+      expect(reason).not.toContain("tasks back to pending")
     } finally {
       await cleanupSession(sessionId)
     }

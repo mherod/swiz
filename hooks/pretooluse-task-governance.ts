@@ -62,6 +62,7 @@ import {
   needsReconciliation,
   overlayEventState,
 } from "../src/tasks/task-event-state.ts"
+import { pendingCompletionRefusal } from "../src/tasks/task-evidence.ts"
 import {
   isWithinUserMessageGrace,
   USER_MESSAGE_GRACE_MS,
@@ -597,8 +598,13 @@ export {
 
 const LARGE_CONTENT_LINE_THRESHOLD = 10
 const IN_PROGRESS_CAP = MAX_IN_PROGRESS_TASKS_PER_PROJECT
-function canStartInProgress(inProgressCount: number, cap = IN_PROGRESS_CAP): boolean {
-  return inProgressCount < cap
+/**
+ * The WIP limit admits `cap` in_progress tasks, so only a queue above it blocks ordinary work.
+ * Blocking at exactly `cap` refused Bash in a state the limit itself permits, while the denial
+ * asked the agent to get back to the count it already had (#930).
+ */
+function exceedsInProgressCap(inProgressCount: number, cap = IN_PROGRESS_CAP): boolean {
+  return inProgressCount > cap
 }
 export function getInProgressCap(): number {
   return IN_PROGRESS_CAP
@@ -780,7 +786,7 @@ async function checkInProgressCap(
   allTasks: Array<{ id: string; status: string; subject: string; ownership?: string }>
 ): Promise<SwizHookOutput | undefined> {
   const inProgressTasks = allTasks.filter((t) => t.status === "in_progress")
-  if (canStartInProgress(inProgressTasks.length)) return undefined
+  if (!exceedsInProgressCap(inProgressTasks.length)) return undefined
   const taskList =
     inProgressTasks.map((t) => `  • #${t.id}: ${t.subject}${taskOwnershipSuffix(t)}`).join("\n") +
     `\n${TASK_QUEUE_RECOVERY}`
@@ -1612,6 +1618,23 @@ async function resolveGovernanceThresholdsForSession(
   }
 }
 
+/**
+ * `taskAutoTransition` is global-scoped, so the dispatch-injected effective value and the global
+ * file the service reads agree. An unreadable setting fails closed: the one-step completion stays
+ * refused, which is non-destructive.
+ */
+async function resolveTaskAutoTransition(input: Record<string, any>): Promise<boolean> {
+  const injected = input._effectiveSettings as
+    | ReturnType<typeof getEffectiveSwizSettings>
+    | undefined
+  if (injected) return injected.taskAutoTransition
+  try {
+    return (await readSwizSettings({ strict: true })).taskAutoTransition
+  } catch {
+    return false
+  }
+}
+
 async function enforceTaskCompletionThreshold(
   input: Record<string, any>,
   taskId: string,
@@ -1640,7 +1663,12 @@ async function enforceTaskCompletionThreshold(
     return denyTaskGovernance({ kind: "completion-threshold", taskId }, input)
   }
 
-  // Optimistically record in event state + cache for parallel TOCTOU safety.
+  // Optimistically record in event state + cache for parallel TOCTOU safety. An evidenced
+  // pending completion steps through in_progress, as the service hop does, so event state
+  // sees two legal edges instead of reverting a direct pending → completed.
+  if (taskBeingCompleted.status === "pending") {
+    applyTaskUpdateEvent(sessionId, taskId, { status: "in_progress" })
+  }
   applyTaskUpdateEvent(sessionId, taskId, { status: "completed" })
   applyCacheTaskUpdate(sessionId, { ...taskBeingCompleted, status: "completed" })
   return null
@@ -1734,20 +1762,28 @@ async function handleNativeTaskUpdateStatus(
   }
   if (context.toolInput.status !== "completed") return "early_exit"
 
-  // Reject shortcut completion from a merely planned task. The user-facing
-  // message deliberately describes the behavior being prevented rather than
-  // handing over a mechanical transition recipe.
+  // A pending task closes in one update under the same contract as the service hop
+  // (`completeTaskWithAutoTransition`): auto-transition on and evidence in the update. That
+  // hop never widens the WIP front, so it is not held to the in_progress cap — otherwise
+  // finished work at the cap could only be recorded as cancelled (#930).
   const allTasks = await readTasksForInput(context.input, context.sessionId)
   const currentTask = allTasks.find((task) => task.id === context.taskId)
   if (currentTask?.status === "pending") {
-    return denyTaskGovernance(
-      {
-        kind: "pending-completion-shortcut",
-        taskId: context.taskId,
-        subject: currentTask.subject,
-      },
-      context.input
+    const refusal = pendingCompletionRefusal(
+      await resolveTaskAutoTransition(context.input),
+      typeof context.toolInput.description === "string" ? context.toolInput.description : undefined
     )
+    if (refusal) {
+      return denyTaskGovernance(
+        {
+          kind: "pending-completion-shortcut",
+          taskId: context.taskId,
+          subject: currentTask.subject,
+          reason: refusal,
+        },
+        context.input
+      )
+    }
   }
 
   const completionDenied = await handleTaskCompletion(

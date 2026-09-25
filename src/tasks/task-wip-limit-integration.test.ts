@@ -13,6 +13,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { createDefaultTaskStore } from "../task-roots.ts"
 import { acquireEnvLock, releaseEnvLockFn } from "../utils/test-utils.ts"
+import { readAuditLog } from "./task-audit-verification.ts"
 import { readTasks, type Task } from "./task-repository.ts"
 import { completeTaskWithAutoTransition, updateStatus } from "./task-service.ts"
 import { MAX_IN_PROGRESS_TASKS_PER_PROJECT } from "./task-wip-limit.ts"
@@ -171,7 +172,54 @@ describe("updateStatus in-progress cap", () => {
           evidence: "note:the work was already done",
         })
         const after = await readTasks("wip-auto-transition")
-        expect(after.find((t) => t.id === "next")?.status).toBe("completed")
+        const next = after.find((t) => t.id === "next")
+        expect(next?.status).toBe("completed")
+        // The evidence and both legal edges survive the capacity bypass (#930).
+        expect(next?.completionEvidence).toBe("note:the work was already done")
+        const edges = (await readAuditLog("wip-auto-transition"))
+          .filter((entry) => entry.taskId === "next")
+          .map((entry) => `${entry.oldStatus}→${entry.newStatus}`)
+        expect(edges).toEqual(["pending→in_progress", "in_progress→completed"])
+      }
+    )
+  })
+
+  // Controls for the bypass above: the capacity exemption is the evidenced, setting-gated hop
+  // only. Each refusal leaves the finished work pending — never cancelled.
+  test("at the cap, a pending completion without evidence is refused and stays pending", async () => {
+    await withSeededHome(
+      "wip-no-evidence",
+      atCapacity(MAX_IN_PROGRESS_TASKS_PER_PROJECT),
+      async () => {
+        await expect(
+          completeTaskWithAutoTransition("wip-no-evidence", "next", {
+            filterCwd: process.cwd(),
+            evidence: "   ",
+          })
+        ).rejects.toThrow(/no evidence of work/)
+        const after = await readTasks("wip-no-evidence")
+        expect(after.find((t) => t.id === "next")?.status).toBe("pending")
+      }
+    )
+  })
+
+  test("at the cap, disabled auto-transition refuses the hop and leaves the task pending", async () => {
+    await withSeededHome(
+      "wip-auto-transition-off",
+      atCapacity(MAX_IN_PROGRESS_TASKS_PER_PROJECT),
+      async () => {
+        await Bun.write(
+          join(process.env.HOME ?? "", ".swiz", "settings.json"),
+          JSON.stringify({ taskAutoTransition: false })
+        )
+        await expect(
+          completeTaskWithAutoTransition("wip-auto-transition-off", "next", {
+            filterCwd: process.cwd(),
+            evidence: "note:the work was already done",
+          })
+        ).rejects.toThrow(/auto-transition is disabled/)
+        const after = await readTasks("wip-auto-transition-off")
+        expect(after.find((t) => t.id === "next")?.status).toBe("pending")
       }
     )
   })

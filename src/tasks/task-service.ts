@@ -16,7 +16,7 @@ import {
 import { computeSubjectFingerprint, subjectsOverlap } from "../subject-fingerprint.ts"
 import { createDefaultTaskStore } from "../task-roots.ts"
 import { splitJsonlLines, tryParseJsonLine } from "../utils/jsonl.ts"
-import { hasMeaningfulCompletionEvidence } from "./task-evidence.ts"
+import { pendingCompletionRefusal } from "./task-evidence.ts"
 import {
   compareTaskIds,
   isIncompleteTaskStatus,
@@ -620,13 +620,14 @@ export async function completeTaskWithAutoTransition(
   const { task, storeKey } = await resolveTaskAddress(taskId, sessionId, options)
   if (task.status === "pending") {
     const settings = await readSwizSettings()
-    if (!settings.taskAutoTransition) {
+    const refusal = pendingCompletionRefusal(settings.taskAutoTransition, options.evidence)
+    if (refusal === "auto-transition-disabled") {
       throw new Error(
         `Cannot complete task ${taskId}: status is "pending". ` +
           `Task auto-transition is disabled — transition to in_progress first.`
       )
     }
-    if (!hasMeaningfulCompletionEvidence(options.evidence)) {
+    if (refusal === "missing-evidence") {
       throw new Error(
         `Cannot auto-complete task ${taskId}: it is still "pending" with no evidence of work. ` +
           `Transition it to in_progress and do the work, or supply completion evidence ` +

@@ -3,6 +3,7 @@ import {
   hasCiEvidence,
   hasMeaningfulCompletionEvidence,
   hasStructuredEvidence,
+  pendingCompletionRefusal,
 } from "./task-evidence.ts"
 
 describe("hasMeaningfulCompletionEvidence", () => {
@@ -15,6 +16,25 @@ describe("hasMeaningfulCompletionEvidence", () => {
   it("accepts any non-empty evidence", () => {
     expect(hasMeaningfulCompletionEvidence("note: did it")).toBe(true)
     expect(hasMeaningfulCompletionEvidence("commit:abc1234")).toBe(true)
+    expect(hasMeaningfulCompletionEvidence("done")).toBe(true)
+  })
+})
+
+// The one contract shared by the service hop and the native TaskUpdate hook (#930).
+describe("pendingCompletionRefusal", () => {
+  it("allows the one-step completion only with auto-transition on and evidence present", () => {
+    expect(pendingCompletionRefusal(true, "commit:abc1234")).toBeNull()
+    expect(pendingCompletionRefusal(true, "note: finished before the task was started")).toBeNull()
+  })
+
+  it("refuses missing or whitespace-only evidence", () => {
+    expect(pendingCompletionRefusal(true, undefined)).toBe("missing-evidence")
+    expect(pendingCompletionRefusal(true, "  \n")).toBe("missing-evidence")
+  })
+
+  it("reports the disabled setting first, since evidence cannot unlock it", () => {
+    expect(pendingCompletionRefusal(false, "commit:abc1234")).toBe("auto-transition-disabled")
+    expect(pendingCompletionRefusal(false, undefined)).toBe("auto-transition-disabled")
   })
 })
 

@@ -24,6 +24,19 @@ describe("checkInProgressLimit", () => {
     expect(error).toContain("Cannot move #x to in_progress")
     expect(error).toContain(`limit ${MAX_IN_PROGRESS_TASKS_PER_PROJECT}`)
     expect(error).toContain("#sess-1: Task 1")
+    // A pending task is told about the evidenced close, which is exempt from the cap (#930).
+    expect(error).toContain("complete it directly with the evidence")
+  })
+
+  test("names the evidenced close only for a pending task", () => {
+    const tasks = [
+      ...inProgress(MAX_IN_PROGRESS_TASKS_PER_PROJECT),
+      { id: "x", status: "completed" },
+    ]
+    // A reopen from completed has no one-step close to offer.
+    expect(checkInProgressLimit("x", "completed", "in_progress", tasks)).not.toContain(
+      "complete it directly"
+    )
   })
 
   test("blocks a reopen from completed when the project is already at the cap", () => {

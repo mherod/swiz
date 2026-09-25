@@ -6,7 +6,8 @@
  * drift between callers:
  *
  * - {@link hasMeaningfulCompletionEvidence} — "is there any evidence at all?"
- *   (non-empty). Gates the CLI auto-transition shortcut in `task-service.ts`.
+ *   (non-empty). Gates the one-step completion of a pending task through
+ *   {@link pendingCompletionRefusal}.
  * - {@link hasStructuredEvidence} — "is it traceable?" (a `commit:`/`pr:`/… marker).
  *   Bypasses the `pretooluse-no-phantom-task-completion` block.
  * - {@link hasCiEvidence} — "does it prove CI passed?". Required by the
@@ -35,6 +36,25 @@ const CI_EVIDENCE_RE = /\bci\b.*(?:green|pass|success)|conclusion.*success/i
  */
 export function hasMeaningfulCompletionEvidence(evidence: string | undefined): boolean {
   return typeof evidence === "string" && evidence.trim().length > 0
+}
+
+/** Why a still-`pending` task cannot be completed in one step. */
+export type PendingCompletionRefusal = "auto-transition-disabled" | "missing-evidence"
+
+/**
+ * The one contract for completing a still-`pending` task in a single update: the
+ * `taskAutoTransition` setting is on AND the update carries meaningful evidence.
+ * Returns null when the completion may proceed. The service hop
+ * (`completeTaskWithAutoTransition`) and the native TaskUpdate hook both apply
+ * it, so the MCP/CLI path and the native path cannot drift apart (#930).
+ */
+export function pendingCompletionRefusal(
+  autoTransition: boolean,
+  evidence: string | undefined
+): PendingCompletionRefusal | null {
+  if (!autoTransition) return "auto-transition-disabled"
+  if (!hasMeaningfulCompletionEvidence(evidence)) return "missing-evidence"
+  return null
 }
 
 /** True when text carries a traceable evidence marker (`commit:`, `pr:`, …). */

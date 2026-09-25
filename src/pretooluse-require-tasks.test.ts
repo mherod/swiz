@@ -115,89 +115,66 @@ describe("pretooluse-require-tasks hook", () => {
     }
   })
 
-  test("blocks Bash when 5 tasks are in_progress (exceeds cap of 4)", async () => {
+  /**
+   * Run Bash against `inProgress` in_progress tasks plus two pending ones, with a fresh TaskList
+   * sync, so the in-progress cap is the only gate left that can decide the call. Without the sync
+   * and the pending buffer, earlier gates deny first and a cap assertion passes vacuously.
+   */
+  async function runBashAtInProgressCount(inProgress: number) {
     const tmpHome = await mkdtemp(join(tmpdir(), "swiz-hook-cap-"))
-    const sessionId = `test-cap-${Date.now()}`
+    const sessionId = `test-cap-${inProgress}-${Date.now()}`
     const tasksDir = join(tmpHome, ".claude", "tasks", sessionId)
     const { mkdir } = await import("node:fs/promises")
     await mkdir(tasksDir, { recursive: true })
-    // Create 5 in_progress tasks — exceeds the cap of 4
-    for (let i = 1; i <= 5; i++) {
+    const tasks = [
+      ...Array.from({ length: inProgress }, (_, i) => ({
+        id: String(i + 1),
+        subject: `Active work ${i + 1}`,
+        status: "in_progress",
+      })),
+      { id: "p1", subject: "Write release notes", status: "pending" },
+      { id: "p2", subject: "Audit logging config", status: "pending" },
+    ]
+    for (const task of tasks) {
       await Bun.write(
-        join(tasksDir, `${i}.json`),
-        JSON.stringify({
-          id: String(i),
-          subject: `Task ${i}`,
-          description: "Active work",
-          status: "in_progress",
-          blocks: [],
-          blockedBy: [],
-        })
+        join(tasksDir, `${task.id}.json`),
+        JSON.stringify({ ...task, description: "Active work", blocks: [], blockedBy: [] })
       )
     }
+    await Bun.write(taskListSyncSentinelPath(sessionId), String(Date.now()))
     try {
       const result = await runHook(
-        {
-          tool_name: "Bash",
-          tool_input: { command: "echo hello" },
-          session_id: sessionId,
-        },
+        { tool_name: "Bash", tool_input: { command: "echo hello" }, session_id: sessionId },
         { HOME: tmpHome }
       )
       expect(result.exitCode).toBe(0)
-      expect(result.parsed).not.toBeNull()
-      const hookOutput = (result.parsed as Record<string, any>)?.hookSpecificOutput as
-        | Record<string, any>
-        | undefined
-      expect(hookOutput?.permissionDecision).toBe("deny")
-      // Hook now blocks on stale task sync before checking cap.
-      expect(String(hookOutput?.permissionDecisionReason ?? "")).toContain(
-        "Sync task state before Bash"
-      )
+      const hookOutput = result.parsed?.hookSpecificOutput as Record<string, any> | undefined
+      return {
+        decision: hookOutput?.permissionDecision as string | undefined,
+        reason: String(hookOutput?.permissionDecisionReason ?? ""),
+      }
     } finally {
       await rm(tmpHome, { recursive: true, force: true })
     }
+  }
+
+  test("blocks Bash when 5 tasks are in_progress (exceeds cap of 4)", async () => {
+    const { decision, reason } = await runBashAtInProgressCount(5)
+    expect(decision).toBe("deny")
+    expect(reason).toContain("Too many tasks active at once (5/4 max)")
+    // The remedy names only legal exits from in_progress: in_progress → pending is not one (#930).
+    expect(reason).not.toContain("tasks back to pending")
+    expect(reason).toContain("it cannot move back to pending")
+    expect(reason).toContain(
+      "Cancel a task only when it is stale, duplicated or no longer real work"
+    )
   })
 
   test("allows Bash when exactly 4 tasks are in_progress (at cap boundary)", async () => {
-    const tmpHome = await mkdtemp(join(tmpdir(), "swiz-hook-cap4-"))
-    const sessionId = `test-cap4-${Date.now()}`
-    const tasksDir = join(tmpHome, ".claude", "tasks", sessionId)
-    const { mkdir } = await import("node:fs/promises")
-    await mkdir(tasksDir, { recursive: true })
-    // Create exactly 4 in_progress tasks — at the cap, not over it
-    for (let i = 1; i <= 4; i++) {
-      await Bun.write(
-        join(tasksDir, `${i}.json`),
-        JSON.stringify({
-          id: String(i),
-          subject: `Task ${i}`,
-          description: "Active work",
-          status: "in_progress",
-          blocks: [],
-          blockedBy: [],
-        })
-      )
-    }
-    try {
-      const result = await runHook(
-        {
-          tool_name: "Bash",
-          tool_input: { command: "echo hello" },
-          session_id: sessionId,
-        },
-        { HOME: tmpHome }
-      )
-      // Hook blocks when no pending tasks exist, even at cap boundary
-      expect(result.exitCode).toBe(0)
-      expect(result.parsed).not.toBeNull()
-      const hookOutput = (result.parsed as Record<string, any>)?.hookSpecificOutput as
-        | Record<string, any>
-        | undefined
-      expect(hookOutput?.permissionDecision).toBe("deny")
-    } finally {
-      await rm(tmpHome, { recursive: true, force: true })
-    }
+    // The WIP limit admits 4 in_progress tasks, so the gate must not refuse the state it allows.
+    const { decision, reason } = await runBashAtInProgressCount(4)
+    expect(decision).not.toBe("deny")
+    expect(reason).not.toContain("Too many tasks active")
   })
 
   test("allows Bash when sync sentinel is missing but transcript shows a recent TaskList, and self-heals the sentinel", async () => {

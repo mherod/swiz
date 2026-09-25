@@ -6,6 +6,7 @@ import {
 } from "../agent-paths.ts"
 import type { AgentDef } from "../agents.ts"
 import { selectStableHookVariant } from "../hook-message-rephrasing.ts"
+import type { PendingCompletionRefusal } from "./task-evidence.ts"
 import { CANONICAL_TASKLIST_SYNC_MAX_AGE_MS } from "./task-governance-constants.ts"
 import { replaceTaskGovernanceSynonyms } from "./task-governance-rephrasing.ts"
 import {
@@ -233,16 +234,10 @@ export type TaskGovernanceMessageRequest =
       taskId: string
     }
   | {
-      kind: "in-progress-transition-cap"
-      taskId: string
-      inProgressCount: number
-      cap: number
-      taskList: string
-    }
-  | {
       kind: "pending-completion-shortcut"
       taskId: string
       subject?: string
+      reason: PendingCompletionRefusal
     }
   | {
       kind: "phantom-completion"
@@ -322,8 +317,10 @@ function buildTooManyInProgressMessage(r: Req<"too-many-in-progress">): string {
       [
         `Reduce in_progress count to ${r.cap} or fewer:`,
         [
-          "Record completed tasks only when the work has evidence.",
-          `Use ${taskUpdateName} to move non-active tasks back to pending.`,
+          `Use ${taskUpdateName} to complete each task whose work is finished, with the evidence in the update.`,
+          "Cancel a task only when it is stale, duplicated or no longer real work.",
+          "Leave unfinished real work in_progress: it cannot move back to pending, and cancelling it would misrecord it. " +
+            "If every listed task is unfinished real work, report that to the user instead of cancelling any of it.",
         ],
         retryAfterTaskList(r.toolName),
       ],
@@ -484,39 +481,39 @@ function buildCompletionThresholdMessage(r: Req<"completion-threshold">): string
   )
 }
 
-function buildInProgressTransitionCapMessage(r: Req<"in-progress-transition-cap">): string {
-  const taskUpdateName = taskUpdateToolName()
-  return (
-    `Task #${r.taskId} can't go active yet — ${r.inProgressCount} of ${r.cap} in_progress slots are already taken.\n\n` +
-    `Currently in progress:\n${r.taskList}\n\n` +
-    `Focusing on one thing at a time makes it easier to track progress.\n\n` +
-    formatTranslatedActionPlan(
-      [
-        "Resolve or park the in_progress tasks that are no longer active:",
-        [
-          "Record completed work only when it has evidence.",
-          `Use ${taskUpdateName} to move non-active tasks back to pending.`,
-        ],
-        `Retry adopting task #${r.taskId} as active work only after TaskList shows focus has been restored.`,
-      ],
-      { taskListFirst: true }
-    )
-  )
-}
-
+/**
+ * Each refusal names only reachable steps: a pending task closes in one update when it carries its
+ * evidence (that hop never takes an in_progress slot), otherwise it must be started first (#930).
+ */
 function buildPendingCompletionShortcutMessage(r: Req<"pending-completion-shortcut">): string {
   const taskUpdateName = taskUpdateToolName()
   const taskRef = r.subject ? `Task #${r.taskId} ("${r.subject}")` : `Task #${r.taskId}`
+  if (r.reason === "missing-evidence") {
+    return (
+      `${taskRef} is still pending, and this update records no evidence of finished work.\n\n` +
+      "Starting a task before closing it keeps the record honest; a pending task closes in one step " +
+      "only when the completing update carries its evidence.\n\n" +
+      formatTranslatedActionPlan(
+        [
+          TASKLIST_STABILITY_STEP,
+          "If the work is not done yet, move this task to active status, do the work, then close it with evidence.",
+          `If the work is already done, retry this ${taskUpdateName} with the evidence in its description ` +
+            "(commit:, file:, test:, pr:, or note:). Completing a pending task this way does not take an in_progress slot.",
+          TASKLIST_CONFIRM_STEP,
+        ],
+        { header: "Next steps:" }
+      )
+    )
+  }
   return (
-    `${taskRef} is still pending — set it in_progress first, do the work, then close it with evidence.\n\n` +
+    `${taskRef} is still pending, and task auto-transition is disabled, so it must be active before it can close.\n\n` +
     "Starting a task before closing it keeps the record honest and makes it easier to track what was done.\n\n" +
     formatTranslatedActionPlan(
       [
         TASKLIST_STABILITY_STEP,
-        `Use ${taskUpdateName} to reflect the task you are genuinely working on now.`,
-        "Move this task to active status before making implementation or verification changes.",
-        "Perform the implementation or verification work described by the task.",
-        "Record completion only with concrete evidence such as commit:, file:, test:, or pr:.",
+        "Move this task to active status, do the work, then close it with concrete evidence such as commit:, file:, test:, or pr:.",
+        "If every in_progress slot is taken, first complete a finished in_progress task with evidence, " +
+          "or cancel one that is stale, duplicated or no longer real work. Do not cancel real work to free a slot.",
         TASKLIST_CONFIRM_STEP,
       ],
       { header: "Next steps:" }
@@ -579,7 +576,6 @@ const MESSAGE_BUILDERS: {
   "completion-rate-limit": buildCompletionRateLimitMessage,
   "native-deletion-threshold": buildNativeDeletionThresholdMessage,
   "completion-threshold": buildCompletionThresholdMessage,
-  "in-progress-transition-cap": buildInProgressTransitionCapMessage,
   "pending-completion-shortcut": buildPendingCompletionShortcutMessage,
   "phantom-completion": buildPhantomCompletionMessage,
   "tasklist-duplicate-subject-notice": buildTasklistDuplicateSubjectNoticeMessage,
@@ -651,12 +647,22 @@ export function buildTaskGovernancePreview(request: TaskGovernanceMessageRequest
         "Task update blocked: preserve the planning buffer first.",
       ])
     case "pending-completion-shortcut":
-      return taskVoiceVariant(`preview:pending-completion-shortcut:${request.taskId}`, [
-        "Task closure paused: start the pending item before closing it.",
-        "Pending task cannot close directly; make the work visible first.",
-        "Task update blocked: pending work needs an active step first.",
-        "Start the planned task before recording it as complete.",
-      ])
+      return taskVoiceVariant(
+        `preview:pending-completion-shortcut:${request.taskId}`,
+        request.reason === "missing-evidence"
+          ? [
+              "Task closure paused: record the evidence, or start the pending item first.",
+              "Pending task cannot close without evidence of finished work.",
+              "Task update blocked: a one-step close needs its evidence.",
+              "Close a pending task only with evidence of the finished work.",
+            ]
+          : [
+              "Task closure paused: start the pending item before closing it.",
+              "Pending task cannot close directly while auto-transition is off.",
+              "Task update blocked: pending work needs an active step first.",
+              "Start the planned task before recording it as complete.",
+            ]
+      )
     default:
       return null
   }
@@ -759,10 +765,6 @@ export const SWIZ_TASKS_CLI_DENY_MESSAGE =
   "Use task tools for routine work, including listing recovered tasks.\n\n" +
   "Keep task state in the native task flow so planning stays accurate and auditable.\n\n" +
   TASK_RECOVERY_HINT
-
-export function buildPendingCompletionTransitionMessage(taskId: string, subject?: string): string {
-  return buildTaskGovernanceMessage({ kind: "pending-completion-shortcut", taskId, subject })
-}
 
 // `buildLastTaskStandingDenial` and its suggestion helpers lived here. They were already
 // unreachable — no caller since handleTaskCompletion took over completion governance — and #834
