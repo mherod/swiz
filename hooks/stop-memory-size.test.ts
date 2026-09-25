@@ -4,6 +4,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import * as home from "../src/home.ts"
 import { USE_COMPACT_MEMORY_SKILL } from "../src/memory-compaction-guidance.ts"
+import { projectKeyFromCwd } from "../src/project-key.ts"
 import * as repository from "../src/repository-capability.ts"
 import { stopHookOutputSchema } from "../src/schemas.ts"
 import * as skills from "../src/skill-utils.ts"
@@ -56,6 +57,38 @@ describe("stop guidance", () => {
         expect(output.reason?.includes(USE_COMPACT_MEMORY_SKILL)).toBe(installed)
       }))
   }
+})
+
+describe("home memory scope", () => {
+  test("ignores another project's memory index but checks this project's", () =>
+    withTmpDir(async (root) => {
+      const cwd = join(root, "repo")
+      const homeDir = join(root, "home")
+      spyOn(repository, "isGitRepoForHookPayload").mockResolvedValue(true)
+      spyOn(home, "getHomeDirWithFallback").mockReturnValue(homeDir)
+      spyOn(memorySize, "resolveThresholds").mockResolvedValue({
+        lineThreshold: 450,
+        wordThreshold: 2,
+      })
+      const projects = join(homeDir, ".claude", "projects")
+      const otherIndex = join(projects, "-Users-someone-other-project", "memory", "MEMORY.md")
+      await mkdir(join(cwd, "src"), { recursive: true })
+      await mkdir(join(otherIndex, ".."), { recursive: true })
+      await Bun.write(otherIndex, "An oversized index from a different repository.\n")
+
+      expect(await evaluateStopMemorySize({ cwd, session_id: "memory-scope" })).toEqual({})
+
+      // Control: the same oversized index under this project's key still blocks.
+      const ownIndex = join(projects, projectKeyFromCwd(cwd), "memory", "MEMORY.md")
+      await mkdir(join(ownIndex, ".."), { recursive: true })
+      await Bun.write(ownIndex, "An oversized index for this repository.\n")
+      const own = stopHookOutputSchema.parse(
+        await evaluateStopMemorySize({ cwd, session_id: "memory-scope" })
+      )
+      expect(own.decision).toBe("block")
+      expect(own.reason).toContain(ownIndex)
+      expect(own.reason).not.toContain(otherIndex)
+    }))
 })
 
 // ── indexPath ─────────────────────────────────────────────────────────────────

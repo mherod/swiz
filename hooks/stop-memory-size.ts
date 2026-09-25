@@ -22,6 +22,7 @@ import {
 } from "../src/memory-compaction-guidance.ts"
 import { getMemoryThresholdViolations } from "../src/memory-thresholds.ts"
 import { NODE_MODULES_DIR } from "../src/node-modules-path.ts"
+import { projectKeyFromCwd } from "../src/project-key.ts"
 import { isGitRepoForHookPayload } from "../src/repository-capability.ts"
 import type { SwizHookOutput, SwizStopHook } from "../src/SwizHook.ts"
 import { runSwizHookAsMain } from "../src/SwizHook.ts"
@@ -129,18 +130,28 @@ async function resolveFileStats(
   return { ...fileInfo, ...stats }
 }
 
-async function collectUniqueMemoryFiles(searchRoots: string[]): Promise<string[]> {
-  const seen = new Set<string>()
-  const allFiles: string[] = []
-  for (const root of searchRoots) {
-    for (const f of await findMemoryFiles(root)) {
-      if (!seen.has(f)) {
-        seen.add(f)
-        allFiles.push(f)
-      }
-    }
+/**
+ * Memory files in the agent home that belong to this session: the global
+ * CLAUDE.md, the global memory directory, and this project's auto-memory.
+ * Walking all of `~/.claude` reached `projects/<every project>/memory/`, so one
+ * oversized index in another repository blocked stop in every session.
+ */
+async function homeMemoryFiles(home: string, cwd: string): Promise<string[]> {
+  if (!home) return []
+  const claudeDir = join(home, ".claude")
+  const globalRules = join(claudeDir, "CLAUDE.md")
+  const files = (await Bun.file(globalRules).exists()) ? [globalRules] : []
+  for (const dir of [
+    join(claudeDir, "memory"),
+    join(claudeDir, "projects", projectKeyFromCwd(cwd), "memory"),
+  ]) {
+    files.push(...(await findMemoryFiles(dir)))
   }
-  return allFiles
+  return files
+}
+
+async function collectUniqueMemoryFiles(cwd: string, home: string): Promise<string[]> {
+  return [...new Set([...(await findMemoryFiles(cwd)), ...(await homeMemoryFiles(home, cwd))])]
 }
 
 async function scanMemoryFiles(
@@ -211,7 +222,7 @@ export async function evaluateStopMemorySize(input: StopHookInput): Promise<Swiz
 
   const thresholds = await resolveThresholds(cwd)
   const home = getHomeDirWithFallback("")
-  const allFiles = await collectUniqueMemoryFiles([cwd, join(home, ".claude")].filter(Boolean))
+  const allFiles = await collectUniqueMemoryFiles(cwd, home)
 
   const RECENCY_WINDOW_MS = 5 * 60 * 1000
   for (const f of allFiles) {
