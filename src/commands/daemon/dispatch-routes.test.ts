@@ -557,6 +557,34 @@ describe("advisory recurrence", () => {
     expect(suppress(ctx, allow("Re-read src/other.ts.")).systemMessage).toContain("src/other.ts")
   })
 
+  // #963: stripping the repeated text used to leave `permissionDecision: "allow"` behind, and a
+  // bare allow tells Claude Code to skip the permission prompt for a call nobody approved.
+  test("drops the whole envelope when a repeat leaves only a bare allow", () => {
+    const ctx = context()
+    const bareAllow = (text: string): Record<string, any> => ({
+      systemMessage: text,
+      hookSpecificOutput: {
+        hookEventName: "PreToolUse",
+        permissionDecision: "allow",
+        permissionDecisionReason: text,
+        additionalContext: text,
+      },
+    })
+    suppress(ctx, bareAllow("Tasks: 1 in_progress, 1 pending."))
+    const repeated = suppress(ctx, bareAllow("Tasks: 1 in_progress, 1 pending."))
+    expect(repeated).toEqual({})
+  })
+
+  test("drops a repeated context-only envelope instead of leaving the event name alone", () => {
+    const ctx = context()
+    const advisory = (text: string): Record<string, any> => ({
+      systemMessage: text,
+      hookSpecificOutput: { hookEventName: "PreToolUse", additionalContext: text },
+    })
+    suppress(ctx, advisory("Tasks: 1 in_progress, 1 pending."))
+    expect(suppress(ctx, advisory("Tasks: 1 in_progress, 1 pending."))).toEqual({})
+  })
+
   test("strips standing advice across events while keeping changed status in both output fields", () => {
     const ctx = context()
     const guidance = buildConcurrentWorkGuidance()

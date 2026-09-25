@@ -31,11 +31,7 @@ import {
   preToolUseDenyTaskFileAccess,
   preToolUseDenyWithSystemMessage,
 } from "../src/SwizHook.ts"
-import {
-  hookSpecificOutputSchema,
-  TASK_UPDATE_ALLOWED_FIELDS,
-  toolHookInputSchema,
-} from "../src/schemas.ts"
+import { TASK_UPDATE_ALLOWED_FIELDS, toolHookInputSchema } from "../src/schemas.ts"
 import { resolveSafeSessionId } from "../src/session-id.ts"
 import {
   getEffectiveSwizSettings,
@@ -139,6 +135,7 @@ import {
 import { scheduleAutoSteer } from "../src/utils/auto-steer-helpers.ts"
 import { hasFileInTree } from "../src/utils/file-utils.ts"
 import { messageFromUnknownError } from "../src/utils/hook-json-helpers.ts"
+import { hsoPreToolUseAdvisory } from "../src/utils/hook-specific-output.ts"
 import {
   readNativeTaskToolAvailability,
   shouldEnforceTaskGovernance,
@@ -2282,15 +2279,8 @@ const pretooluseTaskGovernance: SwizToolHook = {
       if (isCodexTaskGovernanceExempt(input as Record<string, any>)) return {}
       if (await shouldSuppressGovernanceTrace(input as Record<string, any>)) return {}
       const trace = await buildTraceContext(input)
-      return {
-        systemMessage: trace,
-        hookSpecificOutput: hookSpecificOutputSchema.parse({
-          hookEventName: "PreToolUse",
-          permissionDecision: "allow",
-          permissionDecisionReason: trace,
-          additionalContext: trace,
-        }),
-      }
+      // Advice only: an allow here would skip the user's permission prompt (#963).
+      return { systemMessage: trace, hookSpecificOutput: hsoPreToolUseAdvisory({ context: trace }) }
     } catch (err: unknown) {
       return unexpectedHookFailureOutput(err, "pretooluse-task-governance", input)
     }

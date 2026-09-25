@@ -1,7 +1,7 @@
 import { merge } from "lodash-es"
 import { hookOutputSchema } from "../schemas.ts"
 import { isFileEditTool } from "../tool-matchers.ts"
-import { getHookSpecificOutput, hsoPreToolUseMergedAllow } from "../utils/hook-specific-output.ts"
+import { getHookSpecificOutput, hsoPreToolUseAdvisory } from "../utils/hook-specific-output.ts"
 import { extractAllowReason, extractContext, type HookExecution, isDeny, log } from "./engine.ts"
 import {
   type HookExecutionStrategy,
@@ -10,8 +10,8 @@ import {
 } from "./strategy-base.ts"
 
 /**
- * PreToolUse strategy: short-circuits on first deny; collects and merges
- * allow-with-reason hints.
+ * PreToolUse strategy: short-circuits on first deny; merges advisory context from
+ * the other hooks into a response that carries no permission decision.
  */
 type PreToolResult = "deny" | "hint" | "pass"
 
@@ -71,16 +71,17 @@ export function preparePreToolHints(
   return [...nonModeHints, `Active guardrails: ${uniqueNonEmpty(modeLabels).join("; ")}.`]
 }
 
+/** Advice from a hook that allowed the call or stated no decision (context-only output). */
 function classifyAllowHint(
   resp: Record<string, any>,
   execution: HookExecution,
   hints: string[],
   contexts: string[]
 ): boolean {
-  const hso = getHookSpecificOutput(resp)
+  const decision = getHookSpecificOutput(resp)?.permissionDecision
   const reason = extractAllowReason(resp)
   const context = extractContext(resp)
-  if (hso?.permissionDecision !== "allow" || (!reason && !context)) return false
+  if ((decision !== "allow" && decision !== undefined) || (!reason && !context)) return false
   execution.status = "allow-with-reason"
   if (reason) hints.push(reason)
   if (context) contexts.push(context)
@@ -266,6 +267,11 @@ function classifyPreToolResult(
   return "pass"
 }
 
+/**
+ * Merge advisory hook output without a permission decision: the user's permission mode decides
+ * whether the call prompts (#963). Hints travel as the envelope's notice, which the agent-compat
+ * layer renders per agent (see `hsoPreToolUseAdvisory`).
+ */
 function buildPreToolResponse(hints: string[], contexts: string[]): Record<string, any> {
   const cleanContexts = uniqueNonEmpty(contexts)
   const cleanHints = preparePreToolHints(hints, cleanContexts)
@@ -278,17 +284,18 @@ function buildPreToolResponse(hints: string[], contexts: string[]): Record<strin
     `   result: passed with ${cleanHints.length} hint(s)` +
       (cleanContexts.length > 0 ? ` and ${cleanContexts.length} context(s)` : "")
   )
+  const context = cleanContexts.length > 0 ? cleanContexts.join("\n\n") : undefined
   return hookOutputSchema.parse({
-    ...(cleanContexts.length > 0 ? { systemMessage: cleanContexts.join("\n\n") } : {}),
-    hookSpecificOutput: hsoPreToolUseMergedAllow({
-      hintsJoined: cleanHints.length > 0 ? cleanHints.join("\n\n") : undefined,
-      contextsJoined: cleanContexts.length > 0 ? cleanContexts.join("\n\n") : undefined,
+    ...(context ? { systemMessage: context } : {}),
+    hookSpecificOutput: hsoPreToolUseAdvisory({
+      context,
+      notice: cleanHints.length > 0 ? cleanHints.join("\n\n") : undefined,
     }),
   })
 }
 
 /**
- * Replace the merged allow response's context fields with humanised text.
+ * Replace the merged advisory response's context fields with humanised text.
  * Must write `additionalContext` (the agent-recognized PreToolUse field) — writing
  * any other key leaks an unknown field into `hookSpecificOutput`, which the agent
  * rejects as "hook returned invalid pre-tool-use JSON output" (schemas are looseObject,
@@ -305,7 +312,7 @@ export function applyPreToolHumanisedContext(
 }
 
 /**
- * Humanise the merged allow response's context, unless humanisation is off or
+ * Humanise the merged advisory response's context, unless humanisation is off or
  * we are inside the post-user-message grace window — the mechanical context
  * voice stays visually distinct from the user's own messages while they are
  * actively present.

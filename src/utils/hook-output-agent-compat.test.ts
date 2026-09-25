@@ -123,6 +123,51 @@ describe("sanitizeHookOutputForAgent", () => {
     })
   })
 
+  // #963: advisory dispatch output states no decision; each agent must still see exactly what it
+  // saw when that output was an allow.
+  const advisory = {
+    systemMessage: "Tasks: 1 in_progress.",
+    hookSpecificOutput: {
+      hookEventName: "PreToolUse",
+      permissionDecisionReason: "Continue in ditto-preferred copy mode.",
+      additionalContext: "Tasks: 1 in_progress.",
+    },
+  }
+
+  test("renders an advisory notice as Codex systemMessage, like an allow reason", () => {
+    expect(sanitizeHookOutputForAgent<Record<string, unknown>>(advisory, "codex")).toEqual({
+      systemMessage: "Tasks: 1 in_progress. Continue in ditto-preferred copy mode.",
+    })
+  })
+
+  test("drops an advisory notice for Claude, which shows a reason only on a deny", () => {
+    expect(sanitizeHookOutputForAgent<Record<string, unknown>>(advisory, "claude")).toEqual({
+      systemMessage: "Tasks: 1 in_progress.",
+      hookSpecificOutput: {
+        hookEventName: "PreToolUse",
+        additionalContext: "Tasks: 1 in_progress.",
+      },
+    })
+  })
+
+  test("drops a notice-only advisory envelope for Claude entirely", () => {
+    const noticeOnly = {
+      hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecisionReason: "A hint." },
+    }
+    expect(sanitizeHookOutputForAgent<Record<string, unknown>>(noticeOnly, "claude")).toEqual({})
+  })
+
+  test("keeps a deny reason for Claude", () => {
+    const deny = {
+      hookSpecificOutput: {
+        hookEventName: "PreToolUse",
+        permissionDecision: "deny",
+        permissionDecisionReason: "Create a task first.",
+      },
+    }
+    expect(sanitizeHookOutputForAgent(deny, "claude")).toBe(deny)
+  })
+
   test("mirrors PreToolUse deny reason into Codex top-level block fields", () => {
     const output = sanitizeHookOutputForAgent<Record<string, unknown>>(
       {

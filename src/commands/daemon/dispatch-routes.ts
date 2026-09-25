@@ -200,7 +200,11 @@ function stripDuplicateAllowMessage(response: Record<string, any>): void {
     const output = hookSpecificOutput as Record<string, unknown>
     delete output.additionalContext
     delete output.permissionDecisionReason
-    if (Object.keys(output).length === 0) {
+    // A bare allow tells Claude Code to skip the permission prompt (#963); keep an allow only
+    // when it carries rewritten input, which needs the decision to apply.
+    const rewritesInput = output.updatedInput !== undefined || output.modifiedInput !== undefined
+    if (output.permissionDecision === "allow" && !rewritesInput) delete output.permissionDecision
+    if (Object.keys(output).every((key) => key === "hookEventName")) {
       delete response.hookSpecificOutput
     }
   }

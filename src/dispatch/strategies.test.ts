@@ -16,6 +16,7 @@ import {
   collectPreToolResults,
   isSkillGateHook,
   normalizePreToolDenyReason,
+  PreToolUseStrategy,
   preparePreToolHints,
   resolveFileEditDenyDowngrade,
   shouldDowngradeFileEditDenies,
@@ -405,6 +406,112 @@ describe("BlockingStrategy postToolUse skill-recency dispatch", () => {
   })
 })
 
+// #963: advisory hook output was merged as `permissionDecision: "allow"`, which Claude Code
+// reads as "skip the permission prompt" — every advised call silently bypassed the user's mode.
+// The pipeline renders the envelope for `agentId` before writing, so `wire` is what that agent sees.
+describe("PreToolUseStrategy advisory output", () => {
+  function makeContext(outputs: Record<string, any>[], agentId: string) {
+    return {
+      filteredGroups: [
+        {
+          event: "preToolUse",
+          matcher: "Read",
+          hooks: outputs.map((output, index) => ({
+            hook: {
+              name: `pretooluse-advisory-${index}.ts`,
+              event: "preToolUse",
+              run: () => output,
+            },
+          })),
+        },
+      ],
+      enrichedPayloadStr: JSON.stringify({ tool_name: "Read", tool_input: { file_path: "a.ts" } }),
+      canonicalEvent: "preToolUse",
+      hookEventName: "PreToolUse",
+      cwd: process.cwd(),
+      agentId,
+    }
+  }
+
+  async function dispatch(outputs: Record<string, any>[], agentId = "claude") {
+    const { output } = await captureStdout(() =>
+      new PreToolUseStrategy().execute(makeContext(outputs, agentId))
+    )
+    return { wire: JSON.parse(output) as Record<string, any> }
+  }
+
+  const allowWithReason = (reason: string) => ({
+    hookSpecificOutput: {
+      hookEventName: "PreToolUse",
+      permissionDecision: "allow",
+      permissionDecisionReason: reason,
+    },
+  })
+  const allowWithContext = (context: string) => ({
+    hookSpecificOutput: {
+      hookEventName: "PreToolUse",
+      permissionDecision: "allow",
+      permissionDecisionReason: context,
+      additionalContext: context,
+    },
+  })
+
+  it("delivers advice as context and never approves the call", async () => {
+    const { wire } = await dispatch([
+      allowWithContext("Tasks: 1 in_progress, 1 pending."),
+      allowWithReason("Continue in ditto-preferred copy mode."),
+    ])
+    expect(wire).toEqual({
+      systemMessage: "Tasks: 1 in_progress, 1 pending.",
+      hookSpecificOutput: {
+        hookEventName: "PreToolUse",
+        additionalContext: "Tasks: 1 in_progress, 1 pending.",
+      },
+    })
+  })
+
+  it("expresses no opinion to Claude when the only advice is an allow reason", async () => {
+    // Claude Code never showed an allow's reason to Claude or the transcript, so nothing is lost.
+    const { wire } = await dispatch([allowWithReason("Continue in ditto-preferred copy mode.")])
+    expect(wire).toEqual({})
+  })
+
+  it("still shows Codex the allow reason as a system message", async () => {
+    const { wire } = await dispatch(
+      [allowWithReason("Continue in ditto-preferred copy mode.")],
+      "codex"
+    )
+    expect(wire).toEqual({ systemMessage: "Continue in ditto-preferred copy mode." })
+  })
+
+  it("collects context from a hook that states no decision", async () => {
+    const { wire } = await dispatch([
+      { hookSpecificOutput: { hookEventName: "PreToolUse", additionalContext: "Advice only." } },
+    ])
+    expect(wire.hookSpecificOutput).toEqual({
+      hookEventName: "PreToolUse",
+      additionalContext: "Advice only.",
+    })
+  })
+
+  it("still merges a deny with its reason when other hooks only advise", async () => {
+    const { wire } = await dispatch([
+      allowWithContext("Tasks: 1 in_progress, 1 pending."),
+      {
+        hookSpecificOutput: {
+          hookEventName: "PreToolUse",
+          permissionDecision: "deny",
+          permissionDecisionReason: "Create a task before running Bash.",
+        },
+      },
+    ])
+    expect(wire.hookSpecificOutput.permissionDecision).toBe("deny")
+    expect(wire.hookSpecificOutput.permissionDecisionReason).toBe(
+      "Create a task before running Bash."
+    )
+  })
+})
+
 describe("keepSideEffectPostToolGroups", () => {
   it("keeps only side-effect hooks and drops advisory-only groups", () => {
     const groups = [
@@ -485,7 +592,6 @@ describe("applyPreToolHumanisedContext", () => {
       systemMessage: "raw context",
       hookSpecificOutput: {
         hookEventName: "PreToolUse",
-        permissionDecision: "allow",
         permissionDecisionReason: "raw hints",
         additionalContext: "raw context",
       },
@@ -496,8 +602,9 @@ describe("applyPreToolHumanisedContext", () => {
     expect(response.hookSpecificOutput.additionalContext).toBe("humanised paragraph")
     // The legacy bug set `contextsJoined`; it must never appear.
     expect("contextsJoined" in response.hookSpecificOutput).toBe(false)
-    // permissionDecisionReason (hints) is left untouched.
+    // The hint notice (permissionDecisionReason) is left untouched, and no decision appears.
     expect(response.hookSpecificOutput.permissionDecisionReason).toBe("raw hints")
+    expect(response.hookSpecificOutput.permissionDecision).toBeUndefined()
   })
 
   it("is a no-op on hookSpecificOutput when none is present", () => {

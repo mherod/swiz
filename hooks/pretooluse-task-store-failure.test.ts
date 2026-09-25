@@ -212,10 +212,10 @@ describe("task-store failure isolation", () => {
           _taskHome: validHome,
         })
       )
-      expect(result.hookSpecificOutput?.permissionDecision).toBe("allow")
-      expect(result.hookSpecificOutput?.permissionDecisionReason).not.toContain(
-        "Task state unavailable"
-      )
+      // Available means not denied; the governance trace states no decision (#963).
+      expect(result.hookSpecificOutput?.permissionDecision).toBeUndefined()
+      expect(result.hookSpecificOutput?.additionalContext).toContain("Tasks:")
+      expect(JSON.stringify(result)).not.toContain("Task state unavailable")
     }
     expect(await readdir(join(root, ".projects", key))).toEqual(["1.json"])
   })

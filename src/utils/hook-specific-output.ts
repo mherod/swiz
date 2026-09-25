@@ -173,15 +173,23 @@ export function hsoPostToolUseDenyBlock(reason: string): HookSpecificOutput {
   })
 }
 
-/** Merged PreToolUse allow envelope from aggregated hints / contexts (dispatch strategy). */
-export function hsoPreToolUseMergedAllow(fields: {
-  hintsJoined?: string
-  contextsJoined?: string
+/**
+ * Advisory PreToolUse envelope with no permission decision (#963).
+ *
+ * Claude Code reads `permissionDecision: "allow"` as "skip the permission prompt", so advice
+ * must never carry it — the user's permission mode decides.
+ *
+ * `context` reaches the model as `additionalContext`. `notice` is allow-reason hint text, kept
+ * in `permissionDecisionReason` for the agent-compat layer to render: Codex shows it as a system
+ * message; Claude, which shows a reason only on a deny, drops it.
+ */
+export function hsoPreToolUseAdvisory(fields: {
+  context?: string
+  notice?: string
 }): HookSpecificOutput {
   return hookSpecificOutputSchema.parse({
     hookEventName: "PreToolUse",
-    permissionDecision: "allow",
-    ...(fields.hintsJoined ? { permissionDecisionReason: fields.hintsJoined } : {}),
-    ...(fields.contextsJoined ? { additionalContext: fields.contextsJoined } : {}),
+    ...(fields.notice ? { permissionDecisionReason: fields.notice } : {}),
+    ...(fields.context ? { additionalContext: fields.context } : {}),
   })
 }

@@ -178,33 +178,42 @@ describe("dispatch output formats", () => {
     expect(typeof hso.permissionDecisionReason).toBe("string")
   }, 60_000)
 
-  test("preToolUse allow-with-reason uses hookSpecificOutput envelope", async () => {
+  // #963: advice (here banned-commands' "use rg" warning, an allow reason) must not approve the
+  // call — Claude Code reads permissionDecision "allow" as "skip the permission prompt".
+  test("preToolUse advice carries no permission decision for any agent", async () => {
     const homeDir = await _tmp.create("swiz-dispatch-home-")
     const cwd = await _tmp.create("swiz-dispatch-cwd-")
     runGit(cwd, ["init"])
     const sessionId = "session-allow"
     await writeTask(homeDir, sessionId, "pending")
 
-    const result = await dispatch({
-      event: "preToolUse",
-      hookEventName: "PreToolUse",
-      payload: {
-        tool_name: "Bash",
-        tool_input: { command: "grep -r TODO src/" },
-        session_id: sessionId,
-        cwd,
-      },
-      homeDir,
-    })
+    const run = (extra: Record<string, any> = {}) =>
+      dispatch({
+        event: "preToolUse",
+        hookEventName: "PreToolUse",
+        payload: {
+          tool_name: "Bash",
+          tool_input: { command: "grep -r TODO src/" },
+          session_id: sessionId,
+          cwd,
+          ...extra,
+        },
+        homeDir,
+      })
 
-    expect(result.exitCode).toBe(0)
-    expect(result.parsed).not.toBeNull()
+    const claude = await run()
+    expect(claude.exitCode).toBe(0)
+    const claudeHso = claude.parsed?.hookSpecificOutput as Record<string, any> | undefined
+    expect(claudeHso?.permissionDecision).toBeUndefined()
+    // Claude shows an allow reason to neither Claude nor the transcript; it is not upgraded to context.
+    expect(claudeHso?.permissionDecisionReason).toBeUndefined()
+    expect(JSON.stringify(claude.parsed ?? {})).not.toContain("ripgrep")
 
-    const hso = result.parsed!.hookSpecificOutput as Record<string, any>
-    expect(hso.hookEventName).toBe("PreToolUse")
-    expect(hso.permissionDecision).toBe("allow")
-    expect(typeof hso.permissionDecisionReason).toBe("string")
-    expect((hso.permissionDecisionReason as string).toLowerCase()).toContain("rg")
+    // Control: the warning was produced, and Codex still sees it as a system message.
+    const codex = await run({ _env: { CODEX_THREAD_ID: "dispatch-formats-advice" } })
+    expect(codex.exitCode).toBe(0)
+    expect(codex.parsed?.hookSpecificOutput?.permissionDecision).toBeUndefined()
+    expect(String(codex.parsed?.systemMessage ?? "")).toContain("ripgrep")
   }, 60_000)
 
   test("stop block uses top-level decision + reason", async () => {

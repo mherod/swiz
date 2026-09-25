@@ -59,13 +59,15 @@ function sanitizeCodexHookOutput(output: HookOutputLike): HookOutputLike {
   const additionalContext = nonEmptyString(hookSpecificOutput.additionalContext)
   if (additionalContext) appendSystemMessage(cloned, additionalContext)
 
-  if (hookSpecificOutput.permissionDecision === "allow") {
+  // Advisory dispatch output states no decision (#963); its hint notice reads like an allow reason.
+  const decision = hookSpecificOutput.permissionDecision
+  if (decision === "allow" || decision === undefined) {
     const reason = nonEmptyString(hookSpecificOutput.permissionDecisionReason)
     if (reason) appendSystemMessage(cloned, reason)
 
     delete hookSpecificOutput.permissionDecision
     delete hookSpecificOutput.permissionDecisionReason
-  } else if (hookSpecificOutput.permissionDecision === "deny") {
+  } else if (decision === "deny") {
     const reason =
       nonEmptyString(hookSpecificOutput.permissionDecisionReason) ??
       nonEmptyString(cloned.reason) ??
@@ -191,13 +193,30 @@ function stripUnsupportedHookSpecificOutput<T extends HookOutputLike>(output: T)
   return cloned as T
 }
 
+/**
+ * Claude shows `permissionDecisionReason` only on a deny. Advisory output states no decision
+ * (#963), so its hint notice has no reader: drop it, and the envelope if nothing else remains.
+ */
+function stripAdvisoryNotice<T extends HookOutputLike>(output: T): T {
+  const hookSpecificOutput = output.hookSpecificOutput
+  if (!isPlainObject(hookSpecificOutput)) return output
+  if (hookSpecificOutput.permissionDecision !== undefined) return output
+  if (hookSpecificOutput.permissionDecisionReason === undefined) return output
+
+  const cloned = structuredClone(output) as HookOutputLike
+  delete cloned.hookSpecificOutput.permissionDecisionReason
+  removeEmptyHookSpecificOutput(cloned)
+  return cloned as T
+}
+
 export function sanitizeHookOutputForAgent<T extends HookOutputLike>(
   output: T,
   agentId: string | null | undefined
 ): T {
   const base = agentId === "codex" ? (sanitizeCodexHookOutput(output) as T) : output
   const agent = agentId ? getAgent(agentId) : undefined
-  const gated = agentId === "codex" ? base : stripUnsupportedHookSpecificOutput(base)
+  const gated =
+    agentId === "codex" ? base : stripUnsupportedHookSpecificOutput(stripAdvisoryNotice(base))
   return redactHomePathsInOutput(translateHookOutputToolNames(gated, agent))
 }
 

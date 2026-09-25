@@ -742,7 +742,8 @@ describe("pretooluseTaskGovernance context", () => {
       })
 
       const context = additionalContext(result) ?? ""
-      expect(permissionDecision(result)).toBe("allow")
+      // #963: the trace is advice, so it must not approve the call and skip the prompt.
+      expect(permissionDecision(result)).toBeUndefined()
       expect(context).toContain("Deferral tactic detected")
       expect(context).toContain("All work is to be completed in this session")
       expect(context).toContain("There is no follow-up session")
