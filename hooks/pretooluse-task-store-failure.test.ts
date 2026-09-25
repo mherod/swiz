@@ -108,19 +108,29 @@ describe("task-store failure isolation", () => {
     )
   })
 
-  test.each([
-    governance,
-    requireTasksHook,
-  ])("%s permits the advertised diagnostic command repeatedly", async (hook) => {
+  test("governance permits the advertised diagnostic command repeatedly", async () => {
     for (let attempt = 0; attempt < 2; attempt++) {
       const result = output(
-        await hook.run(payload("Bash", { command: "cat hooks/pretooluse-task-governance.ts" }))
+        await governance.run(
+          payload("Bash", { command: "cat hooks/pretooluse-task-governance.ts" })
+        )
       )
       expect(result.hookSpecificOutput?.permissionDecision).toBe("allow")
-      expect(result.hookSpecificOutput?.additionalContext).toContain(hook.name)
+      expect(result.hookSpecificOutput?.additionalContext).toContain(governance.name)
       expect(result.hookSpecificOutput?.additionalContext).toContain(
         "cat hooks/pretooluse-task-governance.ts"
       )
+    }
+  })
+
+  // #957: read-only inspection skips the require-tasks gate before any task-store read, so the
+  // diagnostic command gets no opinion rather than an allow that would skip the permission prompt.
+  test("require-tasks has no opinion on the advertised diagnostic command", async () => {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const result = await requireTasksHook.run(
+        payload("Bash", { command: "cat hooks/pretooluse-task-governance.ts" })
+      )
+      expect(result).toEqual({})
     }
   })
 
