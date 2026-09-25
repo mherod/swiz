@@ -3,6 +3,13 @@ import { readFileSync, unlinkSync, utimesSync, watch, writeFileSync } from "node
 import { z } from "zod"
 import { CHANNEL_DELIVERABLE_TRIGGERS } from "../auto-steer-store.ts"
 import {
+  createMcpCwdResolver,
+  type McpCwdSource,
+  type McpRootsServer,
+  type ResolvedMcpCwd,
+  unresolvedMcpCwdMessage,
+} from "../mcp-cwd.ts"
+import {
   type McpToolInput,
   type McpToolName,
   type McpToolResult,
@@ -139,6 +146,8 @@ export async function pushChannelEvent(event: ChannelEvent, projectKey: string):
 interface McpChannelRuntimeStatus {
   projectKey: string
   cwd: string
+  /** Where `cwd` came from: MCP roots, the process cwd, or neither (the "/" fallback). */
+  cwdSource: McpCwdSource
   pid: number
   serverName: string
   serverVersion: string
@@ -232,7 +241,7 @@ function ensureNotifyFile(projectKey: string): string {
   return path
 }
 
-function startAutoSteerDrainLoop(cwd: string): () => void {
+function startAutoSteerDrainLoop(cwd: string, cwdSource: McpCwdSource): () => void {
   const projectKey = projectKeyFromCwd(cwd)
   let stopped = false
   let draining = false
@@ -241,6 +250,7 @@ function startAutoSteerDrainLoop(cwd: string): () => void {
   const status: McpChannelRuntimeStatus = {
     projectKey,
     cwd,
+    cwdSource,
     pid: process.pid,
     serverName: SERVER_NAME,
     serverVersion: SERVER_VERSION,
@@ -543,7 +553,7 @@ const PermissionRequestSchema = z.object({
   }),
 })
 
-type McpLowLevelServer = {
+type McpLowLevelServer = McpRootsServer & {
   notification: (msg: { method: string; params: unknown }) => Promise<void>
   setNotificationHandler: (
     schema: unknown,
@@ -551,11 +561,12 @@ type McpLowLevelServer = {
       params: { request_id: string; tool_name: string; input_preview: string }
     }) => Promise<void>
   ) => void
+  oninitialized?: () => void
 }
 
-function registerPermissionRelay(lowLevel: McpLowLevelServer, cwd: string): void {
+function registerPermissionRelay(lowLevel: McpLowLevelServer, cwd: ToolCwd): void {
   lowLevel.setNotificationHandler(PermissionRequestSchema, async ({ params }) => {
-    const rules = loadPermissionPolicy(cwd)
+    const rules = loadPermissionPolicy((await cwdForTool(cwd)) ?? process.cwd())
     const verdict = evaluatePermissionPolicy(rules, params.tool_name, params.input_preview)
     if (verdict === null) {
       process.stderr.write(
@@ -652,7 +663,27 @@ type McpToolServer = {
   ) => void
 }
 
-function registerReplyTool(server: McpToolServer, cwd: string): void {
+/** A fixed directory, or a resolver consulted per call once the client handshake has run. */
+export type ToolCwd = string | (() => Promise<string | null>)
+
+function cwdForTool(cwd: ToolCwd): Promise<string | null> {
+  return typeof cwd === "string" ? Promise.resolve(cwd) : cwd()
+}
+
+/** Task tools refuse to run without a project directory rather than share the "-" store. */
+export async function executeProjectTool(
+  tool: McpToolName,
+  input: McpToolInput,
+  cwd: ToolCwd
+): Promise<McpToolResult> {
+  const resolved = await cwdForTool(cwd)
+  if (!resolved) {
+    return { content: [{ type: "text", text: unresolvedMcpCwdMessage(tool) }], isError: true }
+  }
+  return executeMcpTool(tool, input, resolved)
+}
+
+function registerReplyTool(server: McpToolServer, cwd: ToolCwd): void {
   server.registerTool(
     "reply",
     {
@@ -665,12 +696,12 @@ function registerReplyTool(server: McpToolServer, cwd: string): void {
         kind: z.string().optional().describe('Reply kind, e.g. "note" or "status"'),
       },
     },
-    ({ content, kind }: { content: string; kind?: string }) =>
-      executeMcpTool("reply", { content, kind }, cwd)
+    async ({ content, kind }: { content: string; kind?: string }) =>
+      executeMcpTool("reply", { content, kind }, (await cwdForTool(cwd)) ?? process.cwd())
   )
 }
 
-function registerTaskCreateTool(server: McpToolServer, cwd: string): void {
+function registerTaskCreateTool(server: McpToolServer, cwd: ToolCwd): void {
   server.registerTool(
     "TaskCreate",
     {
@@ -690,11 +721,11 @@ function registerTaskCreateTool(server: McpToolServer, cwd: string): void {
       },
     },
     (input: { subject: string; description: string; activeForm?: string }) =>
-      executeMcpTool("TaskCreate", { ...input }, cwd)
+      executeProjectTool("TaskCreate", { ...input }, cwd)
   )
 }
 
-function registerTaskUpdateTool(server: McpToolServer, cwd: string): void {
+function registerTaskUpdateTool(server: McpToolServer, cwd: ToolCwd): void {
   server.registerTool(
     "TaskUpdate",
     {
@@ -730,7 +761,7 @@ function registerTaskUpdateTool(server: McpToolServer, cwd: string): void {
           .describe("List of task IDs to remove from blockedBy"),
       },
     },
-    (input: TaskUpdateToolInput) => executeMcpTool("TaskUpdate", { ...input }, cwd)
+    (input: TaskUpdateToolInput) => executeProjectTool("TaskUpdate", { ...input }, cwd)
   )
 }
 
@@ -739,7 +770,7 @@ function registerTaskUpdateTool(server: McpToolServer, cwd: string): void {
 export { summarizeTasks }
 export type { TaskListSummary }
 
-function registerTaskListTool(server: McpToolServer, cwd: string): void {
+function registerTaskListTool(server: McpToolServer, cwd: ToolCwd): void {
   server.registerTool(
     "TaskList",
     {
@@ -750,11 +781,11 @@ function registerTaskListTool(server: McpToolServer, cwd: string): void {
         "Long lists are truncated with an explicit remainder count.",
       inputSchema: {},
     },
-    () => executeMcpTool("TaskList", {}, cwd)
+    () => executeProjectTool("TaskList", {}, cwd)
   )
 }
 
-export function registerSkillQueryTool(server: McpToolServer, cwd: string): void {
+export function registerSkillQueryTool(server: McpToolServer, cwd: ToolCwd): void {
   server.registerTool(
     "SkillQuery",
     {
@@ -773,15 +804,17 @@ export function registerSkillQueryTool(server: McpToolServer, cwd: string): void
         openWorldHint: false,
       },
     },
-    (input: McpToolInput) => executeMcpTool("SkillQuery", input, cwd)
+    async (input: McpToolInput) =>
+      executeMcpTool("SkillQuery", input, (await cwdForTool(cwd)) ?? process.cwd())
   )
 }
 
 async function serve(): Promise<void> {
   const { McpServer } = await import("@modelcontextprotocol/sdk/server/mcp.js")
   const { StdioServerTransport } = await import("@modelcontextprotocol/sdk/server/stdio.js")
+  const { RootsListChangedNotificationSchema } = await import("@modelcontextprotocol/sdk/types.js")
 
-  const cwd = process.cwd()
+  const processCwd = process.cwd()
   const settings = await readSwizSettings()
   const mcpChannels = settings.mcpChannels
 
@@ -792,25 +825,48 @@ async function serve(): Promise<void> {
       instructions: buildMcpInstructions(mcpChannels),
     }
   )
+  const lowLevel = (server as unknown as { server: McpLowLevelServer }).server
+  const cwdResolver = createMcpCwdResolver(lowLevel, processCwd)
+  const toolCwd = async (): Promise<string | null> => (await cwdResolver.current()).cwd
 
-  registerReplyTool(server, cwd)
+  registerReplyTool(server, toolCwd)
 
-  registerTaskCreateTool(server, cwd)
+  registerTaskCreateTool(server, toolCwd)
 
-  registerTaskUpdateTool(server, cwd)
+  registerTaskUpdateTool(server, toolCwd)
 
-  registerTaskListTool(server, cwd)
+  registerTaskListTool(server, toolCwd)
 
-  registerSkillQueryTool(server, cwd)
+  registerSkillQueryTool(server, toolCwd)
+
+  // Roots are known only after the client handshake, so the channel drain loop
+  // (keyed by project) starts once the directory resolves and restarts when it moves.
+  let stopDrain = (): void => {}
+  let drainCwd: string | null = null
+  const applyResolvedCwd = async (resolution: Promise<ResolvedMcpCwd>): Promise<void> => {
+    const { cwd, source } = await resolution
+    const roots = lowLevel.getClientCapabilities()?.roots ? "advertised" : "not advertised"
+    process.stderr.write(
+      `swiz mcp: project directory ${cwd ?? "unresolved"} (source: ${source}; client roots ${roots})\n`
+    )
+    const channelCwd = cwd ?? processCwd
+    if (!mcpChannels || channelCwd === drainCwd) return
+    stopDrain()
+    drainCwd = channelCwd
+    stopDrain = startAutoSteerDrainLoop(channelCwd, source)
+  }
+  lowLevel.oninitialized = () => void applyResolvedCwd(cwdResolver.refresh())
+  lowLevel.setNotificationHandler(RootsListChangedNotificationSchema, () =>
+    applyResolvedCwd(cwdResolver.refresh())
+  )
 
   const transport = new StdioServerTransport()
   await server.connect(transport)
   activeServer = server as unknown as typeof activeServer
 
-  const lowLevel = (server as unknown as { server: McpLowLevelServer }).server
   if (mcpChannels) {
     try {
-      registerPermissionRelay(lowLevel, cwd)
+      registerPermissionRelay(lowLevel, toolCwd)
     } catch (err) {
       process.stderr.write(`swiz mcp: failed to register permission relay: ${String(err)}\n`)
     }
@@ -823,7 +879,6 @@ async function serve(): Promise<void> {
     `swiz mcp server ready (${SERVER_NAME} ${SERVER_VERSION}) — ${enabledFeatures} enabled\n`
   )
 
-  const stopDrain = mcpChannels ? startAutoSteerDrainLoop(cwd) : () => {}
   const cleanup = (): void => {
     stopDrain()
     activeServer = null

@@ -9,6 +9,7 @@ import {
   buildMcpInstructions,
   evaluatePermissionPolicy,
   executeMcpTool,
+  executeProjectTool,
   loadPermissionPolicy,
   readProjectTasksWithPrune,
   resetMcpToolDaemonBackoff,
@@ -156,6 +157,48 @@ describe("executeMcpTool", () => {
       resetMcpToolDaemonBackoff()
       const result = await executeMcpTool("TaskList", {}, "/never-read-locally")
       expect(result.content[0]?.text).toBe("daemon:TaskList")
+    } finally {
+      if (priorPort === undefined) delete process.env.SWIZ_DAEMON_PORT
+      else process.env.SWIZ_DAEMON_PORT = priorPort
+      if (priorNoDaemon !== undefined) process.env.SWIZ_NO_DAEMON = priorNoDaemon
+      resetMcpToolDaemonBackoff()
+      void server.stop(true)
+    }
+  })
+})
+
+describe("executeProjectTool", () => {
+  it("refuses task tools without a project directory and never reaches a store", async () => {
+    let requests = 0
+    const server = Bun.serve({
+      port: 0,
+      fetch: () => {
+        requests += 1
+        return Response.json({ content: [{ type: "text", text: "daemon" }] })
+      },
+    })
+    const priorPort = process.env.SWIZ_DAEMON_PORT
+    const priorNoDaemon = process.env.SWIZ_NO_DAEMON
+    delete process.env.SWIZ_NO_DAEMON
+    process.env.SWIZ_DAEMON_PORT = String(server.port)
+    try {
+      resetMcpToolDaemonBackoff()
+      const refused = await executeProjectTool("TaskCreate", { subject: "x" }, async () => null)
+      expect(refused.isError).toBe(true)
+      expect(refused.content[0]?.text).toContain("swiz#955")
+      expect(requests).toBe(0)
+
+      // Control: a resolved directory reaches the daemon with that cwd.
+      const received: string[] = []
+      server.reload({
+        fetch: async (req) => {
+          received.push(((await req.json()) as { cwd: string }).cwd)
+          return Response.json({ content: [{ type: "text", text: "daemon" }] })
+        },
+      })
+      const accepted = await executeProjectTool("TaskList", {}, async () => "/tmp/project-a")
+      expect(accepted.isError).toBeUndefined()
+      expect(received).toEqual(["/tmp/project-a"])
     } finally {
       if (priorPort === undefined) delete process.env.SWIZ_DAEMON_PORT
       else process.env.SWIZ_DAEMON_PORT = priorPort
