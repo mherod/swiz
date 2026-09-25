@@ -8,7 +8,10 @@ import type { AgentDef } from "../agents.ts"
 import { formatDuration } from "../format-duration.ts"
 import { selectStableHookVariant } from "../hook-message-rephrasing.ts"
 import type { PendingCompletionRefusal } from "./task-evidence.ts"
-import { CANONICAL_TASKLIST_SYNC_MAX_AGE_MS } from "./task-governance-constants.ts"
+import {
+  CANONICAL_TASKLIST_SYNC_MAX_AGE_MS,
+  STALE_TASK_PRUNE_AGE_MS,
+} from "./task-governance-constants.ts"
 import { replaceTaskGovernanceSynonyms } from "./task-governance-rephrasing.ts"
 import type { PendingScopeCounts } from "./task-queue-view.ts"
 import {
@@ -399,16 +402,19 @@ function formatPendingScope(scope: PendingScopeCounts): string {
 /**
  * Names the one predicate this gate evaluates (pending count against the limit), with its measured
  * values and scope, and only remedies that can lower that count without discarding real work. A
- * TaskList sync is offered to inspect the queue, never as the fix: it cannot change the count (#929).
+ * TaskList sync is offered to inspect the queue; it lowers the count only by pruning tasks past the
+ * stale-prune age, so the copy must not promise more or less than that (#929).
  */
 function buildPendingOverflowMessage(r: Req<"pending-overflow">): string {
   const taskUpdateName = taskUpdateToolName()
+  const pruneDays = Math.round(STALE_TASK_PRUNE_AGE_MS / 86_400_000)
   return (
     `${r.toolName} is paused: ${r.pendingCount} pending tasks are queued, above the limit of ${r.limit}.\n\n` +
     formatPendingScope(r.scope) +
-    `This gate counts pending tasks only and clears once ${r.limit} or fewer remain; a TaskList sync alone ` +
-    "does not lower the count. It is relaxed briefly after a user message and while a skill runs, so a " +
-    "retry can pass then without the count changing.\n\n" +
+    `This gate counts pending tasks only and clears once ${r.limit} or fewer remain. A TaskList sync ` +
+    `lowers the count only by pruning tasks untouched for ${pruneDays} days; it does not clear active ` +
+    "tasks. The gate is relaxed briefly after a user message and while a skill runs, so a retry can " +
+    "pass then without the count changing.\n\n" +
     formatTranslatedActionPlan(
       [
         `Bring pending down by ${r.pendingCount - r.limit} (to ${r.limit} or fewer):`,

@@ -25,8 +25,12 @@ State machine: `pending` → `in_progress` → `completed`, or `deleted` from ei
 - **Pending overflow**: more than **20** pending tasks blocks every tool except TaskList
   (`PENDING_TASK_OVERFLOW_LIMIT`, `checkPendingOverflowGate`, `hooks/pretooluse-task-governance.ts`).
   The denial reports the measured count, the limit, and whose tasks were counted. A TaskList sync
-  alone does not clear it.
-- Tasks are never auto-completed or auto-deleted; every transition is an explicit
+  lowers the count only by pruning tasks untouched for 2 days.
+- **Pruning** (`pruneStaleCompletedTasks`, `src/tasks/task-prune.ts`): completed records are deleted
+  15 minutes after completion (`COMPLETED_TASK_PRUNE_AGE_MS`), and a record of any status is deleted
+  2 days after its last activity (`STALE_TASK_PRUNE_AGE_MS`). MCP task-tool reads prune the project
+  store; daemon cache loads prune session stores.
+- Tasks are never auto-completed; every status transition is an explicit
   `TaskUpdate`.
 
 ## PreToolUse gates

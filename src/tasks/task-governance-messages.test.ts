@@ -32,7 +32,10 @@ describe("pending-overflow denial", () => {
     test(`never offers a sync as the fix for ${label}`, () => {
       const reason = buildTaskGovernanceMessage(overflow(21), { translationAgent: agent })
       expect(reason).toContain("21 pending tasks are queued")
-      expect(reason).toContain("a TaskList sync alone does not lower the count")
+      // The sync is not the fix, but it does prune stale records; the copy must say exactly that.
+      expect(reason).toContain(
+        "A TaskList sync lowers the count only by pruning tasks untouched for 2 days"
+      )
       // The two pre-#929 capability branches: a sync-only remedy and an unqualified cleanup.
       expect(reason).not.toContain("Clear the task state")
       expect(reason).not.toContain("clean up or complete pending tasks")
