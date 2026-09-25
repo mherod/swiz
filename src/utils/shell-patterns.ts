@@ -432,6 +432,59 @@ export function hasGitStashMutation(command: string): boolean {
   )
 }
 
+/** Commands that only read in every form this predicate admits (see the per-command guards below). */
+const READ_ONLY_COMMANDS: ReadonlySet<string> = new Set(["ls", "rg", "grep", "cat", "head", "tail"])
+
+/** Git subcommands with no mutating form. `branch`, `tag` and `remote` are excluded: they mutate. */
+const READ_ONLY_GIT_SUBCOMMANDS: ReadonlySet<string> = new Set([
+  "status",
+  "log",
+  "diff",
+  "show",
+  "rev-parse",
+  "rev-list",
+  "ls-files",
+  "describe",
+])
+
+/** An unquoted output redirect, ignoring fd duplication (`2>&1`) and `/dev/null`. */
+function _hasWriteRedirect(segment: string): boolean {
+  const unquoted = stripQuotedShellStrings(segment)
+    .replace(/\d*>&\d+/g, "")
+    .replace(/\d*>>?\s*\/dev\/null\b/g, "")
+  return unquoted.includes(">")
+}
+
+function _isReadOnlySegment(segment: string): boolean {
+  if (_hasWriteRedirect(segment)) return false
+  const git = parseGitInvocationTokens(segment)
+  if (git) {
+    return READ_ONLY_GIT_SUBCOMMANDS.has(git.subcommand) && !_hasLongFlag(git.args, "--output")
+  }
+  const [command, ...args] = tokenizeShellSegment(segment)
+  if (command === "sed") {
+    return (
+      args.includes("-n") &&
+      !args.some((arg) => /^-[a-z]*i/.test(arg) || arg.startsWith("--in-place"))
+    )
+  }
+  if (command === "rg" && _hasLongFlag(args, "--pre")) return false
+  return command !== undefined && READ_ONLY_COMMANDS.has(command)
+}
+
+/**
+ * True when every statement of a shell command only reads: `ls`, `rg`, `grep`, `cat`, `head`,
+ * `tail`, `sed -n`, and read-only git. Reading is how an agent decides what to plan, so a gate
+ * that requires a task must not require one to read (swiz#957). Every segment across `|`, `;`,
+ * `&&`, `||`, `&` and newlines must qualify, so a read cannot carry a write through; command
+ * substitution is refused outright because it can run anything.
+ */
+export function isReadOnlyInspectionCommand(command: string): boolean {
+  if (/\$\(|`|<\(/.test(command)) return false
+  const segments = splitShellSegments(command).filter((segment) => segment.trim() !== "")
+  return segments.length > 0 && segments.every(_isReadOnlySegment)
+}
+
 /** Detect `--no-verify` on the commit and push subcommands where it bypasses hooks. */
 export function hasGitNoVerifyFlag(command: string): boolean {
   return _gitInvocations(command).some(

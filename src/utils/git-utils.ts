@@ -945,7 +945,12 @@ function isExemptUtilityCommand(command: string): boolean {
   )
 }
 
-/** True when a shell command is exempt from task-tracking enforcement. */
+/**
+ * True when any statement of a shell command is one that should not count as task drift
+ * (weight 0 in `classifyShellCommandWeight`, src/commands/daemon/divergence.ts). The
+ * require-tasks gate does not use this: it needs every statement to be read-only and calls
+ * `isReadOnlyInspectionCommand` in src/utils/shell-patterns.ts instead (#957).
+ */
 export function isTaskTrackingExemptShellCommand(command: string): boolean {
   return isExemptGitCommand(command) || isExemptUtilityCommand(command)
 }

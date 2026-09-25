@@ -4,6 +4,7 @@ import {
   hasGitPushForceFlag,
   hasGitStashMutation,
   hasUnsafeGitPushForceFlag,
+  isReadOnlyInspectionCommand,
   quotePosixShellArg,
   splitShellSegments,
   stripQuotedShellStrings,
@@ -13,6 +14,52 @@ import {
 import { useTempDir } from "./test-utils.ts"
 
 const temporary = useTempDir("swiz-shell-argv-")
+
+describe("isReadOnlyInspectionCommand", () => {
+  const readOnly = [
+    "ls -la",
+    "rg 'some pattern' src/",
+    'grep -n "a > b" file.ts',
+    "cat some-file.txt",
+    "head -20 file.ts",
+    "sed -n 1,5p file.ts",
+    "git status",
+    "git -C /repo log --oneline -3",
+    "git diff HEAD~1 -- src/",
+    "rg foo | head -5",
+    "ls 2>&1 >/dev/null",
+  ]
+  const notReadOnly = [
+    "",
+    "bun run dev",
+    "git push origin main",
+    'git commit -m "wip"',
+    "bun test",
+    "bun run lint",
+    "gh issue edit 1 --add-label ready",
+    "curl -X POST http://127.0.0.1:7943/mcp/tool",
+    "cat template > src/out.ts",
+    "ls | tee listing.txt",
+    "rg foo && git push",
+    "cat file; bun install",
+    'cat "$(rm -rf /)"',
+    "cat `whoami`",
+    "sed -i s/a/b/ file.ts",
+    "sed s/a/b/ file.ts",
+    "rg --pre=./script foo",
+    "git diff --output=patch.diff",
+    "git branch -D feature",
+    "git tag v1.0.0",
+  ]
+
+  for (const command of readOnly) {
+    test(`admits ${command}`, () => expect(isReadOnlyInspectionCommand(command)).toBe(true))
+  }
+  for (const command of notReadOnly) {
+    test(`refuses ${command || "an empty command"}`, () =>
+      expect(isReadOnlyInspectionCommand(command)).toBe(false))
+  }
+})
 
 /** Fixed test inputs only: the shell's git function prints argv and never invokes Git. */
 async function shellArgv(command: string): Promise<string[]> {

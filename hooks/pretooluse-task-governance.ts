@@ -140,6 +140,7 @@ import {
   readNativeTaskToolAvailability,
   shouldEnforceTaskGovernance,
 } from "../src/utils/inline-hook-helpers.ts"
+import { isReadOnlyInspectionCommand } from "../src/utils/shell-patterns.ts"
 import { resolveSessionLines } from "../src/utils/transcript.ts"
 
 // ─── Shared governance infrastructure ──────────────────────────────────────
@@ -636,6 +637,13 @@ function isTaskRecoveryCall(input: Record<string, any>, toolName: string): boole
   if (!isShellTool(toolName)) return false
   const command = String((input.tool_input as Record<string, any> | undefined)?.command ?? "")
   return isTaskRecoveryShellCommand(command)
+}
+
+/** Reading is how an agent decides what to plan, so it never waits on a task buffer (#957). */
+function isReadOnlyInspectionCall(input: Record<string, any>, toolName: string): boolean {
+  if (!isShellTool(toolName)) return false
+  const command = String((input.tool_input as Record<string, any> | undefined)?.command ?? "")
+  return isReadOnlyInspectionCommand(command)
 }
 
 function isMemoryMarkdownEdit(input: Record<string, any>, toolName: string): boolean {
@@ -1312,6 +1320,9 @@ async function runRequireTasksChecks(parsed: ParsedInput): Promise<SwizHookOutpu
   if (taskFileAccess) return taskFileAccess
   /** A broken queue must not prevent its explicit recovery command from running. */
   if (isTaskRecoveryCall(input, toolName)) return preToolUseAllow()
+  // No opinion rather than allow: an explicit allow would auto-approve the read and bypass the
+  // user's own permission rules. Exempt means this gate does not block, nothing more.
+  if (isReadOnlyInspectionCall(input, toolName)) return {}
 
   let thresholds: GovernanceThresholds = GOVERNANCE_THRESHOLDS.strict
   try {

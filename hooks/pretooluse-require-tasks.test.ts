@@ -198,7 +198,7 @@ describe("pretooluse-require-tasks", () => {
     expect(result.reason).toContain("All planned tasks are done")
   })
 
-  test("allows Bash when all tasks completed even with stale transcript (wrap-up exemption)", async () => {
+  test("denies Bash when all tasks completed even with a stale transcript", async () => {
     // Regression test for #23: stop-blocked + bash-blocked deadlock.
     // When all tasks are completed, the staleness check must NOT fire —
     // the agent needs to run git commit during wrap-up without being blocked.
@@ -698,14 +698,13 @@ describe("pretooluse-require-tasks", () => {
 
   describe("shell task governance", () => {
     const blockedShellCommands = [
-      ["git status", "read-only git"],
       ["git push origin main", "git sync"],
       ['git commit -m "wip"', "git commit"],
       ["bun test --concurrent", "test command"],
       ["bun run lint", "lint command"],
-      ["ls -la", "read command"],
-      ["rg 'some pattern' src/", "search command"],
-      ["cat some-file.txt", "generic command"],
+      ["gh issue edit 1 --add-label ready", "gh write"],
+      ["cat template > src/out.ts", "read redirected into a write"],
+      ["rg 'some pattern' src/ && git push", "read chained to a write"],
     ] as const
 
     for (const [command, label] of blockedShellCommands) {
@@ -715,6 +714,27 @@ describe("pretooluse-require-tasks", () => {
         const result = await runHook({ homeDir, command, sessionId })
         expect(result.decision).toBe("deny")
         expect(result.reason).toContain("needs tasks in place first")
+      })
+    }
+
+    // Reading is how an agent decides what to plan (#957, 1d6f546d): read-only inspection never
+    // waits on a task buffer. The gate stays silent rather than allowing, so the user's own
+    // permission rules still decide whether the read runs.
+    const readOnlyShellCommands = [
+      ["git status", "read-only git"],
+      ["ls -la", "read command"],
+      ["rg 'some pattern' src/", "search command"],
+      ["cat some-file.txt", "file read"],
+      ["sed -n 1,20p some-file.txt", "sed -n read"],
+    ] as const
+
+    for (const [command, label] of readOnlyShellCommands) {
+      test(`stays silent on ${label} when task buffer is missing`, async () => {
+        const homeDir = await createTempHome()
+        const sessionId = `session-shell-read-${label.replace(/\s+/g, "-")}-${Date.now()}-${Math.random().toString(16).slice(2)}`
+        const result = await runHook({ homeDir, command, sessionId })
+        expect(result.decision).toBeUndefined()
+        expect(result.reason ?? "").not.toContain("needs tasks in place first")
       })
     }
 

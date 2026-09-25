@@ -45,24 +45,27 @@ describe("pretooluse-require-tasks hook", () => {
     expect(result.parsed).toBeNull()
   })
 
-  test("denies shell commands when task buffer is missing, even for read-only git", async () => {
+  test("denies shell work when task buffer is missing but stays silent on read-only git", async () => {
     const tmpHome = await mkdtemp(join(tmpdir(), "swiz-hook-shell-governance-"))
     const sessionId = `test-exempt-${Date.now()}`
     await Bun.write(taskListSyncSentinelPath(sessionId), String(Date.now()))
-    try {
-      const result = await runHook(
-        {
-          tool_name: "Bash",
-          tool_input: { command: "git status" },
-          session_id: sessionId,
-        },
+    const run = (command: string) =>
+      runHook(
+        { tool_name: "Bash", tool_input: { command }, session_id: sessionId },
         { HOME: tmpHome }
       )
-      expect(result.exitCode).toBe(0)
-      expect(result.parsed?.hookSpecificOutput?.permissionDecision).toBe("deny")
-      expect(String(result.parsed?.hookSpecificOutput?.permissionDecisionReason ?? "")).toContain(
+    try {
+      const push = await run("git push origin main")
+      expect(push.exitCode).toBe(0)
+      expect(push.parsed?.hookSpecificOutput?.permissionDecision).toBe("deny")
+      expect(String(push.parsed?.hookSpecificOutput?.permissionDecisionReason ?? "")).toContain(
         "needs tasks in place first"
       )
+
+      // Reading never waits on a task buffer (#957); silent, not allow, so permissions still apply.
+      const status = await run("git status")
+      expect(status.exitCode).toBe(0)
+      expect(status.parsed).toBeNull()
     } finally {
       await rm(tmpHome, { recursive: true, force: true })
     }
