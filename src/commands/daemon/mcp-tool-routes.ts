@@ -8,13 +8,40 @@
  */
 
 import { z } from "zod"
-import { mcpToolNameSchema, runMcpTool } from "../../mcp-tool-core.ts"
+import { mcpCallerCwdRegistry } from "../../mcp-caller-cwd.ts"
+import { unresolvedMcpCwdMessage } from "../../mcp-cwd.ts"
+import {
+  type McpToolInput,
+  type McpToolName,
+  mcpToolNameSchema,
+  runMcpTool,
+} from "../../mcp-tool-core.ts"
 
 const mcpToolRequestSchema = z.object({
   tool: mcpToolNameSchema,
   cwd: z.string().min(1),
   input: z.looseObject({}).optional(),
 })
+
+/** Tools whose store is keyed by project; they must never fall back to the shared "-" key. */
+const PROJECT_TOOLS: ReadonlySet<McpToolName> = new Set(["TaskCreate", "TaskUpdate", "TaskList"])
+
+/**
+ * A stdio server started from "/" (the Claude desktop app) has no project of its own. Recover
+ * the caller's cwd from the PreToolUse hook Claude Code dispatched for this call (#955); a task
+ * tool with no match is refused rather than written to the store every desktop session shares.
+ */
+export function resolveMcpRequestCwd(
+  tool: McpToolName,
+  input: McpToolInput | undefined,
+  cwd: string,
+  now = Date.now()
+): string | null {
+  if (cwd !== "/") return cwd
+  const caller = mcpCallerCwdRegistry.claim(tool, input, now)
+  if (caller) return caller
+  return PROJECT_TOOLS.has(tool) ? null : cwd
+}
 
 export async function handleMcpToolRoute(req: Request): Promise<Response> {
   const parsed = mcpToolRequestSchema.safeParse(await req.json().catch(() => null))
@@ -24,7 +51,14 @@ export async function handleMcpToolRoute(req: Request): Promise<Response> {
     ].join(", ")
     return Response.json({ error: `Invalid mcp tool request: ${fields}` }, { status: 400 })
   }
-  const { tool, cwd, input } = parsed.data
+  const { tool, input } = parsed.data
+  const cwd = resolveMcpRequestCwd(tool, input, parsed.data.cwd)
+  if (!cwd) {
+    return Response.json({
+      content: [{ type: "text", text: unresolvedMcpCwdMessage(tool) }],
+      isError: true,
+    })
+  }
   const result = await runMcpTool(tool, input ?? {}, cwd)
   return Response.json(result)
 }

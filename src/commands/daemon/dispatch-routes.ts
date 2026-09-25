@@ -28,6 +28,7 @@ import {
 } from "../../dispatch/stop-response.ts"
 import type { DispatchStageDurations } from "../../dispatch/timing.ts"
 import { DISPATCH_TIMEOUTS } from "../../manifest.ts"
+import { mcpCallerCwdRegistry } from "../../mcp-caller-cwd.ts"
 import { taskCompletedHookInputSchema, taskCreatedHookInputSchema } from "../../schemas.ts"
 import { createTaskStoreForHookPayload } from "../../task-roots.ts"
 import { sessionDirPath, sessionStoreKey } from "../../tasks/task-store-path.ts"
@@ -373,6 +374,8 @@ async function captureParsedToolUse(
     return
   }
   if (canonicalEvent !== "preToolUse") return
+  // A rootless `swiz mcp` forwards this call from cwd "/"; the hook carries the real cwd.
+  mcpCallerCwdRegistry.record(toolName, parsed.toolInput, parsed.cwd, nowMs)
   const state = recordDivergenceToolCall(ctx.sessionDivergence, {
     sessionId,
     toolName,

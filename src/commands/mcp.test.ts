@@ -168,12 +168,12 @@ describe("executeMcpTool", () => {
 })
 
 describe("executeProjectTool", () => {
-  it("refuses task tools without a project directory and never reaches a store", async () => {
-    let requests = 0
+  it("hands an unresolved call to the daemon as '/' and passes a resolved cwd through", async () => {
+    const received: string[] = []
     const server = Bun.serve({
       port: 0,
-      fetch: () => {
-        requests += 1
+      fetch: async (req) => {
+        received.push(((await req.json()) as { cwd: string }).cwd)
         return Response.json({ content: [{ type: "text", text: "daemon" }] })
       },
     })
@@ -183,28 +183,31 @@ describe("executeProjectTool", () => {
     process.env.SWIZ_DAEMON_PORT = String(server.port)
     try {
       resetMcpToolDaemonBackoff()
-      const refused = await executeProjectTool("TaskCreate", { subject: "x" }, async () => null)
-      expect(refused.isError).toBe(true)
-      expect(refused.content[0]?.text).toContain("swiz#955")
-      expect(requests).toBe(0)
-
-      // Control: a resolved directory reaches the daemon with that cwd.
-      const received: string[] = []
-      server.reload({
-        fetch: async (req) => {
-          received.push(((await req.json()) as { cwd: string }).cwd)
-          return Response.json({ content: [{ type: "text", text: "daemon" }] })
-        },
-      })
+      // The daemon recovers the caller's cwd from the PreToolUse hook for this call.
+      const unresolved = await executeProjectTool("TaskCreate", { subject: "x" }, async () => null)
+      expect(unresolved.content[0]?.text).toBe("daemon")
       const accepted = await executeProjectTool("TaskList", {}, async () => "/tmp/project-a")
       expect(accepted.isError).toBeUndefined()
-      expect(received).toEqual(["/tmp/project-a"])
+      expect(received).toEqual(["/", "/tmp/project-a"])
     } finally {
       if (priorPort === undefined) delete process.env.SWIZ_DAEMON_PORT
       else process.env.SWIZ_DAEMON_PORT = priorPort
       if (priorNoDaemon !== undefined) process.env.SWIZ_NO_DAEMON = priorNoDaemon
       resetMcpToolDaemonBackoff()
       void server.stop(true)
+    }
+  })
+
+  it("refuses an unresolved task tool when no daemon can recover the caller", async () => {
+    const prior = process.env.SWIZ_NO_DAEMON
+    process.env.SWIZ_NO_DAEMON = "1"
+    try {
+      const refused = await executeProjectTool("TaskCreate", { subject: "x" }, async () => null)
+      expect(refused.isError).toBe(true)
+      expect(refused.content[0]?.text).toContain("swiz#955")
+    } finally {
+      if (prior === undefined) delete process.env.SWIZ_NO_DAEMON
+      else process.env.SWIZ_NO_DAEMON = prior
     }
   })
 })

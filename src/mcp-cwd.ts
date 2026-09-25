@@ -86,8 +86,9 @@ export function createMcpCwdResolver(server: McpRootsServer, processCwd: string)
 export function unresolvedMcpCwdMessage(toolName: string): string {
   return (
     `${toolName} failed: swiz could not determine this session's project directory. ` +
-    'The MCP client started `swiz mcp` with cwd "/" and provided no file:// root, so task ' +
-    "tools are disabled rather than writing to a queue shared by every project (swiz#955). " +
+    'The MCP client started `swiz mcp` with cwd "/", provided no file:// root, and no ' +
+    "PreToolUse hook for this call reached the swiz daemon, so task tools are disabled rather " +
+    "than writing to a queue shared by every project (swiz#955). " +
     "Restart the MCP server from the project directory, or use a client that supports MCP roots."
   )
 }

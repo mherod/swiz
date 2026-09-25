@@ -670,17 +670,21 @@ function cwdForTool(cwd: ToolCwd): Promise<string | null> {
   return typeof cwd === "string" ? Promise.resolve(cwd) : cwd()
 }
 
-/** Task tools refuse to run without a project directory rather than share the "-" store. */
+/**
+ * Task tools never run against the shared "-" store. Without a resolved directory the call
+ * still goes to the daemon as "/", which recovers the caller's cwd from the PreToolUse hook
+ * for the same call; with no daemon either, the tool is refused.
+ */
 export async function executeProjectTool(
   tool: McpToolName,
   input: McpToolInput,
   cwd: ToolCwd
 ): Promise<McpToolResult> {
   const resolved = await cwdForTool(cwd)
-  if (!resolved) {
-    return { content: [{ type: "text", text: unresolvedMcpCwdMessage(tool) }], isError: true }
-  }
-  return executeMcpTool(tool, input, resolved)
+  if (resolved) return executeMcpTool(tool, input, resolved)
+  const viaDaemon = await tryDaemonMcpTool(tool, input, "/")
+  if (viaDaemon) return viaDaemon
+  return { content: [{ type: "text", text: unresolvedMcpCwdMessage(tool) }], isError: true }
 }
 
 function registerReplyTool(server: McpToolServer, cwd: ToolCwd): void {
