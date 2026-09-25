@@ -70,7 +70,11 @@ export interface McpToolTextContent {
 export interface McpToolResult {
   content: McpToolTextContent[]
   isError?: boolean
-  structuredContent?: { taskMutation?: { changed: boolean }; skillQuery?: SkillQueryResult }
+  structuredContent?: {
+    summary?: string
+    taskMutation?: { changed: boolean }
+    skillQuery?: SkillQueryResult
+  }
 }
 
 export const MCP_TOOL_NAMES = [
@@ -92,6 +96,7 @@ export const mcpToolResultSchema = z.object({
   isError: z.boolean().optional(),
   structuredContent: z
     .object({
+      summary: z.string().optional(),
       taskMutation: z.object({ changed: z.boolean() }).optional(),
       skillQuery: skillQueryResultSchema.optional(),
     })
@@ -104,6 +109,16 @@ function textResult(text: string): McpToolResult {
 
 function errorResult(text: string): McpToolResult {
   return { content: [{ type: "text", text }], isError: true }
+}
+
+/**
+ * Claude Code hands the model a tool's structuredContent in place of its text
+ * content, so a mutation result repeats the rendered text as `summary`; without
+ * it the model sees only `{"taskMutation":{"changed":true}}` and never learns
+ * the created id or the resulting queue.
+ */
+function taskMutationResult(text: string, changed: boolean): McpToolResult {
+  return { ...textResult(text), structuredContent: { summary: text, taskMutation: { changed } } }
 }
 
 // ─── Reply sink ─────────────────────────────────────────────────────────────
@@ -218,10 +233,7 @@ async function runTaskCreateTool(input: McpToolInput, cwd: string): Promise<McpT
     const tasks = projectQueueTasks(await readProjectQueueWithPrune(projectKey))
     const headline = `Created #${task.id} — ${truncateForLine(task.subject)}`
     const advice = await discoverRelatedTaskAdvice(cwd, task)
-    return {
-      ...textResult(renderTaskToolResult(headline, tasks, task.id) + advice),
-      structuredContent: { taskMutation: { changed: true } },
-    }
+    return taskMutationResult(renderTaskToolResult(headline, tasks, task.id) + advice, true)
   } catch (error) {
     return errorResult(`${name} failed: ${messageFromUnknownError(error)}`)
   }
@@ -254,6 +266,22 @@ function normalizeTaskIdList(ids: readonly string[]): string[] {
 function removeTaskIds(edges: readonly string[], remove: readonly string[]): string[] {
   const removeSet = new Set(normalizeTaskIdList(remove))
   return edges.filter((id) => !removeSet.has(id.replace(/^#/, "")))
+}
+
+/**
+ * Reject field updates that would persist an unreadable or self-contradicting task:
+ * readTaskStore drops a record whose subject is empty (the task vanishes), and a
+ * self edge is a one-node dependency cycle that can never start.
+ */
+function invalidFieldUpdateReason(taskId: string, input: TaskUpdateToolInput): string | null {
+  if (input.subject !== undefined && !input.subject.trim()) {
+    return "subject must not be empty"
+  }
+  const selfEdges = [...(input.addBlocks ?? []), ...(input.addBlockedBy ?? [])]
+  if (normalizeTaskIdList(selfEdges).includes(taskId)) {
+    return `task #${taskId} cannot block itself`
+  }
+  return null
 }
 
 /** Apply the non-status fields of an update, returning a label per field actually changed. */
@@ -371,6 +399,8 @@ async function runTaskUpdateTool(rawInput: McpToolInput, cwd: string): Promise<M
       return errorResult(renderUnknownTaskId(taskUpdateName, input.taskId, tasksBefore))
     }
     const { task, storeKey } = record
+    const invalidReason = invalidFieldUpdateReason(task.id, input)
+    if (invalidReason) return errorResult(`${taskUpdateName} failed: ${invalidReason}`)
     const previousStatus = task.status
     const movementBefore = taskMovementFields(task)
     // Snapshot before applyTaskFieldUpdates mutates `task` in place, so the unblock comparison
@@ -399,16 +429,10 @@ async function runTaskUpdateTool(rawInput: McpToolInput, cwd: string): Promise<M
     )
     const unblocked = renderUnblockedLine(findNewlyUnblockedTasks(snapshotBefore, tasksAfter))
     const fullHeadline = unblocked ? `${headline}\n${unblocked}` : headline
-    return {
-      ...textResult(renderTaskToolResult(fullHeadline, tasksAfter, input.taskId)),
-      structuredContent: {
-        taskMutation: {
-          changed:
-            finalTask !== undefined &&
-            !isDeepStrictEqual(movementBefore, taskMovementFields(finalTask)),
-        },
-      },
-    }
+    return taskMutationResult(
+      renderTaskToolResult(fullHeadline, tasksAfter, input.taskId),
+      finalTask !== undefined && !isDeepStrictEqual(movementBefore, taskMovementFields(finalTask))
+    )
   } catch (error) {
     return errorResult(`${taskUpdateName} failed: ${messageFromUnknownError(error)}`)
   }

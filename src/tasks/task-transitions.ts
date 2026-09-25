@@ -31,7 +31,11 @@ export function validateTransition(oldStatus: string, newStatus: string): string
   if (oldStatus === newStatus) return null
   const allowed = VALID_TRANSITIONS[oldStatus]
   if (!allowed || !allowed.has(newStatus)) {
-    return `Invalid transition: ${oldStatus} → ${newStatus}. Tasks must be in_progress before they can be completed.`
+    const hint =
+      newStatus === "completed"
+        ? "Tasks must be in_progress before they can be completed."
+        : `Allowed from ${oldStatus}: ${allowed ? [...allowed].join(", ") : "none"}.`
+    return `Invalid transition: ${oldStatus} → ${newStatus}. ${hint}`
   }
   return null
 }

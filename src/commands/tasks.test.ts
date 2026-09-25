@@ -553,6 +553,15 @@ describe("sessionPrefix", () => {
     expect(sessionPrefix("")).toBe("")
   })
 
+  it("hashes short dashed keys so their task ids stay parseable", () => {
+    // projectKeyFromCwd("/") is "-": a verbatim prefix made every id "--1".
+    for (const key of ["-", "-a", "a-b"]) {
+      const prefix = sessionPrefix(key)
+      expect(prefix).toMatch(/^[0-9a-f]{4}$/)
+      expect(parseTaskId(`${prefix}-7`)).toEqual({ prefix, seq: 7 })
+    }
+  })
+
   it("derives distinct sha256 4-hex prefixes for path-derived project keys", () => {
     const swiz = sessionPrefix("-Users-matthewherod-Development-swiz")
     const plugg = sessionPrefix("-Users-matthewherod-Development-plugg-platform")
@@ -1099,6 +1108,12 @@ describe("task transition validator (#302)", () => {
   it("allows same-status no-op", () => {
     expect(validateTransition("pending", "pending")).toBeNull()
     expect(validateTransition("in_progress", "in_progress")).toBeNull()
+  })
+
+  it("names the allowed targets instead of the completion hint for a non-completion move", () => {
+    const error = validateTransition("in_progress", "pending")
+    expect(error).toContain("Allowed from in_progress: completed, cancelled.")
+    expect(error).not.toContain("before they can be completed")
   })
 })
 

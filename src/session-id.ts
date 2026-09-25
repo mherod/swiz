@@ -22,10 +22,13 @@ export function legacySessionPrefix(sessionId: SessionId): string {
  * - For native UUID / hex session IDs: uses first 4 hex characters (e.g. "7ed7", "aaaa").
  * - For project keys and arbitrary path keys: hashes the full store key with SHA-256
  *   to produce a stable 4-hex prefix, ensuring distinct project paths never collide.
+ * - Short alphanumeric ids pass through verbatim. A short key containing "-" (the
+ *   project key for cwd "/" is "-") is hashed instead: a dash in the prefix makes
+ *   `parseTaskId` misread the id, so every create reused `--1` and overwrote it.
  */
 export function sessionPrefix(sessionId: SessionId): string {
   if (!sessionId) return ""
-  if (sessionId.length < 4) return sessionId.toLowerCase()
+  if (sessionId.length < 4 && !sessionId.includes("-")) return sessionId.toLowerCase()
   if (!sessionId.startsWith("-") && HEX_UUID_LIKE_RE.test(sessionId)) {
     return sessionId.replace(/-/g, "").slice(0, 4).toLowerCase()
   }

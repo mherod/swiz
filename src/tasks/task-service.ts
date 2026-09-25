@@ -85,6 +85,10 @@ export async function createTaskInProcess(opts: CreateTaskOptions): Promise<Task
   const { sessionId, subject, description, cwd = process.cwd() } = opts
   const storeKey = opts.storeKey ?? (await resolveLegacyTaskStoreKey(sessionId, cwd))
 
+  // readTaskStore drops records with a falsy subject, so an empty one would be
+  // written, reported as created, and then vanish from every reader.
+  if (!subject.trim()) throw new Error("Task subject must not be empty")
+
   if (!opts.skipSubjectValidation) {
     const detection = detect(subject)
     if (detection.matched) {
