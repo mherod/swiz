@@ -40,6 +40,15 @@ async function createTranscript(dir: string, lines: unknown[]): Promise<string> 
   return path
 }
 
+/**
+ * The skill file the hook resolves for an enforcement project. Hooks run under an isolated
+ * HOME (#924), so they find this project copy. Resolving in the test process could instead
+ * return the developer's global skill, a path the hook never accepts.
+ */
+function projectSkillPath(dir: string): string {
+  return join(dir, ".skills/update-memory/SKILL.md")
+}
+
 async function runHook(
   stdinPayload: Record<string, any>,
   extraEnv?: Record<string, string>
@@ -85,9 +94,7 @@ describe("pretooluse-update-memory-enforcement", () => {
     const dir = await createEnforcementProjectDir(createTempDir)
     const transcript = await createTranscript(dir, [
       hookFeedback(REMINDER_FRAGMENT),
-      ...toolUse("Read", {
-        file_path: resolveSkillFilePathForHookPayload("update-memory", {}, dir)!,
-      }),
+      ...toolUse("Read", { file_path: projectSkillPath(dir) }),
       ...toolUse("Write", { file_path: path, content: "CLAUDE.md" }),
     ])
     const result = await runHook({
@@ -106,9 +113,7 @@ describe("pretooluse-update-memory-enforcement", () => {
     const dir = await createEnforcementProjectDir(createTempDir)
     const transcript = await createTranscript(dir, [
       hookFeedback(REMINDER_FRAGMENT),
-      ...toolUse("Read", {
-        file_path: resolveSkillFilePathForHookPayload("update-memory", {}, dir)!,
-      }),
+      ...toolUse("Read", { file_path: projectSkillPath(dir) }),
       ...toolUse("Write", { file_path: path, content: "DO: verify before delivery." }),
     ])
     const result = await runHook({
@@ -242,11 +247,7 @@ describe("pretooluse-update-memory-enforcement", () => {
     const dir = await createEnforcementProjectDir(createTempDir)
     const transcript = await createTranscript(dir, [
       hookFeedback(`Use the /update-memory skill to ${REMINDER_FRAGMENT}`),
-      ...toolUse("Read", {
-        file_path:
-          resolveSkillFilePathForHookPayload("update-memory", {}, dir) ??
-          "/missing/update-memory/SKILL.md",
-      }),
+      ...toolUse("Read", { file_path: projectSkillPath(dir) }),
       ...toolUse("Write", {
         file_path: "CLAUDE.md",
         content: "DO: update memory immediately.\n",

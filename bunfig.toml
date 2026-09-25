@@ -4,3 +4,7 @@
 # bunfig.toml test section does not support timeout configuration
 [packages]
 # Dependencies configuration if needed
+
+[test]
+# Removes the per-process sandbox HOME after the last test file (#924).
+preload = ["./src/utils/test-preload.ts"]

@@ -4,16 +4,45 @@ import { join } from "node:path"
 import { getGlobalTaskStateCache, setGlobalTaskStateCache } from "../tasks/task-recovery.ts"
 import { readTaskStoreMeta, sessionStoreKey } from "../tasks/task-repository.ts"
 import { TaskStateCache } from "../tasks/task-state-cache.ts"
+import { testSandboxHome } from "./test-sandbox-home.ts"
 import {
   acquireEnvLock,
   neutralAgentEnv,
   releaseEnvLockFn,
+  runHookInProcess,
   useTempDir,
+  withSandboxHome,
   writeRawTaskFixture,
   writeTask,
 } from "./test-utils.ts"
 
 const taskHomes = useTempDir("swiz-task-fixtures-")
+
+// #924: hook runs and direct task writers used the developer's real HOME, so fixture tasks
+// accumulated in the real ~/.claude/tasks.
+const ECHO_HOME_HOOK = "src/utils/fixtures/echo-home-hook.ts"
+
+test("runHookInProcess runs a hook under the sandbox HOME when the test chooses none", async () => {
+  const ambient = process.env.HOME
+  const result = await runHookInProcess(ECHO_HOME_HOOK, {})
+  const sandbox = await testSandboxHome()
+  expect(result.json?.systemMessage).toBe(sandbox)
+  expect(sandbox).not.toBe(ambient)
+  expect(process.env.HOME).toBe(ambient)
+})
+
+test("runHookInProcess keeps an explicit HOME", async () => {
+  const home = await taskHomes.create()
+  const result = await runHookInProcess(ECHO_HOME_HOOK, {}, { env: { HOME: home } })
+  expect(result.json?.systemMessage).toBe(home)
+})
+
+test("withSandboxHome points direct callers at the sandbox and restores HOME", async () => {
+  const ambient = process.env.HOME
+  const seen = await withSandboxHome(async () => process.env.HOME)
+  expect(seen).toBe(await testSandboxHome())
+  expect(process.env.HOME).toBe(ambient)
+})
 
 test("task fixtures stamp updatedAt on disk without reader backfill", async () => {
   const home = await taskHomes.create()

@@ -15,6 +15,7 @@ import {
 } from "../tasks/task-repository.ts"
 import type { Command } from "../types.ts"
 import { extractPreToolSurfaceDecision, getHookSpecificOutput } from "./hook-specific-output.ts"
+import { testSandboxHome } from "./test-sandbox-home.ts"
 
 const REPO_ROOT = resolve(import.meta.dir, "../..")
 
@@ -358,6 +359,10 @@ export function neutralAgentEnvOverrides(
  * Environment and cwd overrides are serialized and restored by this helper.
  * Hooks that resolve environment values at module initialization still need a
  * subprocess contract test; ordinary behavior tests should use this boundary.
+ *
+ * Unless `options.env` sets `HOME`, the run uses this process's sandbox home (`testSandboxHome`),
+ * so tasks, sentinels and state a hook writes never reach the developer's real home (#924).
+ * Pass `HOME` explicitly to inspect what a hook wrote.
  */
 // eslint-disable-next-line complexity
 export async function runHookInProcess(
@@ -372,7 +377,10 @@ export async function runHookInProcess(
   const originalCwd = process.cwd()
   const originalEnv = new Map<string, string | undefined>()
   try {
-    for (const [key, value] of Object.entries(options.env ?? {})) {
+    const env = Object.hasOwn(options.env ?? {}, "HOME")
+      ? (options.env ?? {})
+      : { ...options.env, HOME: await testSandboxHome() }
+    for (const [key, value] of Object.entries(env)) {
       originalEnv.set(key, process.env[key])
       if (value === undefined) delete process.env[key]
       else process.env[key] = value
@@ -418,6 +426,25 @@ export async function runHookInProcess(
       if (value === undefined) delete process.env[key]
       else process.env[key] = value
     }
+    releaseEnvLockFn()
+  }
+}
+
+/**
+ * Run `fn` with HOME pointed at `testSandboxHome()`, under the env lock (#924).
+ *
+ * For tests that call task-writing code directly; hook runs already get this from
+ * `runHookInProcess`. The lock is not reentrant, so `fn` must not call `runHookInProcess`.
+ */
+export async function withSandboxHome<T>(fn: () => Promise<T>): Promise<T> {
+  await acquireEnvLock()
+  const originalHome = process.env.HOME
+  try {
+    process.env.HOME = await testSandboxHome()
+    return await fn()
+  } finally {
+    if (originalHome === undefined) delete process.env.HOME
+    else process.env.HOME = originalHome
     releaseEnvLockFn()
   }
 }

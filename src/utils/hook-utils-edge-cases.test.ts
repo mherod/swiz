@@ -45,6 +45,7 @@ import {
 import { isSwizCommand } from "./inline-hook-helpers.ts"
 import { detectPackageManager, detectPkgRunner, detectRuntime } from "./package-detection.ts"
 import { createSessionTask } from "./session-task-io.ts"
+import { withSandboxHome } from "./test-utils.ts"
 import { extractToolNamesFromTranscript } from "./transcript.ts"
 
 // ─── git() edge cases ───────────────────────────────────────────────────────
@@ -849,55 +850,66 @@ describe("getGitAheadBehind() with malformed inputs", () => {
 // ─── createSessionTask() edge cases ─────────────────────────────────────────
 
 describe("createSessionTask() with malformed inputs", () => {
+  // #924: several of these inputs pass validation and write a task or sentinel. Run them all
+  // under the test sandbox HOME so none reaches the developer's real task store.
+  const createSessionTaskInSandbox = (...args: Parameters<typeof createSessionTask>) =>
+    withSandboxHome(() => createSessionTask(...args))
+
   it("returns early for undefined sessionId", async () => {
-    await createSessionTask(undefined, "test-key", "subject", "desc")
+    await createSessionTaskInSandbox(undefined, "test-key", "subject", "desc")
     // Should not throw
   })
 
   it("returns early for 'null' string sessionId", async () => {
-    await createSessionTask("null", "test-key", "subject", "desc")
+    await createSessionTaskInSandbox("null", "test-key", "subject", "desc")
     // Should not throw
   })
 
   it("returns early for empty sessionId", async () => {
-    await createSessionTask("", "test-key", "subject", "desc")
+    await createSessionTaskInSandbox("", "test-key", "subject", "desc")
     // Should not throw
   })
 
   it("returns early for whitespace-only sessionId", async () => {
-    await createSessionTask("   ", "test-key", "subject", "desc")
+    await createSessionTaskInSandbox("   ", "test-key", "subject", "desc")
     // Should not throw
   })
 
   it("returns early for empty sentinelKey", async () => {
-    await createSessionTask("valid-session", "", "subject", "desc")
+    await createSessionTaskInSandbox("valid-session", "", "subject", "desc")
     // Should not throw
   })
 
   it("returns early for whitespace-only sentinelKey", async () => {
-    await createSessionTask("valid-session", "  \t  ", "subject", "desc")
+    await createSessionTaskInSandbox("valid-session", "  \t  ", "subject", "desc")
     // Should not throw
   })
 
   it("sanitizes path-separator characters in sentinelKey", async () => {
     // Should not throw even with path separators. No-op executor avoids spawning a real process.
     const noopExecutor = async (_args: string[]) => 0
-    await createSessionTask("valid-id", "key/../../etc/passwd", "subject", "desc", noopExecutor)
+    await createSessionTaskInSandbox(
+      "valid-id",
+      "key/../../etc/passwd",
+      "subject",
+      "desc",
+      noopExecutor
+    )
   })
 
   it("sanitizes shell metacharacters in sessionId", async () => {
     // Should not throw even with metacharacters. No-op executor avoids spawning a real process.
     const noopExecutor = async (_args: string[]) => 0
-    await createSessionTask("id;rm -rf /", "safe-key", "subject", "desc", noopExecutor)
+    await createSessionTaskInSandbox("id;rm -rf /", "safe-key", "subject", "desc", noopExecutor)
   })
 
   it("handles sessionId that becomes empty after sanitization", async () => {
     // All special chars → sanitized to empty → should return early
-    await createSessionTask("///", "safe-key", "subject", "desc")
+    await createSessionTaskInSandbox("///", "safe-key", "subject", "desc")
   })
 
   it("handles sentinelKey that becomes empty after sanitization", async () => {
-    await createSessionTask("valid-id", "///", "subject", "desc")
+    await createSessionTaskInSandbox("valid-id", "///", "subject", "desc")
   })
 })
 
