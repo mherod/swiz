@@ -20,6 +20,7 @@ import pretooluseTaskGovernance, {
   evaluateNativeTaskUpdatePath,
   evaluateOtherShellToolPath,
   evaluatePendingOverflowGuard,
+  evaluatePretooluseTaskGovernance,
   evaluateTaskCreatePath,
   findStaleOpenTasks,
   getInProgressCap,
@@ -134,6 +135,73 @@ describe("evaluatePendingOverflowGuard", () => {
     // Empty payload → no session_id → guard exits before any I/O
     const result = await evaluatePendingOverflowGuard({}, "Edit")
     expect(result).toBeNull()
+  })
+
+  // #929: the gate's one predicate is pending > 20. Each denial must carry that measurement, and the
+  // grace window, not the count, explains a retry that passes at an unchanged count.
+  function overflowInput(sessionId: string, extra: Record<string, unknown> = {}) {
+    return {
+      session_id: sessionId,
+      tool_name: "Bash",
+      tool_input: { command: "echo hello" },
+      cwd: process.cwd(),
+      _taskHome: TASK_HOME,
+      ...extra,
+    }
+  }
+
+  test("control: exactly 20 pending tasks pass", async () => {
+    const sessionId = uniqueSessionId("overflow-20")
+    try {
+      await seedPendingTasks(sessionId, 20)
+      expect(await evaluatePendingOverflowGuard(overflowInput(sessionId), "Bash")).toBeNull()
+    } finally {
+      await cleanupSession(sessionId)
+    }
+  })
+
+  for (const count of [21, 46]) {
+    test(`denies ${count} pending tasks with the measured count, limit and scope`, async () => {
+      const sessionId = uniqueSessionId(`overflow-${count}`)
+      try {
+        await seedPendingTasks(sessionId, count)
+        const result = await evaluatePendingOverflowGuard(overflowInput(sessionId), "Bash")
+        const reason = decisionReason(result) ?? ""
+        expect(permissionDecision(result)).toBe("deny")
+        expect(reason).toContain(`${count} pending tasks are queued, above the limit of 20`)
+        expect(reason).toContain(`Counted: ${count} in this session.`)
+        expect(reason).toContain(`Bring pending down by ${count - 20}`)
+        expect(reason).not.toContain("Clear the task state")
+      } finally {
+        await cleanupSession(sessionId)
+      }
+    })
+  }
+
+  test("an unchanged-count retry is denied identically; only the grace window lets it pass", async () => {
+    const sessionId = uniqueSessionId("overflow-retry")
+    try {
+      await seedPendingTasks(sessionId, 46)
+      const first = decisionReason(
+        await evaluatePendingOverflowGuard(overflowInput(sessionId), "Bash")
+      )
+      const retry = decisionReason(
+        await evaluatePendingOverflowGuard(overflowInput(sessionId), "Bash")
+      )
+      expect(first).toContain("46 pending tasks are queued")
+      expect(retry).toBe(first)
+
+      const readInput = overflowInput(sessionId, { tool_name: "Read", tool_input: {} })
+      const outsideGrace = await evaluatePretooluseTaskGovernance(readInput)
+      expect(permissionDecision(outsideGrace)).toBe("deny")
+      const withinGrace = await evaluatePretooluseTaskGovernance({
+        ...readInput,
+        _lastUserMessageAt: Date.now(),
+      })
+      expect(permissionDecision(withinGrace)).not.toBe("deny")
+    } finally {
+      await cleanupSession(sessionId)
+    }
   })
 })
 

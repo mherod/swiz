@@ -268,6 +268,38 @@ describe("pretooluse-require-tasks hook", () => {
     }
   })
 
+  test("reports the measured age when the recorded sync is stale", async () => {
+    const tmpHome = await mkdtemp(join(tmpdir(), "swiz-hook-sync-age-"))
+    const sessionId = `test-sync-age-${Date.now()}`
+    const tasksDir = join(tmpHome, ".claude", "tasks", sessionId)
+    const { mkdir } = await import("node:fs/promises")
+    await mkdir(tasksDir, { recursive: true })
+    await Bun.write(
+      join(tasksDir, "1.json"),
+      JSON.stringify({ id: "1", subject: "Current work", status: "in_progress" })
+    )
+    await Bun.write(
+      join(tasksDir, "2.json"),
+      JSON.stringify({ id: "2", subject: "Next step", status: "pending" })
+    )
+    // A sentinel older than the 20-minute window: the gate must say how old, not just "stale" (#929).
+    await Bun.write(taskListSyncSentinelPath(sessionId), String(Date.now() - 45 * 60_000))
+    try {
+      const result = await runHook(
+        { tool_name: "Bash", tool_input: { command: "echo hello" }, session_id: sessionId },
+        { HOME: tmpHome }
+      )
+      const hookOutput = result.parsed?.hookSpecificOutput as Record<string, any> | undefined
+      const reason = String(hookOutput?.permissionDecisionReason ?? "")
+      expect(hookOutput?.permissionDecision).toBe("deny")
+      expect(reason).toContain("the last canonical TaskList sync for this session was 45m ago")
+      expect(reason).toContain("It checks sync age only")
+      expect(reason).not.toContain("pending tasks are queued")
+    } finally {
+      await rm(tmpHome, { recursive: true, force: true })
+    }
+  })
+
   test("denies (fail-closed) when hook receives malformed JSON stdin", async () => {
     // PROCESS_CONTRACT_TEST: malformed stdin must fail closed at the executable boundary.
     const proc = Bun.spawn([process.execPath, HOOK_PATH], {

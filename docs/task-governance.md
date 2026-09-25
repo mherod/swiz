@@ -14,12 +14,18 @@ queues and the final active task only suggest follow-on tasks when work remains.
 
 State machine: `pending` → `in_progress` → `completed`, or `deleted` from either open state.
 
-- **No shortcut completion**: `pending` → `completed` is blocked; tasks must pass through
-  `in_progress` first (`hooks/pretooluse-task-governance.ts`, completion governance section).
-- **In-progress cap**: at most **4** tasks may be `in_progress` concurrently
-  (`IN_PROGRESS_CAP`, `hooks/pretooluse-task-governance.ts:277`).
-- **Pending overflow**: more than **20** pending tasks triggers a cleanup requirement
-  (`PENDING_TASK_OVERFLOW_LIMIT`, `hooks/pretooluse-task-governance.ts:704`).
+- **Evidenced one-step completion only**: `pending` → `completed` succeeds only when
+  `taskAutoTransition` is on and the update carries evidence in `description`. It steps through
+  `in_progress` without taking an in_progress slot. Otherwise tasks pass through `in_progress`
+  first (`pendingCompletionRefusal`, `src/tasks/task-evidence.ts`, shared by the MCP/CLI hop and
+  the native hook).
+- **In-progress cap**: at most **4** tasks may be `in_progress` per project
+  (`MAX_IN_PROGRESS_TASKS_PER_PROJECT`, `src/tasks/task-wip-limit.ts`). Edit/Write/Bash are
+  blocked only above the cap (`exceedsInProgressCap`, `hooks/pretooluse-task-governance.ts`).
+- **Pending overflow**: more than **20** pending tasks blocks every tool except TaskList
+  (`PENDING_TASK_OVERFLOW_LIMIT`, `checkPendingOverflowGate`, `hooks/pretooluse-task-governance.ts`).
+  The denial reports the measured count, the limit, and whose tasks were counted. A TaskList sync
+  alone does not clear it.
 - Tasks are never auto-completed or auto-deleted; every transition is an explicit
   `TaskUpdate`.
 
@@ -32,15 +38,17 @@ All consolidated in `hooks/pretooluse-task-governance.ts` (thin wrappers re-expo
 | `pretooluse-require-tasks.ts` | Blocks Edit/Write/Bash without a valid task plan. **Strict**: ≥2 incomplete, ≥1 pending, ≥1 in_progress. **Relaxed**: ≥1 incomplete (`pretooluse-task-governance.ts:129-130`). Edit/Write payloads of ≥10 lines (`isLargeContentPayload`, `:299`) pass through with post-tool advisory instead of a hard block, so expensive generated content isn't lost. |
 | `pretooluse-task-subject-validation.ts` | One-verb subjects: rejects compound subjects (coordinators like "and"/"then") unless the pending buffer is healthy; rejects deferral framing ("future work", "carryover"); rejects compliance-gaming meta-subjects about the task tooling; rejects `~`/`$HOME` path references (`src/tasks/task-subject-validation.ts:137`). |
 | `pretooluse-taskupdate-schema.ts` | Restricts `TaskUpdate` input to allowed fields. |
-| `pretooluse-enforce-taskupdate.ts` | Completion rate limit: max **2 completions per 5-second window** (`MAX_COMPLETIONS_IN_WINDOW = 2`, `WINDOW_MS = 5_000`, `pretooluse-task-governance.ts:1022-1023`), bypassed when the planning buffer is healthy. Blocks `pending` → `completed`. Enforces the in-progress cap of 4. Blocks deprecated `swiz tasks` CLI in favour of native task tools. |
+| `pretooluse-enforce-taskupdate.ts` | Completion rate limit: max **2 completions per 5-second window** (`MAX_COMPLETIONS_IN_WINDOW = 2`, `WINDOW_MS = 5_000`, `pretooluse-task-governance.ts:1022-1023`), bypassed when the planning buffer is healthy. Blocks `pending` → `completed` unless the update is evidenced and `taskAutoTransition` is on. Enforces the in-progress cap of 4. Blocks deprecated `swiz tasks` CLI in favour of native task tools. |
 | `pretooluse-no-task-delegation.ts` | Blocks delegating task management to subagents (subagent TaskCreate lands in a different session and deadlocks the parent). |
 | `pretooluse-no-phantom-task-completion.ts` | Blocks completing a task with zero substantive tool calls since it went `in_progress`. |
 | `pretooluse-block-tasks-dir-{read,edit,glob,bash}.ts` | Block direct reads/edits/globs/shell access to `~/.claude/tasks/` — task state must flow through the task tools. |
 
 Governance is skipped when `AgentDef.tasksEnabled === false` (e.g. Codex), outside git repos,
 or when no `CLAUDE.md` exists in the tree (`isTaskEnforcementProject`,
-`pretooluse-task-governance.ts:305`). A grace window after a user message
-(`isWithinUserMessageGrace`) relaxes messaging.
+`pretooluse-task-governance.ts:305`). For 3 minutes after a user message
+(`isWithinUserMessageGrace`, `USER_MESSAGE_GRACE_MS`), the workflow gates stand down entirely;
+task-file integrity checks still apply. A retry in that window can pass without the measured
+condition changing.
 
 ## Staleness thresholds
 

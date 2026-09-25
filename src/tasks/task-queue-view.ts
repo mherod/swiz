@@ -14,6 +14,29 @@ export function taskOwnershipSuffix(task: { ownership?: string }): string {
   return task.ownership ? ` [${task.ownership}]` : ""
 }
 
+/** Where counted pending tasks live: only this session's and the project queue's are the caller's. */
+export interface PendingScopeCounts {
+  thisSession: number
+  projectQueue: number
+  otherSessions: number
+}
+
+/** Split pending tasks by owning store, so a count-based denial can say whose tasks it counted (#929). */
+export function countPendingByScope(
+  tasks: ReadonlyArray<{ status: string; storeKey?: StoredTask["storeKey"] }>,
+  sessionId: string
+): PendingScopeCounts {
+  const counts: PendingScopeCounts = { thisSession: 0, projectQueue: 0, otherSessions: 0 }
+  for (const task of tasks) {
+    if (task.status !== "pending") continue
+    const key = task.storeKey
+    if (key?.kind === "project") counts.projectQueue++
+    else if (!key || key.id === sessionId) counts.thisSession++
+    else counts.otherSessions++
+  }
+  return counts
+}
+
 /** Qualify only colliding IDs; ordinary task IDs and their dependency edges remain familiar. */
 export function projectQueueTasks(records: readonly StoredTask[]): QueueTask[] {
   const byId = new Map<string, StoredTask[]>()

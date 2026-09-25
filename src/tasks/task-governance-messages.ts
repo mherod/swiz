@@ -5,10 +5,12 @@ import {
   taskToolNameForCurrentAgent,
 } from "../agent-paths.ts"
 import type { AgentDef } from "../agents.ts"
+import { formatDuration } from "../format-duration.ts"
 import { selectStableHookVariant } from "../hook-message-rephrasing.ts"
 import type { PendingCompletionRefusal } from "./task-evidence.ts"
 import { CANONICAL_TASKLIST_SYNC_MAX_AGE_MS } from "./task-governance-constants.ts"
 import { replaceTaskGovernanceSynonyms } from "./task-governance-rephrasing.ts"
+import type { PendingScopeCounts } from "./task-queue-view.ts"
 import {
   type DuplicateSubjectGroup,
   formatDuplicateSubjectGroups,
@@ -189,6 +191,8 @@ export type TaskGovernanceMessageRequest =
   | {
       kind: "canonical-tasklist-stale"
       toolName: string
+      /** Age of the last recorded sync; null when none is recorded. */
+      lastSyncAgeMs: number | null
     }
   | {
       kind: "task-deletion-threshold"
@@ -198,6 +202,9 @@ export type TaskGovernanceMessageRequest =
   | {
       kind: "pending-overflow"
       toolName: string
+      pendingCount: number
+      limit: number
+      scope: PendingScopeCounts
     }
   | {
       kind: "duplicate-subject-state"
@@ -359,9 +366,14 @@ function buildStaleTasksMessage(r: Req<"stale-tasks">): string {
 function buildCanonicalTasklistStaleMessage(r: Req<"canonical-tasklist-stale">): string {
   const windowMinutes = Math.round(CANONICAL_TASKLIST_SYNC_MAX_AGE_MS / 60_000)
   const lead = `Sync task state before ${r.toolName}.`
+  const measured =
+    r.lastSyncAgeMs === null
+      ? "no canonical TaskList sync is recorded for this session"
+      : `the last canonical TaskList sync for this session was ${formatDuration(r.lastSyncAgeMs)} ago`
   return (
     `${lead}\n\n` +
-    `Cause: no canonical TaskList sync is recorded for this session within the last ${windowMinutes} minutes.\n\n` +
+    `Cause: ${measured}; this gate needs one within the last ${windowMinutes} minutes. ` +
+    "It checks sync age only, so changing the number of tasks does not clear it.\n\n" +
     formatTranslatedActionPlan([TASKLIST_STABILITY_STEP, retryAfterTaskList(r.toolName)]) +
     `\nIf this block re-fires immediately after a TaskList call, the sync record is not being written — ` +
     `treat it as a hook fault and use the /re-assess skill instead of retrying.`
@@ -375,22 +387,43 @@ function buildTaskDeletionThresholdMessage(r: Req<"task-deletion-threshold">): s
   })
 }
 
+function formatPendingScope(scope: PendingScopeCounts): string {
+  const parts = [
+    scope.thisSession ? `${scope.thisSession} in this session` : "",
+    scope.projectQueue ? `${scope.projectQueue} in the shared project queue` : "",
+    scope.otherSessions ? `${scope.otherSessions} owned by other sessions` : "",
+  ].filter(Boolean)
+  return parts.length ? `Counted: ${parts.join(", ")}. ` : ""
+}
+
+/**
+ * Names the one predicate this gate evaluates (pending count against the limit), with its measured
+ * values and scope, and only remedies that can lower that count without discarding real work. A
+ * TaskList sync is offered to inspect the queue, never as the fix: it cannot change the count (#929).
+ */
 function buildPendingOverflowMessage(r: Req<"pending-overflow">): string {
-  const agent = resolveGovernanceTranslationAgent()
-  const hasTaskList = agentDefinitelySupportsTaskList(agent)
-  if (!hasTaskList) {
-    const taskUpdateName = taskUpdateToolName()
-    return (
-      `Too many pending tasks — reduce them before retrying ${r.toolName}.\n\n` +
-      formatTranslatedActionPlan([
-        `Use ${taskUpdateName} to clean up or complete pending tasks.`,
-        `Retry ${r.toolName} once the task queue is resolved.`,
-      ])
-    )
-  }
+  const taskUpdateName = taskUpdateToolName()
   return (
-    `Clear the task state, then retry ${r.toolName}.\n\n` +
-    formatTranslatedActionPlan([TASKLIST_STABILITY_STEP, retryAfterTaskList(r.toolName)])
+    `${r.toolName} is paused: ${r.pendingCount} pending tasks are queued, above the limit of ${r.limit}.\n\n` +
+    formatPendingScope(r.scope) +
+    `This gate counts pending tasks only and clears once ${r.limit} or fewer remain; a TaskList sync alone ` +
+    "does not lower the count. It is relaxed briefly after a user message and while a skill runs, so a " +
+    "retry can pass then without the count changing.\n\n" +
+    formatTranslatedActionPlan(
+      [
+        `Bring pending down by ${r.pendingCount - r.limit} (to ${r.limit} or fewer):`,
+        [
+          `Use ${taskUpdateName} to complete pending tasks whose work is already done, with the evidence in the update's description.`,
+          "Cancel only tasks that are stale, duplicated or no longer real work.",
+          ...(r.scope.otherSessions
+            ? ["Leave tasks owned by other sessions to their owners."]
+            : []),
+          "Do not cancel real planned work to satisfy this count; if every remaining task is real, report that to the user.",
+        ],
+        retryAfterTaskList(r.toolName),
+      ],
+      { taskListFirst: true }
+    )
   )
 }
 

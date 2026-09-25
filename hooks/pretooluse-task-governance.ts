@@ -80,6 +80,7 @@ import {
 import { replaceTaskGovernanceSynonyms } from "../src/tasks/task-governance-rephrasing.ts"
 import { fetchIssueHints } from "../src/tasks/task-issue-hints.ts"
 import {
+  countPendingByScope,
   projectQueueTasks,
   TASK_QUEUE_RECOVERY,
   taskOwnershipSuffix,
@@ -93,6 +94,7 @@ import {
 import {
   parseTaskId,
   readTaskRecordsAcrossStores,
+  type TaskStoreKey,
   taskRecordReference,
 } from "../src/tasks/task-repository.ts"
 // validateLastTaskStanding removed — handleTaskCompletion now checks full governance thresholds
@@ -946,6 +948,7 @@ async function checkCanonicalTaskListSync(
     taskGovernanceMessage(input, {
       kind: "canonical-tasklist-stale",
       toolName,
+      lastSyncAgeMs: ageMs,
     })
   )
 }
@@ -1100,15 +1103,30 @@ function checkTaskDeletion(
 
 const PENDING_TASK_OVERFLOW_LIMIT = 20
 
-function checkPendingOverflow(
+/**
+ * The gate's one predicate is the pending count against PENDING_TASK_OVERFLOW_LIMIT, so the denial
+ * carries that measurement and whose tasks it counted. Without them the copy could only guess at a
+ * cause, and a sync-only remedy sent agents cancelling real work (#929).
+ */
+function checkPendingOverflowGate(
+  input: Record<string, any>,
   toolName: string,
-  allTasks: Array<{ id: string; status: string; subject: string }>
+  sessionId: string,
+  allTasks: Array<{ id: string; status: string; subject: string; storeKey?: TaskStoreKey }>
 ): SwizHookOutput | undefined {
   if (isTaskListTool(toolName)) return undefined
   const pendingCount = allTasks.filter((t) => t.status === "pending").length
   if (pendingCount <= PENDING_TASK_OVERFLOW_LIMIT) return undefined
 
-  return preToolUseDeny(buildTaskGovernanceMessage({ kind: "pending-overflow", toolName }))
+  return preToolUseDeny(
+    taskGovernanceMessage(input, {
+      kind: "pending-overflow",
+      toolName,
+      pendingCount,
+      limit: PENDING_TASK_OVERFLOW_LIMIT,
+      scope: countPendingByScope(allTasks, sessionId),
+    })
+  )
 }
 
 function buildDuplicateSubjectStateBlock(
@@ -1247,7 +1265,12 @@ function checkReconciliationRequired(context: TaskStateCheckContext): SwizHookOu
 }
 
 function runImmediateTaskStateChecks(context: TaskStateCheckContext): SwizHookOutput | undefined {
-  const pendingOverflow = checkPendingOverflow(context.toolName, context.allTasks)
+  const pendingOverflow = checkPendingOverflowGate(
+    context.input,
+    context.toolName,
+    context.sessionId,
+    context.allTasks
+  )
   if (pendingOverflow) return pendingOverflow
 
   const deletion = checkTaskDeletion(
@@ -1942,7 +1965,7 @@ export async function evaluatePendingOverflowGuard(
   if (await skillOwnsWorkflow(input, cwd)) return null
 
   const allTasks = overlayEventState(await readTasksForInput(input, sessionId), sessionId)
-  return checkPendingOverflow(toolName, allTasks) ?? null
+  return checkPendingOverflowGate(input, toolName, sessionId, allTasks) ?? null
 }
 
 /**
