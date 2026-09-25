@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+import { isHookDenialResult, shellCommandKey } from "../src/infractions.ts"
 import {
   buildContextHookOutput,
   runSwizHookAsMain,
@@ -17,7 +18,6 @@ import { resolveSessionLines } from "../src/utils/transcript.ts"
 const WINDOW_MS = 20 * 60 * 1000
 const EDIT_LIMIT = 8
 const BASH_FAILURE_LIMIT = 3
-const COMMAND_KEY_LENGTH = 60
 const UNBLOCK_SKILL = ["un", "block-myself"].join("")
 
 type StuckSignal =
@@ -78,11 +78,12 @@ function isRecord(value: unknown): value is Record<string, any> {
 
 function resultFromBlock(block: Record<string, any>, entryTimestampMs: number | null): ToolResult {
   const text = textFromUnknown(block.content)
+  const isError = typeof block.is_error === "boolean" ? block.is_error : null
   return {
-    isError: typeof block.is_error === "boolean" ? block.is_error : null,
+    isError,
     text,
     timestampMs: parseTimestampMs(block.timestamp) ?? entryTimestampMs,
-    denied: text.includes("You must act on this now") || text.includes("Resolve this block"),
+    denied: isHookDenialResult(isError, text),
   }
 }
 
@@ -113,8 +114,9 @@ function normalizeCommand(command: string): string {
   return command.normalize("NFKC").replace(/\s+/g, " ").trim()
 }
 
+/** The retry-after-block detector's key, so both detectors agree on what "the same command" is. */
 export function commandKey(command: string): string {
-  return normalizeCommand(command).slice(0, COMMAND_KEY_LENGTH)
+  return shellCommandKey(command)
 }
 
 function shellFailed(result: ToolResult | undefined): boolean {

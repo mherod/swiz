@@ -26,7 +26,8 @@ function deniedBash(id: string, command: string): string[] {
             type: "tool_result",
             tool_use_id: id,
             is_error: true,
-            content: `Blocked.\n\n${DENY_FOOTER}`,
+            // How Claude Code records a hook denial; the detector keys on this wrapper (#964).
+            content: `PreToolUse:Bash hook error: Blocked.\n\n${DENY_FOOTER}`,
           },
         ],
       },

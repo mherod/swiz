@@ -22,16 +22,6 @@ import type { JsonLike } from "./schemas.ts"
 import { isCodeChangeTool, isShellTool } from "./tool-matchers.ts"
 import { tryParseJsonLine } from "./utils/jsonl.ts"
 
-/**
- * Substrings that appear in the footer of every PreToolUse/Stop denial emitted by
- * `denyPreToolUse` / `blockStop` (see src/utils/hook-response.ts, blockingStrategy.ts).
- * A tool_result containing one of these was a block, not a normal tool error.
- */
-export const DENY_FOOTER_MARKERS = ["You must act on this now", "Resolve this block"] as const
-
-/** Key length cap — mirrors pretooluse-stuck-state.ts so command keys collapse identically. */
-const COMMAND_KEY_LENGTH = 60
-
 /** How far back denied attempts count toward an infraction. */
 export const INFRACTION_WINDOW_MS = 20 * 60 * 1000
 
@@ -138,26 +128,44 @@ function textFromContent(value: JsonLike | undefined): string {
   return ""
 }
 
-function isDenialText(text: string): boolean {
-  return DENY_FOOTER_MARKERS.some((marker) => text.includes(marker))
-}
+/**
+ * How Claude Code records a hook denial: the tool_result content opens with
+ * "<Event>:<Tool> hook error:", e.g. "PreToolUse:Bash hook error: …".
+ */
+const HOOK_DENIAL_WRAPPER_RE = /^[A-Za-z]+:[^\s:]+ hook error:/
 
-function shellCommandKey(input: object | null | undefined): string {
-  if (!input || typeof input !== "object") return ""
-  const command = String(Reflect.get(input, "command") ?? Reflect.get(input, "cmd") ?? "")
-  if (!command) return ""
-  // Collapse whitespace so retries differing only in spacing still collide —
-  // normalizeCommand alone handles backslash-continuations, not internal runs.
-  return normalizeCommand(command).replace(/\s+/g, " ").trim().slice(0, COMMAND_KEY_LENGTH)
+/**
+ * A tool_result is a hook denial only when it is an error AND opens with the hook-error
+ * wrapper (#964). Text alone cannot decide it: a successful run, or a failing test, can print
+ * the same deny footer, and counting that turned compliant retries into red cards.
+ */
+export function isHookDenialResult(isError: boolean | null | undefined, text: string): boolean {
+  return isError === true && HOOK_DENIAL_WRAPPER_RE.test(text.trimStart())
 }
 
 /**
- * Build the comparable key for a tool call. Shell calls key on the (normalised,
- * capped) command; file edits key on the path; anything else keys on the tool name
+ * Comparable key for a shell command, shared with pretooluse-stuck-state.ts. It joins
+ * backslash continuations, applies NFKC and collapses whitespace, so retries that differ only
+ * in spacing collide. It is never truncated: a 60-character cap made a corrected command
+ * collide with the one that was denied (#964).
+ */
+export function shellCommandKey(command: string): string {
+  return normalizeCommand(command).normalize("NFKC").replace(/\s+/g, " ").trim()
+}
+
+function shellInputKey(input: object | null | undefined): string {
+  if (!input || typeof input !== "object") return ""
+  const command = String(Reflect.get(input, "command") ?? Reflect.get(input, "cmd") ?? "")
+  return command ? shellCommandKey(command) : ""
+}
+
+/**
+ * Build the comparable key for a tool call. Shell calls key on the full normalised
+ * command; file edits key on the path; anything else keys on the tool name
  * so e.g. repeated denied TaskUpdate attempts still collapse together.
  */
 export function attemptKey(toolName: string, input: object | null | undefined): string {
-  if (isShellTool(toolName)) return shellCommandKey(input)
+  if (isShellTool(toolName)) return shellInputKey(input)
   if (isCodeChangeTool(toolName)) {
     if (!input || typeof input !== "object") return ""
     return String(Reflect.get(input, "file_path") ?? Reflect.get(input, "path") ?? "")
@@ -172,6 +180,7 @@ const rawBlockSchema = z.looseObject({
   name: z.string().optional(),
   tool_use_id: z.union([z.string(), z.number()]).optional(),
   content: z.custom<JsonLike>().optional(),
+  is_error: z.boolean().optional(),
   timestamp: z.union([z.string(), z.number()]).optional(),
   input: z.record(z.string(), z.custom<JsonLike>()).optional(),
 })
@@ -224,7 +233,7 @@ function collectResults(lines: string[]): Map<string, ToolResultRecord> {
       results.set(id, {
         text,
         timestampMs: parseTimestampMs(block.timestamp) ?? entryTimestampMs,
-        denied: isDenialText(text),
+        denied: isHookDenialResult(block.is_error, text),
         isCooldown: text.includes(COOLDOWN_MARKER),
         isInfractionDenial: text.includes(INFRACTION_DENIAL_MARKER),
         isRetryAllowed: text.includes(RETRY_ALLOWED_DENIAL_MARKER),

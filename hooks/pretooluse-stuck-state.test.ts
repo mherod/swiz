@@ -2,8 +2,9 @@ import { describe, expect, test } from "bun:test"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { attemptKey } from "../src/infractions.ts"
 import { runHookInProcess } from "../src/utils/test-utils.ts"
-import pretooluseStuckState from "./pretooluse-stuck-state.ts"
+import pretooluseStuckState, { commandKey } from "./pretooluse-stuck-state.ts"
 
 const HOOK = join(import.meta.dir, "pretooluse-stuck-state.ts")
 const NOW_MS = Date.parse("2026-05-09T12:00:00.000Z")
@@ -90,6 +91,21 @@ async function withTranscript<T>(lines: string[], fn: (path: string) => Promise<
     await rm(dir, { recursive: true, force: true })
   }
 }
+
+// #964: both detectors cut command keys at 60 characters, so distinct long commands collided.
+describe("stuck-state command keys", () => {
+  const base = "gh issue edit 956 --body-file /private/tmp/claude-501/-Users-someone-Development-"
+
+  test("keeps commands that differ only after character 60 apart", () => {
+    expect(commandKey(`${base}a.md`)).not.toBe(commandKey(`${base}b.md`))
+  })
+
+  test("uses the same key as the retry-after-block detector", () => {
+    for (const command of [`${base}a.md`, "git   commit \\\n  -m 'x'", "ｇｉｔ status"]) {
+      expect(commandKey(command)).toBe(attemptKey("Bash", { command }))
+    }
+  })
+})
 
 describe("pretooluse-stuck-state", () => {
   test("repeat-edit without commit emits advisory context", async () => {

@@ -5,7 +5,6 @@ import {
   COOLDOWN_MARKER,
   collectBlockedAttempts,
   complianceBaselineWantedLevel,
-  DENY_FOOTER_MARKERS,
   evaluateInfraction,
   INFRACTION_DENIAL_MARKER,
   INFRACTION_WINDOW_MS,
@@ -15,7 +14,12 @@ import {
   standingWantedLevel,
 } from "./infractions.ts"
 
-const DENY_FOOTER = DENY_FOOTER_MARKERS[0]
+/** The mandate footer swiz appends to every denial (src/SwizHook.ts preToolUseDenyWithSystemMessage). */
+const DENY_FOOTER =
+  "You must act on this now. Do not try to stop again without completing the required action."
+
+/** How Claude Code records a PreToolUse hook denial: an is_error result opening with this wrapper. */
+const hookDenial = (tool: string, reason: string) => `PreToolUse:${tool} hook error: ${reason}`
 
 /** Build an assistant tool_use JSONL line. */
 function toolUseLine(opts: {
@@ -59,7 +63,7 @@ function deniedBashAttempt(id: string, command: string, ts?: string): string[] {
     toolUseLine({ id, name: "Bash", input: { command }, timestamp: ts }),
     toolResultLine({
       toolUseId: id,
-      text: `Blocked: do the thing.\n\n${DENY_FOOTER}`,
+      text: hookDenial("Bash", `Blocked: do the thing.\n\n${DENY_FOOTER}`),
       timestamp: ts,
     }),
   ]
@@ -70,7 +74,7 @@ function infractionDeniedBashAttempt(id: string, command: string, ts?: string): 
     toolUseLine({ id, name: "Bash", input: { command }, timestamp: ts }),
     toolResultLine({
       toolUseId: id,
-      text: `Blocked by ${INFRACTION_DENIAL_MARKER}.\n\n${DENY_FOOTER}`,
+      text: hookDenial("Bash", `Blocked by ${INFRACTION_DENIAL_MARKER}.\n\n${DENY_FOOTER}`),
       timestamp: ts,
     }),
   ]
@@ -81,7 +85,10 @@ function retryAllowedDeniedBashAttempt(id: string, command: string, ts?: string)
     toolUseLine({ id, name: "Bash", input: { command }, timestamp: ts }),
     toolResultLine({
       toolUseId: id,
-      text: `${RETRY_ALLOWED_DENIAL_MARKER}: retry this command.\n\n${DENY_FOOTER}`,
+      text: hookDenial(
+        "Bash",
+        `${RETRY_ALLOWED_DENIAL_MARKER}: retry this command.\n\n${DENY_FOOTER}`
+      ),
       timestamp: ts,
     }),
   ]
@@ -104,6 +111,54 @@ describe("attemptKey", () => {
 
   it("returns empty key when shell command is absent", () => {
     expect(attemptKey("Bash", {})).toBe("")
+  })
+
+  // #964: keys were cut at 60 characters, so a corrected command collided with the one denied.
+  it("keeps commands that differ only after character 60 apart", () => {
+    const base = "gh issue edit 956 --body-file /private/tmp/claude-501/-Users-someone-Development-"
+    expect(base.length).toBeGreaterThan(60)
+    expect(attemptKey("Bash", { command: `${base}a.md` })).not.toBe(
+      attemptKey("Bash", { command: `${base}b.md` })
+    )
+  })
+})
+
+describe("retry-after-block with a corrected command (#964)", () => {
+  const TS = "2026-05-25T00:00:00.000Z"
+  const NOW = Date.parse(TS) + 1000
+  const run = 'bun test src/pretooluse-require-tasks.test.ts -t "in_progress" 2>&1'
+
+  it("does not escalate a new filter after a denied one and a compliant run", () => {
+    const lines = [
+      ...deniedBashAttempt("a", `${run} | tail -8`, TS),
+      // The compliant retry ran; one failing test's output quoted a hook message.
+      toolUseLine({
+        id: "b",
+        name: "Bash",
+        input: { command: `${run} | tail -15` },
+        timestamp: TS,
+      }),
+      toolResultLine({
+        toolUseId: "b",
+        isError: false,
+        text: `(fail) x\n${DENY_FOOTER}`,
+        timestamp: TS,
+      }),
+    ]
+    const current = resolveCurrentAttempt({
+      tool_name: "Bash",
+      tool_input: { command: `${run} | tail -12` },
+    })
+    expect(evaluateInfraction(lines, current!, NOW).level).toBe("none")
+  })
+
+  it("control: re-issuing the exact denied command still escalates yellow then red", () => {
+    const command = `${run} | tail -8`
+    const current = resolveCurrentAttempt({ tool_name: "Bash", tool_input: { command } })
+    const once = deniedBashAttempt("a", command, TS)
+    expect(evaluateInfraction(once, current!, NOW).level).toBe("yellow")
+    const twice = [...once, ...deniedBashAttempt("b", command, TS)]
+    expect(evaluateInfraction(twice, current!, NOW).level).toBe("red")
   })
 })
 
@@ -128,12 +183,34 @@ describe("collectBlockedAttempts", () => {
     expect(attempts[0]?.toolName).toBe("Bash")
   })
 
-  it("detects denials carrying the second footer marker", () => {
+  it("detects hook denials of non-shell tools", () => {
     const lines = [
       toolUseLine({ id: "a", name: "Edit", input: { file_path: "/x.ts" } }),
-      toolResultLine({ toolUseId: "a", text: `nope. ${DENY_FOOTER_MARKERS[1]}` }),
+      toolResultLine({ toolUseId: "a", text: hookDenial("Edit", "nope. Resolve this block.") }),
     ]
     expect(collectBlockedAttempts(lines)).toHaveLength(1)
+  })
+
+  // #964: output that merely quotes deny text was counted as a denial, so a compliant run
+  // added to the retry count.
+  it("never counts a successful result, whatever its output quotes", () => {
+    const lines = [
+      toolUseLine({ id: "a", name: "Bash", input: { command: "bun test src/x.test.ts" } }),
+      toolResultLine({
+        toolUseId: "a",
+        isError: false,
+        text: `1 fail\nexpected: "Blocked. ${DENY_FOOTER}"\nRan 3 tests`,
+      }),
+    ]
+    expect(collectBlockedAttempts(lines)).toEqual([])
+  })
+
+  it("never counts a failed command that prints deny text", () => {
+    const lines = [
+      toolUseLine({ id: "a", name: "Bash", input: { command: "bun test src/x.test.ts" } }),
+      toolResultLine({ toolUseId: "a", text: `Exit code 1\n${hookDenial("Bash", DENY_FOOTER)}` }),
+    ]
+    expect(collectBlockedAttempts(lines)).toEqual([])
   })
 })
 
@@ -294,7 +371,7 @@ function cooldownAttempt(id: string, command: string): string[] {
             type: "tool_result",
             tool_use_id: id,
             is_error: true,
-            content: `${COOLDOWN_MARKER}.\n\n${DENY_FOOTER_MARKERS[0]}`,
+            content: hookDenial("Bash", `${COOLDOWN_MARKER}.\n\n${DENY_FOOTER}`),
           },
         ],
       },
