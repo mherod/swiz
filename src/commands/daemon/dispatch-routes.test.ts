@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test"
+import { tmpdir } from "node:os"
 import stopLifecycleTasks from "../../../hooks/stop-lifecycle-tasks.ts"
 import type { HookGroup } from "../../manifest.ts"
 import type { SwizHook } from "../../SwizHook.ts"
@@ -495,7 +496,9 @@ describe("handleDispatchRoute", () => {
       new Request(url, {
         method: "POST",
         body: JSON.stringify({
-          cwd: process.cwd(),
+          // Not process.cwd(): the checkout's live .swiz project-state notices would prefix the
+          // first message and make the "repeated" hint look new.
+          cwd: tmpdir(),
           tool_name: "Bash",
           tool_input: { command: "echo ok" },
           session_id: "dispatch-route-dedupe",
