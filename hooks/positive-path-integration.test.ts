@@ -1116,7 +1116,13 @@ describe("stop-git-push: positive paths (now merged into stop-git-status)", () =
     await gitExec(["add", "."], workDir)
     await gitExec(["commit", "-m", "unpushed"], workDir)
 
-    const r = await runHook(HOOK, { cwd: workDir, session_id: `test-unpushed-${Date.now()}` })
+    // The default settings (autoContinue false, idleDeliveryMinutes 0) resolve to "commit" mode,
+    // which checks only uncommitted files; the unpushed-commit block runs in "all" mode.
+    const r = await runHook(HOOK, {
+      cwd: workDir,
+      session_id: `test-unpushed-${Date.now()}`,
+      _stopContinuationMode: "all",
+    })
     expect(r.exitCode).toBe(0)
     expect(r.json).not.toBeNull()
     expect(r.json?.decision).toBe("block")
