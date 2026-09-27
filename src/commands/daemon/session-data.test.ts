@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test"
+import { describe, expect, spyOn, test } from "bun:test"
 import { mkdir, rm } from "node:fs/promises"
 import { join } from "node:path"
 import { TMP_ROOT } from "../../temp-paths.ts"
@@ -205,6 +205,8 @@ describe("getProjectTasks", () => {
     ])
 
     const cache = new TaskStateCache({ maxEntries: 20 })
+    // Cache reuse is independent of delayed filesystem events from fixture setup.
+    const watchSession = spyOn(cache, "watchSession").mockImplementation(() => {})
     try {
       // First poll — cold load
       const first = await getProjectTasks(cwd, 100, cache, tasksDir, base)
@@ -220,7 +222,10 @@ describe("getProjectTasks", () => {
       const state2 = await cache.getState(sessionId, sessionDir)
       expect(state1).toBe(state2)
       expect(state1.syncedAtMs).toBe(state2.syncedAtMs)
+      expect(watchSession).toHaveBeenCalledTimes(2)
+      expect(watchSession).toHaveBeenCalledWith(sessionId, sessionDir)
     } finally {
+      watchSession.mockRestore()
       cache.close()
     }
   })

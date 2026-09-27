@@ -124,6 +124,9 @@ describe("UpstreamSyncRegistry fork entries", () => {
 describe("UpstreamSyncRegistry lifecycle", () => {
   test("aborts timed-out sync, resets syncing, and permits next interval without overlap", async () => {
     let syncCalls = 0
+    let activeSyncs = 0
+    let maxActiveSyncs = 0
+    const secondSyncStarted = deferred()
     const observedSignals: AbortSignal[] = []
     const store = new IssueStore(":memory:")
     const registry = new UpstreamSyncRegistry({
@@ -133,6 +136,8 @@ describe("UpstreamSyncRegistry lifecycle", () => {
       resolveFork: async () => null,
       sync: async (_repo, _cwd, opts) => {
         syncCalls++
+        activeSyncs++
+        maxActiveSyncs = Math.max(maxActiveSyncs, activeSyncs)
         if (opts?.signal) observedSignals.push(opts.signal)
         if (syncCalls === 1) {
           // First call hangs until aborted
@@ -140,8 +145,11 @@ describe("UpstreamSyncRegistry lifecycle", () => {
             if (opts?.signal?.aborted) return resolve()
             opts?.signal?.addEventListener("abort", () => resolve(), { once: true })
           })
+          activeSyncs--
           return createSyncResult()
         }
+        activeSyncs--
+        secondSyncStarted.resolve()
         return createSyncResult()
       },
       store,
@@ -149,10 +157,12 @@ describe("UpstreamSyncRegistry lifecycle", () => {
 
     try {
       await registry.register("/virtual/repo")
-      // Wait long enough for first sync to timeout and abort, and next interval to trigger
-      await Bun.sleep(100)
+      await secondSyncStarted.promise
+      // Join the active sync (or finish an immediate refresh if it already settled).
+      await registry.syncNow("/virtual/repo")
 
       expect(syncCalls).toBeGreaterThanOrEqual(2)
+      expect(maxActiveSyncs).toBe(1)
       expect(observedSignals[0]?.aborted).toBe(true)
       // Once settled, syncing is false
       expect(registry.listActive()[0]?.syncing).toBe(false)

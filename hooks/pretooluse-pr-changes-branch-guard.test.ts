@@ -2,10 +2,11 @@ import { describe, expect, test } from "bun:test"
 import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { createTestRepo } from "../src/utils/test-utils.ts"
-
-const BUN_EXE = process.execPath
-const WORKSPACE_ROOT = process.cwd()
+import {
+  createTestRepo,
+  neutralAgentEnvOverrides,
+  runHookInProcess,
+} from "../src/utils/test-utils.ts"
 
 async function createFakeGhBin(opts: {
   hasPr: boolean
@@ -47,35 +48,21 @@ async function runHook(
   command: string,
   fakeBin: string
 ): Promise<{ raw: string; parsed: Record<string, unknown> | null; decision: string }> {
-  const payload = JSON.stringify({ tool_name: "Bash", tool_input: { command }, cwd })
-
-  const proc = Bun.spawn([BUN_EXE, "hooks/pretooluse-pr-changes-branch-guard.ts"], {
-    cwd: WORKSPACE_ROOT,
-    stdin: "pipe",
-    stdout: "pipe",
-    stderr: "pipe",
-    env: {
-      ...process.env,
-      PATH: `${fakeBin}:${process.env.PATH ?? ""}`,
-      AI_TEST_NO_BACKEND: "1",
-    },
-  })
-  await proc.stdin.write(payload)
-  await proc.stdin.end()
-  const [raw] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-  ])
-  await proc.exited
-  const trimmed = raw.trim()
-  if (!trimmed) return { raw: trimmed, parsed: null, decision: "allow" }
-  const parsed = JSON.parse(trimmed) as Record<string, unknown>
-  const hso = parsed.hookSpecificOutput as Record<string, unknown> | undefined
-  const decision =
-    (hso?.permissionDecision as string | undefined) ??
-    (parsed.decision as string | undefined) ??
-    "allow"
-  return { raw: trimmed, parsed, decision }
+  // Exercise branch policy with isolated HOME/env, without a second Bun test process.
+  const result = await runHookInProcess(
+    "hooks/pretooluse-pr-changes-branch-guard.ts",
+    { tool_name: "Bash", tool_input: { command }, cwd },
+    {
+      cwd,
+      env: neutralAgentEnvOverrides({
+        PATH: `${fakeBin}:${process.env.PATH ?? ""}`,
+        AI_TEST_NO_BACKEND: "1",
+        SWIZ_NO_DAEMON: "1",
+      }),
+    }
+  )
+  expect(result.exitCode).toBe(0)
+  return { raw: result.stdout, parsed: result.json ?? null, decision: result.decision ?? "allow" }
 }
 
 describe("pretooluse-pr-changes-branch-guard", () => {
