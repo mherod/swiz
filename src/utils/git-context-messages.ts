@@ -294,6 +294,11 @@ export function buildUncommittedReason(
     .join("\n")
   if (total > 20) reason += `\n  ... and ${total - 20} more file(s)`
   reason += "\n\n"
+  reason +=
+    "If any uncommitted changes do not belong to the current agent, use list-agents " +
+    "and send-message to contact the other agents and verify who owns those changes. " +
+    "If no owner can be found after checking, proceed with the commit. " +
+    "If an owner is found, prompt that agent to commit their changes.\n\n"
 
   if (behind > 0) {
     reason += `Note: branch '${branch}' is also ${behind} commit(s) behind '${upstream}' - after committing you will need to pull before pushing.\n\n`
