@@ -1,5 +1,6 @@
+import { Database } from "bun:sqlite"
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test"
-import { symlinkSync } from "node:fs"
+import { existsSync, readdirSync, symlinkSync } from "node:fs"
 import { join } from "node:path"
 import { Client } from "@modelcontextprotocol/sdk/client/index.js"
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js"
@@ -10,7 +11,7 @@ import { getIssueStore, resetIssueStore } from "../issue-store.ts"
 import { mcpCallerCwdRegistry } from "../mcp-caller-cwd.ts"
 import { mcpToolResultSchema, runMcpTool } from "../mcp-tool-core.ts"
 import { projectKeyFromCwd } from "../project-key.ts"
-import { canonicalClaimPath } from "../session-file-claims.ts"
+import { canonicalClaimPath, fileClaimProjectKey } from "../session-file-claims.ts"
 import { resolveSessionFileOwnershipResult } from "../utils/session-file-ownership.ts"
 import { acquireEnvLock, releaseEnvLockFn, runGit, useTempDir } from "../utils/test-utils.ts"
 import { handleMcpToolRoute } from "./daemon/mcp-tool-routes.ts"
@@ -65,7 +66,104 @@ function call(
   return manageFileOwnership({ action, sessionId, paths, ...extra }, cwd, now)
 }
 
+async function filesystemIsInsensitive(): Promise<boolean> {
+  await Bun.write(join(cwd, "CaseProbe"), "probe")
+  return existsSync(join(cwd, "caseprobe"))
+}
+
 describe("FileOwnership leases", () => {
+  test("case aliases of missing files follow the target filesystem", async () => {
+    const insensitive = await filesystemIsInsensitive()
+    const first = call("claim", "session-a", ["NewFolder/NewFile.ts"])
+    const second = call("claim", "session-b", ["newfolder/newfile.ts", "other.ts"])
+    expect(first.ok).toBe(true)
+    expect(second.ok).toBe(!insensitive)
+    if (insensitive) {
+      expect(second.conflicts[0]?.session_id).toBe("session-a")
+      expect(manageFileOwnership({}, cwd, 1000).claims).toHaveLength(1)
+    }
+    expect(readdirSync(cwd)).toEqual(["CaseProbe"])
+  })
+
+  test("deduplicates case aliases in a batch only on insensitive filesystems", async () => {
+    const insensitive = await filesystemIsInsensitive()
+    const result = call("claim", "session-a", ["NewFile.ts", "newfile.ts"])
+    expect(result.claims).toHaveLength(insensitive ? 1 : 2)
+    expect(result.claims[0]?.file_path).toBe(join(cwd, "NewFile.ts"))
+    expect(call("list", "session-b", ["newfile.ts"]).claims).toHaveLength(1)
+  })
+
+  test("keeps the owner across file creation and case-variant guard lookups", async () => {
+    const insensitive = await filesystemIsInsensitive()
+    await runGit(cwd, ["init"])
+    call("claim", "session-a", ["NewFile.ts"])
+    const written = insensitive ? "newfile.ts" : "NewFile.ts"
+    const input = {
+      cwd,
+      session_id: "session-b",
+      tool_name: "Write",
+      tool_input: { file_path: join(cwd, written) },
+    }
+    expect(await evaluatePretooluseConcurrentSessionEdits(input, 1000)).toMatchObject({
+      hookSpecificOutput: { permissionDecision: "deny" },
+    })
+    await Bun.write(join(cwd, written), "created")
+    expect(call("hold", "session-a", ["NewFile.ts"]).claims[0]).toMatchObject({
+      file_path: join(cwd, "NewFile.ts"),
+      session_id: "session-a",
+      claimed_at: 1000,
+    })
+    expect(call("hold", "session-b", [written]).ok).toBe(false)
+    expect(call("release", "session-b", [written]).ok).toBe(false)
+    expect(
+      await resolveSessionFileOwnershipResult(cwd, "session-b", [written], 1000)
+    ).toMatchObject({
+      known: true,
+      ownership: { editedByOthers: [written] },
+    })
+    expect(call("release", "session-a", [written]).released).toEqual([join(cwd, "NewFile.ts")])
+    expect(call("claim", "session-b", [written]).ok).toBe(true)
+  })
+
+  test("never chooses an owner from overlapping legacy rows", async () => {
+    const insensitive = await filesystemIsInsensitive()
+    await runGit(cwd, ["init"])
+    const db = new Database(dbPath)
+    try {
+      const insert = db.query(
+        "INSERT INTO session_file_claims VALUES (?, ?, ?, '', 1000, 1000, 61000)"
+      )
+      insert.run(fileClaimProjectKey(cwd), join(cwd, "Legacy.ts"), "session-a")
+      insert.run(fileClaimProjectKey(cwd), join(cwd, "legacy.ts"), "session-b")
+    } finally {
+      db.close()
+    }
+    expect(call("claim", "session-a", ["Legacy.ts"]).ok).toBe(!insensitive)
+    expect(call("hold", "session-b", ["legacy.ts"]).ok).toBe(!insensitive)
+    if (insensitive) {
+      expect(
+        await resolveSessionFileOwnershipResult(cwd, "session-a", ["Legacy.ts"], 1000)
+      ).toEqual({
+        known: false,
+        reason: "query-failed",
+      })
+    }
+    expect(call("release", "session-a", ["Legacy.ts"]).released).toEqual([join(cwd, "Legacy.ts")])
+    expect(manageFileOwnership({}, cwd, 1000).claims).toHaveLength(1)
+    expect(call("hold", "session-b", ["legacy.ts"]).ok).toBe(true)
+  })
+
+  test("refuses uncertain missing Unicode identity without mutating any lease", async () => {
+    const insensitive = await filesystemIsInsensitive()
+    if (insensitive) {
+      expect(() => call("claim", "session-a", ["valid.ts", "café.ts"])).toThrow("case equivalence")
+      expect(manageFileOwnership({}, cwd, 1000).claims).toEqual([])
+    } else {
+      expect(call("claim", "session-a", ["café.ts"]).ok).toBe(true)
+    }
+    expect(readdirSync(cwd)).toEqual(["CaseProbe"])
+  })
+
   test("claims exact canonical files without inventing edit records", () => {
     const result = call("claim", "session-a", ["src/../file.ts", join(cwd, "file.ts")], {
       lane: "api",
@@ -154,15 +252,20 @@ describe("FileOwnership leases", () => {
     expect(manageFileOwnership({}, outside, 1000).claims).toEqual([])
   })
 
-  test("competing processes cannot both acquire the same file", async () => {
+  test.each([
+    false,
+    true,
+  ])("competing processes serialize claims with case variants=%s", async (variants) => {
+    const insensitive = await filesystemIsInsensitive()
     const modulePath = join(import.meta.dir, "../issue-store.ts")
     const source = `import { IssueStore } from ${JSON.stringify(modulePath)};
       const store = new IssueStore(process.argv[1]);
-      const result = store.fileClaims.mutate({projectKey:"race",sessionId:process.argv[2],paths:["shared.ts"],action:"claim",leaseMs:60000,now:1000});
+      const result = store.fileClaims.mutate({projectKey:"race",sessionId:process.argv[2],paths:[process.argv[3]],action:"claim",leaseMs:60000,now:1000});
       store.close(); process.stdout.write(JSON.stringify(result));`
     const results = await Promise.all(
       ["a", "b"].map(async (session) => {
-        const proc = Bun.spawn([process.execPath, "-e", source, dbPath, session], {
+        const path = variants && session === "a" ? "Shared.ts" : "shared.ts"
+        const proc = Bun.spawn([process.execPath, "-e", source, dbPath, session, path], {
           cwd,
           env: { ...process.env, HOME: cwd, AI_TEST_NO_BACKEND: "1" },
           stdout: "pipe",
@@ -178,7 +281,7 @@ describe("FileOwnership leases", () => {
         return JSON.parse(stdout) as { ok: boolean }
       })
     )
-    expect(results.filter((result) => result.ok)).toHaveLength(1)
+    expect(results.filter((result) => result.ok)).toHaveLength(variants && !insensitive ? 2 : 1)
   })
 })
 

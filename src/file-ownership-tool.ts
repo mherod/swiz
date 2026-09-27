@@ -4,7 +4,11 @@ import { z } from "zod"
 import { getIssueStore, type IssueStore } from "./issue-store.ts"
 import type { McpToolInput } from "./mcp-tool-core.ts"
 import { projectKeyFromCwd } from "./project-key.ts"
-import { canonicalClaimPath, fileClaimProjectKey } from "./session-file-claims.ts"
+import {
+  canonicalClaimPath,
+  fileClaimIdentity,
+  fileClaimProjectKey,
+} from "./session-file-claims.ts"
 import { CONCURRENT_EDIT_WINDOW_MS } from "./utils/session-file-ownership.ts"
 
 export const fileOwnershipInputSchema = {
@@ -114,11 +118,12 @@ function applyOwnershipAction(store: IssueStore, input: OwnershipInput, root: st
   const projectKey = fileClaimProjectKey(root)
   const action = input.action ?? "list"
   if (action === "list") {
+    const selected = input.paths ? new Set(input.paths.map(fileClaimIdentity)) : undefined
     return {
       ok: true,
       claims: store.fileClaims
         .list(projectKey, now)
-        .filter((claim) => !input.paths || input.paths.includes(claim.file_path)),
+        .filter((claim) => !selected || selected.has(fileClaimIdentity(claim.file_path))),
       conflicts: [],
       missing: [],
       released: [],

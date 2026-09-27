@@ -36,6 +36,15 @@ Example calls, using your current session's ID in place of `<session-id>`:
 Paths are exact files, relative to the resolved MCP project or absolute within
 it. New files are supported. Dot segments and symlink aliases resolve to one
 file identity. Directories, globs and paths outside the project are rejected.
+Missing path components follow the containing directory's case sensitivity:
+`NewFile.ts` and `newfile.ts` conflict on a case-insensitive volume. The capability
+check creates and removes one private empty probe directory, with at most 512
+cached results valid for 60 seconds. It runs in the nearest existing parent,
+so mounts inside a project are checked independently. Stored spelling is retained;
+creating a file does not change its owner. If the probe cannot run, or missing
+non-ASCII components require case folding on an insensitive volume, the operation
+returns an explicit error without changing leases. Existing Unicode names still
+resolve through the filesystem.
 Mutations accept at most 100 paths and require a nonempty explicit selection;
 omitting paths never releases an entire session. `list` can omit paths to show
 all lanes, and an optional `sessionId` does not hide peers.
@@ -46,6 +55,12 @@ any lease is missing or expired. Results include owners, lanes, expiry timestamp
 conflicts and missing leases. There is no force takeover or peer-release action.
 Repeated release of already free files succeeds without changes. After release
 or expiry another session can claim the file.
+
+Older databases may contain overlapping case-alias reservations. All owners are
+shown; no row is silently selected as the winner. Claim and hold refuse competing
+owners, editing remains denied to peers, and dirty-file attribution reports unknown.
+Each owner can release its own rows from an overlapping group while preserving
+every peer row. This is the only release exception to ordinary peer-conflict refusal.
 
 Reservations live in the `session_file_claims` table of the existing
 `~/.swiz/issues.db`. An immediate SQLite transaction serialises competing

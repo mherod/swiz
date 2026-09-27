@@ -13,7 +13,7 @@ import {
   type SwizHookOutput,
 } from "../src/SwizHook.ts"
 import { type FileEditHookInput, fileEditHookInputSchema } from "../src/schemas.ts"
-import { canonicalClaimPath, fileClaimProjectKey } from "../src/session-file-claims.ts"
+import { fileClaimIdentity, fileClaimProjectKey } from "../src/session-file-claims.ts"
 import { extractFileEditTargetPaths, isFileEditTool } from "../src/tool-matchers.ts"
 import { buildConcurrentFileEditGuidance } from "../src/utils/concurrent-work-guidance.ts"
 import { CONCURRENT_EDIT_WINDOW_MS } from "../src/utils/session-file-ownership.ts"
@@ -86,10 +86,20 @@ export async function evaluatePretooluseConcurrentSessionEdits(
 
   const store = getIssueStore()
   if (store.isNoOp) return {}
-  const targets = new Set(editContext.filePaths.map(canonicalClaimPath))
-  const held = store.fileClaims
+  const peers = store.fileClaims
     .list(fileClaimProjectKey(editContext.cwd), nowMs)
-    .filter((claim) => claim.session_id !== editContext.sessionId && targets.has(claim.file_path))
+    .filter((claim) => claim.session_id !== editContext.sessionId)
+  let held = peers
+  if (peers.length) {
+    try {
+      const targets = new Set(editContext.filePaths.map(fileClaimIdentity))
+      held = peers.filter((claim) => targets.has(fileClaimIdentity(claim.file_path)))
+    } catch {
+      return preToolUseDeny(
+        "File reservation identity could not be established. Inspect active FileOwnership leases before editing."
+      )
+    }
+  }
   if (held.length) {
     return preToolUseDeny(
       [

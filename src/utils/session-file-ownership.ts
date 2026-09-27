@@ -1,7 +1,8 @@
 import { relative, resolve } from "node:path"
 import {
-  canonicalClaimPath,
+  fileClaimIdentity,
   fileClaimProjectKey,
+  indexFileClaims,
   type SessionFileClaim,
 } from "../session-file-claims.ts"
 import { buildConcurrentWorkGuidance } from "./concurrent-work-guidance.ts"
@@ -129,8 +130,14 @@ function classifyWithClaims(
   sessionId: string
 ): SessionFileOwnership {
   if (claims.length === 0) return classifySessionFileOwnership(options)
-  const active = new Map(claims.map((claim) => [claim.file_path, claim]))
-  const claimFor = (file: string) => active.get(canonicalClaimPath(resolve(options.gitRoot, file)))
+  const active = indexFileClaims(claims)
+  const claimFor = (file: string) => {
+    const group = active.get(fileClaimIdentity(resolve(options.gitRoot, file)))
+    if (group && new Set(group.map((claim) => claim.session_id)).size > 1) {
+      throw new Error("Conflicting legacy reservations leave file ownership ambiguous")
+    }
+    return group?.[0]
+  }
   const unclaimed = options.files.filter((file) => !claimFor(file))
   const ownership = classifySessionFileOwnership({ ...options, files: unclaimed })
   for (const file of options.files) {
