@@ -378,14 +378,8 @@ export const AGENTS: AgentDef[] = registerAgents([
   // so hooksKey is the group name ("swiz") and agy reads it as one of its
   // "named hooks": { "swiz": { <Event>: [...] } }.
   //
-  // CRITICAL (agy v1.0.x): only turn-level lifecycle events actually fire —
-  // PreInvocation, PostInvocation and Stop carry protobuf HookArgs types in the
-  // binary. PreToolUse/PostToolUse/SessionStart are registered enum stubs that
-  // never fire (verified empirically: tool calls produced no dispatch). So the
-  // eventMap targets only the firing events; there is NO tool-level gating on
-  // Antigravity yet (same limitation pattern as Cursor CLI). agy also expects
-  // lifecycle events as a FLAT [{type,command,timeout}] list, hence
-  // configStyle "flat-lifecycle" (the nested {matcher,hooks} shape gets mangled).
+  // Current agy supports tool hooks with nested matcher groups, alongside
+  // flat lifecycle [{type,command,timeout}] lists (configStyle "flat-lifecycle").
   //
   // Antigravity does not inject identifying env vars into shell subprocesses, so
   // runtime detection relies on the `--agent antigravity` flag swiz install bakes
@@ -404,16 +398,19 @@ export const AGENTS: AgentDef[] = registerAgents([
     // Match the executable or runtime script, never incidental arguments such as test filenames.
     processPattern:
       /^(?:(?:\S*\/)?(?:bun|node)\s+)?(?:\S*\/)?(?:agy|antigravity)(?:\.[cm]?js)?(?:\s|$)/,
-    toolAliases: {},
+    toolAliases: {
+      Edit: "replace_file_content",
+      MultiEdit: "multi_replace_file_content",
+      Write: "write_to_file",
+    },
     eventMap: {
+      preToolUse: "PreToolUse",
+      postToolUse: "PostToolUse",
       stop: "Stop",
       userPromptSubmit: "PreInvocation",
     },
-    // Tool-level and session events are enum stubs in agy v1.0.x — they never
-    // fire, so swiz does not install them.
+    // No mappings for unsupported session/task lifecycle events.
     unsupportedEvents: [
-      "preToolUse",
-      "postToolUse",
       "postToolUseFailure",
       "sessionStart",
       "sessionEnd",

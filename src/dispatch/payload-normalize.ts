@@ -19,6 +19,7 @@
  */
 import { unset } from "lodash-es"
 import { isShellTool } from "../tool-matchers.ts"
+import { normalizeAntigravityPayload } from "./antigravity-payload.ts"
 
 function normalizeSessionId(payload: Record<string, any>): void {
   const sid = payload.session_id
@@ -54,6 +55,7 @@ function normalizeCwd(payload: Record<string, any>): void {
 }
 
 export function normalizeAgentHookPayload(payload: Record<string, any>): void {
+  normalizeAntigravityPayload(payload)
   normalizeSessionId(payload)
   normalizeCwd(payload)
   normalizeCursorShellCommandShape(payload)

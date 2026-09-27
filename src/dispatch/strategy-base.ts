@@ -6,7 +6,10 @@
 
 import { merge } from "lodash-es"
 import type { HookGroup } from "../manifest.ts"
-import { coerceDispatchAgentEnvelopeInPlace } from "./dispatch-zod-surfaces.ts"
+import {
+  coerceDispatchAgentEnvelopeInPlace,
+  parseValidatedAgentDispatchWireJson,
+} from "./dispatch-zod-surfaces.ts"
 import type { HookExecution } from "./engine.ts"
 import {
   buildSpawnContext,
@@ -153,6 +156,13 @@ export async function runStrategyPipeline(
     ctx.agentId
   )
 
-  writeResponse(finalResponse)
+  writeResponse(
+    parseValidatedAgentDispatchWireJson(
+      finalResponse,
+      ctx.canonicalEvent,
+      ctx.hookEventName,
+      ctx.agentId
+    )
+  )
   return finalResponse
 }

@@ -6,6 +6,7 @@
  * resolve to tool-matchers.ts and git-utils.ts — no path back to manifest.ts.
  */
 
+import { projectAntigravityFileContent } from "../antigravity-tools.ts"
 import { isEditTool, isNotebookTool, isWriteTool } from "../tool-matchers.ts"
 
 // Duplicated from git-utils.ts to avoid pulling in settings.ts (which creates
@@ -46,6 +47,9 @@ export async function computeProjectedContent(
   filePath: string,
   toolInput: ProjectedContentInput
 ): Promise<string | null> {
+  if (["replace_file_content", "multi_replace_file_content", "write_to_file"].includes(toolName)) {
+    return projectAntigravityFileContent(toolName, filePath, toolInput)
+  }
   if (isNotebookTool(toolName)) {
     return (toolInput.content ?? "") || null
   }

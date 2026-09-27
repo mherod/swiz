@@ -51,14 +51,14 @@ interface LoadedSettings {
 
 // ─── Normalization ──────────────────────────────────────────────────────────
 
-function normalizeFlatHooks(raw: Record<string, HookEntry[]>): HooksConfig {
+function normalizeFlatHooks(raw: Record<string, (HookEntry | HookMatcher)[]>): HooksConfig {
   const result: HooksConfig = {}
   for (const [event, entries] of Object.entries(raw)) {
     const groups = new Map<string, HookEntry[]>()
     for (const entry of entries) {
       const key = entry.matcher ?? ""
       if (!groups.has(key)) groups.set(key, [])
-      groups.get(key)!.push(entry)
+      groups.get(key)!.push(...("hooks" in entry ? entry.hooks : [entry]))
     }
     result[event] = [...groups.entries()].map(([matcher, hooks]) => ({
       ...(matcher ? { matcher } : {}),
@@ -97,8 +97,7 @@ async function loadAllSettings(): Promise<LoadedSettings[]> {
         const raw = json.hooks ?? json[agent.hooksKey]
         if (!raw) continue
 
-        // Both Cursor ("flat") and Antigravity ("flat-lifecycle") store each
-        // event as a flat list of hook objects rather than nested matcher groups.
+        // Antigravity combines flat lifecycle handlers with nested tool groups.
         const hooks =
           agent.configStyle === "nested" ? (raw as HooksConfig) : normalizeFlatHooks(raw)
 

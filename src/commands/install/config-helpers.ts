@@ -50,7 +50,7 @@ function buildDispatchEntry(
 function addAdditionalDispatchEntries(
   agent: AgentDef,
   merged: Record<string, unknown[]>,
-  wrapEntry: (cmd: string, timeout: number) => unknown,
+  wrapEntry: (cmd: string, timeout: number, eventName: string) => unknown,
   seenEvents: Set<string>
 ): void {
   if (!agent.additionalDispatchEntries) return
@@ -59,14 +59,14 @@ function addAdditionalDispatchEntries(
     const timeout = DISPATCH_TIMEOUTS[canonicalEvent] ?? 30
     const cmd = `command -v swiz >/dev/null 2>&1 || exit 0; swiz dispatch --agent ${agent.id} ${canonicalEvent} ${agentEventName}`
     if (!merged[agentEventName]) merged[agentEventName] = []
-    merged[agentEventName]!.push(wrapEntry(cmd, timeout))
+    merged[agentEventName]!.push(wrapEntry(cmd, timeout, agentEventName))
   }
 }
 
 function addDispatchEntries(
   agent: AgentDef,
   merged: Record<string, unknown[]>,
-  wrapEntry: (cmd: string, timeout: number) => unknown
+  wrapEntry: (cmd: string, timeout: number, eventName: string) => unknown
 ): void {
   const seenEvents = new Set<string>()
   // Build the manifest for the *target* agent so a Claude shell installing
@@ -79,7 +79,7 @@ function addDispatchEntries(
     if (!supportsAgentEvent(agent, group.event)) continue
     const { eventName, timeout, cmd } = buildDispatchEntry(agent, group.event)
     if (!merged[eventName]) merged[eventName] = []
-    merged[eventName]!.push(wrapEntry(cmd, timeout))
+    merged[eventName]!.push(wrapEntry(cmd, timeout, eventName))
   }
 
   addAdditionalDispatchEntries(agent, merged, wrapEntry, seenEvents)
@@ -120,26 +120,8 @@ function mergeFlatConfig(
 }
 
 /**
- * Strip swiz-managed entries from a lifecycle event array, tolerating both the
- * flat shape (`{type,command,timeout}`) and any leftover nested shape
- * (`{hooks:[...]}`) — agy normalizes hooks.json on load, so a re-install may see
- * either form for the same event.
- */
-function stripManagedFromLifecycleList(entries: unknown[]): unknown[] {
-  return entries.filter((entry) => {
-    const e = entry as Record<string, any>
-    if (Array.isArray(e.hooks)) {
-      return e.hooks.some((h: Record<string, any>) => !isManagedSwizCommand(h.command))
-    }
-    return !isManagedSwizCommand(e.command)
-  })
-}
-
-/**
- * Antigravity (`agy`) lifecycle config: each event holds a flat list of
- * `{type,command,timeout}` hook objects (no matcher wrapper). Only events agy
- * actually fires (Stop, PreInvocation, PostInvocation) are installed; agy strips
- * unknown fields like `statusMessage` on load, so we omit it.
+ * Antigravity uses nested tool matchers and flat lifecycle handlers.
+ * Limit tool dispatch to the file-editing tools whose payloads we normalize.
  */
 function mergeLifecycleConfig(
   agent: AgentDef,
@@ -148,14 +130,18 @@ function mergeLifecycleConfig(
   const merged: Record<string, unknown[]> = {}
   for (const [event, entries] of Object.entries(existingHooks)) {
     if (!Array.isArray(entries)) continue
-    const userEntries = stripManagedFromLifecycleList(entries)
+    const userEntries = stripManagedFromNestedGroups(entries)
     if (userEntries.length > 0) merged[event] = userEntries
   }
-  addDispatchEntries(agent, merged, (cmd, timeout) => ({
-    type: "command",
-    command: cmd,
-    timeout,
-  }))
+  addDispatchEntries(agent, merged, (cmd, timeout, eventName) => {
+    const handler = { type: "command", command: cmd, timeout }
+    return eventName === "PreToolUse" || eventName === "PostToolUse"
+      ? {
+          matcher: "^(replace_file_content|multi_replace_file_content|write_to_file)$",
+          hooks: [handler],
+        }
+      : handler
+  })
   return merged
 }
 

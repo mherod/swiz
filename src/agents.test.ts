@@ -58,10 +58,11 @@ describe("agents.ts", () => {
       expect(antigravity?.configStyle).toBe("flat-lifecycle")
       expect(antigravity?.settingsPath.endsWith(".gemini/antigravity-cli/hooks.json")).toBe(true)
       expect(antigravity?.tasksEnabled).toBe(false)
-      // Only agy's actually-firing turn-level events are mapped (no tool hooks).
+      // Tool hooks accompany the flat lifecycle handlers.
       expect(antigravity?.eventMap.stop).toBe("Stop")
       expect(antigravity?.eventMap.userPromptSubmit).toBe("PreInvocation")
-      expect(antigravity?.eventMap.preToolUse).toBeUndefined()
+      expect(antigravity?.eventMap.preToolUse).toBe("PreToolUse")
+      expect(antigravity?.eventMap.postToolUse).toBe("PostToolUse")
     })
 
     it("each agent has required properties", () => {
@@ -523,8 +524,6 @@ describe("agents.ts", () => {
 
   describe("event mappings", () => {
     it("all agents map preToolUse unless they declare it unsupported", () => {
-      // Antigravity (agy v1.0.x) only fires turn-level lifecycle hooks, so it
-      // lists preToolUse in unsupportedEvents rather than mapping it.
       AGENTS.forEach((agent) => {
         if (agent.unsupportedEvents?.includes("preToolUse")) {
           expect(agent.eventMap.preToolUse).toBeUndefined()

@@ -31,8 +31,16 @@ export const EDIT_TOOLS = new Set([
   "replace",
   "apply_patch",
   "functions.apply_patch",
+  "replace_file_content",
+  "multi_replace_file_content",
 ])
-export const WRITE_TOOLS = new Set(["Write", "write_file", "apply_patch", "functions.apply_patch"])
+export const WRITE_TOOLS = new Set([
+  "Write",
+  "write_file",
+  "write_to_file",
+  "apply_patch",
+  "functions.apply_patch",
+])
 export const READ_TOOLS = new Set(["Read", "read_file", "read_many_files", "view_file"])
 export const NOTEBOOK_TOOLS = new Set([
   "NotebookEdit",

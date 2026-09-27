@@ -30,6 +30,7 @@ import {
   sanitizeHookOutputForAgent,
   sanitizeHookOutputForCurrentAgent,
 } from "../utils/hook-output-agent-compat.ts"
+import { formatAntigravityToolOutput } from "./antigravity-output.ts"
 import { stripInternalDispatchFields } from "./dispatch-wire.ts"
 import { isStopLikeDispatchEvent } from "./stop-response.ts"
 
@@ -200,5 +201,6 @@ export function parseValidatedAgentDispatchWireJson(
     ? sanitizeHookOutputForAgent(stripped, agentId)
     : sanitizeHookOutputForCurrentAgent(stripped)
   const schema = isStopLikeDispatchEvent(canonicalEvent) ? stopHookOutputSchema : hookOutputSchema
-  return schema.parse(agent) as Record<string, any>
+  const parsed = schema.parse(agent) as Record<string, any>
+  return agentId === "antigravity" ? formatAntigravityToolOutput(parsed, canonicalEvent) : parsed
 }
