@@ -1,6 +1,7 @@
 import { spawnSync } from "node:child_process"
 import { existsSync, readdirSync } from "node:fs"
-import { basename, dirname } from "node:path"
+import { basename, dirname, join, resolve } from "node:path"
+import { preProcessFile } from "typescript"
 
 /**
  * Script to determine which tests to run pre-push, mirroring CI logic.
@@ -49,6 +50,43 @@ const testFiles = new Set<string>()
 // they match SKIP_PATTERNS — skipping a file you just edited would drop the only
 // test that exercises the change and fall through to the flaky safe-subset run.
 const directlyChangedTests = new Set<string>()
+const directImporters = new Set<string>()
+const changedSources = new Set<string>()
+
+/** Inventory shared by importer discovery and the recurring excluded-suite run. */
+function listTests(): string[] {
+  return [
+    ...new Bun.Glob("{src,hooks,scripts}/**/*.{test,spec}.{ts,tsx}").scanSync({
+      cwd: process.cwd(),
+      onlyFiles: true,
+    }),
+  ].sort()
+}
+
+/** Match relative imports without confusing comments or string literals for edges. */
+async function findDirectImporters(sources: Set<string>): Promise<void> {
+  if (sources.size === 0) return
+  for (const testFile of listTests()) {
+    const source = await Bun.file(testFile).text()
+    const imports = preProcessFile(source, true, true).importedFiles
+    for (const { fileName } of imports) {
+      if (!fileName.startsWith(".")) continue
+      const path = resolve(dirname(testFile), fileName)
+      const candidates = [
+        path,
+        `${path}.ts`,
+        `${path}.tsx`,
+        `${path}/index.ts`,
+        `${path}/index.tsx`,
+      ]
+      if (candidates.some((candidate) => sources.has(candidate))) {
+        testFiles.add(testFile)
+        directImporters.add(testFile)
+        break
+      }
+    }
+  }
+}
 
 /**
  * Locate test files associated with a sub-module entry by walking up to its
@@ -74,7 +112,7 @@ function findParentBundleTests(file: string): string[] {
         entry.startsWith(bundleName) &&
         (entry.endsWith(".test.ts") || entry.endsWith(".test.tsx") || entry.endsWith(".spec.ts"))
       ) {
-        found.push(`${grandparent}/${entry}`)
+        found.push(join(grandparent, entry))
       }
     }
   } catch {
@@ -102,6 +140,7 @@ for (const file of changedFiles) {
     continue
   }
   if (!file.endsWith(".ts") && !file.endsWith(".tsx")) continue
+  changedSources.add(resolve(file))
 
   // 0) Explicit alias mapping for non-standard source→test associations
   const aliases = TEST_ALIASES[file]
@@ -109,21 +148,16 @@ for (const file of changedFiles) {
     for (const alias of aliases) {
       if (existsSync(alias)) testFiles.add(alias)
     }
-    continue
   }
 
   // 1) Sibling test file: src/foo.ts → src/foo.test.ts
   const baseName = file.replace(/\.tsx?$/, "")
-  let matched = false
   for (const ext of [".test.ts", ".test.tsx", ".spec.ts"]) {
     const testCandidate = baseName + ext
     if (existsSync(testCandidate)) {
       testFiles.add(testCandidate)
-      matched = true
-      break
     }
   }
-  if (matched) continue
 
   // 2) Parent-bundle test files: hooks/foo/bar.ts → hooks/foo.test.ts,
   //    hooks/foo-e2e.test.ts, etc. The grandparent directory listing finds
@@ -160,8 +194,22 @@ const SKIP_PATTERNS = [
   "scripts/get-test-scope",
 ]
 
+if (args.includes("--excluded")) {
+  process.stdout.write(
+    listTests()
+      .filter((f) => SKIP_PATTERNS.some((p) => f.includes(p)))
+      .join(" ")
+  )
+  process.exit(0)
+}
+
+await findDirectImporters(changedSources)
+
 const filteredTests = Array.from(testFiles).filter(
-  (f) => directlyChangedTests.has(f) || !SKIP_PATTERNS.some((p) => f.includes(p))
+  (f) =>
+    directlyChangedTests.has(f) ||
+    directImporters.has(f) ||
+    !SKIP_PATTERNS.some((p) => f.includes(p))
 )
 
 if (filteredTests.length > 0 && filteredTests.length <= 30) {

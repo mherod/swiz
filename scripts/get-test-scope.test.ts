@@ -3,6 +3,7 @@ import { spawnSync } from "node:child_process"
 import { mkdirSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { useTempDir } from "../src/utils/test-utils.ts"
 
 /**
  * Behavioral tests for scripts/get-test-scope.ts.
@@ -16,6 +17,101 @@ import { join } from "node:path"
 
 const PROJECT_ROOT = new URL("..", import.meta.url).pathname
 const SCOPE_SCRIPT = join(PROJECT_ROOT, "scripts/get-test-scope.ts")
+
+describe("get-test-scope import discovery", () => {
+  const tmp = useTempDir("swiz-scope-imports-")
+
+  async function fixture(files: Record<string, string>) {
+    const dir = await tmp.create()
+    for (const [path, content] of Object.entries(files)) await Bun.write(join(dir, path), content)
+    return dir
+  }
+
+  function scope(cwd: string, ...files: string[]) {
+    const proc = Bun.spawnSync([process.execPath, SCOPE_SCRIPT, ...files], {
+      cwd,
+      env: { ...process.env, HOME: cwd, CI_BASE: "" },
+    })
+    expect(proc.exitCode).toBe(0)
+    return proc.stdout.toString().trim().split(/\s+/)
+  }
+
+  test("governance aliases retain sibling, bundle and direct importer tests", async () => {
+    const dir = await fixture({
+      "hooks/pretooluse-task-governance.ts": "export const value = 1",
+      "hooks/pretooluse-enforce-taskupdate.test.ts": "",
+      "src/pretooluse-require-tasks.test.ts": "",
+      "hooks/pretooluse-task-governance.test.ts": "",
+      "hooks.test.ts": "",
+      "hooks/pretooluse-task-store-failure.test.ts":
+        'import { value } from "./pretooluse-task-governance.ts"',
+      "hooks/pretooluse-task-governance-dispatch.test.ts":
+        'await import("./pretooluse-task-governance.ts")',
+    })
+    expect(scope(dir, "hooks/pretooluse-task-governance.ts").sort()).toEqual([
+      "hooks.test.ts",
+      "hooks/pretooluse-enforce-taskupdate.test.ts",
+      "hooks/pretooluse-task-governance-dispatch.test.ts",
+      "hooks/pretooluse-task-governance.test.ts",
+      "hooks/pretooluse-task-store-failure.test.ts",
+      "src/pretooluse-require-tasks.test.ts",
+    ])
+  })
+
+  test("compatibility module selects resolved importers including skip-listed suites", async () => {
+    const dir = await fixture({
+      "src/utils/hook-output-agent-compat.ts": "export const value = 1",
+      "src/utils/hook-output-agent-compat.test.ts": "",
+      "src/commands/dispatch.test.ts":
+        'import { value } from "../utils/hook-output-agent-compat.ts"',
+      "hooks/posttooluse-git-task-autocomplete.test.ts":
+        'import type { Value } from "../src/utils/hook-output-agent-compat"',
+      "src/unrelated.test.ts":
+        '// import { value } from "./utils/hook-output-agent-compat.ts"\nconst text = "./utils/hook-output-agent-compat.ts"',
+    })
+    expect(scope(dir, "src/utils/hook-output-agent-compat.ts").sort()).toEqual([
+      "hooks/posttooluse-git-task-autocomplete.test.ts",
+      "src/commands/dispatch.test.ts",
+      "src/utils/hook-output-agent-compat.test.ts",
+    ])
+  })
+
+  test("excluded inventory includes suites without requiring an edit", async () => {
+    const dir = await fixture({
+      "hooks/positive-path-integration.test.ts": "",
+      "src/commands/daemon.test.ts": "",
+      "scripts/get-test-scope.test.ts": "",
+      "src/ordinary.test.ts": "",
+    })
+    expect(scope(dir, "--excluded").sort()).toEqual([
+      "hooks/positive-path-integration.test.ts",
+      "scripts/get-test-scope.test.ts",
+      "src/commands/daemon.test.ts",
+    ])
+  })
+
+  test("resolves directory imports and deduplicates multiple import edges", async () => {
+    const dir = await fixture({
+      "src/library/index.ts": "export const value = 1",
+      "src/consumer.spec.ts":
+        'import { value } from "./library"; const again = require("./library/index.ts")',
+      "src/dynamic.test.tsx": 'await import("./library/../library/index.ts")',
+    })
+    expect(scope(dir, "src/library/index.ts").sort()).toEqual([
+      "src/consumer.spec.ts",
+      "src/dynamic.test.tsx",
+    ])
+  })
+
+  test("more than 30 importers retains the broad-run fallback", async () => {
+    const files: Record<string, string> = { "src/shared.ts": "export const value = 1" }
+    for (let i = 0; i < 31; i++) {
+      files[`src/consumer-${i}.test.ts`] = 'import { value } from "./shared.ts"'
+    }
+    const dir = await fixture(files)
+    expect(scope(dir, "src/shared.ts")).toEqual([""])
+  })
+})
 
 function runScopeScript(env: Record<string, string> = {}): {
   stdout: string
@@ -204,13 +300,14 @@ describe("get-test-scope parent-bundle lookup", () => {
 })
 
 describe("get-test-scope argument passing", () => {
-  test("honors skip policy when skipped source file passed as argument", () => {
+  test("direct importers override skip policy when source file passed as argument", () => {
     const proc = spawnSync("bun", ["run", SCOPE_SCRIPT, "scripts/get-test-scope.ts"], {
       cwd: PROJECT_ROOT,
       encoding: "utf8",
     })
     expect(proc.status).toBe(0)
-    expect(proc.stdout.trim()).toBe("no-tests-affected")
+    expect(proc.stdout.trim().split(/\s+/)).toContain("scripts/get-test-scope-deletions.test.ts")
+    expect(proc.stdout.trim().split(/\s+/)).not.toContain("scripts/get-test-scope.test.ts")
   })
 
   test("returns no-tests-affected when unrelated file passed as argument", () => {

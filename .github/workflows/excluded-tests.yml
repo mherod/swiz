@@ -1,0 +1,39 @@
+name: Excluded test suites
+
+on:
+  schedule:
+    - cron: "23 4 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  excluded-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: main
+          fetch-depth: 0
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+        env:
+          LEFTHOOK: 0
+      - name: Run suites excluded from ordinary test selection
+        env:
+          SWIZ_NO_DAEMON: "1"
+          AI_TEST_NO_BACKEND: "1"
+        run: |
+          TEST_FILES=$(bun scripts/get-test-scope.ts --excluded)
+          if [ -z "$TEST_FILES" ]; then
+            echo "ERROR: excluded test inventory is empty"
+            exit 1
+          fi
+          echo "Excluded suites: $TEST_FILES"
+          set -- $TEST_FILES
+          bun test --reporter=dots --parallel=2 --timeout=60000 "$@"
