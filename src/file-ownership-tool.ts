@@ -114,7 +114,12 @@ function validateOwnershipInput(raw: McpToolInput): OwnershipInput {
   return input
 }
 
-function applyOwnershipAction(store: IssueStore, input: OwnershipInput, root: string, now: number) {
+function applyOwnershipAction(
+  store: IssueStore,
+  input: OwnershipInput,
+  root: string,
+  clock: () => number
+) {
   const projectKey = fileClaimProjectKey(root)
   const action = input.action ?? "list"
   if (action === "list") {
@@ -122,7 +127,7 @@ function applyOwnershipAction(store: IssueStore, input: OwnershipInput, root: st
     return {
       ok: true,
       claims: store.fileClaims
-        .list(projectKey, now)
+        .list(projectKey, clock())
         .filter((claim) => !selected || selected.has(fileClaimIdentity(claim.file_path))),
       conflicts: [],
       missing: [],
@@ -136,7 +141,7 @@ function applyOwnershipAction(store: IssueStore, input: OwnershipInput, root: st
     action,
     lane: input.lane,
     leaseMs: (input.leaseSeconds ?? 1800) * 1000,
-    now,
+    clock,
   })
 }
 
@@ -144,8 +149,9 @@ function applyOwnershipAction(store: IssueStore, input: OwnershipInput, root: st
 export function manageFileOwnership(
   raw: McpToolInput,
   cwd: string,
-  now = Date.now()
+  time: number | (() => number) = Date.now
 ): FileOwnershipResult {
+  const clock = typeof time === "number" ? () => time : time
   const input = validateOwnershipInput(raw)
   const action = input.action ?? "list"
   if (!isAbsolute(cwd) || canonicalClaimPath(cwd) === sep)
@@ -160,10 +166,10 @@ export function manageFileOwnership(
     throw new Error("Ownership store is unavailable; no files were claimed or released")
   // Resolve all read/validation work before mutating, so a failed call cannot hide a successful claim.
   const recentEdits = store
-    .listOtherSessionEdits(projectKeyFromCwd(cwd), "", now - CONCURRENT_EDIT_WINDOW_MS)
+    .listOtherSessionEdits(projectKeyFromCwd(cwd), "", clock() - CONCURRENT_EDIT_WINDOW_MS)
     .map((edit) => ({ ...edit, file_path: canonicalClaimPath(resolve(cwd, edit.file_path)) }))
     .filter((edit) => !paths || paths.includes(edit.file_path))
-  const result = applyOwnershipAction(store, { ...input, paths }, root, now)
+  const result = applyOwnershipAction(store, { ...input, paths }, root, clock)
   return { action, cwd: root, sessionId: input.sessionId, ...result, recentEdits }
 }
 

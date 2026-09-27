@@ -207,6 +207,64 @@ describe("FileOwnership leases", () => {
     )
   })
 
+  test.each([
+    "hold",
+    "claim",
+  ])("evaluates queued %s after acquiring the write lock", async (action) => {
+    manageFileOwnership({ action: "claim", sessionId: "session-a", paths: ["file.ts"] }, cwd)
+    const source = `import { Database } from "bun:sqlite";
+      const db = new Database(process.argv[1]);
+      db.exec("PRAGMA busy_timeout = 5000; BEGIN IMMEDIATE");
+      const expiry = Date.now() + 700;
+      db.query("UPDATE session_file_claims SET expires_at = ?").run(expiry);
+      process.stdout.write(String(expiry) + "\\n");
+      await Bun.sleep(1400);
+      db.exec("COMMIT"); db.close();`
+    const proc = Bun.spawn([process.execPath, "-e", source, dbPath], {
+      cwd,
+      env: { ...process.env, HOME: cwd, AI_TEST_NO_BACKEND: "1" },
+      stdout: "pipe",
+      stderr: "pipe",
+    })
+    const stderr = new Response(proc.stderr).text()
+    const output = proc.stdout.getReader()
+    const first = await output.read()
+    const expiry = Number(new TextDecoder().decode(first.value))
+    const remaining = (async () => {
+      while (!(await output.read()).done) {
+        /* Drain the child before checking its exit. */
+      }
+    })()
+    let result: ReturnType<typeof manageFileOwnership>
+    try {
+      expect(Date.now()).toBeLessThan(expiry)
+      result = manageFileOwnership(
+        {
+          action,
+          sessionId: action === "hold" ? "session-a" : "session-b",
+          paths: ["file.ts"],
+          leaseSeconds: 60,
+        },
+        cwd
+      )
+    } finally {
+      await remaining
+      await proc.exited
+      expect(await stderr).toBe("")
+      expect(proc.exitCode).toBe(0)
+    }
+    if (action === "hold") {
+      expect(result.ok).toBe(false)
+      expect(result.missing).toEqual([join(cwd, "file.ts")])
+    } else {
+      expect(result.ok).toBe(true)
+      const claim = result.claims[0]!
+      expect(claim.updated_at).toBeGreaterThanOrEqual(expiry)
+      expect(claim.claimed_at).toBe(claim.updated_at)
+      expect(claim.expires_at - claim.updated_at).toBe(60_000)
+    }
+  })
+
   test("release is idempotent and preserves edit history for handoff", () => {
     call("claim")
     getIssueStore().recordSessionEdit(
@@ -260,7 +318,7 @@ describe("FileOwnership leases", () => {
     const modulePath = join(import.meta.dir, "../issue-store.ts")
     const source = `import { IssueStore } from ${JSON.stringify(modulePath)};
       const store = new IssueStore(process.argv[1]);
-      const result = store.fileClaims.mutate({projectKey:"race",sessionId:process.argv[2],paths:[process.argv[3]],action:"claim",leaseMs:60000,now:1000});
+      const result = store.fileClaims.mutate({projectKey:"race",sessionId:process.argv[2],paths:[process.argv[3]],action:"claim",leaseMs:60000,clock:()=>1000});
       store.close(); process.stdout.write(JSON.stringify(result));`
     const results = await Promise.all(
       ["a", "b"].map(async (session) => {
@@ -282,6 +340,23 @@ describe("FileOwnership leases", () => {
       })
     )
     expect(results.filter((result) => result.ok)).toHaveLength(variants && !insensitive ? 2 : 1)
+  })
+
+  test("samples the mutation clock once for a coherent batch", () => {
+    let samples = 0
+    const result = getIssueStore().fileClaims.mutate({
+      projectKey: fileClaimProjectKey(cwd),
+      sessionId: "session-a",
+      paths: [join(cwd, "a.ts"), join(cwd, "b.ts")],
+      action: "claim",
+      leaseMs: 60_000,
+      clock: () => 1000 + samples++,
+    })
+    expect(samples).toBe(1)
+    expect(result.claims).toHaveLength(2)
+    for (const claim of result.claims) {
+      expect(claim).toMatchObject({ claimed_at: 1000, updated_at: 1000, expires_at: 61000 })
+    }
   })
 })
 

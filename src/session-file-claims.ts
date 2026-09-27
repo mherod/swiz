@@ -109,8 +109,10 @@ interface ClaimMutation {
   action: "claim" | "hold" | "release"
   leaseMs: number
   lane?: string
-  now: number
+  clock?: () => number
 }
+
+type LockedClaimMutation = ClaimMutation & { now: number }
 
 export interface ClaimMutationResult {
   ok: boolean
@@ -145,10 +147,12 @@ export class SessionFileClaimStore {
 
   /** BEGIN IMMEDIATE makes the conflict check and the entire batch one cross-process write. */
   mutate(input: ClaimMutation): ClaimMutationResult {
-    return this.db.transaction(() => this.mutateLocked(input)).immediate()
+    return this.db
+      .transaction(() => this.mutateLocked({ ...input, now: (input.clock ?? Date.now)() }))
+      .immediate()
   }
 
-  private mutateLocked(input: ClaimMutation): ClaimMutationResult {
+  private mutateLocked(input: LockedClaimMutation): ClaimMutationResult {
     const { projectKey, sessionId, action, now } = input
     const paths = new Map<string, string>()
     for (const path of input.paths) {
@@ -207,7 +211,7 @@ export class SessionFileClaimStore {
   }
 
   private upsertClaims(
-    input: ClaimMutation,
+    input: LockedClaimMutation,
     paths: string[],
     current: Map<string, SessionFileClaim>
   ): void {
