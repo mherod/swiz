@@ -68,10 +68,6 @@ export const GATE_REQUIRED_SKILLS = {
     name: "end-of-day",
     hooks: ["stop-required-skills"],
   },
-  farmOutIssues: {
-    name: "farm-out-issues",
-    hooks: ["stop-required-skills"],
-  },
   continueWithTasks: {
     name: "continue-with-tasks",
     hooks: ["stop-required-skills"],

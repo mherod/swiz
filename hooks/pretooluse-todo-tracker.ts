@@ -60,7 +60,6 @@ function buildDenyMessage(oldCount: number, newCount: number): string {
       [
         "Remove the debt marker comment before writing",
         "If this is real follow-up work, create a GitHub issue instead: gh issue create",
-        "Use the /farm-out-issues skill to convert inline markers into tracked issues",
         "If the marker is already in the file (not new), verify old_string captures it",
       ],
       { header: "Your options:" }

@@ -39,11 +39,10 @@ applicable missing invocation:
 | Skill | Stop condition |
 |---|---|
 | `end-of-day` | `enforceEndOfDay` is enabled and the repository has unpushed commits or incomplete session tasks. |
-| `farm-out-issues` | The session is in a Git repository. An older invocation remains valid when no commit or push occurred after it. |
 | `continue-with-tasks` | Required before stop after earlier applicable rules have passed. |
 | `reflect-on-session-mistakes` | Required before stop after earlier applicable rules have passed. |
 
-These four rules intentionally fail open for agents without a native `Skill` tool, including
+These three rules intentionally fail open for agents without a native `Skill` tool, including
 Codex (`agentHasSkillToolForHookPayload`). They are therefore present in the hook policy but
 are not currently enforced in Codex sessions.
 

@@ -130,7 +130,6 @@ async function createOldTranscript(dir: string, skills: string[]): Promise<strin
 
 const ALL_REQUIRED_SKILLS = [
   GATE_REQUIRED_SKILLS.endOfDay.name,
-  GATE_REQUIRED_SKILLS.farmOutIssues.name,
   GATE_REQUIRED_SKILLS.continueWithTasks.name,
   GATE_REQUIRED_SKILLS.reflectOnSessionMistakes.name,
 ]
@@ -155,9 +154,9 @@ describe("stop-required-skills", () => {
     const result = await runHook(dir, transcriptPath)
     expect(result.exitCode).toBe(0)
     expect(result.decision).toBe("block")
-    expect(result.reason).toContain("farm-out-issues")
+    expect(result.reason).toContain("reflect-on-session-mistakes")
     expect(result.reason).toContain(
-      join(dir, ".skills", GATE_REQUIRED_SKILLS.farmOutIssues.name, "SKILL.md")
+      join(dir, ".skills", GATE_REQUIRED_SKILLS.reflectOnSessionMistakes.name, "SKILL.md")
     )
   })
 
@@ -171,17 +170,13 @@ describe("stop-required-skills", () => {
     const result = await runHook(dir, transcriptPath)
     expect(result.exitCode).toBe(0)
     expect(result.decision).toBe("block")
-    expect(result.reason).toContain("farm-out-issues")
+    expect(result.reason).toContain("reflect-on-session-mistakes")
   })
 
   test("reaches reflection only after the higher-priority skills were used", async () => {
     const dir = await tmp.create()
     for (const s of ALL_REQUIRED_SKILLS) await createSkill(dir, s, s)
-    const transcriptPath = await createTranscript(dir, [
-      "end-of-day",
-      "farm-out-issues",
-      "continue-with-tasks",
-    ])
+    const transcriptPath = await createTranscript(dir, ["end-of-day", "continue-with-tasks"])
 
     const result = await runHook(dir, transcriptPath)
     expect(result.exitCode).toBe(0)
@@ -225,8 +220,8 @@ describe("stop-required-skills", () => {
       const result = await runHook(dir, transcriptPath)
       expect(result.exitCode).toBe(0)
       expect(result.decision).toBe("block")
-      // Should hit farm-out-issues instead of end-of-day
-      expect(result.reason).toContain("farm-out-issues")
+      // Should hit reflect-on-session-mistakes instead of end-of-day
+      expect(result.reason).toContain("reflect-on-session-mistakes")
     })
 
     test("blocks when unpushed commits exist and end-of-day was not used", async () => {
@@ -234,7 +229,6 @@ describe("stop-required-skills", () => {
       await initGitRepoWithUnpushedCommit(dir)
       for (const s of ALL_REQUIRED_SKILLS) await createSkill(dir, s, s)
       const transcriptPath = await createTranscript(dir, [
-        "farm-out-issues",
         "continue-with-tasks",
         "reflect-on-session-mistakes",
       ])
@@ -251,7 +245,6 @@ describe("stop-required-skills", () => {
       await initGitRepo(dir) // No unpushed commits
       for (const s of ALL_REQUIRED_SKILLS) await createSkill(dir, s, s)
       const transcriptPath = await createTranscript(dir, [
-        "farm-out-issues",
         "continue-with-tasks",
         "reflect-on-session-mistakes",
       ])
@@ -292,7 +285,6 @@ describe("stop-required-skills", () => {
       for (const s of ALL_REQUIRED_SKILLS) await createSkill(dir, s, s)
       // transcript has all required skills EXCEPT end-of-day; enforceEndOfDay:false causes that rule to skip
       const transcriptPath = await createTranscript(dir, [
-        "farm-out-issues",
         "continue-with-tasks",
         "reflect-on-session-mistakes",
       ])
@@ -309,13 +301,13 @@ describe("stop-required-skills", () => {
     const dir = await tmp.create()
     await initGitRepo(dir)
     for (const s of ALL_REQUIRED_SKILLS) await createSkill(dir, s, s)
-    const skill = GATE_REQUIRED_SKILLS.farmOutIssues.name
+    const skill = GATE_REQUIRED_SKILLS.reflectOnSessionMistakes.name
     const claudePath = join(dir, ".claude", "skills", skill, "SKILL.md")
     const codexPath = join(dir, ".codex", "skills", skill, "SKILL.md")
     await mkdir(join(dir, ".claude", "skills", skill), { recursive: true })
     await mkdir(join(dir, ".codex", "skills", skill), { recursive: true })
-    await writeFile(claudePath, "# Claude farm out\n")
-    await writeFile(codexPath, "# Codex farm out\n")
+    await writeFile(claudePath, "# Claude reflect\n")
+    await writeFile(codexPath, "# Codex reflect\n")
     const transcriptPath = await createTranscript(dir) // no skills invoked
 
     const result = await runHookWithInput(dir, transcriptPath, {
@@ -343,7 +335,9 @@ describe("stop-required-skills", () => {
           timestamp: new Date(now - 5000).toISOString(),
           type: "assistant",
           message: {
-            content: [{ type: "tool_use", name: "Skill", input: { skill: "farm-out-issues" } }],
+            content: [
+              { type: "tool_use", name: "Skill", input: { skill: "reflect-on-session-mistakes" } },
+            ],
           },
         }),
         JSON.stringify({ type: "system", subtype: "compact" }),
@@ -360,75 +354,8 @@ describe("stop-required-skills", () => {
     const result = await runHook(dir, transcriptPath)
     expect(result.exitCode).toBe(0)
     expect(result.decision).toBe("block")
-    expect(result.reason).toContain("farm-out-issues")
+    expect(result.reason).toContain("reflect-on-session-mistakes")
     expect(result.reason).toContain("compaction reset the recency window")
-  })
-
-  describe("farm-out-issues bypass rule", () => {
-    async function createFarmOutOldThenBash(dir: string, bashCommand: string): Promise<string> {
-      const transcriptPath = join(dir, "farm-out-old.jsonl")
-      const old = Date.now() - 25 * 60 * 1000
-      const recent = Date.now() - 1000
-      await writeFile(
-        transcriptPath,
-        `${[
-          JSON.stringify({
-            timestamp: new Date(old).toISOString(),
-            type: "assistant",
-            message: {
-              content: [{ type: "tool_use", name: "Skill", input: { skill: "farm-out-issues" } }],
-            },
-          }),
-          JSON.stringify({ type: "user", message: { content: [{ type: "text", text: "ok" }] } }),
-          JSON.stringify({
-            timestamp: new Date(recent).toISOString(),
-            type: "assistant",
-            message: {
-              content: [{ type: "tool_use", name: "Bash", input: { command: bashCommand } }],
-            },
-          }),
-        ].join("\n")}\n`
-      )
-      return transcriptPath
-    }
-
-    test("bypasses farm-out-issues gate when no git commits happened since last invocation", async () => {
-      const dir = await tmp.create()
-      await initGitRepo(dir)
-      for (const s of ALL_REQUIRED_SKILLS) await createSkill(dir, s, s)
-      const transcriptPath = await createFarmOutOldThenBash(dir, "bun test --reporter=dots")
-
-      const result = await runHook(dir, transcriptPath)
-      expect(result.exitCode).toBe(0)
-      expect(result.decision).toBe("block")
-      // farm-out-issues bypassed; next rule fires
-      expect(result.reason).not.toContain("farm-out-issues")
-      expect(result.reason).toContain("reflect-on-session-mistakes")
-    })
-
-    test("does not bypass farm-out-issues gate when a git push happened after last invocation", async () => {
-      const dir = await tmp.create()
-      await initGitRepo(dir)
-      for (const s of ALL_REQUIRED_SKILLS) await createSkill(dir, s, s)
-      const transcriptPath = await createFarmOutOldThenBash(dir, "git push origin main")
-
-      const result = await runHook(dir, transcriptPath)
-      expect(result.exitCode).toBe(0)
-      expect(result.decision).toBe("block")
-      expect(result.reason).toContain("farm-out-issues")
-    })
-
-    test("does not bypass farm-out-issues gate when a git commit happened after last invocation", async () => {
-      const dir = await tmp.create()
-      await initGitRepo(dir)
-      for (const s of ALL_REQUIRED_SKILLS) await createSkill(dir, s, s)
-      const transcriptPath = await createFarmOutOldThenBash(dir, "git commit -m feat: add feature")
-
-      const result = await runHook(dir, transcriptPath)
-      expect(result.exitCode).toBe(0)
-      expect(result.decision).toBe("block")
-      expect(result.reason).toContain("farm-out-issues")
-    })
   })
 
   test("fails open when no required SKILL.md file exists", async () => {

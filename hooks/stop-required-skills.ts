@@ -12,7 +12,6 @@ import { getUnpushedCommitCount } from "../src/git-helpers.ts"
 import { isGitRepoForHookPayload } from "../src/repository-capability.ts"
 import { runSwizHookAsMain, type SwizHookOutput, type SwizStopHook } from "../src/SwizHook.ts"
 import { type StopHookInput, stopHookInputSchema } from "../src/schemas.ts"
-import { getEffectiveSwizSettings, readProjectSettings, readSwizSettings } from "../src/settings.ts"
 import {
   type CurrentSessionUsageRecencyOptions,
   formatCurrentSessionUsageWindow,
@@ -178,20 +177,6 @@ async function countIncompleteSessionTasks(input: StopHookInput): Promise<number
   return tasks.filter((task) => isIncompleteTaskStatus(task.status)).length
 }
 
-async function isIssueContinuationEnabled({
-  input,
-  cwd,
-}: RequiredStopSkillContext): Promise<boolean> {
-  const settings =
-    (input._effectiveSettings as ReturnType<typeof getEffectiveSwizSettings> | undefined) ??
-    getEffectiveSwizSettings(
-      await readSwizSettings(),
-      input.session_id,
-      await readProjectSettings(cwd)
-    )
-  return settings.autoContinue === true && (await isGitRepoForHookPayload(input, cwd))
-}
-
 async function isEndOfDayApplicable(ctx: RequiredStopSkillContext): Promise<boolean> {
   const effectiveSettings = (ctx.input as Record<string, unknown>)._effectiveSettings
   if (isRecord(effectiveSettings) && effectiveSettings.enforceEndOfDay === false) {
@@ -245,19 +230,6 @@ const REQUIRED_STOP_SKILLS: readonly RequiredStopSkillRule[] = [
     },
     why: (skillReference) =>
       `${skillReference} ensures commits reach the remote (so Closes #N auto-closes issues on GitHub), evidence is posted, and follow-up work is captured — preventing work from being lost when the session ends.`,
-  },
-  {
-    skill: GATE_REQUIRED_SKILLS.farmOutIssues.name,
-    applies: isIssueContinuationEnabled,
-    blockedLine: (skillReference) =>
-      `BLOCKED: The ${skillReference} skill has not been invoked recently.`,
-    actionHeader: (skillReference) => `The ${skillReference} skill has not been invoked recently:`,
-    actionPlan: (skillReference) => [
-      `Invoke the ${skillReference} skill to batch and distribute pending issues.`,
-    ],
-    why: (skillReference) =>
-      `the ${skillReference} skill batches and distributes pending issues across sessions. Stopping without running it leaves issues untriaged and unassigned.`,
-    bypassIfNoNewCommits: true,
   },
   {
     skill: GATE_REQUIRED_SKILLS.continueWithTasks.name,
