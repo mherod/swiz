@@ -1,3 +1,4 @@
+import { Database } from "bun:sqlite"
 import { afterEach, describe, expect, test } from "bun:test"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
@@ -5,6 +6,7 @@ import { join } from "node:path"
 import { groupMatches } from "../src/dispatch/engine.ts"
 import { getIssueStore, resetIssueStore } from "../src/issue-store.ts"
 import { bundledHookManifest, hookIdentifier } from "../src/manifest.ts"
+import { SessionEditObservationStore } from "../src/session-edit-observations.ts"
 import { canonicalClaimPath, fileClaimProjectKey } from "../src/session-file-claims.ts"
 import { evaluatePosttooluseSessionEdits as observeAfter } from "./posttooluse-session-edits.ts"
 import { evaluatePretooluseSessionEdits as observeBefore } from "./pretooluse-session-edits.ts"
@@ -41,6 +43,30 @@ async function fixture(toolName = "functions.exec") {
 }
 
 describe("session edit observation", () => {
+  test("upgrades existing observation tables without losing baselines", () => {
+    const db = new Database(":memory:")
+    try {
+      db.exec(`CREATE TABLE session_edit_observations (
+        project_key TEXT, session_id TEXT, tool_id TEXT, started_at INTEGER,
+        finished_at INTEGER, snapshot TEXT,
+        PRIMARY KEY (project_key, session_id, tool_id)
+      )`)
+      db.query("INSERT INTO session_edit_observations VALUES (?, ?, ?, ?, ?, ?)").run(
+        "project",
+        "owner",
+        "call",
+        1,
+        null,
+        '{"source.ts":"original"}'
+      )
+      const store = new SessionEditObservationStore(db)
+      new SessionEditObservationStore(db)
+      store.pause("project", "owner", "call", "cell")
+      expect(store.pending("project", "owner", "cell")?.snapshot).toBe('{"source.ts":"original"}')
+    } finally {
+      db.close()
+    }
+  })
   test("observes a real shell subprocess with dynamically computed output paths", async () => {
     const { cwd, input, paths } = await fixture("exec_command")
     await observeBefore(input)

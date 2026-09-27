@@ -25,6 +25,14 @@ export class SessionEditObservationStore {
       continuation TEXT,
       PRIMARY KEY (project_key, session_id, tool_id)
     )`)
+    db.transaction(() => {
+      const columns = db
+        .query<{ name: string }, []>("PRAGMA table_info(session_edit_observations)")
+        .all()
+      if (!columns.some((column) => column.name === "continuation")) {
+        db.exec("ALTER TABLE session_edit_observations ADD COLUMN continuation TEXT")
+      }
+    }).immediate()
   }
 
   begin(project: string, session: string, tool: string, now = Date.now()): boolean {
