@@ -35,5 +35,15 @@ jobs:
             exit 1
           fi
           echo "Excluded suites: $TEST_FILES"
-          set -- $TEST_FILES
-          bun test --reporter=dots --parallel=2 --timeout=60000 "$@"
+          failed=0
+          for test_file in $TEST_FILES; do
+            echo "::group::$test_file"
+            # Fresh processes prevent worker reuse from leaking suite state.
+            # The outer timeout also catches hangs outside Bun's test timeout.
+            if ! timeout --kill-after=10s 180s bun test --reporter=dots --parallel=1 --timeout=60000 "$test_file"; then
+              echo "::error file=$test_file::Suite failed or timed out"
+              failed=1
+            fi
+            echo "::endgroup::"
+          done
+          exit "$failed"
