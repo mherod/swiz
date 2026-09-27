@@ -6,7 +6,7 @@ each lifecycle-coverage audit does not have to re-derive the same analysis.
 
 **Source of truth:** the event list is `HookEventNameSchema` in
 [`agent-hook-schemas/claude`](../node_modules/agent-hook-schemas/claude.ts) (the
-vendored Claude hook schema package). The *mapped* set is derived from Claude's
+installed Claude hook schema dependency). The *mapped* set is derived from Claude's
 `eventMap` in [`src/agents.ts`](../src/agents.ts); the *reserved* set is everything
 in the schema that `eventMap` does not list. `src/lifecycle-event-coverage.test.ts`
 fails if this table drifts from those two sources, so it stays in sync whenever the
@@ -33,6 +33,7 @@ install against it yet.
 | `PostToolBatch` | Reserved | — | Batched tool-result phase; PostToolUse already covers per-call needs. |
 | `PermissionDenied` | Reserved | — | Hard denial after PermissionRequest; the request phase is where swiz records friction. Revisit if denial-only telemetry is needed. |
 | `Notification` | Mapped | `notification` | Daemon-driven TTS for watched-session messages. |
+| `MessageDisplay` | Reserved | — | Display-time message transformation; swiz has no display rewrite to install. |
 | `SubagentStart` | Mapped | `subagentStart` | Subagent lifecycle context. |
 | `SubagentStop` | Mapped | `subagentStop` | Subagent completion handling. |
 | `TaskCreated` | Mapped | `taskCreated` | Records daemon-owned background-task lifecycle state without touching planning/TODO tasks. |
@@ -45,8 +46,11 @@ install against it yet.
 | `FileChanged` | Reserved | — | External file-watch event; swiz acts on tool edits, not ambient file changes. |
 | `WorktreeCreate` | Reserved | — | Git worktree lifecycle; no swiz worktree-time behaviour. |
 | `WorktreeRemove` | Reserved | — | Git worktree lifecycle; no swiz worktree-time behaviour. |
+| `DirectoryAdded` | Reserved | — | Additional workspace directory registration; swiz resolves the working directory per dispatch. |
 | `PreCompact` | Mapped | `preCompact` | Snapshots task state before compaction. |
 | `PostCompact` | Mapped | `postCompact` | Restores the task snapshot and injects recovery guidance after compaction. |
+| `PreModelSwitch` | Reserved | — | Model selection is managed by the host; swiz has no model-switch gate. |
+| `PostModelSwitch` | Reserved | — | Model changes require no swiz lifecycle action. |
 | `SessionEnd` | Mapped | `sessionEnd` | Session teardown handling. |
 | `Elicitation` | Reserved | — | Interactive elicitation prompt; no swiz interception. |
 | `ElicitationResult` | Reserved | — | Result of an elicitation prompt; no swiz interception. |

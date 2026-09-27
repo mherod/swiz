@@ -91,7 +91,7 @@ describe("Codex hook schema contracts", () => {
       tool_input: { command: "e\u0301cho hello" },
     })
     expect(result.success).toBe(true)
-    expect(result.data!.tool_input!.command).toBe("\u00E9cho hello")
+    expect(result.data!.tool_input).toEqual({ command: "\u00E9cho hello" })
   })
 
   it("codexPostToolUseInputSchema accepts tool_response", () => {
