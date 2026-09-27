@@ -72,10 +72,6 @@ export const GATE_REQUIRED_SKILLS = {
     name: "continue-with-tasks",
     hooks: ["stop-required-skills"],
   },
-  reflectOnSessionMistakes: {
-    name: "reflect-on-session-mistakes",
-    hooks: ["stop-required-skills"],
-  },
 } as const satisfies Record<string, GateRequiredSkill>
 
 export function listGateRequiredSkills(): GateRequiredSkill[] {

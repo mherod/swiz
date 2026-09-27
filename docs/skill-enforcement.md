@@ -40,15 +40,14 @@ applicable missing invocation:
 |---|---|
 | `end-of-day` | `enforceEndOfDay` is enabled and the repository has unpushed commits or incomplete session tasks. |
 | `continue-with-tasks` | Required before stop after earlier applicable rules have passed. |
-| `reflect-on-session-mistakes` | Required before stop after earlier applicable rules have passed. |
 
-These three rules intentionally fail open for agents without a native `Skill` tool, including
+These two rules intentionally fail open for agents without a native `Skill` tool, including
 Codex (`agentHasSkillToolForHookPayload`). They are therefore present in the hook policy but
 are not currently enforced in Codex sessions.
 
 ## Gate-skill drift detection
 
-`src/gate-required-skills.ts` is the canonical registry for all 16 skill names whose absence
+`src/gate-required-skills.ts` is the canonical registry for all 15 skill names whose absence
 can make an enforcement decision fail open. The central command gate, specialized file and
 PR-comment gates, memory follow-through gate, and ordered Stop rules consume those entries
 instead of owning duplicate skill-name strings.

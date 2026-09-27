@@ -282,7 +282,6 @@ Constraint enforcement (descriptive reason, no `STOP.` prefix):
 - `stop-lockfile-drift.ts` — lockfile consistency
 - `stop-lint-staged.ts` — lint-staged checks
 - `stop-quality-checks.ts` — quality check enforcement
-- `stop-reflect-on-session-mistakes.ts` — reflection enforcement
 - `stop-ship-checklist.ts` — ship readiness
 - `stop-pr-description.ts` — PR description quality
 - `stop-pr-changes-requested.ts` — outstanding review feedback

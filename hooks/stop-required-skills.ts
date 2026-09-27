@@ -244,17 +244,6 @@ const REQUIRED_STOP_SKILLS: readonly RequiredStopSkillRule[] = [
     why: (skillReference) =>
       `the ${skillReference} skill makes the next task-carrying continuation explicit before the session ends, so work is handed off cleanly instead of being abandoned between stops.`,
   },
-  {
-    skill: GATE_REQUIRED_SKILLS.reflectOnSessionMistakes.name,
-    blockedLine: (skillReference) =>
-      `BLOCKED: stop requires the ${skillReference} skill to be used first.`,
-    actionHeader: (skillReference) => `The ${skillReference} skill has not been invoked recently:`,
-    actionPlan: (skillReference) => [
-      `Invoke the ${skillReference} skill to identify patterns to avoid before ending the session.`,
-    ],
-    why: () =>
-      "session reflection captures the mistakes before the session ends and keeps the follow-up memory/update workflow grounded in concrete evidence.",
-  },
 ]
 
 async function getAllCurrentSessionUsageEvents(

@@ -164,9 +164,20 @@ describe("stop hook ACTION REQUIRED footer regression", () => {
   })
 
   test("stop-required-skills: missing skill invocation block includes footer", async () => {
-    const dir = await tmp.create("swiz-stop-reflect-")
-    await mkdir(join(dir, ".skills", "reflect-on-session-mistakes"), { recursive: true })
-    await writeFile(join(dir, ".skills", "reflect-on-session-mistakes", "SKILL.md"), "# Reflect\n")
+    const dir = await tmp.create("swiz-stop-continue-")
+    await mkdir(join(dir, ".skills", "continue-with-tasks"), { recursive: true })
+    await writeFile(join(dir, ".skills", "continue-with-tasks", "SKILL.md"), "# Continue\n")
+    const tasksDir = join(dir, ".claude/tasks/test-continue")
+    await mkdir(tasksDir, { recursive: true })
+    await writeFile(
+      join(tasksDir, "T1.json"),
+      `${JSON.stringify({
+        id: "T1",
+        status: "pending",
+        subject: "Incomplete task",
+        description: "...",
+      })}\n`
+    )
     const transcriptPath = join(dir, "transcript.jsonl")
     await writeFile(
       transcriptPath,
@@ -185,8 +196,8 @@ describe("stop hook ACTION REQUIRED footer regression", () => {
     )
     const result = await runStopHook(
       "stop-required-skills.ts",
-      { cwd: dir, session_id: "test-reflect", transcript_path: transcriptPath },
-      { cwd: dir, env: { CLAUDECODE: "1" } }
+      { cwd: dir, session_id: "test-continue", transcript_path: transcriptPath },
+      { cwd: dir, env: { CLAUDECODE: "1", HOME: dir } }
     )
     expect(result.blocked).toBe(true)
     expect(result.reason).toContain(FOOTER_MARKER)

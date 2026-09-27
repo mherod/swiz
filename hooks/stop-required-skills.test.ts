@@ -131,38 +131,54 @@ async function createOldTranscript(dir: string, skills: string[]): Promise<strin
 const ALL_REQUIRED_SKILLS = [
   GATE_REQUIRED_SKILLS.endOfDay.name,
   GATE_REQUIRED_SKILLS.continueWithTasks.name,
-  GATE_REQUIRED_SKILLS.reflectOnSessionMistakes.name,
 ]
 
+async function createIncompleteTask(dir: string, sessionId = "test-session"): Promise<void> {
+  const tasksDir = join(dir, ".claude/tasks", sessionId)
+  await mkdir(tasksDir, { recursive: true })
+  await writeFile(
+    join(tasksDir, "T1.json"),
+    `${JSON.stringify({
+      id: "T1",
+      status: "pending",
+      subject: "Incomplete task",
+      description: "...",
+    })}\n`
+  )
+}
+
 describe("stop-required-skills", () => {
-  test("does not require backlog delegation without continuation opt-in", async () => {
+  test("allows stop when no skills are applicable", async () => {
     const dir = await tmp.create()
     await initGitRepo(dir)
     for (const s of ALL_REQUIRED_SKILLS) await createSkill(dir, s, s)
-    const transcriptPath = await createTranscript(dir, ["reflect-on-session-mistakes"])
+    const transcriptPath = await createTranscript(dir)
     const result = await runHookWithInput(dir, transcriptPath, {
       _effectiveSettings: { autoContinue: false },
     })
     expect(result.decision).toBeUndefined()
   })
+
   test("blocks on the first missing required skill by priority", async () => {
     const dir = await tmp.create()
-    await initGitRepo(dir)
+    await initGitRepoWithUnpushedCommit(dir)
+    await createIncompleteTask(dir)
     for (const s of ALL_REQUIRED_SKILLS) await createSkill(dir, s, s)
     const transcriptPath = await createTranscript(dir)
 
     const result = await runHook(dir, transcriptPath)
     expect(result.exitCode).toBe(0)
     expect(result.decision).toBe("block")
-    expect(result.reason).toContain("reflect-on-session-mistakes")
+    expect(result.reason).toContain("end-of-day")
     expect(result.reason).toContain(
-      join(dir, ".skills", GATE_REQUIRED_SKILLS.reflectOnSessionMistakes.name, "SKILL.md")
+      join(dir, ".skills", GATE_REQUIRED_SKILLS.endOfDay.name, "SKILL.md")
     )
   })
 
   test("falls through to the next missing skill once higher-priority skills were used", async () => {
     const dir = await tmp.create()
-    await initGitRepo(dir)
+    await initGitRepoWithUnpushedCommit(dir)
+    await createIncompleteTask(dir)
     for (const s of ALL_REQUIRED_SKILLS) await createSkill(dir, s, s)
     // end-of-day is used
     const transcriptPath = await createTranscript(dir, ["end-of-day"])
@@ -170,22 +186,13 @@ describe("stop-required-skills", () => {
     const result = await runHook(dir, transcriptPath)
     expect(result.exitCode).toBe(0)
     expect(result.decision).toBe("block")
-    expect(result.reason).toContain("reflect-on-session-mistakes")
-  })
-
-  test("reaches reflection only after the higher-priority skills were used", async () => {
-    const dir = await tmp.create()
-    for (const s of ALL_REQUIRED_SKILLS) await createSkill(dir, s, s)
-    const transcriptPath = await createTranscript(dir, ["end-of-day", "continue-with-tasks"])
-
-    const result = await runHook(dir, transcriptPath)
-    expect(result.exitCode).toBe(0)
-    expect(result.decision).toBe("block")
-    expect(result.reason).toContain("reflect-on-session-mistakes")
+    expect(result.reason).toContain("continue-with-tasks")
   })
 
   test("allows stop once all applicable required skills were used", async () => {
     const dir = await tmp.create()
+    await initGitRepoWithUnpushedCommit(dir)
+    await createIncompleteTask(dir)
     for (const s of ALL_REQUIRED_SKILLS) await createSkill(dir, s, s)
     const transcriptPath = await createTranscript(dir, ALL_REQUIRED_SKILLS)
 
@@ -211,7 +218,7 @@ describe("stop-required-skills", () => {
   }
 
   describe("end-of-day rule", () => {
-    test("skips when repo has no upstream — falls through to next rule", async () => {
+    test("skips end-of-day when repo has no upstream and no incomplete tasks", async () => {
       const dir = await tmp.create()
       await initGitRepo(dir) // no remote, no upstream
       for (const s of ALL_REQUIRED_SKILLS) await createSkill(dir, s, s)
@@ -219,19 +226,14 @@ describe("stop-required-skills", () => {
 
       const result = await runHook(dir, transcriptPath)
       expect(result.exitCode).toBe(0)
-      expect(result.decision).toBe("block")
-      // Should hit reflect-on-session-mistakes instead of end-of-day
-      expect(result.reason).toContain("reflect-on-session-mistakes")
+      expect(result.decision).toBeUndefined()
     })
 
     test("blocks when unpushed commits exist and end-of-day was not used", async () => {
       const dir = await tmp.create()
       await initGitRepoWithUnpushedCommit(dir)
       for (const s of ALL_REQUIRED_SKILLS) await createSkill(dir, s, s)
-      const transcriptPath = await createTranscript(dir, [
-        "continue-with-tasks",
-        "reflect-on-session-mistakes",
-      ])
+      const transcriptPath = await createTranscript(dir, ["continue-with-tasks"])
 
       const result = await runHook(dir, transcriptPath)
       expect(result.exitCode).toBe(0)
@@ -244,23 +246,10 @@ describe("stop-required-skills", () => {
       const dir = await tmp.create()
       await initGitRepo(dir) // No unpushed commits
       for (const s of ALL_REQUIRED_SKILLS) await createSkill(dir, s, s)
-      const transcriptPath = await createTranscript(dir, [
-        "continue-with-tasks",
-        "reflect-on-session-mistakes",
-      ])
+      const transcriptPath = await createTranscript(dir, ["continue-with-tasks"])
 
       // Create an incomplete task
-      const tasksDir = join(dir, ".claude/tasks/test-session")
-      await mkdir(tasksDir, { recursive: true })
-      await writeFile(
-        join(tasksDir, "T1.json"),
-        `${JSON.stringify({
-          id: "T1",
-          status: "pending",
-          subject: "Incomplete task",
-          description: "...",
-        })}\n`
-      )
+      await createIncompleteTask(dir)
 
       const result = await runHook(dir, transcriptPath)
       expect(result.exitCode).toBe(0)
@@ -284,10 +273,7 @@ describe("stop-required-skills", () => {
       await initGitRepoWithUnpushedCommit(dir)
       for (const s of ALL_REQUIRED_SKILLS) await createSkill(dir, s, s)
       // transcript has all required skills EXCEPT end-of-day; enforceEndOfDay:false causes that rule to skip
-      const transcriptPath = await createTranscript(dir, [
-        "continue-with-tasks",
-        "reflect-on-session-mistakes",
-      ])
+      const transcriptPath = await createTranscript(dir, ["continue-with-tasks"])
 
       const result = await runHookWithInput(dir, transcriptPath, {
         _effectiveSettings: { enforceEndOfDay: false },
@@ -300,17 +286,19 @@ describe("stop-required-skills", () => {
   test("blocks Codex with its preferred verified SKILL.md path", async () => {
     const dir = await tmp.create()
     await initGitRepo(dir)
+    await createIncompleteTask(dir)
     for (const s of ALL_REQUIRED_SKILLS) await createSkill(dir, s, s)
-    const skill = GATE_REQUIRED_SKILLS.reflectOnSessionMistakes.name
+    const skill = GATE_REQUIRED_SKILLS.continueWithTasks.name
     const claudePath = join(dir, ".claude", "skills", skill, "SKILL.md")
     const codexPath = join(dir, ".codex", "skills", skill, "SKILL.md")
     await mkdir(join(dir, ".claude", "skills", skill), { recursive: true })
     await mkdir(join(dir, ".codex", "skills", skill), { recursive: true })
-    await writeFile(claudePath, "# Claude reflect\n")
-    await writeFile(codexPath, "# Codex reflect\n")
+    await writeFile(claudePath, "# Claude continue\n")
+    await writeFile(codexPath, "# Codex continue\n")
     const transcriptPath = await createTranscript(dir) // no skills invoked
 
     const result = await runHookWithInput(dir, transcriptPath, {
+      _effectiveSettings: { enforceEndOfDay: false },
       _env: { CODEX_MANAGED_BY_NPM: "1" },
     })
 
@@ -323,6 +311,7 @@ describe("stop-required-skills", () => {
   test("includes compaction note when required skill was used only before a compaction boundary", async () => {
     const dir = await tmp.create()
     await initGitRepo(dir)
+    await createIncompleteTask(dir)
     for (const s of ALL_REQUIRED_SKILLS) await createSkill(dir, s, s)
 
     // Transcript: skill before compaction, system boundary, then unrelated post-compaction content.
@@ -335,9 +324,7 @@ describe("stop-required-skills", () => {
           timestamp: new Date(now - 5000).toISOString(),
           type: "assistant",
           message: {
-            content: [
-              { type: "tool_use", name: "Skill", input: { skill: "reflect-on-session-mistakes" } },
-            ],
+            content: [{ type: "tool_use", name: "Skill", input: { skill: "continue-with-tasks" } }],
           },
         }),
         JSON.stringify({ type: "system", subtype: "compact" }),
@@ -351,10 +338,12 @@ describe("stop-required-skills", () => {
       ].join("\n")}\n`
     )
 
-    const result = await runHook(dir, transcriptPath)
+    const result = await runHookWithInput(dir, transcriptPath, {
+      _effectiveSettings: { enforceEndOfDay: false },
+    })
     expect(result.exitCode).toBe(0)
     expect(result.decision).toBe("block")
-    expect(result.reason).toContain("reflect-on-session-mistakes")
+    expect(result.reason).toContain("continue-with-tasks")
     expect(result.reason).toContain("compaction reset the recency window")
   })
 

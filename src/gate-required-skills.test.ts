@@ -19,7 +19,6 @@ describe("gate-required skill registry", () => {
       "collaborate-with-another-agent",
       "end-of-day",
       "continue-with-tasks",
-      "reflect-on-session-mistakes",
     ])
   })
 
