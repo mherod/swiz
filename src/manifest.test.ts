@@ -274,7 +274,7 @@ describe("manifest.ts", () => {
             // Tools should be capitalized or snake_case (cross-agent aliases)
             if (tool.length > 0) {
               const isCapitalized = tool[0] === tool[0]?.toUpperCase()
-              const isSnakeCase = /^[a-z][a-z0-9_]*$/.test(tool)
+              const isSnakeCase = /^(?:functions\.)?[a-z][a-z0-9_]*$/.test(tool)
               expect(isCapitalized || isSnakeCase).toBe(true)
             }
           })

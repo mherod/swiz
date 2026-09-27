@@ -6,7 +6,7 @@ One manifest of TypeScript hook scripts gets installed across Claude Code, Curso
 
 When `swiz idea` and `swiz continue` are used together, the system can enter a **self-directed loop** — a closed-loop state where the agent's own outputs become the next inputs, expanding the project without external prompts. See [docs/ai-providers.md](docs/ai-providers.md#self-directed-loop) for the canonical terminology.
 
-**165 hooks. 17 event types. Every agent. Zero compromises.**
+**166 hooks. 17 event types. Every agent. Zero compromises.**
 
 ## Install
 
@@ -100,7 +100,7 @@ The JSON must name a supported agent and contain only valid tool-name strings. M
 
 ## Bundled Hooks
 
-158 hook scripts across 17 event types. All TypeScript.
+159 hook scripts across 17 event types. All TypeScript.
 
 The bundled hooks cover seven events: Stop, PreToolUse, PostToolUse, SessionStart, PreCompact, UserPromptSubmit, and Notification. Five additional events — **SubagentStart**, **SubagentStop**, **TaskCreated**, **TaskCompleted**, and **SessionEnd** — are formally registered in the dispatch system. Claude supports all five; other agents retain their existing event surface. Task lifecycle events update a daemon-owned registry and feed unfinished background work into a non-blocking Stop advisory. For the full picture of which Claude lifecycle events swiz maps versus intentionally leaves reserved (and why), see [docs/lifecycle-event-coverage.md](docs/lifecycle-event-coverage.md).
 
@@ -139,7 +139,7 @@ Stop hooks run before the agent is allowed to end a session. They're the last li
 | `stop-git-status.ts` | Modular git workflow validation — detects uncommitted changes, unpushed commits, branch divergence. Blocks stop until git state is clean. Separated into independent validators (context, uncommitted-changes, remote-state, push-cooldown, background-push-detector, action-plan, evaluate) for testability and reusability. See [hook-extraction-pattern.md](docs/hook-extraction-pattern.md) for modular architecture details. |
 | `stop-personal-repo-issues.ts` | Blocks stop if there are unassigned issues on a personal repository. |
 
-### PreToolUse (83)
+### PreToolUse (84)
 
 PreToolUse hooks intercept tool calls *before* they execute. A blocking hook here prevents the action entirely — the agent has to find another way.
 
@@ -229,6 +229,8 @@ PreToolUse hooks intercept tool calls *before* they execute. A blocking hook her
 | `pretooluse-measure-test-time.ts`              | Identifies full test suite runs and writes start times to temporary sentinel files. Excludes single file or limited directory test runs to focus on complete suite evaluations. |
 | `pretooluse-measure-lint-time.ts`              | Identifies full lint suite runs and writes start times to temporary sentinel files. Excludes single file or limited directory lint runs to focus on complete suite evaluations. |
 
+| `pretooluse-session-edits.ts` | Captures file fingerprints before edit, shell and Codex code-mode calls; correlates observations by session and tool call. |
+
 ### PostToolUse (35)
 
 PostToolUse hooks run after a tool completes. They can feed error context back to the agent or inject advisory information.
@@ -265,7 +267,7 @@ PostToolUse hooks run after a tool completes. They can feed error context back t
 | `posttooluse-skill-steps.ts` | After a Skill tool call, extracts numbered steps from the skill's `## Steps` section and creates pending tasks for each step that doesn't already exist as a pending/in_progress task. Uses subject fingerprinting and overlap detection to avoid duplicates. |
 | `posttooluse-auto-steer.ts` | Consumes any scheduled steer message and types it into the active terminal session after a tool call using AppleScript automation. Scheduled steers are humanised into a natural paragraph at enqueue (falling back to the raw text, e.g. "Continue"). Supports iTerm2 (`write text`) and Terminal.app (`do script`). Runs async. |
 | `posttooluse-mid-session-prompt.ts` | After 3+ hours of session activity, checks for drift signals (>10 uncommitted files, stale last commit with dirty tree, new review-requested PRs) and softly suggests /mid-session-checkin via additionalContext. Opt-in via `enforceMidSessionCheckin` setting (default off). Cooldown: 30 minutes. |
-| `posttooluse-session-edits.ts` | Records files edited during the session into the `session_edits` table in IssueStore. |
+| `posttooluse-session-edits.ts` | Records observed file changes from edit, shell and Codex code-mode calls in IssueStore; overlapping sessions produce an ownership warning instead of guessed attribution. |
 | `posttooluse-jbcontext-reindex.ts` | After git commit, merge, rebase, or pull, triggers background indexing via `jbcontext index --silent`. Keeps semantic search synchronized with recent changes without blocking agent execution. |
 | `posttooluse-measure-test-time.ts`            | Reads start time sentinels written by the preToolUse hook, computes the test run duration, updates average stats in `.swiz/test-execution-stats.json`, and reports the updated average via systemMessage. |
 | `posttooluse-measure-lint-time.ts`            | Reads start time sentinels written by the preToolUse hook, computes the lint run duration, updates average stats in `.swiz/lint-execution-stats.json`, and reports the updated average via systemMessage. |
@@ -327,13 +329,16 @@ Notification hooks are triggered by the daemon when it detects events such as ne
 |------|-------------|
 | `notification-speak.ts` | Speaks daemon-detected assistant messages via platform-native TTS when `speak` is enabled. Triggered by the daemon's monitoring loop; fire-and-forget so it never blocks the notification path. |
 
-### PostToolUseFailure (1)
+### PostToolUseFailure (2)
 
 PostToolUseFailure fires when a Claude tool call fails, giving hooks the failure signal directly instead of inferring it from transcript scans.
 
 | Hook | What it does |
 |------|-------------|
 | `posttoolusefailure-retry-advisor.ts` | Tracks consecutive same-tool failures per session in memory and, once a tool fails repeatedly, advises stopping to read the error and change approach rather than retrying blindly. |
+
+The shared `posttooluse-session-edits.ts` observer also records partial mutations
+from failed tools using the matching pre-tool observation.
 
 ## Plugin Marketplace
 

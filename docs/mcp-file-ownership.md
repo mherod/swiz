@@ -104,3 +104,34 @@ reservations; it continues to provide advisory context for recent edits without
 a reservation. File hooks must be installed and enabled for enforcement. Shell
 commands, external editors and other clients that bypass those hooks are not
 filesystem-locked by this tool.
+
+### Automatic edit observation
+
+The pre/post file observers also cover Codex `exec` / `functions.exec`,
+`exec_command` / `functions.exec_command`, shell tools, `write_stdin` and
+`wait`. They compare file content and mode fingerprints around the actual call,
+so nested patches, dynamic script writes, additions, deletions and renames do
+not depend on parsing JavaScript or guessing paths from shell command text.
+Existing dirty files are attributed only if their content or mode changes.
+Failed calls still record partial mutations; unchanged or unexecuted examples
+do not create edit records.
+
+Observations are paired by the runtime's session ID and `tool_use_id` (or
+`call_id`) and persisted in `session_edit_observations` in `issues.db`.
+Only fingerprints and paths are stored, not source contents or command text.
+Completed observations are idempotent. Yielded code cells and shell processes
+retain their original baseline until the matching `wait` or `write_stdin`
+completion, including writes made between polls. Interrupted pre-tool dispatches
+cancel their observations. Failed snapshots and missing baselines emit coverage
+warnings, and overlapping peer sessions produce uncertainty rather than guessed
+ownership. This observation does not acquire a reservation or lock the filesystem.
+
+Coverage requires both tool hooks, a stable call ID and a Git working directory.
+Snapshots include tracked and non-ignored untracked files under the hook cwd;
+explicit edit-tool targets also include ignored files within that directory.
+Each snapshot is bounded to 100,000 files and 64 MiB per file; exceeding a bound
+reports incomplete coverage. External editors, writes outside the observed
+directory, ignored files changed by opaque scripts, and detached processes with
+no matching completion cannot be reliably attributed by these hooks. Concurrent
+external writers must still be coordinated separately. A hook-disabled runtime
+cannot provide full attribution; an empty ledger is never proof of no edits.

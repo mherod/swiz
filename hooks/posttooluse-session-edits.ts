@@ -1,61 +1,121 @@
 #!/usr/bin/env bun
 
-// PostToolUse hook: Track file edits during a session in IssueStore
-//
-// Dual-mode: exports a SwizHook for inline dispatch and remains executable as a subprocess.
-
 import { resolve } from "node:path"
-import type { SwizHook, SwizHookOutput } from "../src/SwizHook.ts"
-import { runSwizHookAsMain } from "../src/SwizHook.ts"
+import type { IssueStore } from "../src/issue-store.ts"
+import {
+  buildContextHookOutput,
+  runSwizHookAsMain,
+  type SwizHook,
+  type SwizHookOutput,
+} from "../src/SwizHook.ts"
 import { type PostToolHookInput, toolHookInputSchema } from "../src/schemas.ts"
+import {
+  captureEditSnapshot,
+  type EditObservationIdentity,
+  editContinuationInput,
+  editContinuationOutput,
+  editObservationIdentity,
+  explicitEditTargets,
+  failedEditResponse,
+  isObservedEditTool,
+} from "../src/session-edit-snapshot.ts"
 import { extractFileEditTargetPaths, isFileEditTool } from "../src/tool-matchers.ts"
 
 export function resolveEditTargets(input: ReturnType<typeof toolHookInputSchema.parse>): string[] {
-  const tool = input.tool_name ?? ""
-  if (!isFileEditTool(tool)) return []
+  if (!isFileEditTool(input.tool_name ?? "")) return []
   return extractFileEditTargetPaths(input.tool_input ?? {})
+}
+
+function uncertainOwnership(): SwizHookOutput {
+  return buildContextHookOutput(
+    "PostToolUse",
+    "File edit ownership is uncertain for this call (overlapping sessions or unavailable observation). Inspect the diff before claiming files.",
+    { rephrase: false }
+  )
+}
+
+async function recordExplicitEdits(input: PostToolHookInput): Promise<SwizHookOutput> {
+  if (failedEditResponse(input)) return {}
+  const parsed = toolHookInputSchema.parse(
+    typeof input.tool_input === "string"
+      ? { ...input, tool_input: { command: input.tool_input } }
+      : input
+  )
+  const files = resolveEditTargets(parsed)
+  if (files.length === 0) return {}
+  const cwd = parsed.cwd ?? process.cwd()
+  const sessionId = parsed.session_id
+  if (!sessionId) return uncertainOwnership()
+  const [{ getIssueStore }, { canonicalClaimPath, fileClaimProjectKey }] = await Promise.all([
+    import("../src/issue-store.ts"),
+    import("../src/session-file-claims.ts"),
+  ])
+  const store = getIssueStore()
+  if (store.isNoOp) return uncertainOwnership()
+  const projectKey = fileClaimProjectKey(cwd)
+  for (const file of files)
+    store.recordSessionEdit(projectKey, sessionId, canonicalClaimPath(resolve(cwd, file)))
+  return {}
+}
+
+async function finishObservation(
+  store: IssueStore,
+  identity: EditObservationIdentity,
+  input: PostToolHookInput
+): Promise<SwizHookOutput | null> {
+  const { cwd, project, session, tool } = identity
+  const continuation = editContinuationInput(input)
+  const observation =
+    (continuation && store.editObservations.pending(project, session, continuation)) ||
+    store.editObservations.get(project, session, tool)
+  if (!observation) return null
+  if (observation.finished_at !== null) return {}
+  const pending = editContinuationOutput(input.tool_response)
+  if (pending) {
+    store.editObservations.pause(project, session, observation.tool_id, pending)
+    return {}
+  }
+  const previousPaths = Object.keys(JSON.parse(observation.snapshot ?? "{}"))
+  const after = await captureEditSnapshot(cwd, [
+    ...previousPaths,
+    ...explicitEditTargets(input),
+  ]).catch((error) => {
+    store.editObservations.abandon(project, session, observation.tool_id)
+    throw error
+  })
+  const changed = store.editObservations.finish(project, session, observation.tool_id, after)
+  return changed === null ? uncertainOwnership() : {}
+}
+
+async function recordObservedEdits(input: PostToolHookInput): Promise<SwizHookOutput | null> {
+  try {
+    const identity = editObservationIdentity(input)
+    if (!identity) return null
+    const { getIssueStore } = await import("../src/issue-store.ts")
+    const store = getIssueStore()
+    if (store.isNoOp) return uncertainOwnership()
+    return await finishObservation(store, identity, input)
+  } catch {
+    return uncertainOwnership()
+  }
 }
 
 export async function evaluatePosttooluseSessionEdits(
   input: PostToolHookInput
 ): Promise<SwizHookOutput> {
-  const parsed = toolHookInputSchema.parse(input)
-  const files = resolveEditTargets(parsed)
-
-  if (files.length === 0) return {}
-
-  const cwd = parsed.cwd ?? process.cwd()
-  const sessionId = (parsed.session_id as string) ?? ""
-
-  const [{ getIssueStore }, { canonicalClaimPath, fileClaimProjectKey }] = await Promise.all([
-    import("../src/issue-store.ts"),
-    import("../src/session-file-claims.ts"),
-  ])
-
-  const projectKey = fileClaimProjectKey(cwd)
-
-  if (sessionId && projectKey) {
-    const store = getIssueStore()
-    for (const file of files)
-      store.recordSessionEdit(projectKey, sessionId, canonicalClaimPath(resolve(cwd, file)))
-  }
-
-  return {}
+  if (!isObservedEditTool(input.tool_name ?? "")) return {}
+  const observed = await recordObservedEdits(input)
+  if (observed) return observed
+  if (isFileEditTool(input.tool_name ?? "")) return await recordExplicitEdits(input)
+  return uncertainOwnership()
 }
 
-const posttooluseSessionEdits: SwizHook<PostToolHookInput> = {
+const hook: SwizHook<PostToolHookInput> = {
   name: "posttooluse-session-edits",
   event: "postToolUse",
-  matcher: "Edit|Write|Replace",
-  timeout: 5,
-
-  run(input) {
-    return evaluatePosttooluseSessionEdits(input)
-  },
+  timeout: 10,
+  run: evaluatePosttooluseSessionEdits,
 }
 
-export default posttooluseSessionEdits
-
-if (import.meta.main) {
-  await runSwizHookAsMain(posttooluseSessionEdits)
-}
+export default hook
+if (import.meta.main) await runSwizHookAsMain(hook)

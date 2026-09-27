@@ -112,6 +112,7 @@ import pretooluseRequireConvertToKotlin from "../hooks/pretooluse-require-conver
 import pretooluseRequirementsGenerateGate from "../hooks/pretooluse-requirements-generate-gate.ts"
 import pretooluseSandboxGuidanceConsolidation from "../hooks/pretooluse-sandbox-guidance-consolidation.ts"
 import pretooluseSandboxedEdits from "../hooks/pretooluse-sandboxed-edits.ts"
+import pretooluseSessionEdits from "../hooks/pretooluse-session-edits.ts"
 import pretooluseSkillInvocationGate from "../hooks/pretooluse-skill-invocation-gate.ts"
 import pretooluseStaleApprovalGate from "../hooks/pretooluse-stale-approval-gate.ts"
 import pretooluseStateGate from "../hooks/pretooluse-state-gate.ts"
@@ -174,6 +175,7 @@ import userpromptsubmitSkillSteps from "../hooks/userpromptsubmit-skill-steps.ts
 import userpromptsubmitTaskAdvisor from "../hooks/userpromptsubmit-task-advisor.ts"
 import { debugLog } from "./debug.ts"
 import { detectFrameworks, type Framework } from "./detect-frameworks.ts"
+import { SESSION_EDIT_OBSERVATION_MATCHER } from "./session-edit-snapshot.ts"
 
 export { DISPATCH_TIMEOUTS } from "./dispatch/timeouts.ts"
 
@@ -308,6 +310,11 @@ export const bundledHookManifest: HookGroup[] = [
     event: "preToolUse",
     matcher: "Task",
     hooks: [{ hook: pretooluseNoTaskDelegation }],
+  },
+  {
+    event: "preToolUse",
+    matcher: SESSION_EDIT_OBSERVATION_MATCHER,
+    hooks: [{ hook: pretooluseSessionEdits }],
   },
   {
     event: "preToolUse",
@@ -452,6 +459,7 @@ export const bundledHookManifest: HookGroup[] = [
     event: "postToolUse",
     hooks: [
       { hook: posttooluseActiveSkills },
+      { hook: posttooluseSessionEdits },
       { hook: posttoolusGitContext },
       { hook: posttooluseLastCommitAge },
       { hook: posttooluseMcpChannelTrace },
@@ -520,12 +528,11 @@ export const bundledHookManifest: HookGroup[] = [
       { hook: posttooluseFileTruncationGuard },
       { hook: posttoolusePrettierTs },
       { hook: posttoolusMidSessionPrompt },
-      { hook: posttooluseSessionEdits },
     ],
   },
   {
     event: "postToolUseFailure",
-    hooks: [{ hook: posttoolusefailureRetryAdvisor }],
+    hooks: [{ hook: posttoolusefailureRetryAdvisor }, { hook: posttooluseSessionEdits }],
   },
   {
     event: "sessionStart",

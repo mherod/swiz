@@ -32,6 +32,7 @@ import {
 } from "./issue-store-rest-fallback.ts"
 import type { PrBranchDetail } from "./pr-branch-detail.ts"
 import type { RepositoryCapability } from "./repository-capability.ts"
+import { SessionEditObservationStore } from "./session-edit-observations.ts"
 import { SessionFileClaimStore } from "./session-file-claims.ts"
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -457,6 +458,7 @@ export class IssueStore {
 
   private db: Database
   readonly fileClaims: SessionFileClaimStore
+  readonly editObservations: SessionEditObservationStore
   private _stmtListIssues!: Statement<{ data: string }>
   private _stmtDashboardIssues!: Statement<{ data: string }>
   private _stmtDashboardPrs!: Statement<{ data: string }>
@@ -484,6 +486,7 @@ export class IssueStore {
     this.db.run("PRAGMA busy_timeout=5000")
     this.migrate()
     this.fileClaims = new SessionFileClaimStore(this.db)
+    this.editObservations = new SessionEditObservationStore(this.db)
     this._stmtDashboardIssues = this.db.prepare(dashboardListSql("issues"))
     this._stmtDashboardPrs = this.db.prepare(dashboardListSql("pull_requests"))
     this._stmtListIssues = this.db.prepare(
