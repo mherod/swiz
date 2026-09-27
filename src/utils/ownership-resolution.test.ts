@@ -6,7 +6,7 @@ import { resolvePeerHeldFiles, resolveSessionFileOwnership } from "./session-fil
 
 const ownQuery = mock(() => [] as { file_path: string }[])
 const peerQuery = mock(() => [] as { file_path: string }[])
-const store = { isNoOp: false, listOtherSessionEdits: peerQuery }
+const store = { isNoOp: false, listOtherSessionEdits: peerQuery, fileClaims: { list: () => [] } }
 beforeAll(() =>
   mock.module("../issue-store.ts", () => ({
     getIssueStore: () => store,

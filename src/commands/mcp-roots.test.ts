@@ -70,6 +70,14 @@ describe("swiz mcp roots resolution (end to end)", () => {
     const root = { current: first }
     const { client, home, tmp } = await startRootedServer(root)
 
+    expect((await client.listTools()).tools.map((tool) => tool.name)).toContain("FileOwnership")
+    const claim = await client.callTool({
+      name: "FileOwnership",
+      arguments: { action: "claim", sessionId: "roots-session", paths: ["reserved.ts"] },
+    })
+    expect(claim.isError).toBeUndefined()
+    expect(claim.structuredContent).toMatchObject({ fileOwnership: { ok: true, action: "claim" } })
+
     // AC5: the drain loop's status file names the resolved directory and its source.
     expect(await statusFor(tmp, first)).toMatchObject({ cwd: first, cwdSource: "roots" })
 
@@ -83,6 +91,8 @@ describe("swiz mcp roots resolution (end to end)", () => {
     root.current = second
     await client.sendRootsListChanged()
     expect(await statusFor(tmp, second)).toMatchObject({ cwd: second, cwdSource: "roots" })
+    const secondRoot = await client.callTool({ name: "FileOwnership", arguments: {} })
+    expect(secondRoot.structuredContent).toMatchObject({ fileOwnership: { claims: [] } })
     await client.callTool({
       name: "TaskCreate",
       arguments: { subject: "Probe the second root", description: "note: e2e" },

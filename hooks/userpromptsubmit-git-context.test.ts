@@ -27,6 +27,7 @@ await mock.module("../src/issue-store.ts", () => {
   // The hook resolves session edits via getIssueStoreReader (daemon-fallback
   // reader added in 17046fd2); getIssueStore is kept for any sync callers.
   const reader = {
+    fileClaims: { list: () => [] },
     listSessionEdits: (projectKey: string, sessionId: string) => {
       return mockSessionEdits.get(`${projectKey}:${sessionId}`) ?? []
     },
@@ -212,10 +213,10 @@ describe("userpromptsubmit-git-context", () => {
 
     const context = additionalContext(result)
     expect(context).toContain("Uncommitted files:")
-    expect(context).toContain("  Edited in this session (recorded):")
+    expect(context).toContain("  Edited or explicitly held in this session:")
     expect(context).toContain("    - src/file1.ts")
     expect(context).toContain("    - src/file2.ts")
-    expect(context).toContain("  Edited by another active session (confirmed):")
+    expect(context).toContain("  Edited or explicitly held by another session (confirmed):")
     expect(context).toContain("    - src/file3.ts")
     expect(context).toContain("Don't panic.")
     expect(context).toContain("Continue as you were.")
@@ -244,7 +245,7 @@ describe("userpromptsubmit-git-context", () => {
     const result = await evaluateUserpromptsubmitGitContext({ session_id: sessionId, cwd })
     const context = additionalContext(result)
 
-    expect(context).toContain("Edited in this session (recorded):")
+    expect(context).toContain("Edited or explicitly held in this session:")
     expect(context).not.toContain("Don't panic.")
   })
 

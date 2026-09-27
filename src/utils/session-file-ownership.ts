@@ -1,4 +1,9 @@
 import { relative, resolve } from "node:path"
+import {
+  canonicalClaimPath,
+  fileClaimProjectKey,
+  type SessionFileClaim,
+} from "../session-file-claims.ts"
 import { buildConcurrentWorkGuidance } from "./concurrent-work-guidance.ts"
 
 export interface SessionFileEdit {
@@ -118,6 +123,24 @@ export async function resolveSessionFileOwnership(
     : { editedByUs: [], editedByOthers: [], unattributed: [...files] }
 }
 
+function classifyWithClaims(
+  options: ClassifySessionFilesOptions,
+  claims: SessionFileClaim[],
+  sessionId: string
+): SessionFileOwnership {
+  if (claims.length === 0) return classifySessionFileOwnership(options)
+  const active = new Map(claims.map((claim) => [claim.file_path, claim]))
+  const claimFor = (file: string) => active.get(canonicalClaimPath(resolve(options.gitRoot, file)))
+  const unclaimed = options.files.filter((file) => !claimFor(file))
+  const ownership = classifySessionFileOwnership({ ...options, files: unclaimed })
+  for (const file of options.files) {
+    const claim = claimFor(file)
+    if (claim)
+      ownership[claim.session_id === sessionId ? "editedByUs" : "editedByOthers"].push(file)
+  }
+  return ownership
+}
+
 /** Preserve query certainty separately from the three attribution buckets. */
 export async function resolveSessionFileOwnershipResult(
   cwd: string | undefined,
@@ -154,10 +177,12 @@ export async function resolveSessionFileOwnershipResult(
     const gitRoot = (await git(["rev-parse", "--show-toplevel"], cwd)).trim()
     if (!gitRoot) return { known: false, reason: "git-root-unavailable" }
 
-    return {
-      known: true,
-      ownership: classifySessionFileOwnership({ cwd, gitRoot, files, ownEdits, otherEdits }),
-    }
+    const ownership = classifyWithClaims(
+      { cwd, gitRoot, files, ownEdits, otherEdits },
+      store.fileClaims.list(fileClaimProjectKey(cwd), nowMs),
+      sessionId
+    )
+    return { known: true, ownership }
   } catch {
     return { known: false, reason: "query-failed" }
   }
@@ -227,7 +252,7 @@ export function appendSessionFileOwnershipContext(
   const sections = ["Uncommitted files:"]
   appendFileSection(
     sections,
-    "  Edited in this session (recorded):",
+    "  Edited or explicitly held in this session:",
     ownership.editedByUs,
     maxFiles
   )
@@ -235,7 +260,7 @@ export function appendSessionFileOwnershipContext(
   const otherLimit = Math.max(5, maxFiles - ownership.editedByUs.length)
   appendFileSection(
     sections,
-    "  Edited by another active session (confirmed):",
+    "  Edited or explicitly held by another session (confirmed):",
     ownership.editedByOthers,
     otherLimit
   )

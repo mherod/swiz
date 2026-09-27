@@ -57,7 +57,7 @@ describe("session file ownership", () => {
       editedByOthers: ["src/theirs.ts"],
       unattributed: [],
     })
-    expect(concurrentContext).toContain("Edited by another active session (confirmed):")
+    expect(concurrentContext).toContain("Edited or explicitly held by another session (confirmed):")
     expect(concurrentContext).toContain("Don't panic.")
   })
 })

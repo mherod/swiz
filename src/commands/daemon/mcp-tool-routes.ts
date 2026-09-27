@@ -24,7 +24,12 @@ const mcpToolRequestSchema = z.object({
 })
 
 /** Tools whose store is keyed by project; they must never fall back to the shared "-" key. */
-const PROJECT_TOOLS: ReadonlySet<McpToolName> = new Set(["TaskCreate", "TaskUpdate", "TaskList"])
+const PROJECT_TOOLS: ReadonlySet<McpToolName> = new Set([
+  "TaskCreate",
+  "TaskUpdate",
+  "TaskList",
+  "FileOwnership",
+])
 
 /**
  * A stdio server started from "/" (the Claude desktop app) has no project of its own. Recover

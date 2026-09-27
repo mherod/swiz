@@ -2,17 +2,18 @@
 
 // PreToolUse hook: Flag files a concurrent agent session changed recently.
 //
-// Reassurance, not a block: another agent editing the same repo is expected.
-// The point is to re-read before writing and to stay inside your own change.
+// Recent edits provide context; explicit peer leases prevent overlapping writes.
 
 import { relative, resolve } from "node:path"
 import {
   preToolUseAllowWithContext,
+  preToolUseDeny,
   runSwizHookAsMain,
   type SwizHook,
   type SwizHookOutput,
 } from "../src/SwizHook.ts"
 import { type FileEditHookInput, fileEditHookInputSchema } from "../src/schemas.ts"
+import { canonicalClaimPath, fileClaimProjectKey } from "../src/session-file-claims.ts"
 import { extractFileEditTargetPaths, isFileEditTool } from "../src/tool-matchers.ts"
 import { buildConcurrentFileEditGuidance } from "../src/utils/concurrent-work-guidance.ts"
 import { CONCURRENT_EDIT_WINDOW_MS } from "../src/utils/session-file-ownership.ts"
@@ -84,6 +85,23 @@ export async function evaluatePretooluseConcurrentSessionEdits(
   if (!projectKey) return {}
 
   const store = getIssueStore()
+  if (store.isNoOp) return {}
+  const targets = new Set(editContext.filePaths.map(canonicalClaimPath))
+  const held = store.fileClaims
+    .list(fileClaimProjectKey(editContext.cwd), nowMs)
+    .filter((claim) => claim.session_id !== editContext.sessionId && targets.has(claim.file_path))
+  if (held.length) {
+    return preToolUseDeny(
+      [
+        "These files have active reservations in another session:",
+        ...held.map(
+          (claim) =>
+            `${displayPathFor(editContext.cwd, claim.file_path)} — ${claim.session_id}${claim.lane ? ` (${claim.lane})` : ""}; expires ${new Date(claim.expires_at).toISOString()}`
+        ),
+        "Continue in unclaimed files. Coordinate release with the owner, then use FileOwnership claim with your own sessionId before editing.",
+      ].join("\n")
+    )
+  }
   const since = nowMs - CONCURRENT_EDIT_WINDOW_MS
   const latest = findLatestConcurrentEdit(
     editContext.filePaths,

@@ -32,6 +32,7 @@ import {
 } from "./issue-store-rest-fallback.ts"
 import type { PrBranchDetail } from "./pr-branch-detail.ts"
 import type { RepositoryCapability } from "./repository-capability.ts"
+import { SessionFileClaimStore } from "./session-file-claims.ts"
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -455,6 +456,7 @@ export class IssueStore {
   }
 
   private db: Database
+  readonly fileClaims: SessionFileClaimStore
   private _stmtListIssues!: Statement<{ data: string }>
   private _stmtDashboardIssues!: Statement<{ data: string }>
   private _stmtDashboardPrs!: Statement<{ data: string }>
@@ -479,7 +481,9 @@ export class IssueStore {
     mkdirSync(dirname(path), { recursive: true })
     this.db = new Database(path)
     this.db.run("PRAGMA journal_mode=WAL")
+    this.db.run("PRAGMA busy_timeout=5000")
     this.migrate()
+    this.fileClaims = new SessionFileClaimStore(this.db)
     this._stmtDashboardIssues = this.db.prepare(dashboardListSql("issues"))
     this._stmtDashboardPrs = this.db.prepare(dashboardListSql("pull_requests"))
     this._stmtListIssues = this.db.prepare(

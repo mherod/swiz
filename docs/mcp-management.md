@@ -1,5 +1,8 @@
 # MCP configuration management
 
+For coordinating file reservations between sessions through the Swiz MCP server,
+see [FileOwnership](mcp-file-ownership.md).
+
 `swiz manage mcp` supports Claude Code, Claude Desktop, Cursor, Windsurf, Gemini,
 Junie, AI, Antigravity CLI and Codex. Antigravity accepts `--antigravity`
 or `--agy`; Codex uses `--codex`; Windsurf uses `--windsurf`.
@@ -78,4 +81,3 @@ only registers the `swiz` stdio server and never implicitly syncs other entries.
 
 Formats: [Antigravity MCP documentation](https://www.antigravity.google/docs/mcp)
 and [Codex MCP documentation](https://developers.openai.com/codex/mcp).
-

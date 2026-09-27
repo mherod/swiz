@@ -2,6 +2,7 @@ import { createHash } from "node:crypto"
 import { readFileSync, unlinkSync, utimesSync, watch, writeFileSync } from "node:fs"
 import { z } from "zod"
 import { CHANNEL_DELIVERABLE_TRIGGERS } from "../auto-steer-store.ts"
+import { fileOwnershipInputSchema, fileOwnershipResultSchema } from "../file-ownership-tool.ts"
 import {
   createMcpCwdResolver,
   type McpCwdSource,
@@ -813,6 +814,31 @@ export function registerSkillQueryTool(server: McpToolServer, cwd: ToolCwd): voi
   )
 }
 
+export function registerFileOwnershipTool(server: McpToolServer, cwd: ToolCwd): void {
+  server.registerTool(
+    "FileOwnership",
+    {
+      title: "Coordinate session file ownership",
+      description:
+        "Coordinate work lanes in this project with list, claim, hold and release. " +
+        "Claims are exclusive, expiring reservations; hold renews only your active leases. " +
+        "Mutations require your actual sessionId and explicit file paths and are all-or-nothing. " +
+        "Never pass another session's ID. No force takeover or peer release. " +
+        "List includes recent edit evidence; releasing a lease does not erase uncommitted edits. " +
+        "Use the same session ID as your editing hooks so the existing ownership checks recognise you.",
+      inputSchema: fileOwnershipInputSchema,
+      outputSchema: { summary: z.string(), fileOwnership: fileOwnershipResultSchema },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: false,
+      },
+    },
+    (input: McpToolInput) => executeProjectTool("FileOwnership", input, cwd)
+  )
+}
+
 async function serve(): Promise<void> {
   const { McpServer } = await import("@modelcontextprotocol/sdk/server/mcp.js")
   const { StdioServerTransport } = await import("@modelcontextprotocol/sdk/server/stdio.js")
@@ -842,6 +868,8 @@ async function serve(): Promise<void> {
   registerTaskListTool(server, toolCwd)
 
   registerSkillQueryTool(server, toolCwd)
+
+  registerFileOwnershipTool(server, toolCwd)
 
   // Roots are known only after the client handshake, so the channel drain loop
   // (keyed by project) starts once the directory resolves and restarts when it moves.
@@ -877,8 +905,8 @@ async function serve(): Promise<void> {
   }
 
   const enabledFeatures = mcpChannels
-    ? "channel + permission + reply + task-tools + skill-query"
-    : "reply + task-tools + skill-query"
+    ? "channel + permission + reply + task-tools + skill-query + file-ownership"
+    : "reply + task-tools + skill-query + file-ownership"
   process.stderr.write(
     `swiz mcp server ready (${SERVER_NAME} ${SERVER_VERSION}) — ${enabledFeatures} enabled\n`
   )

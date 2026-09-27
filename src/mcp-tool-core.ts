@@ -17,6 +17,12 @@ import { appendFile, mkdir } from "node:fs/promises"
 import { dirname } from "node:path"
 import { isDeepStrictEqual } from "node:util"
 import { z } from "zod"
+import {
+  type FileOwnershipResult,
+  fileOwnershipResultSchema,
+  manageFileOwnership,
+  renderFileOwnership,
+} from "./file-ownership-tool.ts"
 import { getHomeDirWithFallback } from "./home.ts"
 import { projectKeyFromCwd } from "./project-key.ts"
 import {
@@ -74,6 +80,7 @@ export interface McpToolResult {
     summary?: string
     taskMutation?: { changed: boolean }
     skillQuery?: SkillQueryResult
+    fileOwnership?: FileOwnershipResult
   }
 }
 
@@ -83,6 +90,7 @@ export const MCP_TOOL_NAMES = [
   "TaskUpdate",
   "TaskList",
   "SkillQuery",
+  "FileOwnership",
 ] as const
 export const mcpToolNameSchema = z.enum(MCP_TOOL_NAMES)
 export type McpToolName = z.infer<typeof mcpToolNameSchema>
@@ -99,6 +107,7 @@ export const mcpToolResultSchema = z.object({
       summary: z.string().optional(),
       taskMutation: z.object({ changed: z.boolean() }).optional(),
       skillQuery: skillQueryResultSchema.optional(),
+      fileOwnership: fileOwnershipResultSchema.optional(),
     })
     .optional(),
 })
@@ -473,6 +482,20 @@ async function runSkillQueryTool(input: McpToolInput, cwd: string): Promise<McpT
 
 // ─── Entry point ────────────────────────────────────────────────────────────
 
+function runFileOwnershipTool(input: McpToolInput, cwd: string): McpToolResult {
+  try {
+    const result = manageFileOwnership(input, cwd)
+    const summary = renderFileOwnership(result)
+    return {
+      ...textResult(summary),
+      ...(result.ok ? {} : { isError: true }),
+      structuredContent: { summary, fileOwnership: result },
+    }
+  } catch (error) {
+    return errorResult(`FileOwnership failed: ${messageFromUnknownError(error)}`)
+  }
+}
+
 /** Execute one MCP tool call. Shared by the daemon route and the stdio fallback. */
 export async function runMcpTool(
   tool: McpToolName,
@@ -490,5 +513,7 @@ export async function runMcpTool(
       return runTaskListTool(cwd)
     case "SkillQuery":
       return runSkillQueryTool(input, cwd)
+    case "FileOwnership":
+      return runFileOwnershipTool(input, cwd)
   }
 }
