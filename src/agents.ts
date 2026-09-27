@@ -401,7 +401,9 @@ export const AGENTS: AgentDef[] = registerAgents([
     binary: "agy",
     tasksEnabled: false,
     hooksConfigurable: true,
-    processPattern: /\bagy\b|antigravity/,
+    // Match the executable or runtime script, never incidental arguments such as test filenames.
+    processPattern:
+      /^(?:(?:\S*\/)?(?:bun|node)\s+)?(?:\S*\/)?(?:agy|antigravity)(?:\.[cm]?js)?(?:\s|$)/,
     toolAliases: {},
     eventMap: {
       stop: "Stop",
