@@ -128,9 +128,26 @@ describe("session edit observation", () => {
     expect(paths()).toEqual([])
   })
 
-  test("a missing pre-hook is explicitly uncertain", async () => {
+  test("a missing shell pre-hook stays quiet without claiming files", async () => {
     const { input, paths } = await fixture()
-    expect(JSON.stringify(await observeAfter(input))).toContain("uncertain")
+    expect(await observeAfter(input)).toEqual({})
+    expect(paths()).toEqual([])
+  })
+
+  test("a failed Bash call without observation stays quiet", async () => {
+    const { input, paths } = await fixture("Bash")
+    expect(await observeAfter({ ...input, hook_event_name: "PostToolUseFailure" })).toEqual({})
+    expect(paths()).toEqual([])
+  })
+
+  test("overlapping unchanged calls stay quiet even when Bash fails", async () => {
+    const { cwd, input, paths } = await fixture("Bash")
+    await Bun.write(join(cwd, "existing.ts"), "unchanged")
+    const peer = { ...input, session_id: "peer", tool_use_id: "peer-call" }
+    await observeBefore(input)
+    await observeBefore(peer)
+    expect(await observeAfter({ ...input, hook_event_name: "PostToolUseFailure" })).toEqual({})
+    expect(await observeAfter(peer)).toEqual({})
     expect(paths()).toEqual([])
   })
 
@@ -139,7 +156,7 @@ describe("session edit observation", () => {
     await Bun.write(join(cwd, "existing.ts"), "unchanged")
     await observeBefore(input)
     await rm(join(cwd, ".git"), { recursive: true, force: true })
-    expect(JSON.stringify(await observeAfter(input))).toContain("uncertain")
+    expect(await observeAfter(input)).toEqual({})
     expect(paths()).toEqual([])
     expect(
       store.editObservations.get(fileClaimProjectKey(cwd), "owner", input.tool_use_id)?.finished_at

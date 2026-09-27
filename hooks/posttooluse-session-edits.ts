@@ -34,6 +34,11 @@ function uncertainOwnership(): SwizHookOutput {
   )
 }
 
+/** Missing shell observations are not evidence that the call edited files. */
+function unavailableOwnership(input: PostToolHookInput): SwizHookOutput {
+  return isFileEditTool(input.tool_name ?? "") ? uncertainOwnership() : {}
+}
+
 async function recordExplicitEdits(input: PostToolHookInput): Promise<SwizHookOutput> {
   if (failedEditResponse(input)) return {}
   const parsed = toolHookInputSchema.parse(
@@ -84,7 +89,8 @@ async function finishObservation(
     throw error
   })
   const changed = store.editObservations.finish(project, session, observation.tool_id, after)
-  return changed === null ? uncertainOwnership() : {}
+  if (changed !== null) return {}
+  return observation.snapshot ? uncertainOwnership() : unavailableOwnership(input)
 }
 
 async function recordObservedEdits(input: PostToolHookInput): Promise<SwizHookOutput | null> {
@@ -93,10 +99,10 @@ async function recordObservedEdits(input: PostToolHookInput): Promise<SwizHookOu
     if (!identity) return null
     const { getIssueStore } = await import("../src/issue-store.ts")
     const store = getIssueStore()
-    if (store.isNoOp) return uncertainOwnership()
+    if (store.isNoOp) return unavailableOwnership(input)
     return await finishObservation(store, identity, input)
   } catch {
-    return uncertainOwnership()
+    return unavailableOwnership(input)
   }
 }
 
@@ -107,7 +113,7 @@ export async function evaluatePosttooluseSessionEdits(
   const observed = await recordObservedEdits(input)
   if (observed) return observed
   if (isFileEditTool(input.tool_name ?? "")) return await recordExplicitEdits(input)
-  return uncertainOwnership()
+  return {}
 }
 
 const hook: SwizHook<PostToolHookInput> = {

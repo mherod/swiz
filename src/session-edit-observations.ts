@@ -114,16 +114,17 @@ export class SessionEditObservationStore {
         WHERE project_key = ? AND session_id = ? AND tool_id = ?`)
           .run(now, project, session, tool)
         if (!observation.snapshot) return null
+        const before = JSON.parse(observation.snapshot) as FileSnapshot
+        const changed = [...new Set([...Object.keys(before), ...Object.keys(after)])].filter(
+          (path) => (before[path] ?? null) !== (after[path] ?? null)
+        )
+        if (changed.length === 0) return []
         const overlap = this.db
           .query(`SELECT 1 FROM session_edit_observations
         WHERE project_key = ? AND session_id != ? AND started_at <= ?
         AND (finished_at IS NULL OR finished_at >= ?) LIMIT 1`)
           .get(project, session, now, observation.started_at)
         if (overlap) return null
-        const before = JSON.parse(observation.snapshot) as FileSnapshot
-        const changed = [...new Set([...Object.keys(before), ...Object.keys(after)])].filter(
-          (path) => (before[path] ?? null) !== (after[path] ?? null)
-        )
         const insert = this.db.query(`INSERT INTO session_edits
         (project_key, session_id, file_path, updated_at) VALUES (?, ?, ?, ?)
         ON CONFLICT(project_key, session_id, file_path) DO UPDATE SET
