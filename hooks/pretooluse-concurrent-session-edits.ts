@@ -13,7 +13,12 @@ import {
   type SwizHookOutput,
 } from "../src/SwizHook.ts"
 import { type FileEditHookInput, fileEditHookInputSchema } from "../src/schemas.ts"
-import { fileClaimIdentity, fileClaimProjectKey } from "../src/session-file-claims.ts"
+import { sessionEditProjectKeys } from "../src/session-edit-identity.ts"
+import {
+  canonicalClaimPath,
+  fileClaimIdentity,
+  fileClaimProjectKey,
+} from "../src/session-file-claims.ts"
 import { extractFileEditTargetPaths, isFileEditTool } from "../src/tool-matchers.ts"
 import { buildConcurrentFileEditGuidance } from "../src/utils/concurrent-work-guidance.ts"
 import { CONCURRENT_EDIT_WINDOW_MS } from "../src/utils/session-file-ownership.ts"
@@ -53,16 +58,24 @@ function getConcurrentEditContext(input: FileEditHookInput): ConcurrentEditConte
 
 function findLatestConcurrentEdit(
   filePaths: string[],
-  projectKey: string,
+  projectKeys: string[],
   sessionId: string,
   since: number,
   store: ReturnType<typeof import("../src/issue-store.ts").getIssueStore>
 ): { filePath: string; updatedAt: number } | undefined {
   const pendingOverlaps = filePaths.flatMap((filePath) => {
-    const latest = store.listOtherSessionEditors(projectKey, sessionId, filePath, since)[0]
+    const paths = [...new Set([filePath, canonicalClaimPath(filePath)])]
+    const queries = projectKeys.flatMap((key) => paths.map((path) => ({ key, path })))
+    const latest = queries
+      .flatMap(({ key, path }) => store.listOtherSessionEditors(key, sessionId, path, since))
+      .sort((a, b) => b.updated_at - a.updated_at)[0]
     if (!latest) return []
-    const ownEditAt = store.getSessionEditAt(projectKey, sessionId, filePath)
-    if (ownEditAt !== null && ownEditAt >= latest.updated_at) return []
+    const ownEditAt = Math.max(
+      ...queries.map(
+        ({ key, path }) => store.getSessionEditAt(key, sessionId, path) ?? Number.NEGATIVE_INFINITY
+      )
+    )
+    if (ownEditAt >= latest.updated_at) return []
     return [{ filePath, updatedAt: latest.updated_at }]
   })
   pendingOverlaps.sort((a, b) => b.updatedAt - a.updatedAt)
@@ -76,13 +89,8 @@ export async function evaluatePretooluseConcurrentSessionEdits(
   const editContext = getConcurrentEditContext(input)
   if (!editContext) return {}
 
-  const [{ getIssueStore }, { projectKeyFromCwd }] = await Promise.all([
-    import("../src/issue-store.ts"),
-    import("../src/transcript-utils.ts"),
-  ])
-
-  const projectKey = projectKeyFromCwd(editContext.cwd)
-  if (!projectKey) return {}
+  const { getIssueStore } = await import("../src/issue-store.ts")
+  const projectKeys = sessionEditProjectKeys(editContext.cwd)
 
   const store = getIssueStore()
   if (store.isNoOp) return {}
@@ -115,7 +123,7 @@ export async function evaluatePretooluseConcurrentSessionEdits(
   const since = nowMs - CONCURRENT_EDIT_WINDOW_MS
   const latest = findLatestConcurrentEdit(
     editContext.filePaths,
-    projectKey,
+    projectKeys,
     editContext.sessionId,
     since,
     store

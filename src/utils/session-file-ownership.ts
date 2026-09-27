@@ -1,5 +1,7 @@
 import { relative, resolve } from "node:path"
+import { resolveSessionEditPath, sessionEditProjectKeys } from "../session-edit-identity.ts"
 import {
+  canonicalClaimPath,
   fileClaimIdentity,
   fileClaimProjectKey,
   indexFileClaims,
@@ -66,8 +68,11 @@ function normalizedEditTimes(
   edits: readonly SessionFileEdit[]
 ): Map<string, number> {
   const editTimes = new Map<string, number>()
+  const canonicalRoot = canonicalClaimPath(gitRoot)
   for (const edit of edits) {
-    const filePath = relative(gitRoot, resolve(cwd, edit.file_path))
+    const path = resolveSessionEditPath(gitRoot, resolve(cwd, edit.file_path))
+    if (!path) continue
+    const filePath = relative(canonicalRoot, path)
     const updatedAt = edit.updated_at ?? 0
     editTimes.set(filePath, Math.max(editTimes.get(filePath) ?? 0, updatedAt))
   }
@@ -97,7 +102,10 @@ export function classifySessionFileOwnership({
   }
 
   for (const file of files) {
-    const normalizedFile = relative(gitRoot, resolve(gitRoot, file))
+    const normalizedFile = relative(
+      canonicalClaimPath(gitRoot),
+      canonicalClaimPath(resolve(gitRoot, file))
+    )
     const ownEditAt = ownEditTimes.get(normalizedFile)
     const otherEditAt = otherEditTimes.get(normalizedFile)
     if (ownEditAt !== undefined && (otherEditAt === undefined || ownEditAt >= otherEditAt)) {
@@ -159,9 +167,7 @@ export async function resolveSessionFileOwnershipResult(
   if (!hasIdentity(sessionId)) return { known: false, reason: "missing-session" }
 
   try {
-    const { projectKeyFromCwd } = await import("../transcript-utils.ts")
-    const projectKey = projectKeyFromCwd(cwd)
-    if (!projectKey) return { known: false, reason: "missing-project" }
+    const projectKeys = sessionEditProjectKeys(cwd)
     if (files.length === 0) {
       return { known: true, ownership: { editedByUs: [], editedByOthers: [], unattributed: [] } }
     }
@@ -172,14 +178,15 @@ export async function resolveSessionFileOwnershipResult(
     const store = getIssueStore()
     if (store.isNoOp) return { known: false, reason: "store-unavailable" }
 
-    const ownEdits = await getIssueStoreReader().listSessionEdits<SessionFileEdit>(
-      projectKey,
-      sessionId
-    )
-    const otherEdits = store.listOtherSessionEdits(
-      projectKey,
-      sessionId,
-      nowMs - CONCURRENT_EDIT_WINDOW_MS
+    const ownEdits = (
+      await Promise.all(
+        projectKeys.map((key) =>
+          getIssueStoreReader().listSessionEdits<SessionFileEdit>(key, sessionId)
+        )
+      )
+    ).flat()
+    const otherEdits = projectKeys.flatMap((key) =>
+      store.listOtherSessionEdits(key, sessionId, nowMs - CONCURRENT_EDIT_WINDOW_MS)
     )
     const gitRoot = (await git(["rev-parse", "--show-toplevel"], cwd)).trim()
     if (!gitRoot) return { known: false, reason: "git-root-unavailable" }

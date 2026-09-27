@@ -82,6 +82,16 @@ claiming a file: obtaining a reservation does not authorise overwriting a peer's
 changes. Releasing a reservation does not delete edits, modify file contents,
 stage files, or commit work.
 
+New edit records use the same canonical project root as reservations, so a project
+symlink and its real directory share history. Reads also include the current
+caller's exact legacy key and combine duplicate session/file records using their
+latest timestamp. Resolved paths outside the project are excluded, even when
+older encoded directory keys collide. No legacy rows are rewritten or deleted.
+`historyWarnings` explains the remaining coverage limit: older keys cannot safely
+reveal every former directory alias. History under other aliases remains stored;
+use its original alias to inspect it. An empty history response is not proof that
+no other session has made edits.
+
 Historical paths that can no longer be resolved are returned in `unresolvedEdits`
 with their path and error code. The rendered response warns that history is
 incomplete. These records remain in the ledger and do not prevent releasing an

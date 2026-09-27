@@ -3,7 +3,11 @@ import { isAbsolute, relative, resolve, sep } from "node:path"
 import { z } from "zod"
 import { getIssueStore, type IssueStore } from "./issue-store.ts"
 import type { McpToolInput } from "./mcp-tool-core.ts"
-import { projectKeyFromCwd } from "./project-key.ts"
+import {
+  LEGACY_EDIT_HISTORY_WARNING,
+  resolveSessionEditPath,
+  sessionEditProjectKeys,
+} from "./session-edit-identity.ts"
 import {
   canonicalClaimPath,
   fileClaimIdentity,
@@ -75,6 +79,7 @@ export const fileOwnershipResultSchema = z.object({
     z.object({ file_path: z.string(), session_id: z.string(), updated_at: z.number() })
   ),
   unresolvedEdits: z.array(z.object({ file_path: z.string(), error: z.string() })),
+  historyWarnings: z.array(z.string()),
 })
 export type FileOwnershipResult = z.infer<typeof fileOwnershipResultSchema>
 const inputSchema = z.strictObject(fileOwnershipInputSchema)
@@ -173,25 +178,35 @@ function resolveRecentEdits(
   paths: string[] | undefined,
   now: number
 ) {
-  const recentEdits: FileOwnershipResult["recentEdits"] = []
+  const recentEdits = new Map<string, FileOwnershipResult["recentEdits"][number]>()
   const unresolvedEdits: FileOwnershipResult["unresolvedEdits"] = []
   const selected = paths ? new Set(paths.map(fileClaimIdentity)) : undefined
-  for (const edit of store.listOtherSessionEdits(
-    projectKeyFromCwd(cwd),
-    "",
-    now - CONCURRENT_EDIT_WINDOW_MS
-  )) {
+  const rows = sessionEditProjectKeys(cwd).flatMap((key) =>
+    store.listOtherSessionEdits(key, "", now - CONCURRENT_EDIT_WINDOW_MS)
+  )
+  for (const edit of rows) {
     try {
-      const path = canonicalClaimPath(resolve(cwd, edit.file_path))
-      if (!selected || selected.has(fileClaimIdentity(path))) {
-        recentEdits.push({ ...edit, file_path: path })
-      }
+      const path = resolveSessionEditPath(cwd, edit.file_path)
+      if (!path || (selected && !selected.has(fileClaimIdentity(path)))) continue
+      const key = `${edit.session_id}\0${path}`
+      const previous = recentEdits.get(key)
+      if (!previous || previous.updated_at < edit.updated_at)
+        recentEdits.set(key, { ...edit, file_path: path })
     } catch (error) {
       const code = (error as { code?: string }).code
       unresolvedEdits.push({ file_path: edit.file_path, error: code ?? "Path resolution failed" })
     }
   }
-  return { recentEdits, unresolvedEdits }
+  return {
+    recentEdits: [...recentEdits.values()].sort(
+      (a, b) =>
+        b.updated_at - a.updated_at ||
+        a.file_path.localeCompare(b.file_path) ||
+        a.session_id.localeCompare(b.session_id)
+    ),
+    unresolvedEdits,
+    historyWarnings: [LEGACY_EDIT_HISTORY_WARNING],
+  }
 }
 
 /** Explicit leases and observed edits remain separate: release never erases attribution. */
@@ -218,7 +233,7 @@ export function manageFileOwnership(
 }
 
 function renderOwnershipHistory(result: FileOwnershipResult): string[] {
-  const lines: string[] = []
+  const lines = [...result.historyWarnings]
   if (result.recentEdits.length)
     lines.push(
       "Recent recorded edits (independent of leases):",

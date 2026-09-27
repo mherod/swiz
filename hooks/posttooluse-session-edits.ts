@@ -27,16 +27,17 @@ export async function evaluatePosttooluseSessionEdits(
   const cwd = parsed.cwd ?? process.cwd()
   const sessionId = (parsed.session_id as string) ?? ""
 
-  const [{ getIssueStore }, { projectKeyFromCwd }] = await Promise.all([
+  const [{ getIssueStore }, { canonicalClaimPath, fileClaimProjectKey }] = await Promise.all([
     import("../src/issue-store.ts"),
-    import("../src/transcript-utils.ts"),
+    import("../src/session-file-claims.ts"),
   ])
 
-  const projectKey = projectKeyFromCwd(cwd)
+  const projectKey = fileClaimProjectKey(cwd)
 
   if (sessionId && projectKey) {
     const store = getIssueStore()
-    for (const file of files) store.recordSessionEdit(projectKey, sessionId, resolve(cwd, file))
+    for (const file of files)
+      store.recordSessionEdit(projectKey, sessionId, canonicalClaimPath(resolve(cwd, file)))
   }
 
   return {}
