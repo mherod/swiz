@@ -39,7 +39,9 @@ async function execute(
     filteredGroups: [{ event: canonicalEvent, hooks }],
   })
   const wire = hookOutputSchema.parse(stripInternalDispatchFields(result))
-  expect(write).toHaveBeenCalledWith(result)
+  expect(write).toHaveBeenCalledTimes(1)
+  expect(write).toHaveBeenCalledWith(wire)
+  expect(wire).not.toHaveProperty("hookExecutions")
   return { result, wire }
 }
 
