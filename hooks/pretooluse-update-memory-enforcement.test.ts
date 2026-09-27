@@ -7,7 +7,6 @@ setDefaultTimeout(30_000)
 import { join } from "node:path"
 import { withGitClient } from "../src/git/client.ts"
 import { MockGitClient } from "../src/git/mock-client.ts"
-import { resolveSkillFilePathForHookPayload } from "../src/skill-utils.ts"
 import { getSessionTasksDir } from "../src/tasks/task-recovery.ts"
 import {
   createEnforcementProjectDir as createEnforcementFixture,
@@ -197,50 +196,61 @@ describe("pretooluse-update-memory-enforcement", () => {
     expect(result.stdout).toBe("")
   })
 
-  test("allows the markdown write once the skill read is already in the transcript", async () => {
-    const dir = await createTempDir()
+  test.each([
+    true,
+    false,
+  ])("a later markdown write requires the recorded skill read: %s", async (hasRead) => {
+    const dir = await createEnforcementProjectDir(createTempDir)
     const transcript = await createTranscript(dir, [
       hookFeedback(`Use the /update-memory skill to ${REMINDER_FRAGMENT}`),
-      ...toolUse("Read", {
-        file_path:
-          resolveSkillFilePathForHookPayload("update-memory", {}, dir) ??
-          "/missing/update-memory/SKILL.md",
+      // A first memory write is allowed before the skill read (same-turn escape).
+      // Once it is recorded, another write must not bypass the missing read.
+      ...toolUse("Write", {
+        file_path: "CLAUDE.md",
+        content: "DO: update memory immediately.\n",
       }),
+      ...(hasRead ? toolUse("Read", { file_path: projectSkillPath(dir) }) : []),
     ])
 
     const result = await runHook({
+      cwd: dir,
       tool_name: "Edit",
       tool_input: { file_path: "CLAUDE.md", new_string: "DO: update memory immediately.\n" },
       transcript_path: transcript,
     })
 
     expect(result.exitCode).toBe(0)
-    expect(result.stdout).toBe("")
+    if (hasRead) expect(result.stdout).toBe("")
+    else expect(result.json?.hookSpecificOutput?.permissionDecision).toBe("deny")
   })
 
-  test("allows normal work after the reminder has already been satisfied", async () => {
-    const dir = await createTempDir()
+  test.each([
+    "complete",
+    "missing read",
+    "missing write",
+  ])("normal work after reminder: %s", async (evidence) => {
+    const dir = await createEnforcementProjectDir(createTempDir)
     const transcript = await createTranscript(dir, [
       hookFeedback(`Use the /update-memory skill to ${REMINDER_FRAGMENT}`),
-      ...toolUse("Read", {
-        file_path:
-          resolveSkillFilePathForHookPayload("update-memory", {}, dir) ??
-          "/missing/update-memory/SKILL.md",
-      }),
-      ...toolUse("Write", {
-        file_path: "CLAUDE.md",
-        content: "DO: update memory immediately.\n",
-      }),
+      ...(evidence !== "missing read" ? toolUse("Read", { file_path: projectSkillPath(dir) }) : []),
+      ...(evidence !== "missing write"
+        ? toolUse("Write", {
+            file_path: "CLAUDE.md",
+            content: "DO: update memory immediately.\n",
+          })
+        : []),
     ])
 
     const result = await runHook({
+      cwd: dir,
       tool_name: "Edit",
       tool_input: { file_path: "src/app.ts", new_string: "export const y = 2\n" },
       transcript_path: transcript,
     })
 
     expect(result.exitCode).toBe(0)
-    expect(result.stdout).toBe("")
+    if (evidence === "complete") expect(result.stdout).toBe("")
+    else expect(result.json?.hookSpecificOutput?.permissionDecision).toBe("deny")
   })
 
   test("ignores later plain transcript mentions of the reminder fragment after the hook was satisfied", async () => {
@@ -293,17 +303,22 @@ describe("pretooluse-update-memory-enforcement", () => {
     expect(result.stdout).toBe("")
   })
 
-  test("allows the markdown write even when the skill read is not yet in the transcript (same-turn case)", async () => {
+  test.each([
+    true,
+    false,
+  ])("allows the first markdown write with skill read recorded: %s", async (hasRead) => {
     // Reproduces the deadlock: skill Read and Edit happen in the same response turn,
     // so the transcript hasn't captured the skill Read yet when the Edit hook fires.
-    const dir = await createTempDir()
+    const dir = await createEnforcementProjectDir(createTempDir)
     const transcript = await createTranscript(dir, [
       hookFeedback(`Use the /update-memory skill to ${REMINDER_FRAGMENT}`),
       // Skill read is absent — simulating the same-turn case where the transcript
       // hasn't been written yet for the current assistant turn.
+      ...(hasRead ? toolUse("Read", { file_path: projectSkillPath(dir) }) : []),
     ])
 
     const result = await runHook({
+      cwd: dir,
       tool_name: "Edit",
       tool_input: { file_path: "CLAUDE.md", new_string: "DO: update memory immediately.\n" },
       transcript_path: transcript,
@@ -311,33 +326,49 @@ describe("pretooluse-update-memory-enforcement", () => {
 
     expect(result.exitCode).toBe(0)
     expect(result.stdout).toBe("")
+
+    const control = await runHook({
+      cwd: dir,
+      tool_name: "Edit",
+      tool_input: { file_path: "src/app.ts", new_string: "export const x = 1\n" },
+      transcript_path: transcript,
+    })
+    expect(control.json?.hookSpecificOutput?.permissionDecision).toBe("deny")
   })
 
-  test("ignores its own prior denials when locating the active reminder", async () => {
-    const dir = await createTempDir()
+  test.each([
+    "complete",
+    "missing read",
+    "missing write",
+  ])("ignores its own prior denials with evidence: %s", async (evidence) => {
+    const dir = await createEnforcementProjectDir(createTempDir)
     const transcript = await createTranscript(dir, [
       hookFeedback(`Use the /update-memory skill to ${REMINDER_FRAGMENT}`),
-      ...toolUse("Read", {
-        file_path:
-          resolveSkillFilePathForHookPayload("update-memory", {}, dir) ??
-          "/missing/update-memory/SKILL.md",
-      }),
+      ...(evidence !== "missing read" ? toolUse("Read", { file_path: projectSkillPath(dir) }) : []),
+      ...(evidence !== "missing write"
+        ? toolUse("Write", {
+            file_path: "CLAUDE.md",
+            content: "DO: record the rule before continuing.\n",
+          })
+        : []),
       hookFeedback(
         `${SELF_SENTINEL}: still pending. Use the /update-memory skill to ${REMINDER_FRAGMENT}`
       ),
     ])
 
     const result = await runHook({
+      cwd: dir,
       tool_name: "Edit",
       tool_input: {
-        file_path: "CLAUDE.md",
-        new_string: "DO: record the rule before continuing.\n",
+        file_path: "src/app.ts",
+        new_string: "export const continued = true\n",
       },
       transcript_path: transcript,
     })
 
     expect(result.exitCode).toBe(0)
-    expect(result.stdout).toBe("")
+    if (evidence === "complete") expect(result.stdout).toBe("")
+    else expect(result.json?.hookSpecificOutput?.permissionDecision).toBe("deny")
   })
 
   test("skips enforcement when context compaction occurred after the trigger (issue #22)", async () => {
