@@ -36,8 +36,14 @@ Example calls, using your current session's ID in place of `<session-id>`:
 ```
 
 Paths are exact files, relative to the resolved MCP project or absolute within
-it. New files are supported. Dot segments and symlink aliases resolve to one
-file identity. Directories, globs and paths outside the project are rejected.
+it. New files are supported. Selected files absent at validation time are listed
+in `nonexistentPaths`, with a warning to check spelling; claiming them does not
+create files. This differs from `missing`, which means there is no active lease
+to renew. Dot segments, trailing separators and symlink aliases resolve to one
+file identity. Redundant supplied spellings appear in `duplicates`, with a warning;
+only one lease per identity is changed. Literal brackets and braces are supported,
+including `app/[id]/page.tsx`. No pattern expansion occurs. Directories, `*`, `?`
+and paths outside the project are rejected.
 Missing path components follow the containing directory's case sensitivity:
 `NewFile.ts` and `newfile.ts` conflict on a case-insensitive volume. The capability
 check creates and removes one private empty probe directory, with at most 512

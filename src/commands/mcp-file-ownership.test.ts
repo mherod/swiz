@@ -89,6 +89,7 @@ describe("FileOwnership leases", () => {
     const insensitive = await filesystemIsInsensitive()
     const result = call("claim", "session-a", ["NewFile.ts", "newfile.ts"])
     expect(result.claims).toHaveLength(insensitive ? 1 : 2)
+    expect(result.duplicates).toHaveLength(insensitive ? 1 : 0)
     expect(result.claims[0]?.file_path).toBe(join(cwd, "NewFile.ts"))
     expect(call("list", "session-b", ["newfile.ts"]).claims).toHaveLength(1)
   })
@@ -177,6 +178,47 @@ describe("FileOwnership leases", () => {
     })
     expect(result.recentEdits).toEqual([])
     expect(getIssueStore().listSessionEdits(projectKeyFromCwd(cwd), "session-a")).toEqual([])
+  })
+
+  test.each([
+    false,
+    true,
+  ])("coordinates literal bracket routes with existing=%s", async (existing) => {
+    const paths = ["[id].ts", "app/[id]/page.tsx", "{layout}.ts"]
+    mkdirSync(join(cwd, "app/[id]"), { recursive: true })
+    if (existing) for (const path of paths) await Bun.write(join(cwd, path), "route")
+    await Bun.write(join(cwd, "i.ts"), "neighbour")
+    for (const action of ["claim", "hold", "list", "release"]) {
+      const result = call(action, "session-a", paths)
+      expect(result.ok).toBe(true)
+      expect(action === "release" ? result.released : result.claims).toHaveLength(3)
+      expect(result.claims.some((claim) => claim.file_path === join(cwd, "i.ts"))).toBe(false)
+    }
+    expect(() => call("claim", "session-a", ["*.ts"])).toThrow("exact files")
+    expect(manageFileOwnership({}, cwd, 1000).claims).toHaveLength(0)
+  })
+
+  test("warns about planned files without creating them", async () => {
+    await Bun.write(join(cwd, "exists.ts"), "existing")
+    const selected = ["exists.ts", "planned/new.ts"]
+    const result = call("claim", "session-a", selected)
+    expect(result.ok).toBe(true)
+    expect(result.nonexistentPaths).toEqual([join(cwd, "planned/new.ts")])
+    expect(renderFileOwnership(result)).toContain("check the spelling")
+    expect(existsSync(join(cwd, "planned"))).toBe(false)
+    await Bun.write(join(cwd, "planned/new.ts"), "created")
+    expect(call("hold", "session-a", selected).nonexistentPaths).toEqual([])
+  })
+
+  test("warns on redundant normalised selections for every action", () => {
+    const variants = ["file.ts", "./file.ts", join(cwd, "file.ts"), "file.ts/"]
+    for (const action of ["claim", "hold", "list", "release"]) {
+      const result = call(action, "session-a", variants)
+      expect(result.ok).toBe(true)
+      expect(result.duplicates).toEqual(variants.slice(1))
+      expect(renderFileOwnership(result)).toContain("Duplicate paths ignored")
+      expect(action === "release" ? result.released : result.claims).toHaveLength(1)
+    }
   })
 
   test("rejects peer claims and releases atomically across a batch", () => {
@@ -315,7 +357,7 @@ describe("FileOwnership leases", () => {
       { action: "release", sessionId: "a" },
       { action: "claim", sessionId: " " },
       { action: "force" },
-      ...[[], ["../escape.ts"], [cwd], ["*.ts"], [" "]].map((paths) => ({
+      ...[[], ["../escape.ts"], [cwd], ["*.ts"], ["?.ts"], ["\0.ts"], [" "]].map((paths) => ({
         action: "claim",
         sessionId: "a",
         paths,
@@ -421,6 +463,9 @@ describe("FileOwnership integration", () => {
     const input = { action: "claim", sessionId: "session-a", paths: ["file.ts"] }
     const fallback = await executeMcpTool("FileOwnership", input, cwd)
     expect(fallback.structuredContent?.fileOwnership?.claims).toHaveLength(1)
+    expect(fallback.structuredContent?.fileOwnership?.nonexistentPaths).toEqual([
+      join(cwd, "file.ts"),
+    ])
     resetMcpToolDaemonBackoff()
     fetchSpy.mockImplementation(
       Object.assign(
@@ -429,10 +474,18 @@ describe("FileOwnership integration", () => {
         { preconnect() {} }
       )
     )
-    const viaDaemon = await executeMcpTool("FileOwnership", {}, cwd)
+    const viaDaemon = await executeMcpTool(
+      "FileOwnership",
+      { paths: ["file.ts", "./file.ts"] },
+      cwd
+    )
     expect(
       mcpToolResultSchema.parse(viaDaemon).structuredContent?.fileOwnership?.claims
     ).toHaveLength(1)
+    expect(viaDaemon.structuredContent?.fileOwnership?.duplicates).toEqual(["./file.ts"])
+    expect(viaDaemon.structuredContent?.fileOwnership?.nonexistentPaths).toEqual([
+      join(cwd, "file.ts"),
+    ])
     const conflict = await executeMcpTool(
       "FileOwnership",
       { ...input, sessionId: "session-b" },

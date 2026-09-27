@@ -33,7 +33,7 @@ export const fileOwnershipInputSchema = {
     .max(100)
     .optional()
     .describe(
-      "Exact file paths relative to the project or absolute within it. Required for mutations; optional list filter. No globs."
+      "Exact file paths relative to the project or absolute within it. Literal brackets are supported; no globs. New or duplicate paths return warnings. Required for mutations; optional list filter."
     ),
   lane: z
     .string()
@@ -69,6 +69,8 @@ export const fileOwnershipResultSchema = z.object({
   conflicts: z.array(claimSchema),
   missing: z.array(z.string()),
   released: z.array(z.string()),
+  nonexistentPaths: z.array(z.string()),
+  duplicates: z.array(z.string()),
   recentEdits: z.array(
     z.object({ file_path: z.string(), session_id: z.string(), updated_at: z.number() })
   ),
@@ -83,8 +85,8 @@ function isWithinProject(cwd: string, path: string): boolean {
   return !!rel && rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel)
 }
 
-function scopedPath(cwd: string, path: string): string {
-  if (!path.trim() || path.includes("\0") || /[*?[\]{}]/.test(path)) {
+function scopedPath(cwd: string, path: string): { path: string; exists: boolean } {
+  if (!path.trim() || path.includes("\0") || /[*?]/.test(path)) {
     throw new Error("paths must name exact files, without globs or empty values")
   }
   const absolute = canonicalClaimPath(resolve(cwd, path))
@@ -96,8 +98,26 @@ function scopedPath(cwd: string, path: string): string {
       throw new Error(`Expected a file, not a directory: ${path}`)
   } catch (error) {
     if ((error as { code?: string }).code !== "ENOENT") throw error
+    return { path: absolute, exists: false }
   }
-  return absolute
+  return { path: absolute, exists: true }
+}
+
+function resolveOwnershipSelection(cwd: string, input: string[] | undefined) {
+  const paths = new Map<string, string>()
+  const nonexistentPaths: string[] = []
+  const duplicates: string[] = []
+  for (const raw of input ?? []) {
+    const selected = scopedPath(cwd, raw)
+    const identity = fileClaimIdentity(selected.path)
+    if (paths.has(identity)) {
+      duplicates.push(raw)
+      continue
+    }
+    paths.set(identity, selected.path)
+    if (!selected.exists) nonexistentPaths.push(selected.path)
+  }
+  return { paths: input ? [...paths.values()] : undefined, nonexistentPaths, duplicates }
 }
 
 function validateOwnershipInput(raw: McpToolInput): OwnershipInput {
@@ -187,16 +207,14 @@ export function manageFileOwnership(
     throw new Error("A resolved project directory is required")
   const root = canonicalClaimPath(cwd)
   if (!statSync(root).isDirectory()) throw new Error("Project directory does not exist")
-  const paths = input.paths
-    ? [...new Set(input.paths.map((path) => scopedPath(root, path)))]
-    : undefined
+  const { paths, ...diagnostics } = resolveOwnershipSelection(root, input.paths)
   const store = getIssueStore()
   if (store.isNoOp)
     throw new Error("Ownership store is unavailable; no files were claimed or released")
   // Resolve all read/validation work before mutating, so a failed call cannot hide a successful claim.
   const history = resolveRecentEdits(store, cwd, paths, clock())
   const result = applyOwnershipAction(store, { ...input, paths }, root, clock)
-  return { action, cwd: root, sessionId: input.sessionId, ...result, ...history }
+  return { action, cwd: root, sessionId: input.sessionId, ...result, ...history, ...diagnostics }
 }
 
 function renderOwnershipHistory(result: FileOwnershipResult): string[] {
@@ -216,6 +234,17 @@ function renderOwnershipHistory(result: FileOwnershipResult): string[] {
         (edit) => `${relative(result.cwd, edit.file_path)} — ${edit.error}`
       )
     )
+  return lines
+}
+
+function renderSelectionWarnings(result: FileOwnershipResult): string[] {
+  const lines: string[] = []
+  if (result.nonexistentPaths.length)
+    lines.push(
+      `Selected files do not exist yet; check the spelling: ${result.nonexistentPaths.map((path) => relative(result.cwd, path)).join(", ")}.`
+    )
+  if (result.duplicates.length)
+    lines.push(`Duplicate paths ignored after normalisation: ${result.duplicates.join(", ")}.`)
   return lines
 }
 
@@ -240,6 +269,6 @@ export function renderFileOwnership(result: FileOwnershipResult): string {
     lines.push(`Released ${result.released.length} lease(s). Edit history is preserved.`)
   if (result.action === "list" && !result.claims.length)
     lines.push("No active leases for this selection.")
-  lines.push(...renderOwnershipHistory(result))
+  lines.push(...renderSelectionWarnings(result), ...renderOwnershipHistory(result))
   return lines.join("\n")
 }
