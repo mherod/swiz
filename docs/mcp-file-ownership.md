@@ -76,6 +76,11 @@ claiming a file: obtaining a reservation does not authorise overwriting a peer's
 changes. Releasing a reservation does not delete edits, modify file contents,
 stage files, or commit work.
 
+Historical paths that can no longer be resolved are returned in `unresolvedEdits`
+with their path and error code. The rendered response warns that history is
+incomplete. These records remain in the ledger and do not prevent releasing an
+unrelated valid selection. Invalid selected paths still refuse the whole call.
+
 Active reservations take precedence in existing dirty-file ownership checks.
 Without a reservation, the existing latest-edit attribution and two-hour peer
 window still apply. The concurrent file-edit hook denies edits to active peer

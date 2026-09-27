@@ -1,12 +1,12 @@
 import { Database } from "bun:sqlite"
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test"
-import { existsSync, readdirSync, symlinkSync } from "node:fs"
+import { chmodSync, existsSync, mkdirSync, readdirSync, symlinkSync } from "node:fs"
 import { join } from "node:path"
 import { Client } from "@modelcontextprotocol/sdk/client/index.js"
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js"
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js"
 import { evaluatePretooluseConcurrentSessionEdits } from "../../hooks/pretooluse-concurrent-session-edits.ts"
-import { manageFileOwnership } from "../file-ownership-tool.ts"
+import { manageFileOwnership, renderFileOwnership } from "../file-ownership-tool.ts"
 import { getIssueStore, resetIssueStore } from "../issue-store.ts"
 import { mcpCallerCwdRegistry } from "../mcp-caller-cwd.ts"
 import { mcpToolResultSchema, runMcpTool } from "../mcp-tool-core.ts"
@@ -276,6 +276,37 @@ describe("FileOwnership leases", () => {
     expect(call("release").released).toEqual([join(cwd, "file.ts")])
     expect(call("release").released).toEqual([])
     expect(call("claim", "session-b").recentEdits[0]?.session_id).toBe("session-a")
+  })
+
+  test.each([
+    "ELOOP",
+    "EACCES",
+  ])("isolates %s in historical edits from selected leases", async (code) => {
+    const blocked = join(cwd, "blocked")
+    const historical = join(blocked, "history.ts")
+    mkdirSync(blocked)
+    await Bun.write(historical, "history")
+    const broken = code === "ELOOP" ? join(cwd, "loop.ts") : historical
+    if (code === "ELOOP") symlinkSync(broken, broken)
+    else chmodSync(blocked, 0)
+    try {
+      const store = getIssueStore()
+      store.recordSessionEdit(projectKeyFromCwd(cwd), "session-b", broken, 1000)
+      expect(call("claim").ok).toBe(true)
+      expect(call("hold").ok).toBe(true)
+      const listed = manageFileOwnership({}, cwd, 1000)
+      expect(listed.claims).toHaveLength(1)
+      expect(listed.unresolvedEdits).toEqual([{ file_path: broken, error: code }])
+      expect(renderFileOwnership(listed)).toContain("history is incomplete")
+      expect(() => call("release", "session-a", ["file.ts", broken])).toThrow()
+      expect(manageFileOwnership({}, cwd, 1000).claims).toHaveLength(1)
+      const released = call("release")
+      expect(released.released).toEqual([join(cwd, "file.ts")])
+      expect(released.unresolvedEdits).toHaveLength(1)
+      expect(store.listSessionEdits(projectKeyFromCwd(cwd), "session-b")).toHaveLength(1)
+    } finally {
+      chmodSync(blocked, 0o700)
+    }
   })
 
   test("does not mutate on invalid identities, paths or lease lengths", async () => {

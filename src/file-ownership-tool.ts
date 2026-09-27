@@ -72,6 +72,7 @@ export const fileOwnershipResultSchema = z.object({
   recentEdits: z.array(
     z.object({ file_path: z.string(), session_id: z.string(), updated_at: z.number() })
   ),
+  unresolvedEdits: z.array(z.object({ file_path: z.string(), error: z.string() })),
 })
 export type FileOwnershipResult = z.infer<typeof fileOwnershipResultSchema>
 const inputSchema = z.strictObject(fileOwnershipInputSchema)
@@ -145,6 +146,34 @@ function applyOwnershipAction(
   })
 }
 
+/** Historical paths may have become inaccessible; they cannot invalidate a live selection. */
+function resolveRecentEdits(
+  store: IssueStore,
+  cwd: string,
+  paths: string[] | undefined,
+  now: number
+) {
+  const recentEdits: FileOwnershipResult["recentEdits"] = []
+  const unresolvedEdits: FileOwnershipResult["unresolvedEdits"] = []
+  const selected = paths ? new Set(paths.map(fileClaimIdentity)) : undefined
+  for (const edit of store.listOtherSessionEdits(
+    projectKeyFromCwd(cwd),
+    "",
+    now - CONCURRENT_EDIT_WINDOW_MS
+  )) {
+    try {
+      const path = canonicalClaimPath(resolve(cwd, edit.file_path))
+      if (!selected || selected.has(fileClaimIdentity(path))) {
+        recentEdits.push({ ...edit, file_path: path })
+      }
+    } catch (error) {
+      const code = (error as { code?: string }).code
+      unresolvedEdits.push({ file_path: edit.file_path, error: code ?? "Path resolution failed" })
+    }
+  }
+  return { recentEdits, unresolvedEdits }
+}
+
 /** Explicit leases and observed edits remain separate: release never erases attribution. */
 export function manageFileOwnership(
   raw: McpToolInput,
@@ -165,12 +194,29 @@ export function manageFileOwnership(
   if (store.isNoOp)
     throw new Error("Ownership store is unavailable; no files were claimed or released")
   // Resolve all read/validation work before mutating, so a failed call cannot hide a successful claim.
-  const recentEdits = store
-    .listOtherSessionEdits(projectKeyFromCwd(cwd), "", clock() - CONCURRENT_EDIT_WINDOW_MS)
-    .map((edit) => ({ ...edit, file_path: canonicalClaimPath(resolve(cwd, edit.file_path)) }))
-    .filter((edit) => !paths || paths.includes(edit.file_path))
+  const history = resolveRecentEdits(store, cwd, paths, clock())
   const result = applyOwnershipAction(store, { ...input, paths }, root, clock)
-  return { action, cwd: root, sessionId: input.sessionId, ...result, recentEdits }
+  return { action, cwd: root, sessionId: input.sessionId, ...result, ...history }
+}
+
+function renderOwnershipHistory(result: FileOwnershipResult): string[] {
+  const lines: string[] = []
+  if (result.recentEdits.length)
+    lines.push(
+      "Recent recorded edits (independent of leases):",
+      ...result.recentEdits.map(
+        (edit) =>
+          `${relative(result.cwd, edit.file_path)} — ${edit.session_id}; ${new Date(edit.updated_at).toISOString()}`
+      )
+    )
+  if (result.unresolvedEdits.length)
+    lines.push(
+      "Some recorded paths could not be resolved; history is incomplete:",
+      ...result.unresolvedEdits.map(
+        (edit) => `${relative(result.cwd, edit.file_path)} — ${edit.error}`
+      )
+    )
+  return lines
 }
 
 export function renderFileOwnership(result: FileOwnershipResult): string {
@@ -194,13 +240,6 @@ export function renderFileOwnership(result: FileOwnershipResult): string {
     lines.push(`Released ${result.released.length} lease(s). Edit history is preserved.`)
   if (result.action === "list" && !result.claims.length)
     lines.push("No active leases for this selection.")
-  if (result.recentEdits.length)
-    lines.push(
-      "Recent recorded edits (independent of leases):",
-      ...result.recentEdits.map(
-        (edit) =>
-          `${relative(result.cwd, edit.file_path)} — ${edit.session_id}; ${new Date(edit.updated_at).toISOString()}`
-      )
-    )
+  lines.push(...renderOwnershipHistory(result))
   return lines.join("\n")
 }
