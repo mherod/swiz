@@ -13,9 +13,11 @@ upgrading so the client discovers the new tool.
 | `release` | Release only your reservations | `sessionId`, `paths` |
 
 Pass the actual agent session ID used by editing hooks (`session_id`). Do not
-invent a new ID per call, use the shared project task-store key, or pass a peer's
-ID. MCP does not supply an authenticated agent session identity; this is a
-cooperative local coordination mechanism, not an authorisation boundary.
+use `swiz session` (which heuristically returns the latest mtime transcript across
+the project and collides between concurrent agents), invent a new ID per call,
+use the shared project task-store key, or pass a peer's ID. MCP does not supply
+an authenticated agent session identity; this is a cooperative local coordination
+mechanism, not an authorisation boundary.
 
 An optional `lane` describes the work, such as `authentication`. Ownership is
 always keyed by session ID, not the lane label. `leaseSeconds` defaults to 1800

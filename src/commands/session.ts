@@ -5,7 +5,7 @@ import type { Command } from "../types.ts"
 
 export const sessionCommand: Command = {
   name: "session",
-  description: "Show the current session ID",
+  description: "Show the latest discovered session ID for a project (heuristic mtime discovery)",
   usage: "swiz session [--list] [--dir <path>]",
   options: [
     { flags: "--list, -l", description: "List all sessions for the project with timestamps" },
