@@ -401,7 +401,11 @@ export type CodexSessionStartInput = z.infer<typeof codexSessionStartInputSchema
  * Currently only fires for `Bash` tool. Includes `turn_id` and `tool_use_id`.
  */
 export const codexPreToolUseInputSchema = toolHookBaseObjectSchema
-  .extend(PkgCodexPreToolUseInputSchema.partial().shape)
+  .extend({
+    ...PkgCodexPreToolUseInputSchema.partial().shape,
+    // Codex accepts arbitrary JSON on the wire; canonical hooks inspect argument objects.
+    tool_input: ToolCallCoreSchema.shape.tool_input.optional(),
+  })
   .transform((val) => {
     if (val.tool_input) {
       val.tool_input = nfkcDeep(val.tool_input as JsonLike) as typeof val.tool_input
@@ -417,7 +421,10 @@ export type CodexPreToolUseInput = z.infer<typeof codexPreToolUseInputSchema>
  * Currently only fires for `Bash` tool. Includes `tool_response`.
  */
 export const codexPostToolUseInputSchema = toolHookBaseObjectSchema
-  .extend(PkgCodexPostToolUseInputSchema.partial().shape)
+  .extend({
+    ...PkgCodexPostToolUseInputSchema.partial().shape,
+    tool_input: ToolCallCoreSchema.shape.tool_input.optional(),
+  })
   .transform((val) => {
     if (val.tool_input) {
       val.tool_input = nfkcDeep(val.tool_input as JsonLike) as typeof val.tool_input
