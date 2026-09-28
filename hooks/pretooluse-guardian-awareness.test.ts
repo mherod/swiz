@@ -85,6 +85,66 @@ describe("pretooluse-guardian-awareness", () => {
   })
 })
 
+describe("Codex Git sandbox context", () => {
+  async function advise(command: string, agent = "codex") {
+    return getHookSpecificOutput(
+      await evaluateGuardianAwareness({
+        _agent: agent,
+        tool_name: "Bash",
+        tool_input: { command },
+      })
+    )
+  }
+
+  test.each([
+    "git fetch origin && git rev-parse HEAD origin/main",
+    "git status --short; git fetch origin",
+    "git fetch origin\ngit log -1",
+    "git -C '/repo with spaces' fetch origin",
+    "git -c credential.helper= fetch origin",
+    "git add -- README.md && git diff --cached",
+  ])("adds context without granting permission: %s", async (command) => {
+    const specific = await advise(command)
+    expect(specific?.permissionDecision).toBeUndefined()
+    expect(specific?.additionalContext).toContain(".git/FETCH_HEAD")
+    expect(specific?.additionalContext).toContain("separate tool calls")
+    expect(specific?.additionalContext).toContain("workdir")
+    expect(specific?.additionalContext).toContain("Preserve required Git options")
+    expect(specific?.additionalContext).toContain("does not override a denied approval")
+  })
+
+  test.each([
+    "git fetch origin",
+    "git status --short && git rev-parse HEAD",
+    "git log --format='fetch && push'",
+    "printf '%s' 'git fetch origin && git rev-parse HEAD'",
+    "rg 'git fetch origin' README.md",
+    "git fetch 'remote;name'",
+  ])("keeps ordinary calls and quoted command text quiet: %s", async (command) => {
+    expect((await advise(command))?.additionalContext).toBeUndefined()
+  })
+
+  test("keeps Codex-specific advice out of other agents", async () => {
+    const command = "git fetch origin && git rev-parse HEAD"
+    expect((await advise(command, "claude"))?.additionalContext).toBeUndefined()
+  })
+
+  test("explains recovery for an isolated Git permission failure", async () => {
+    const specific = getHookSpecificOutput(await evaluate("permission-failed", "git fetch origin"))
+    expect(specific?.additionalContext).toContain(".git/FETCH_HEAD")
+    expect(specific?.additionalContext).toContain("ordinary sandbox first")
+    expect(specific?.additionalContext).toContain("exact permission error")
+  })
+
+  test("preserves the denial after successful compound Git work", async () => {
+    const specific = getHookSpecificOutput(
+      await evaluate("succeeded", "git fetch origin && git rev-parse HEAD")
+    )
+    expect(specific?.permissionDecision).toBe("deny")
+    expect(specific?.additionalContext).toBeUndefined()
+  })
+})
+
 describe("gitAddAvoidanceMessage peer gating (issue #843 finding A)", () => {
   test("control: without peer files the commit -a route is offered", () => {
     const message = gitAddAvoidanceMessage(0, { known: true, files: [] })

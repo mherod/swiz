@@ -1,7 +1,8 @@
 #!/usr/bin/env bun
 
-/** Steer Codex away from avoidable guardian reviews before an escalated shell call runs. */
+/** Explain Codex Git sandbox failures and avoid unnecessary guardian reviews. */
 
+import { detectCurrentAgentFromHookPayload } from "../src/agent-paths.ts"
 import {
   GIT_ADD_GUARDIAN_DENIAL_LIMIT,
   GIT_ADD_GUARDIAN_DENIAL_MARKER,
@@ -9,6 +10,7 @@ import {
   type SandboxAttemptEvidence,
 } from "../src/guardian-review.ts"
 import {
+  buildContextHookOutput,
   preToolUseAllow,
   preToolUseAllowWithContext,
   preToolUseDeny,
@@ -23,9 +25,57 @@ import {
   type PeerHeldFilesResult,
   resolvePeerHeldFiles,
 } from "../src/utils/session-file-ownership.ts"
-import { gitSubcommandRe, stripQuotedShellStrings } from "../src/utils/shell-patterns.ts"
+import {
+  gitSubcommandRe,
+  parseGitInvocationTokens,
+  splitShellSegments,
+  stripQuotedShellStrings,
+} from "../src/utils/shell-patterns.ts"
 
 const GIT_ADD_RE = gitSubcommandRe("add\\b")
+const GIT_METADATA_WRITES = new Set([
+  "add",
+  "commit",
+  "fetch",
+  "pull",
+  "push",
+  "checkout",
+  "switch",
+  "merge",
+  "rebase",
+  "cherry-pick",
+  "worktree",
+])
+
+const GIT_SANDBOX_GUIDANCE = [
+  "Codex Git sandbox guidance: .git/FETCH_HEAD, .git/index.lock, and refs can be read-only even when the working tree is writable.",
+  "Run Git metadata writes and read-only checks in separate tool calls. For example, run `git fetch origin` first, then `git rev-parse HEAD origin/main` separately. A command without a matching allow rule can keep the entire combined shell invocation inside the sandbox.",
+  "Invoke Git directly and use the tool's workdir for the same checkout instead of adding `git -C`. Preserve required Git options, authentication, and operation scope; `git -c ...` and helpers that spawn Git may need their own scoped approval.",
+  "After a Git metadata permission failure, retry only the smallest already-authorized Git operation in the ordinary sandbox first. If it still fails, request approval for that exact operation and cite the exact permission error. Run that retry alone so its result is attributable.",
+  "This guidance does not override a denied approval or authorize additional Git operations. Keep hooks and sandbox protections enabled; do not chmod Git metadata, delete lock files, or repush a successful remote update to repair local metadata.",
+].join("\n\n")
+
+function needsGitSandboxGuidance(command: string, confirmedFailure = false): boolean {
+  const segments = splitShellSegments(command)
+  return segments.some((segment) => {
+    const git = parseGitInvocationTokens(segment)
+    return (
+      git !== null &&
+      GIT_METADATA_WRITES.has(git.subcommand) &&
+      (confirmedFailure || segments.length > 1 || git.globalArgs.length > 0)
+    )
+  })
+}
+
+function gitSandboxAdvice(input: object, command: string): SwizHookOutput {
+  if (
+    detectCurrentAgentFromHookPayload(input)?.id === "codex" &&
+    needsGitSandboxGuidance(command)
+  ) {
+    return buildContextHookOutput("PreToolUse", GIT_SANDBOX_GUIDANCE, { rephrase: false })
+  }
+  return preToolUseAllow("")
+}
 
 function avoidanceMessage(evidence: Exclude<SandboxAttemptEvidence, "permission-failed">): string {
   const preamble =
@@ -81,6 +131,7 @@ export function gitAddAvoidanceMessage(
     "Retry permitted by guard: you may retry this same narrowly scoped `git add` after this denial.",
     "After three guardian denials in one minute, this guard stands down so the next retry can reach the approval path.",
     ...commitRoute,
+    GIT_SANDBOX_GUIDANCE,
   ].join("\n")
 }
 
@@ -88,6 +139,7 @@ function gitAddRetryContext(): string {
   return [
     "Guardian retry allowance reached: this narrowly scoped `git add` already received three guardian denials in the last minute.",
     "The retry is permitted now. Keep the escalation limited to this `git add` and preserve the original sandbox index-lock failure in the justification.",
+    GIT_SANDBOX_GUIDANCE,
   ].join("\n")
 }
 
@@ -95,11 +147,12 @@ export async function evaluateGuardianAwareness(input: unknown): Promise<SwizHoo
   const parsed = shellHookInputSchema.parse(input)
   if (!isShellTool(parsed.tool_name ?? "")) return preToolUseAllow("")
 
+  const rawCommand = parsed.tool_input?.command ?? ""
   const context = getGuardianReviewContext(parsed)
-  if (!context) return preToolUseAllow("")
+  if (!context) return gitSandboxAdvice(parsed, rawCommand)
 
   if (context.priorSandboxAttempt === "permission-failed") {
-    const command = stripQuotedShellStrings(parsed.tool_input?.command ?? "")
+    const command = stripQuotedShellStrings(rawCommand)
     if (GIT_ADD_RE.test(command)) {
       if (context.recentGitAddGuardianDenialCount >= GIT_ADD_GUARDIAN_DENIAL_LIMIT) {
         return preToolUseAllowWithContext(
@@ -116,7 +169,11 @@ export async function evaluateGuardianAwareness(input: unknown): Promise<SwizHoo
 
     return preToolUseAllowWithContext(
       "Guardian review follows a confirmed sandbox restriction.",
-      "A sandboxed attempt failed because of a concrete permission or network restriction. Keep this escalation narrowly scoped to the blocked operation and preserve the failure in the justification."
+      [
+        "A sandboxed attempt failed because of a concrete permission or network restriction. Keep this escalation narrowly scoped to the blocked operation and preserve the failure in the justification.",
+        ...(needsGitSandboxGuidance(rawCommand, true) ? [GIT_SANDBOX_GUIDANCE] : []),
+      ].join("\n\n"),
+      { rephrase: false }
     )
   }
 
