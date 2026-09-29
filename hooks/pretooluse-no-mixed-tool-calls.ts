@@ -28,7 +28,11 @@ import {
   TASK_TOOLS,
   WRITE_TOOLS,
 } from "../src/tool-matchers.ts"
-import { escapeRegex, SHELL_STATEMENT_BOUNDARY } from "../src/utils/shell-patterns.ts"
+import {
+  escapeRegex,
+  SHELL_STATEMENT_BOUNDARY,
+  stripQuotedShellStrings,
+} from "../src/utils/shell-patterns.ts"
 
 const EXTRA_TOOL_NAMES = ["AskUserQuestion", "LS", "MultiEdit", "WebFetch", "WebSearch"]
 
@@ -74,7 +78,10 @@ function evaluate(input: ShellHookInput) {
   if (!isShellTool(input.tool_name ?? "")) return {}
 
   const rawCommand = String(input.tool_input?.command ?? "")
-  const normalizedCommand = stripHeredocs(normalizeCommand(rawCommand))
+  // Quoted prose can hold `;` or newlines before a tool name; only command position matters (#958).
+  const normalizedCommand = stripQuotedShellStrings(stripHeredocs(normalizeCommand(rawCommand)), {
+    preserveQuotePairs: true,
+  })
   const match = MIXED_TOOL_CALL_RE.exec(normalizedCommand)
 
   if (!match?.groups?.tool) {

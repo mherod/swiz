@@ -48,6 +48,24 @@ describe("pretooluse-no-mixed-tool-calls", () => {
     expect(result.decision).toBe("allow")
   })
 
+  // #958: a `;` or newline inside a quoted argument is prose, not a statement boundary.
+  for (const command of [
+    'git commit -m "fix: reject a blank subject; TaskUpdate also rejects a self edge"',
+    "git commit -m 'a; TaskUpdate b'",
+    "gh issue create --body 'x\nTaskCreate y'",
+    'gh issue create --body "x\nTaskList y"',
+  ]) {
+    test(`allows a tool name inside quoted text: ${command}`, async () => {
+      expect((await runHook(command)).decision).toBe("allow")
+    })
+  }
+
+  for (const command of ["echo hi; TaskUpdate", "TaskList", 'echo "a; b"; TaskUpdate']) {
+    test(`control: still denies a real tool call: ${command}`, async () => {
+      expect((await runHook(command)).decision).toBe("deny")
+    })
+  }
+
   test("ignores non-shell tools", async () => {
     const result = await runHook("TaskCreate", { toolName: "Read" })
     expect(result.stdout).toBe("")
