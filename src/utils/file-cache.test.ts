@@ -11,6 +11,52 @@ import {
   getFileCacheMemoryStats,
 } from "./file-cache.ts"
 
+describe("file-cache bounds under a 1,000-file stress fixture (#809)", () => {
+  test("never exceeds 256 entries, 16 MiB total, or 2 MiB per entry", async () => {
+    const { mkdtemp, rm } = await import("node:fs/promises")
+    const dir = await mkdtemp(join(tmpdir(), "swiz-cache-stress-"))
+    const stable = (Date.now() - 3 * 60 * 60 * 1000) / 1000
+    clearFileCache()
+    try {
+      let maxEntries = 0
+      let maxBytes = 0
+      for (let i = 0; i < 1000; i++) {
+        // Mostly small files, every 50th well over the 2 MiB admission ceiling.
+        const size = i % 50 === 0 ? 3 * 1024 * 1024 : 8 * 1024 + (i % 7) * 4096
+        const path = join(dir, `f${i}.txt`)
+        await Bun.write(path, "x".repeat(size))
+        utimesSync(path, stable, stable)
+        expect((await getCachedFileText(path)).length).toBe(size)
+        const stats = getFileCacheMemoryStats()
+        maxEntries = Math.max(maxEntries, stats.entries)
+        maxBytes = Math.max(maxBytes, stats.estimatedBytes)
+      }
+      expect(maxEntries).toBeLessThanOrEqual(256)
+      expect(maxBytes).toBeLessThanOrEqual(16 * 1024 * 1024)
+      // Control: the cache was actually exercised to its entry bound, not bypassed.
+      expect(maxEntries).toBe(256)
+    } finally {
+      clearFileCache()
+      await rm(dir, { recursive: true, force: true })
+    }
+  }, 60_000)
+
+  test("a file above the 2 MiB ceiling is read but not retained", async () => {
+    const path = join(tmpdir(), `swiz-cache-big-${Math.random().toString(36).slice(2)}.txt`)
+    const stable = (Date.now() - 3 * 60 * 60 * 1000) / 1000
+    clearFileCache()
+    await Bun.write(path, "y".repeat(3 * 1024 * 1024))
+    utimesSync(path, stable, stable)
+    try {
+      expect((await getCachedFileText(path)).length).toBe(3 * 1024 * 1024)
+      expect(getFileCacheMemoryStats()).toEqual({ entries: 0, estimatedBytes: 0 })
+    } finally {
+      clearFileCache()
+      await unlink(path).catch(() => {})
+    }
+  })
+})
+
 describe("file-cache", () => {
   const content = "line 1\nline 2\nline 3"
 

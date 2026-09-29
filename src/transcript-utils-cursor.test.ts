@@ -85,6 +85,46 @@ describe("Cursor transcript support", () => {
     }
   })
 
+  it("keeps no store.db body and recomputes the match when the file changes (#809)", async () => {
+    const { clearFileCache, getFileCacheMemoryStats } = await import("./utils/file-cache.ts")
+    const { clearCursorMatchCache } = await import("./transcript-sessions-discovery.ts")
+    const home = await makeTmpDir("cursor-match-home")
+    const targetProject = join(home, "workspace", "target-project")
+    await mkdir(targetProject, { recursive: true })
+    const db = join(home, ".cursor", "chats", "workspace-hash", "flip-session", "store.db")
+    await mkdir(dirname(db), { recursive: true })
+    const cursorIds = async () =>
+      (await findAllProviderSessions(targetProject, home))
+        .filter((s) => s.provider === "cursor")
+        .map((s) => s.id)
+    clearFileCache()
+    clearCursorMatchCache()
+    try {
+      await writeFile(
+        db,
+        `SQLite format 3\u0000{"role":"user","content":"cwd:${targetProject}"}\u0000`
+      )
+      expect(await cursorIds()).toEqual(["flip-session"])
+      // No decoded store.db text is retained in the long-lived file cache.
+      expect(getFileCacheMemoryStats().entries).toBe(0)
+
+      // A changed (ino, mtimeMs, size) fingerprint recomputes the match, both ways.
+      await writeFile(
+        db,
+        `SQLite format 3\u0000{"role":"user","content":"cwd:/elsewhere/project-x"}\u0000`
+      )
+      expect(await cursorIds()).toEqual([])
+      await writeFile(
+        db,
+        `SQLite format 3\u0000{"role":"user","content":"cwd:${targetProject} again"}\u0000`
+      )
+      expect(await cursorIds()).toEqual(["flip-session"])
+    } finally {
+      clearCursorMatchCache()
+      await rm(home, { recursive: true, force: true })
+    }
+  })
+
   it("discovers cursor agent-transcripts jsonl sessions for project key", async () => {
     const home = await makeTmpDir("cursor-agent-transcript-home")
     const targetProject = join(home, "workspace", "target-project")
