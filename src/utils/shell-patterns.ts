@@ -339,8 +339,24 @@ function _commandStart(tokens: string[], command: string): number | null {
   return tokens[index] === command ? index : null
 }
 
+const _REDIRECT_RE = /^(\d*(>>|>&|<&|>\||<>|>|<)|&>>?)(.*)$/
+
+/**
+ * Drop shell redirections (`2>&1`, `> out`, `2>/dev/null`, `&> log`) so they never
+ * count as command arguments — POSIX removes them before the command runs (#973).
+ */
+function _stripRedirections(tokens: string[]): string[] {
+  const kept: string[] = []
+  for (let i = 0; i < tokens.length; i++) {
+    const match = _REDIRECT_RE.exec(tokens[i]!)
+    if (!match) kept.push(tokens[i]!)
+    else if (!match[3]) i++ // operator without an attached target consumes the next token
+  }
+  return kept
+}
+
 function _parseGitInvocation(segment: string): _ParsedGitInvocation | null {
-  const tokens = tokenizeShellSegment(segment)
+  const tokens = _stripRedirections(tokenizeShellSegment(segment))
   const gitIndex = _commandStart(tokens, "git")
   if (gitIndex === null) return null
 

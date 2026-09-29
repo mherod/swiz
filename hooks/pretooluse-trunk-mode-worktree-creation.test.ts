@@ -93,6 +93,10 @@ describe("pretooluse-trunk-mode-worktree-creation", () => {
     "git worktree add -df ../review HEAD",
     "git worktree add ../review codex/existing-pr; git worktree add -b new ../new main",
     'git worktree add --reason="main" ../missing',
+    // #973 controls: a redirection never rescues a new-branch, orphan or forced form.
+    "git worktree add -b feat/new ../review main 2>&1 | tail -2",
+    "git worktree add --orphan ../review 2>/dev/null",
+    "git worktree add --force ../review codex/existing-pr > out.log",
   ]) {
     test(`blocks worktree creation with ${command}`, async () => {
       const result = await runHook(command)
@@ -128,6 +132,11 @@ describe("pretooluse-trunk-mode-worktree-creation", () => {
     "git worktree add --no-checkout -- ../review codex/existing-pr",
     "git status && git worktree add ../review codex/existing-pr",
     "command git worktree add ../review codex/existing-pr",
+    // #973: redirections are not positionals.
+    "git worktree add --detach ../review refs/remotes/origin/existing-pr 2>&1 | tail -2",
+    "git worktree add ../review codex/existing-pr 2>/dev/null",
+    "git worktree add ../review codex/existing-pr > /tmp/out.log 2>&1",
+    "git worktree add ../review codex/existing-pr &>> log",
   ]) {
     test(`allows verified existing refs: ${command}`, async () => {
       expect(await runHook(command)).toEqual({})
