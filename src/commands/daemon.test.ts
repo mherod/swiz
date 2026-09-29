@@ -408,6 +408,7 @@ describe("DaemonWorkerRuntime", () => {
       transcriptPath: null,
       toolName: "Shell",
       toolInput: { command: "echo hi" },
+      agentId: null,
     })
   })
 
@@ -436,6 +437,7 @@ describe("DaemonWorkerRuntime", () => {
       transcriptPath: null,
       toolName: "ReadFile",
       toolInput: { path: "/tmp/file.ts" },
+      agentId: null,
     })
     runtime.close()
   })
