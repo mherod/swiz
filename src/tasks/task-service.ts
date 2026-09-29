@@ -61,6 +61,32 @@ export function findCollidingTask(
   return null
 }
 
+/** A task id's sequence within this store, or 0 when it belongs to another prefix or is malformed. */
+function sequenceFor(taskId: string, prefix: string): number {
+  const parsed = parseTaskId(taskId)
+  const seq = parsed.prefix === prefix || parsed.prefix === null ? parsed.seq : 0
+  return Number.isNaN(seq) ? 0 : seq
+}
+
+const AUDIT_TASK_ID_RE = /"taskId":"([^"]+)"/
+
+/** Highest sequence the store's audit log has ever named; 0 when it has no log. */
+async function highestAuditedSequence(storeKey: TaskStoreKey, prefix: string): Promise<number> {
+  let text: string
+  try {
+    const dir = await readTaskStorePath(storeKey, createDefaultTaskStore().tasksDir)
+    text = await readFile(join(dir, ".audit-log.jsonl"), "utf-8")
+  } catch {
+    return 0
+  }
+  let highest = 0
+  for (const line of splitJsonlLines(text)) {
+    const taskId = AUDIT_TASK_ID_RE.exec(line)?.[1]
+    if (taskId) highest = Math.max(highest, sequenceFor(taskId, prefix))
+  }
+  return highest
+}
+
 // ─── Actions ─────────────────────────────────────────────────────────────────
 
 export interface CreateTaskOptions {
@@ -107,11 +133,11 @@ export async function createTaskInProcess(opts: CreateTaskOptions): Promise<Task
   }
 
   const prefix = sessionPrefix(taskStoreId(storeKey))
-  const maxSeq = tasks.reduce((m, t) => {
-    const parsed = parseTaskId(t.id)
-    const seq = parsed.prefix === prefix || parsed.prefix === null ? parsed.seq : 0
-    return Math.max(m, Number.isNaN(seq) ? 0 : seq)
-  }, 0)
+  const maxFileSeq = tasks.reduce((m, t) => Math.max(m, sequenceFor(t.id, prefix)), 0)
+  // Pruning deletes task files, so the highest file alone moves backwards and reissues ids that
+  // audit entries, blocker edges and commit messages still name (#972). The audit log is
+  // append-only and every create writes to it, so it is the high-water mark.
+  const maxSeq = Math.max(maxFileSeq, await highestAuditedSequence(storeKey, prefix))
   const id = `${prefix}-${maxSeq + 1}`
 
   const task: Task = {
