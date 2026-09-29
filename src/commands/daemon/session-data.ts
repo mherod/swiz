@@ -456,7 +456,6 @@ export class SessionDataCache {
     this.summaries.set(key, {
       format: session.format,
       metadata: view.metadata ?? metadata,
-      projectIdentity: resolveSessionProjectIdentity(session.path, cwd),
       scan,
     })
     return scan
@@ -582,10 +581,11 @@ export class SessionDataCache {
 
   /** Invalidate only entries owned by the exact canonical project identity for `cwd`. */
   invalidateProject(cwd: string): void {
+    // Summaries survive: each is revalidated against its file fingerprint on read, so a changed
+    // file cannot serve a stale preview, while an unchanged one is not rebuilt. The project's
+    // watcher fires whenever any of its transcripts changes, so dropping summaries here rebuilt
+    // every candidate after each live append elsewhere in the project (#985).
     const projectKey = projectKeyFromCwd(cwd)
-    for (const [key, summary] of this.summaries.entries()) {
-      if (summary.projectIdentity === projectKey) this.summaries.delete(key)
-    }
     for (const [key, entry] of this.entries.entries()) {
       if (entry.projectIdentity === projectKey) {
         this.entries.delete(key)
@@ -657,7 +657,6 @@ export const MAX_SESSION_SUMMARIES = 2_000
 interface SessionSummaryEntry {
   format: Session["format"]
   metadata: JsonlAppendMetadata
-  projectIdentity: string
   scan: SessionScanResult
 }
 

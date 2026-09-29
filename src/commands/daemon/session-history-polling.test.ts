@@ -230,4 +230,27 @@ describe("dashboard history polling through the session routes (#809)", () => {
     expect(after.coldRebuilds - before.coldRebuilds).toBe(0)
     expect(after.bodyBytesRead - before.bodyBytesRead).toBe(0)
   }, 60_000)
+
+  test("a project watcher invalidation rebuilds only the preview whose file changed (#985)", async () => {
+    await writeSession(projectCwd, "session-still", "unchanged")
+    const livePath = await writeSession(projectCwd, "session-live", "first")
+    const list = () => post("/sessions/projects", { selectedProjectCwd: projectCwd })
+    await list()
+
+    // A live append elsewhere in the project fires the watcher, which invalidates the project.
+    await Bun.write(livePath, `${await Bun.file(livePath).text()}${transcriptLine("second")}`)
+    sessionDataCache.invalidateProject(projectCwd)
+    providerSessionIndex.invalidate(projectCwd)
+    const before = sessionDataCache.getReadStats()
+    const after = await list()
+    const stats = sessionDataCache.getReadStats()
+
+    // Control: the changed transcript is re-read, so invalidation is not being ignored wholesale.
+    expect(stats.summaryMisses - before.summaryMisses).toBeGreaterThanOrEqual(1)
+    expect(stats.bodyBytesRead - before.bodyBytesRead).toBeGreaterThan(0)
+    // Every other preview is served from its still-valid fingerprint.
+    const ids = after.projects[0].sessions.map((s: { id: string }) => s.id)
+    expect(ids).toContain("session-still")
+    expect(stats.summaryMisses - before.summaryMisses).toBe(1)
+  })
 })
