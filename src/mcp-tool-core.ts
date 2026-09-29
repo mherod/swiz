@@ -99,11 +99,17 @@ export type McpToolName = z.infer<typeof mcpToolNameSchema>
 export const mcpToolInputSchema = z.looseObject({})
 export type McpToolInput = z.infer<typeof mcpToolInputSchema>
 
-export const mcpToolResultSchema = z.object({
+/**
+ * Loose on purpose: the long-lived stdio server validates daemon replies with the schema it loaded
+ * at start, while the daemon runs the current commit. A strict object stripped every field added
+ * since, so a running session never saw them until restart (#960). Known fields stay validated and
+ * `content` stays required, so a malformed reply still falls back in-process.
+ */
+export const mcpToolResultSchema = z.looseObject({
   content: z.array(z.object({ type: z.literal("text"), text: z.string() })),
   isError: z.boolean().optional(),
   structuredContent: z
-    .object({
+    .looseObject({
       summary: z.string().optional(),
       taskMutation: z.object({ changed: z.boolean() }).optional(),
       skillQuery: skillQueryResultSchema.optional(),

@@ -237,6 +237,46 @@ describe("executeMcpTool across a daemon restart and stale fallback (#926)", () 
   })
 })
 
+describe("executeMcpTool forwards fields a newer daemon adds (#960)", () => {
+  async function withFakeDaemon<T>(reply: unknown, run: () => Promise<T>): Promise<T> {
+    const server = Bun.serve({ port: 0, fetch: () => Response.json(reply) })
+    const priorPort = process.env.SWIZ_DAEMON_PORT
+    const priorNoDaemon = process.env.SWIZ_NO_DAEMON
+    delete process.env.SWIZ_NO_DAEMON
+    process.env.SWIZ_DAEMON_PORT = String(server.port)
+    try {
+      resetMcpToolDaemonBackoff()
+      return await run()
+    } finally {
+      if (priorPort === undefined) delete process.env.SWIZ_DAEMON_PORT
+      else process.env.SWIZ_DAEMON_PORT = priorPort
+      if (priorNoDaemon !== undefined) process.env.SWIZ_NO_DAEMON = priorNoDaemon
+      resetMcpToolDaemonBackoff()
+      void server.stop(true)
+    }
+  }
+
+  it("keeps an unrecognised structuredContent field from the daemon", async () => {
+    const reply = {
+      content: [{ type: "text", text: "daemon" }],
+      structuredContent: { summary: "s", addedLater: { value: 7 } },
+    }
+    const result = await withFakeDaemon(reply, () =>
+      executeMcpTool("SkillQuery", { name: "x" }, "/never-read-locally")
+    )
+    expect(result.content[0]?.text).toBe("daemon")
+    expect(result.structuredContent).toEqual(reply.structuredContent)
+  })
+
+  it("still rejects a reply without content and falls back in-process (control)", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "swiz-mcp-nocontent-"))
+    const result = await withFakeDaemon({ structuredContent: { summary: "no content" } }, () =>
+      executeMcpTool("TaskList", {}, cwd)
+    )
+    expect(result.content.at(-1)?.text).toContain("No tasks in this project yet.")
+  })
+})
+
 describe("executeProjectTool", () => {
   it("hands an unresolved call to the daemon as '/' and passes a resolved cwd through", async () => {
     const received: string[] = []
