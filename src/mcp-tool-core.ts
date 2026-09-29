@@ -282,15 +282,37 @@ function removeTaskIds(edges: readonly string[], remove: readonly string[]): str
  * readTaskStore drops a record whose subject is empty (the task vanishes), and a
  * self edge is a one-node dependency cycle that can never start.
  */
-function invalidFieldUpdateReason(taskId: string, input: TaskUpdateToolInput): string | null {
+function invalidFieldUpdateReason(
+  taskId: string,
+  input: TaskUpdateToolInput,
+  records: readonly StoredTask[]
+): string | null {
   if (input.subject !== undefined && !input.subject.trim()) {
     return "subject must not be empty"
   }
-  const selfEdges = [...(input.addBlocks ?? []), ...(input.addBlockedBy ?? [])]
-  if (normalizeTaskIdList(selfEdges).includes(taskId)) {
+  const addedEdges = normalizeTaskIdList([
+    ...(input.addBlocks ?? []),
+    ...(input.addBlockedBy ?? []),
+  ])
+  if (addedEdges.includes(taskId)) {
     return `task #${taskId} cannot block itself`
   }
+  // A dangling edge is stored but ignored by readiness and hidden by the renderer, so a mistyped
+  // blocker silently leaves the task READY (#959). Removals stay permissive to clean such edges up.
+  const unknown = addedEdges.filter((id) => !queueHasTask(records, id))
+  if (unknown.length > 0) {
+    return `no task matches ${unknown.map((id) => `#${id}`).join(", ")}`
+  }
   return null
+}
+
+function queueHasTask(records: readonly StoredTask[], id: string): boolean {
+  try {
+    return resolveQueueTask(records, id) !== undefined
+  } catch {
+    // Ambiguous: it exists; resolveQueueTask reports the ambiguity where it matters.
+    return true
+  }
 }
 
 /**
@@ -435,7 +457,7 @@ async function runTaskUpdateTool(rawInput: McpToolInput, cwd: string): Promise<M
       return errorResult(renderUnknownTaskId(taskUpdateName, input.taskId, tasksBefore))
     }
     const { task, storeKey } = record
-    const invalidReason = invalidFieldUpdateReason(task.id, input)
+    const invalidReason = invalidFieldUpdateReason(task.id, input, records)
     if (invalidReason) return errorResult(`${taskUpdateName} failed: ${invalidReason}`)
     const previousStatus = task.status
     const movementBefore = taskMovementFields(task)

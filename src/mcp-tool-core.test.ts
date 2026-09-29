@@ -220,6 +220,70 @@ async function runNoopUpdateDriver(): Promise<NoopUpdateResult> {
   return spawnCoreScript<NoopUpdateResult>(home, script)
 }
 
+interface UnknownBlockerResult {
+  unknown: { isError: boolean; text: string }
+  blockedByAfterUnknown: string[]
+  real: { isError: boolean }
+  blockedByAfterReal: string[]
+  removeUnknown: { isError: boolean }
+}
+
+/** Adds an unknown blocker, then a real one, then removes an unknown id (#959). */
+async function runUnknownBlockerDriver(): Promise<UnknownBlockerResult> {
+  const home = await tmp.create()
+  const cwd = join(home, "project")
+  const corePath = join(process.cwd(), "src", "mcp-tool-core.ts")
+  const taskRootsPath = join(process.cwd(), "src", "task-roots.ts")
+  const repositoryPath = join(process.cwd(), "src", "tasks", "task-repository.ts")
+  const discoveryPath = join(process.cwd(), "src", "tasks", "task-discovery.ts")
+  const script = `
+    import { mock } from "bun:test"
+    import { mkdir } from "node:fs/promises"
+    mock.module(${JSON.stringify(discoveryPath)}, () => ({ discoverRelatedTaskAdvice: async () => "" }))
+    const { runMcpTool } = await import(${JSON.stringify(corePath)})
+    const { createDefaultTaskStore } = await import(${JSON.stringify(taskRootsPath)})
+    const { readTaskStore, projectStoreKey } = await import(${JSON.stringify(repositoryPath)})
+    const cwd = ${JSON.stringify(cwd)}
+    await mkdir(cwd, { recursive: true })
+    const textOf = (result) => result.content.map((part) => part.text ?? "").join("\\n")
+    const create = (subject) => runMcpTool("TaskCreate", { subject, description: "note: fixture" }, cwd)
+    const id = /Created #(\\S+)/.exec(textOf(await create("Probe the blocker check")))?.[1] ?? ""
+    const realId = /Created #(\\S+)/.exec(textOf(await create("Document the deployment runbook")))?.[1] ?? ""
+    const blockedBy = async () =>
+      (await readTaskStore(projectStoreKey(cwd), createDefaultTaskStore().tasksDir)).find((t) => t.id === id)?.blockedBy ?? []
+    const unknown = await runMcpTool("TaskUpdate", { taskId: id, addBlockedBy: ["no-such-id"] }, cwd)
+    const blockedByAfterUnknown = await blockedBy()
+    const real = await runMcpTool("TaskUpdate", { taskId: id, addBlockedBy: ["#" + realId] }, cwd)
+    const blockedByAfterReal = await blockedBy()
+    const removeUnknown = await runMcpTool("TaskUpdate", { taskId: id, removeBlockedBy: ["ghost-99"] }, cwd)
+    console.log(JSON.stringify({
+      unknown: { isError: unknown.isError === true, text: textOf(unknown) },
+      blockedByAfterUnknown,
+      real: { isError: real.isError === true, text: textOf(real) },
+      blockedByAfterReal,
+      removeUnknown: { isError: removeUnknown.isError === true },
+      realId,
+    }))
+  `
+  return spawnCoreScript<UnknownBlockerResult>(home, script)
+}
+
+describe("runTaskUpdateTool rejects blocker ids that match no task (#959)", () => {
+  test("unknown blockers are refused by name; real ones and removals still work", async () => {
+    const result = (await runUnknownBlockerDriver()) as UnknownBlockerResult & { realId: string }
+    // Fixture guard: the control needs a real second task to have been created.
+    expect(result.realId).not.toBe("")
+    expect(result.unknown.isError).toBe(true)
+    expect(result.unknown.text).toContain("no-such-id")
+    expect(result.blockedByAfterUnknown).toEqual([])
+    // Control: a real task id is still accepted and stored.
+    expect(result.real).toMatchObject({ isError: false })
+    expect(result.blockedByAfterReal).toEqual([result.realId])
+    // Removal stays permissive so existing dangling edges can be cleaned up.
+    expect(result.removeUnknown.isError).toBe(false)
+  }, 30000)
+})
+
 describe("runTaskUpdateTool leaves the refresh stamp alone on no-op updates", () => {
   test("identical subject, description and edges do not move updatedAt; a real change does", async () => {
     const result = await runNoopUpdateDriver()
