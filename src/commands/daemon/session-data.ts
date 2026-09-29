@@ -166,6 +166,13 @@ export class SessionDataCache {
   private activeLoads = 0
   private readonly waitingLoads: Array<() => void> = []
   private generation = 0
+  private readonly readStats: SessionDataReadStats = {
+    hits: 0,
+    appends: 0,
+    coldRebuilds: 0,
+    fallbackReads: 0,
+    bodyBytesRead: 0,
+  }
 
   constructor(private readonly fileForPath = (path: string) => Bun.file(path)) {}
 
@@ -446,8 +453,14 @@ export class SessionDataCache {
   ): Promise<CachedSessionData> {
     const jsonl =
       cached?.format === format && cached.jsonl ? cached.jsonl : new HistoricalJsonlState(format)
-    const kind = await jsonl.read(file, metadata)
-    if (kind === "hit" && cached) return cached
+    const { kind, bytesRead } = await jsonl.read(file, metadata)
+    this.readStats.bodyBytesRead += bytesRead
+    if (kind === "cold") this.readStats.coldRebuilds++
+    else if (kind === "append") this.readStats.appends++
+    if (kind === "hit" && cached) {
+      this.readStats.hits++
+      return cached
+    }
     const view = jsonl.view(metadata.size)
     const next = this.buildFromEntries(
       view.entries,
@@ -465,9 +478,14 @@ export class SessionDataCache {
     format: Session["format"],
     cached?: CachedSessionData
   ): Promise<CachedSessionData | null> {
-    if (cached && isCacheFresh(cached, metadata, format)) return cached
+    if (cached && isCacheFresh(cached, metadata, format)) {
+      this.readStats.hits++
+      return cached
+    }
     const text = await readSessionPreview(file, metadata.size, format)
     if (text === null) return null
+    this.readStats.fallbackReads++
+    this.readStats.bodyBytesRead += Buffer.byteLength(text)
     const parsed = parseTranscriptEntries(text, format)
     const start = Math.max(0, parsed.length - MAX_TRANSCRIPT_ENTRIES)
     const prepared = parsed
@@ -533,6 +551,24 @@ export class SessionDataCache {
   getMemoryStats(): { entries: number; estimatedBytes: number } {
     return { entries: this.entries.size, estimatedBytes: this.entries.calculatedSize }
   }
+
+  /** Aggregate read counters only — never paths, session ids or transcript content. */
+  getReadStats(): SessionDataReadStats {
+    return { ...this.readStats }
+  }
+}
+
+/**
+ * Historical transcript read volume, process-local and reset with the daemon. `hits` served a
+ * cached view without reading the body; `appends` read only new bytes; `coldRebuilds` re-read the
+ * bounded JSONL window; `fallbackReads` re-read a non-append format's preview.
+ */
+export interface SessionDataReadStats {
+  hits: number
+  appends: number
+  coldRebuilds: number
+  fallbackReads: number
+  bodyBytesRead: number
 }
 
 /** Compact JSONL owns its strings; fallback formats retain their conservative source allowance. */

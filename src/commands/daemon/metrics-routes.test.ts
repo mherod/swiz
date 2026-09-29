@@ -91,7 +91,31 @@ function createContext(): MetricsRoutesContext {
     projectMetrics: new Map(),
     globalMetrics: createMetrics(),
     watchers: { status: async () => watcherEntries },
+    sessionHistory: {
+      providerIndex: { getMetrics: () => providerIndexMetrics },
+      sessionData: {
+        getReadStats: () => sessionReadStats,
+        getMemoryStats: () => ({ entries: 2, estimatedBytes: 4096 }),
+      },
+    },
   }
+}
+
+const providerIndexMetrics = {
+  hits: 19,
+  misses: 1,
+  coalesced: 4,
+  invalidations: 2,
+  staleRefreshes: 3,
+  keys: 1,
+  descriptors: 12,
+}
+const sessionReadStats = {
+  hits: 40,
+  appends: 1,
+  coldRebuilds: 1,
+  fallbackReads: 0,
+  bodyBytesRead: 9090,
 }
 
 describe("metrics routes", () => {
@@ -141,6 +165,23 @@ describe("metrics routes", () => {
       timeoutCount: 0,
     })
     expect(body.byEvent.stop.routes.unknown.count).toBe(1)
+  })
+
+  test("exposes dashboard history counters as aggregate numbers only (#809)", async () => {
+    const body = await (
+      await routes.handleMetricsRoute(new URL("http://daemon/metrics"), createContext())
+    ).json()
+
+    expect(body.caches.providerSessionIndex).toEqual(providerIndexMetrics)
+    expect(body.caches.sessionHistory).toEqual({
+      ...sessionReadStats,
+      entries: 2,
+      estimatedBytes: 4096,
+    })
+    // Content-free contract: every exposed value is a count or byte total, never a path or id.
+    for (const block of [body.caches.providerSessionIndex, body.caches.sessionHistory]) {
+      for (const value of Object.values(block)) expect(typeof value).toBe("number")
+    }
   })
 
   test("returns an isolated project view and an empty fallback for unknown projects", async () => {

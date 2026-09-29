@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test"
+import { providerSessionIndex, sessionDataCache } from "./session-data.ts"
 import {
   buildCacheRoutesContext,
   buildCiRoutesContext,
@@ -150,6 +151,11 @@ describe("web server route context builders", () => {
       "watchers",
     ] as const satisfies readonly (keyof DaemonWebServerContext)[]
 
-    expectDirectContextSubset(source, buildMetricsRoutesContext(source), keys)
+    // Dashboard history caches are daemon-module singletons, not server-context fields, so they
+    // are checked by identity separately from the forwarded subset (#809).
+    const { sessionHistory, ...forwarded } = buildMetricsRoutesContext(source)
+    expectDirectContextSubset(source, forwarded, keys)
+    expect(sessionHistory.providerIndex).toBe(providerSessionIndex)
+    expect(sessionHistory.sessionData).toBe(sessionDataCache)
   })
 })

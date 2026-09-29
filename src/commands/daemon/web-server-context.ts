@@ -33,7 +33,13 @@ import type {
   RepositoryCapabilityCache,
   TranscriptIndexCache,
 } from "./runtime-cache.ts"
-import { getProjectTasks, getSessionData, listProjectSessions } from "./session-data.ts"
+import {
+  getProjectTasks,
+  getSessionData,
+  listProjectSessions,
+  providerSessionIndex,
+  sessionDataCache,
+} from "./session-data.ts"
 import type { SessionRoutesContext } from "./session-routes.ts"
 import type { SettingsRoutesContext } from "./settings-routes.ts"
 import type { CachedSnapshot } from "./snapshot.ts"
@@ -227,5 +233,9 @@ export function buildMetricsRoutesContext(ctx: DaemonWebServerContext): MetricsR
     projectMetrics: ctx.projectMetrics,
     globalMetrics: ctx.globalMetrics,
     watchers: ctx.watchers,
+    sessionHistory: {
+      providerIndex: providerSessionIndex,
+      sessionData: sessionDataCache,
+    },
   }
 }

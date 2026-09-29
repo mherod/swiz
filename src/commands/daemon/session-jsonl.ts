@@ -65,7 +65,11 @@ export class HistoricalJsonlState {
     }
   }
 
-  async read(file: Bun.BunFile, metadata: JsonlAppendMetadata): Promise<"hit" | "append" | "cold"> {
+  /** `bytesRead` counts transcript body bytes this call consumed: the delta, or the cold window. */
+  async read(
+    file: Bun.BunFile,
+    metadata: JsonlAppendMetadata
+  ): Promise<{ kind: "hit" | "append" | "cold"; bytesRead: number }> {
     this.cutoff = Math.max(0, metadata.size - MAX_SESSION_PREVIEW_BYTES)
     this.prune()
     if (!this.continuable) this.cursor.clear()
@@ -84,8 +88,9 @@ export class HistoricalJsonlState {
       this.cursor.seed(metadata, cold.pendingTail)
       /** A clipped record with no visible newline cannot seed a continuation safely. */
       this.continuable = cold.reachedStart || cold.startOffset < metadata.size
+      return { kind: "cold", bytesRead: metadata.size - cold.startOffset }
     }
-    return update.kind
+    return { kind: update.kind, bytesRead: update.bytesRead }
   }
 
   private prune(): void {

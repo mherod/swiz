@@ -299,6 +299,39 @@ test("truncation and same-size rewrite each rebuild once", async () => {
   expect(await cache.get(session)).toBe(rewritten)
 })
 
+test("read stats attribute hot hits, appended bytes and cold rebuilds (#809)", async () => {
+  const first = `${line("One")}\n`
+  const session = await fixture(first)
+  const { cache, reads } = measuredCache()
+  const sliceBytes = () => reads.reduce((sum, [start, end]) => sum + (end - start), 0)
+
+  await cache.get(session)
+  expect(cache.getReadStats()).toMatchObject({ coldRebuilds: 1, bodyBytesRead: first.length })
+
+  reads.length = 0
+  for (let cycle = 0; cycle < 20; cycle++) await cache.get(session)
+  // Unchanged polls are pure hits: no body read and no byte growth.
+  expect(sliceBytes()).toBe(0)
+  expect(cache.getReadStats()).toMatchObject({
+    hits: 20,
+    coldRebuilds: 1,
+    bodyBytesRead: first.length,
+  })
+
+  const added = `${line("Two")}\n`
+  await appendFile(session.path, added)
+  await cache.get(session)
+  expect(cache.getReadStats()).toMatchObject({
+    appends: 1,
+    coldRebuilds: 1,
+    bodyBytesRead: first.length + added.length,
+  })
+
+  await Bun.write(session.path, `${line("Reset")}\n`)
+  await cache.get(session)
+  expect(cache.getReadStats()).toMatchObject({ appends: 1, coldRebuilds: 2 })
+})
+
 test("losing file identity forces a cold read instead of a hot hit", async () => {
   const session = await fixture(`${line("First")}\n`)
   let identity = true

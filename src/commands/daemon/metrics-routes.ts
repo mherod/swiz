@@ -7,6 +7,7 @@ import { getGhRateLimitStats } from "../../gh-rate-limit.ts"
 import { getHookLogMetrics, readHookLogs } from "../../hook-log.ts"
 import { getCodexPlanSyncMetrics } from "../../tasks/codex-update-plan.ts"
 import { getTurnsCacheStats } from "../../transcript-turns.ts"
+import type { ProviderSessionIndex } from "./cache/provider-session-index.ts"
 import type { FileWatcherRegistry } from "./cache/worker-file-watcher-registry.ts"
 import { RpcFailure } from "./cache/worker-rpc.ts"
 import type {
@@ -20,6 +21,7 @@ import type {
   TranscriptIndexCache,
 } from "./runtime-cache.ts"
 import { createMetrics, serializeMetrics } from "./runtime-cache.ts"
+import type { SessionDataCache } from "./session-data.ts"
 
 export interface MetricsRoutesContext {
   ghCache: GhQueryCache
@@ -33,6 +35,11 @@ export interface MetricsRoutesContext {
   projectMetrics: Map<string, DaemonMetrics>
   globalMetrics: DaemonMetrics
   watchers: Pick<FileWatcherRegistry, "status">
+  /** Dashboard history caches; their counters carry no paths, session ids or content (#809). */
+  sessionHistory: {
+    providerIndex: Pick<ProviderSessionIndex, "getMetrics">
+    sessionData: Pick<SessionDataCache, "getReadStats" | "getMemoryStats">
+  }
 }
 
 /** Keep unrelated metrics available when watcher IPC fails, without presenting stale health. */
@@ -67,6 +74,11 @@ export async function handleMetricsRoute(url: URL, ctx: MetricsRoutesContext): P
     projectSettings: { size: ctx.projectSettingsCache.size },
     manifest: { size: ctx.manifestCache.size },
     snapshots: { size: ctx.snapshots.size },
+    providerSessionIndex: ctx.sessionHistory.providerIndex.getMetrics(),
+    sessionHistory: {
+      ...ctx.sessionHistory.sessionData.getReadStats(),
+      ...ctx.sessionHistory.sessionData.getMemoryStats(),
+    },
   }
   if (projectParam) {
     const pm = ctx.projectMetrics.get(projectParam)
