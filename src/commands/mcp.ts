@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto"
 import { readFileSync, unlinkSync, utimesSync, watch, writeFileSync } from "node:fs"
+import { dirname } from "node:path"
 import { z } from "zod"
 import { CHANNEL_DELIVERABLE_TRIGGERS } from "../auto-steer-store.ts"
 import { fileOwnershipInputSchema, fileOwnershipResultSchema } from "../file-ownership-tool.ts"
@@ -599,11 +600,80 @@ function registerPermissionRelay(lowLevel: McpLowLevelServer, cwd: ToolCwd): voi
 
 const MCP_TOOL_DAEMON_TIMEOUT_MS = 5_000
 const MCP_TOOL_BACKOFF_MS = 30_000
+/**
+ * Lefthook restarts the daemon on every commit (~2.5 s). A call landing in that window used to
+ * fail over straight to in-process code and then stay there for the whole backoff, so a session
+ * whose stdio server predates a store-layout change read an empty queue for 30 s after each
+ * commit (#926). One delayed retry rides out the restart instead.
+ */
+const MCP_TOOL_RESTART_RETRY_MS = 3_000
 let lastMcpDaemonFailureAt = 0
+
+/** When this stdio server loaded its code; in-process fallback runs that snapshot. */
+const MCP_CODE_LOADED_AT_MS = Date.now()
+
+interface McpFallbackOptions {
+  restartRetryMs: number
+  codeLoadedAtMs: number
+  /** Commit time (ms) of the checkout's HEAD, or null when it cannot be read. */
+  checkoutHeadCommitMs: () => Promise<number | null>
+}
+
+const defaultFallbackOptions: McpFallbackOptions = {
+  restartRetryMs: MCP_TOOL_RESTART_RETRY_MS,
+  codeLoadedAtMs: MCP_CODE_LOADED_AT_MS,
+  checkoutHeadCommitMs: readCheckoutHeadCommitMs,
+}
+let fallbackOptions = defaultFallbackOptions
 
 /** Exported for testing — reset backoff state between test cases. */
 export function resetMcpToolDaemonBackoff(): void {
   lastMcpDaemonFailureAt = 0
+}
+
+/** Exported for testing — override retry timing and code-staleness inputs; `null` restores defaults. */
+export function setMcpFallbackOptionsForTest(options: Partial<McpFallbackOptions> | null): void {
+  fallbackOptions = options ? { ...defaultFallbackOptions, ...options } : defaultFallbackOptions
+}
+
+async function readCheckoutHeadCommitMs(): Promise<number | null> {
+  try {
+    const proc = Bun.spawn(["git", "log", "-1", "--format=%ct"], {
+      cwd: dirname(Bun.main),
+      stdout: "pipe",
+      stderr: "pipe",
+    })
+    const [out] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+    ])
+    await proc.exited
+    const seconds = Number.parseInt(out.trim(), 10)
+    return proc.exitCode === 0 && Number.isFinite(seconds) ? seconds * 1000 : null
+  } catch {
+    return null
+  }
+}
+
+const TASK_TOOLS = new Set<McpToolName>(["TaskCreate", "TaskUpdate", "TaskList"])
+
+/**
+ * An in-process fallback runs the code this server loaded at start. When the checkout has
+ * committed since, that code may read a store layout that has since migrated and report an empty
+ * queue with the data intact (#926), so the answer must say where it came from.
+ */
+async function annotateStaleFallback(
+  tool: McpToolName,
+  result: McpToolResult
+): Promise<McpToolResult> {
+  if (!TASK_TOOLS.has(tool)) return result
+  const headMs = await fallbackOptions.checkoutHeadCommitMs()
+  if (headMs === null || headMs <= fallbackOptions.codeLoadedAtMs) return result
+  const warning =
+    "⚠️ The swiz daemon was unavailable, so this answer came from the MCP server's in-process " +
+    "fallback, whose code predates the latest commit in the swiz checkout. Task state may be " +
+    "missing or stale here; retry once the daemon is back, or restart the MCP server."
+  return { ...result, content: [{ type: "text", text: warning }, ...result.content] }
 }
 
 async function tryDaemonMcpTool(
@@ -615,7 +685,26 @@ async function tryDaemonMcpTool(
   if (lastMcpDaemonFailureAt > 0 && Date.now() - lastMcpDaemonFailureAt < MCP_TOOL_BACKOFF_MS) {
     return null
   }
+  const first = await requestDaemonMcpTool(tool, input, cwd)
+  // Unreachable is the restart signature; an answered-but-rejected request is not retried. Only
+  // task tools wait it out: their fallback reads a store layout that may have moved since this
+  // server loaded, while other tools stay correct in-process and should not pay the delay.
+  const second =
+    first === "unreachable" && TASK_TOOLS.has(tool)
+      ? await Bun.sleep(fallbackOptions.restartRetryMs).then(() =>
+          requestDaemonMcpTool(tool, input, cwd)
+        )
+      : first
+  if (second !== "unreachable") return second
+  lastMcpDaemonFailureAt = Date.now()
+  return null
+}
 
+async function requestDaemonMcpTool(
+  tool: McpToolName,
+  input: McpToolInput,
+  cwd: string
+): Promise<McpToolResult | null | "unreachable"> {
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), MCP_TOOL_DAEMON_TIMEOUT_MS)
   try {
@@ -632,8 +721,7 @@ async function tryDaemonMcpTool(
     const parsed = mcpToolResultSchema.safeParse(await resp.json())
     return parsed.success ? parsed.data : null
   } catch {
-    lastMcpDaemonFailureAt = Date.now()
-    return null
+    return "unreachable"
   } finally {
     clearTimeout(timer)
   }
@@ -647,7 +735,7 @@ export async function executeMcpTool(
 ): Promise<McpToolResult> {
   const viaDaemon = await tryDaemonMcpTool(tool, input, cwd)
   if (viaDaemon) return viaDaemon
-  return runMcpTool(tool, input, cwd)
+  return annotateStaleFallback(tool, await runMcpTool(tool, input, cwd))
 }
 
 // Re-exported so existing consumers keep importing these from mcp.ts after the

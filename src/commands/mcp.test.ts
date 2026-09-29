@@ -13,6 +13,7 @@ import {
   loadPermissionPolicy,
   readProjectTasksWithPrune,
   resetMcpToolDaemonBackoff,
+  setMcpFallbackOptionsForTest,
   summarizeTasks,
 } from "./mcp.ts"
 
@@ -163,6 +164,75 @@ describe("executeMcpTool", () => {
       if (priorNoDaemon !== undefined) process.env.SWIZ_NO_DAEMON = priorNoDaemon
       resetMcpToolDaemonBackoff()
       void server.stop(true)
+    }
+  })
+})
+
+describe("executeMcpTool across a daemon restart and stale fallback (#926)", () => {
+  function withEnv(vars: Record<string, string | undefined>) {
+    const prior = Object.fromEntries(Object.keys(vars).map((k) => [k, process.env[k]]))
+    for (const [k, v] of Object.entries(vars)) {
+      if (v === undefined) delete process.env[k]
+      else process.env[k] = v
+    }
+    return () => {
+      for (const [k, v] of Object.entries(prior)) {
+        if (v === undefined) delete process.env[k]
+        else process.env[k] = v
+      }
+    }
+  }
+
+  it("rides out a daemon restart instead of serving the in-process fallback", async () => {
+    // Reserve a port, release it, and bring the daemon back only after the first request fails.
+    const probe = Bun.serve({ port: 0, fetch: () => new Response("") })
+    const port = probe.port
+    void probe.stop(true)
+    const restore = withEnv({ SWIZ_NO_DAEMON: undefined, SWIZ_DAEMON_PORT: String(port) })
+    let server: ReturnType<typeof Bun.serve> | undefined
+    const restart = setTimeout(() => {
+      server = Bun.serve({
+        port,
+        fetch: () => Response.json({ content: [{ type: "text", text: "daemon:restarted" }] }),
+      })
+    }, 100)
+    try {
+      resetMcpToolDaemonBackoff()
+      setMcpFallbackOptionsForTest({ restartRetryMs: 400 })
+      const result = await executeMcpTool("TaskList", {}, "/never-read-locally")
+      expect(result.content[0]?.text).toBe("daemon:restarted")
+    } finally {
+      clearTimeout(restart)
+      setMcpFallbackOptionsForTest(null)
+      resetMcpToolDaemonBackoff()
+      restore()
+      void server?.stop(true)
+    }
+  })
+
+  it("marks a task answer served by fallback code older than the checkout", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "swiz-mcp-stale-"))
+    const restore = withEnv({ SWIZ_NO_DAEMON: "1" })
+    try {
+      setMcpFallbackOptionsForTest({
+        codeLoadedAtMs: 1_000,
+        checkoutHeadCommitMs: async () => 2_000,
+      })
+      const stale = await executeMcpTool("TaskList", {}, cwd)
+      expect(stale.content[0]?.text).toContain("in-process fallback")
+      expect(stale.content.at(-1)?.text).toContain("No tasks in this project yet.")
+
+      // Control: code loaded after the last commit is current, so no warning is added.
+      setMcpFallbackOptionsForTest({
+        codeLoadedAtMs: 3_000,
+        checkoutHeadCommitMs: async () => 2_000,
+      })
+      const current = await executeMcpTool("TaskList", {}, cwd)
+      expect(current.content).toHaveLength(1)
+      expect(current.content[0]?.text).not.toContain("in-process fallback")
+    } finally {
+      setMcpFallbackOptionsForTest(null)
+      restore()
     }
   })
 })
