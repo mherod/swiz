@@ -2,7 +2,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, setSystemTime, test 
 import { mkdir, realpath } from "node:fs/promises"
 import { join } from "node:path"
 import { projectKeyFromCwd } from "../../project-key.ts"
-import { useTempDir } from "../../utils/test-utils.ts"
+import { acquireEnvLock, releaseEnvLockFn, useTempDir } from "../../utils/test-utils.ts"
 import {
   getSessionData,
   listProjectSessions,
@@ -93,6 +93,8 @@ function advance(ms: number): void {
 }
 
 beforeAll(async () => {
+  // Provider discovery reads HOME at call time; serialize with other HOME-mutating files.
+  await acquireEnvLock()
   home = await realpath(await createTempDir())
   process.env.HOME = home
   projectCwd = join(home, "work", "project-a")
@@ -102,6 +104,7 @@ beforeAll(async () => {
 afterAll(() => {
   setSystemTime()
   process.env.HOME = originalHome
+  releaseEnvLockFn()
 })
 
 beforeEach(() => {
