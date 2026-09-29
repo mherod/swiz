@@ -293,36 +293,63 @@ function invalidFieldUpdateReason(taskId: string, input: TaskUpdateToolInput): s
   return null
 }
 
-/** Apply the non-status fields of an update, returning a label per field actually changed. */
+/**
+ * Apply the non-status fields of an update, returning a label per field actually changed.
+ *
+ * A field counts only when its value differs: resubmitting the same subject, description or edge
+ * must not persist, because every write stamps `updatedAt` and the refresh gate reads that stamp as
+ * proof the task was revisited (see `findLongRunningActiveTasks`).
+ */
 function applyTaskFieldUpdates(task: Task, input: TaskUpdateToolInput): string[] {
   const changes: string[] = []
-  if (input.subject !== undefined) {
+  if (input.subject !== undefined && input.subject !== task.subject) {
     task.subject = input.subject
     changes.push("subject")
   }
-  if (input.description !== undefined) {
+  if (input.description !== undefined && input.description !== task.description) {
     task.description = input.description
     changes.push("description")
   }
+  const edgeChange = (field: "blocks" | "blockedBy", next: string[], label: string) => {
+    if (sameIdSet(task[field], next)) return
+    task[field] = next
+    changes.push(label)
+  }
   if (input.addBlocks) {
     const added = normalizeTaskIdList(input.addBlocks)
-    task.blocks = [...new Set([...task.blocks, ...added])]
-    changes.push(`blocks +#${added.join(", #")}`)
+    edgeChange("blocks", [...new Set([...task.blocks, ...added])], `blocks +#${added.join(", #")}`)
   }
   if (input.removeBlocks) {
-    task.blocks = removeTaskIds(task.blocks, input.removeBlocks)
-    changes.push(`blocks -#${normalizeTaskIdList(input.removeBlocks).join(", #")}`)
+    const removed = normalizeTaskIdList(input.removeBlocks)
+    edgeChange(
+      "blocks",
+      removeTaskIds(task.blocks, input.removeBlocks),
+      `blocks -#${removed.join(", #")}`
+    )
   }
   if (input.addBlockedBy) {
     const added = normalizeTaskIdList(input.addBlockedBy)
-    task.blockedBy = [...new Set([...task.blockedBy, ...added])]
-    changes.push(`blockedBy +#${added.join(", #")}`)
+    edgeChange(
+      "blockedBy",
+      [...new Set([...task.blockedBy, ...added])],
+      `blockedBy +#${added.join(", #")}`
+    )
   }
   if (input.removeBlockedBy) {
-    task.blockedBy = removeTaskIds(task.blockedBy, input.removeBlockedBy)
-    changes.push(`blockedBy -#${normalizeTaskIdList(input.removeBlockedBy).join(", #")}`)
+    const removed = normalizeTaskIdList(input.removeBlockedBy)
+    edgeChange(
+      "blockedBy",
+      removeTaskIds(task.blockedBy, input.removeBlockedBy),
+      `blockedBy -#${removed.join(", #")}`
+    )
   }
   return changes
+}
+
+function sameIdSet(a: readonly string[], b: readonly string[]): boolean {
+  const left = new Set(a)
+  const right = new Set(b)
+  return left.size === right.size && [...left].every((id) => right.has(id))
 }
 
 async function persistTaskUpdate(

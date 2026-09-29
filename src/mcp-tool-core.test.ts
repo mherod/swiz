@@ -170,6 +170,68 @@ async function runRootCwdDriver(): Promise<RootCwdResult> {
   return spawnCoreScript<RootCwdResult>(home, script)
 }
 
+interface NoopUpdateResult {
+  initial: string
+  afterSameDescription: string
+  afterSameSubject: string
+  afterExistingEdge: string
+  afterNewDescription: string
+}
+
+/** Records the stored `updatedAt` after each resubmitted-but-identical update, then a real one. */
+async function runNoopUpdateDriver(): Promise<NoopUpdateResult> {
+  const home = await tmp.create()
+  const cwd = join(home, "project")
+  const corePath = join(process.cwd(), "src", "mcp-tool-core.ts")
+  const taskRootsPath = join(process.cwd(), "src", "task-roots.ts")
+  const repositoryPath = join(process.cwd(), "src", "tasks", "task-repository.ts")
+  const discoveryPath = join(process.cwd(), "src", "tasks", "task-discovery.ts")
+  const script = `
+    import { mock } from "bun:test"
+    import { mkdir } from "node:fs/promises"
+    mock.module(${JSON.stringify(discoveryPath)}, () => ({ discoverRelatedTaskAdvice: async () => "" }))
+    const { runMcpTool } = await import(${JSON.stringify(corePath)})
+    const { createDefaultTaskStore } = await import(${JSON.stringify(taskRootsPath)})
+    const { readTaskStore, projectStoreKey } = await import(${JSON.stringify(repositoryPath)})
+    const cwd = ${JSON.stringify(cwd)}
+    await mkdir(cwd, { recursive: true })
+    const textOf = (result) => result.content.map((part) => part.text ?? "").join("\\n")
+    const create = (subject) => runMcpTool("TaskCreate", { subject, description: "note: fixture" }, cwd)
+    const id = /Created #(\\S+)/.exec(textOf(await create("Probe the refresh stamp")))?.[1] ?? ""
+    const edgeId = /Created #(\\S+)/.exec(textOf(await create("Verify the edge fixture")))?.[1] ?? ""
+    await runMcpTool("TaskUpdate", { taskId: id, addBlocks: [edgeId] }, cwd)
+    const stamp = async () => {
+      // Let the clock move so an unwanted rewrite would produce a different stamp.
+      await Bun.sleep(15)
+      const tasks = await readTaskStore(projectStoreKey(cwd), createDefaultTaskStore().tasksDir)
+      return tasks.find((task) => task.id === id)?.updatedAt ?? ""
+    }
+    const initial = await stamp()
+    await runMcpTool("TaskUpdate", { taskId: id, description: "note: fixture" }, cwd)
+    const afterSameDescription = await stamp()
+    await runMcpTool("TaskUpdate", { taskId: id, subject: "Probe the refresh stamp" }, cwd)
+    const afterSameSubject = await stamp()
+    await runMcpTool("TaskUpdate", { taskId: id, addBlocks: ["#" + edgeId] }, cwd)
+    const afterExistingEdge = await stamp()
+    await runMcpTool("TaskUpdate", { taskId: id, description: "note: real progress" }, cwd)
+    const afterNewDescription = await stamp()
+    console.log(JSON.stringify({ initial, afterSameDescription, afterSameSubject, afterExistingEdge, afterNewDescription }))
+  `
+  return spawnCoreScript<NoopUpdateResult>(home, script)
+}
+
+describe("runTaskUpdateTool leaves the refresh stamp alone on no-op updates", () => {
+  test("identical subject, description and edges do not move updatedAt; a real change does", async () => {
+    const result = await runNoopUpdateDriver()
+    expect(result.initial).not.toBe("")
+    expect(result.afterSameDescription).toBe(result.initial)
+    expect(result.afterSameSubject).toBe(result.initial)
+    expect(result.afterExistingEdge).toBe(result.initial)
+    // Control: without it the equalities above could pass because no write path stamps at all.
+    expect(result.afterNewDescription).not.toBe(result.initial)
+  }, 30000)
+})
+
 describe("MCP task tools under the root cwd (project key '-')", () => {
   test("keeps both tasks and rejects writes that would hide or self-block a task", async () => {
     const result = await runRootCwdDriver()
