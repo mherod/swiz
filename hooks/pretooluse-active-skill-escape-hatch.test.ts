@@ -1,6 +1,9 @@
 import { beforeAll, describe, expect, test } from "bun:test"
+import { mkdir, writeFile } from "node:fs/promises"
+import { join } from "node:path"
 import { hookOutputSchema } from "../src/schemas.ts"
 import { hasActiveSkillForHookPayload } from "../src/skill-utils.ts"
+import { getSessionTasksDir } from "../src/tasks/task-recovery.ts"
 import { useTempDir } from "../src/utils/test-utils.ts"
 import { evaluatePretooluseRequireTasks } from "./pretooluse-task-governance.ts"
 
@@ -86,5 +89,48 @@ describe("task governance stands down while a skill is active", () => {
     // The stand-down is scoped to the skill's lifetime — it must not leak into ordinary work.
     const input = emptyQueueInput({ skills: ["commit"], timestamp: STALE_TIMESTAMP })
     expect(await hasActiveSkillForHookPayload(input)).toBe(false)
+  })
+})
+
+describe("the task refresh gate survives the skill stand-down", () => {
+  const HOUR_MS = 60 * 60_000
+
+  /** An active-skill payload whose session holds one in_progress task started two hours ago. */
+  async function longRunningTaskInput(updatedAgoMs: number) {
+    const input = emptyQueueInput({ skills: ["work-on-issue"] })
+    const dir = getSessionTasksDir(input.session_id, taskHome)
+    if (!dir) throw new Error("Failed to resolve session tasks directory")
+    await mkdir(dir, { recursive: true })
+    const startedAt = Date.now() - 2 * HOUR_MS
+    const task = {
+      id: "1",
+      subject: "Long-running task",
+      description: "",
+      status: "in_progress",
+      blocks: [],
+      blockedBy: [],
+      statusChangedAt: new Date(startedAt).toISOString(),
+      startedAt,
+      updatedAt: new Date(Date.now() - updatedAgoMs).toISOString(),
+    }
+    await writeFile(join(dir, "1.json"), JSON.stringify(task))
+    return input
+  }
+
+  test("denies Bash mid-skill while an in_progress task is unrefreshed past the window", async () => {
+    const input = await longRunningTaskInput(2 * HOUR_MS)
+    const output = hookOutputSchema.parse(await evaluatePretooluseRequireTasks(input))
+    expect(output.hookSpecificOutput?.permissionDecision).toBe("deny")
+    expect(String(output.hookSpecificOutput?.permissionDecisionReason)).toContain(
+      "without a refresh"
+    )
+  })
+
+  test("still stands down mid-skill once the task was refreshed (control)", async () => {
+    // Same skill and task shape: only the refresh differs, so the deny above is the refresh gate
+    // and not some other state gate leaking past the stand-down.
+    const input = await longRunningTaskInput(60_000)
+    const output = hookOutputSchema.parse(await evaluatePretooluseRequireTasks(input))
+    expect(output.hookSpecificOutput?.permissionDecision).not.toBe("deny")
   })
 })

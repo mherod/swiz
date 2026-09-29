@@ -1332,11 +1332,20 @@ function runImmediateTaskStateChecks(context: TaskStateCheckContext): SwizHookOu
   )
 }
 
+/**
+ * A skill relaxes queue-shape pressure, but it never refreshes a task by running: an in_progress
+ * task left untouched past the refresh window stays stale however long the skill runs, and
+ * TaskUpdate stays reachable during it. So the refresh gate survives the stand-down.
+ */
+function allowSkillWorkflow(context: TaskStateCheckContext): SwizHookOutput {
+  return checkLongRunningActiveTasks(context.toolName, context.allTasks) ?? preToolUseAllow()
+}
+
 async function runTaskStateChecks(context: TaskStateCheckContext): Promise<SwizHookOutput> {
   if (await nativeTaskToolsProvenAbsent(context.input)) return preToolUseAllow()
 
   // Escape hatch — see skillOwnsWorkflow.
-  if (await skillOwnsWorkflow(context.input, context.cwd)) return preToolUseAllow()
+  if (await skillOwnsWorkflow(context.input, context.cwd)) return allowSkillWorkflow(context)
 
   const reconciliation = checkReconciliationRequired(context)
   if (reconciliation) return reconciliation
