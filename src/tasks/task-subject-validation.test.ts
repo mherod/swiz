@@ -62,6 +62,26 @@ describe("detect", () => {
       expect(result.intro).not.toContain("TaskCreate")
     })
 
+    // #967: task tools are swiz's product, so real work may name them as a qualifier.
+    for (const subject of [
+      "Report the measured sync age in the stale TaskList denial",
+      "Fix TaskUpdate evidence parsing",
+    ]) {
+      test(`accepts a tool name qualifying real work: ${subject}`, () => {
+        expect(detect(subject).matched).toBe(false)
+      })
+    }
+
+    for (const subject of [
+      "Run TaskList now",
+      "Call TaskUpdate to satisfy the gate",
+      "Track the work with TaskCreate",
+    ]) {
+      test(`control: rejects task-tool bookkeeping: ${subject}`, () => {
+        expect(detect(subject).matched).toBe(true)
+      })
+    }
+
     test("rejects 'Ensure a task is in progress'", () => {
       const result = detect("Ensure a task is in progress")
       expect(result.matched).toBe(true)

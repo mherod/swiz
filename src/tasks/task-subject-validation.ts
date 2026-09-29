@@ -77,22 +77,29 @@ function detectPlaceholder(s: string): CompoundMatch | null {
 /** Sorted longest-first so "TaskCreate" matches before "Task". */
 const TASK_TOOL_NAMES = [...TASK_TOOLS].sort((a, b) => b.length - a.length)
 
+const TOOL_NAME_ALT = TASK_TOOL_NAMES.join("|")
+/**
+ * Bookkeeping, not work: a subject that opens with a task tool, invokes one with a leading
+ * bookkeeping verb, or says it does a task (or ends) "with" one. A tool named as a qualifier of real work
+ * ("Fix TaskUpdate evidence parsing", "… in the stale TaskList denial") passes (#967).
+ */
+const TASK_TOOL_BOOKKEEPING_RE = new RegExp(
+  `^(?:(?:run|call|use|invoke|sync|create|update|refresh)\\s+(?:the\\s+)?)?(?:${TOOL_NAME_ALT})\\b|\\btasks?\\s+with\\s+(?:${TOOL_NAME_ALT})\\b|\\bwith\\s+(?:${TOOL_NAME_ALT})\\s*$`,
+  "i"
+)
+
 function detectTaskToolName(s: string): CompoundMatch | null {
-  for (const tool of TASK_TOOL_NAMES) {
-    if (new RegExp(`\\b${tool}\\b`).test(s)) {
-      return {
-        matched: true,
-        intro:
-          "You are creating bookkeeping about the task tool instead of tracking the work. Name the real work to do now. Acceptable next actions:",
-        suggestions: [
-          "Fix authentication bug in login flow",
-          "Add pagination to search results",
-          "Refactor database connection pooling",
-        ],
-      }
-    }
+  if (!TASK_TOOL_BOOKKEEPING_RE.test(s.trim())) return null
+  return {
+    matched: true,
+    intro:
+      "You are creating bookkeeping about the task tool instead of tracking the work. Name the real work to do now. Acceptable next actions:",
+    suggestions: [
+      "Fix authentication bug in login flow",
+      "Add pagination to search results",
+      "Refactor database connection pooling",
+    ],
   }
-  return null
 }
 
 /**
