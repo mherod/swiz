@@ -36,7 +36,7 @@ alwaysApply: false
 - **NEVER** let guardrails, task/branch gates, or scope boundaries harden into refusing obviously-wanted work; on tracked, well-specified issues execute a minimal concrete step rather than explaining why you "cannot".
 - Run `/commit` before `git commit` (`pretooluse-commit-skill-gate` enforces it); it checks task preflight and Conventional Commits `<type>(<scope>): <summary>`.
 - Call task tools every 20 calls; staleness gate at 40.
-- **DO**: Use native task tools, not `swiz tasks` CLI (exception: `swiz tasks adopt`); change a subject via `TaskUpdate` `subject`/`description`.
+- **DO**: Use native task tools, not `swiz tasks` CLI; change a subject via `TaskUpdate` `subject`/`description`.
 - **DO**: Use `createTaskInProcess()` from `src/tasks/task-service.ts` or `createSessionTask()` from `hook-utils.ts` in hooks.
 - Call `TaskUpdate` after each file, at least every 3 edits.
 - Exempt Bash: `ls`, `rg`, `grep`; read-only `git` (`log`, `status`, `diff`, `show`, `branch`, `remote`, `rev-parse`); `git push/pull/fetch`; all `gh`; `swiz issue close/comment`.
