@@ -6,11 +6,11 @@ import {
 
 const NOW = Date.parse("2026-09-29T12:00:00.000Z")
 const iso = (ms: number) => new Date(ms).toISOString()
-const DAY = LONG_RUNNING_ACTIVE_TASK_MS
+const HOUR = LONG_RUNNING_ACTIVE_TASK_MS
 
 describe("findLongRunningActiveTasks", () => {
-  test("flags an in_progress task started over a day ago with no refresh", () => {
-    const started = NOW - DAY - 60_000
+  test("flags an in_progress task started over an hour ago with no refresh", () => {
+    const started = NOW - HOUR - 60_000
     const tasks = [
       {
         id: "1",
@@ -23,8 +23,8 @@ describe("findLongRunningActiveTasks", () => {
     expect(findLongRunningActiveTasks(tasks, NOW).map((t) => t.id)).toEqual(["1"])
   })
 
-  test("releases a long-running task refreshed within the last day", () => {
-    const started = NOW - 3 * DAY
+  test("releases a long-running task refreshed within the last hour", () => {
+    const started = NOW - 3 * HOUR
     const tasks = [
       {
         id: "1",
@@ -37,8 +37,8 @@ describe("findLongRunningActiveTasks", () => {
     expect(findLongRunningActiveTasks(tasks, NOW)).toEqual([])
   })
 
-  test("ignores tasks under a day and non-active tasks", () => {
-    const old = iso(NOW - 2 * DAY)
+  test("ignores tasks under an hour and non-active tasks", () => {
+    const old = iso(NOW - 2 * HOUR)
     const tasks = [
       { id: "1", status: "in_progress", subject: "Fresh", statusChangedAt: iso(NOW - 60_000) },
       { id: "2", status: "pending", subject: "Queued", statusChangedAt: old, updatedAt: old },

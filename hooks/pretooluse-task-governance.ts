@@ -804,13 +804,13 @@ async function checkInProgressCap(
   )
 }
 
-export const LONG_RUNNING_ACTIVE_TASK_MS = 24 * 60 * 60_000
+export const LONG_RUNNING_ACTIVE_TASK_MS = 60 * 60_000
 
 type LongRunningTaskLike = SlowTaskEntry & { updatedAt?: string }
 
 /**
- * An in_progress task started over a day ago no longer describes the work in flight unless it was
- * refreshed since. A TaskUpdate stamps `updatedAt`, so refreshing within the last day releases it.
+ * An in_progress task started over an hour ago no longer describes the work in flight unless it was
+ * refreshed since. A TaskUpdate stamps `updatedAt`, so refreshing within the last hour releases it.
  */
 export function findLongRunningActiveTasks<T extends LongRunningTaskLike>(
   allTasks: readonly T[],
@@ -839,7 +839,7 @@ function checkLongRunningActiveTasks(
     )
     .join("\n")
   return preToolUseDeny(
-    `Active tasks have been in_progress for over 1 day without a refresh — refresh them before ${toolName} can continue.\n\n` +
+    `Active tasks have been in_progress for over 1 hour without a refresh — refresh them before ${toolName} can continue.\n\n` +
       `${list}\n\n` +
       `Use ${taskUpdateToolName()} on each task: complete it with evidence if the work is done, ` +
       `cancel it if it is stale, or update its description with current progress if it is still real work.`
@@ -1351,7 +1351,7 @@ async function runTaskStateChecks(context: TaskStateCheckContext): Promise<SwizH
   const immediateOutcome = runImmediateTaskStateChecks(context)
   if (immediateOutcome) return immediateOutcome
 
-  // Also refuses Bash while an in_progress task has run over a day without a refresh.
+  // Also refuses Bash while an in_progress task has run over an hour without a refresh.
   const capOutcome = await checkInProgressCap(
     context.toolName,
     context.sessionId,
