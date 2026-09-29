@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 import { mkdir, writeFile } from "node:fs/promises"
 import { join, resolve } from "node:path"
 import { AGENTS } from "../src/agents.ts"
+import { RETRY_ALLOWED_DENIAL_MARKER } from "../src/infractions.ts"
 import { syncCodexUpdatePlanSnapshot } from "../src/tasks/codex-update-plan.ts"
 import { getSessionTasksDir } from "../src/tasks/task-recovery.ts"
 import { taskListSyncSentinelPath } from "../src/temp-paths.ts"
@@ -328,6 +329,8 @@ describe("pretooluse-require-tasks", () => {
     expect(result.reason).toContain("Duplicate task subjects found")
     expect(result.reason).toContain("Pick the duplicate entry")
     expect(result.reason).toContain("Retry this")
+    // #970: the rendered denial carries the marker that exempts a compliant retry.
+    expect(result.reason).toContain(RETRY_ALLOWED_DENIAL_MARKER)
   })
 
   test("allows with a non-blocking warning when an in-progress task exceeds the default duration threshold", async () => {

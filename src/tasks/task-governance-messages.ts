@@ -7,6 +7,7 @@ import {
 import type { AgentDef } from "../agents.ts"
 import { formatDuration } from "../format-duration.ts"
 import { selectStableHookVariant } from "../hook-message-rephrasing.ts"
+import { RETRY_ALLOWED_DENIAL_MARKER } from "../infractions.ts"
 import type { PendingCompletionRefusal } from "./task-evidence.ts"
 import {
   CANONICAL_TASKLIST_SYNC_MAX_AGE_MS,
@@ -103,8 +104,12 @@ function plural(count: number, singular: string, pluralForm = `${singular}s`): s
   return `${count} ${count === 1 ? singular : pluralForm}`
 }
 
+/**
+ * The remedy (a task-tool call) cannot be seen in the retried call itself, so a compliant
+ * retry must not count as retry-after-block (#970).
+ */
 export function retryAfterTaskList(toolName: string): string {
-  return `Retry this ${toolName} call after the task queue is ready.`
+  return `Retry this ${toolName} call after the task queue is ready (${RETRY_ALLOWED_DENIAL_MARKER}).`
 }
 
 export function buildTaskListRepairPlan(
