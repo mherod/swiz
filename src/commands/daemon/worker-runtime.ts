@@ -6,6 +6,8 @@ export interface NormalizedDispatchPayload {
   transcriptPath: string | null
   toolName: string | null
   toolInput?: Record<string, any>
+  /** Claude Code subagent id; present only when the hook fired inside a subagent (#962). */
+  agentId?: string | null
 }
 
 export interface DispatchPayloadWorkerRequest {
@@ -56,14 +58,21 @@ function parseDispatchPayloadInThread(payloadStr: string): NormalizedDispatchPay
   } catch {
     return null
   }
-  normalizeAgentHookPayload(parsed)
+  return normalizeParsedDispatchPayload(parsed)
+}
 
+/** Shared by the in-thread path and the hot-path worker so both read the same fields. */
+export function normalizeParsedDispatchPayload(
+  parsed: Record<string, any>
+): NormalizedDispatchPayload {
+  normalizeAgentHookPayload(parsed)
   return {
     cwd: stringField(parsed, "cwd"),
     sessionId: stringField(parsed, "session_id"),
     transcriptPath: stringField(parsed, "transcript_path"),
     toolName: stringField(parsed, "tool_name", "toolName"),
     toolInput: objectField(parsed, "tool_input", "toolInput"),
+    agentId: stringField(parsed, "agent_id"),
   }
 }
 

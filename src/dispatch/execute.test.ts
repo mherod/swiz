@@ -989,6 +989,45 @@ describe("dispatch execute integration", () => {
       expect(providerSessionId).toBe("usage-session")
       expect(providerTranscriptPath).toBe("/nonexistent/transcript.jsonl")
     })
+
+    it("keys a subagent's usage separately from the parent session (#962)", async () => {
+      const { writeSwizSettings, invalidateSettingsCache, getSwizSettingsPath, readSwizSettings } =
+        await import("../settings.ts")
+      // Subagent hooks are relaxed by default; disable that so the enrichment path runs.
+      const tempHome = `/tmp/swiz-usage-key-${Date.now()}-${crypto.randomUUID()}`
+      try {
+        const defaults = await readSwizSettings({ home: tempHome })
+        await writeSwizSettings({ ...defaults, relaxSubagentHooks: false }, { home: tempHome })
+        const settingsPath = getSwizSettingsPath(tempHome)
+        if (settingsPath) invalidateSettingsCache(settingsPath)
+
+        const keys: string[] = []
+        const provider = async (sessionId: string) => {
+          keys.push(sessionId)
+          return { toolNames: [], skillInvocations: [] }
+        }
+        for (const agent_id of ["explore-1", undefined]) {
+          await executeDispatch({
+            canonicalEvent: "preToolUse",
+            hookEventName: "PreToolUse",
+            settingsHomeOverride: tempHome,
+            payloadStr: JSON.stringify({
+              cwd: process.cwd(),
+              session_id: "usage-session",
+              ...(agent_id ? { agent_id } : {}),
+              tool_name: "Read",
+              tool_input: { file_path: "/tmp/x" },
+            }),
+            currentSessionToolUsageProvider: provider,
+            disableTranscriptSummaryFallback: true,
+          })
+        }
+        expect(keys).toEqual(["usage-session#agent:explore-1", "usage-session"])
+      } finally {
+        const settingsPath = getSwizSettingsPath(tempHome)
+        if (settingsPath) invalidateSettingsCache(settingsPath)
+      }
+    })
   })
 
   describe("manifestProvider", () => {

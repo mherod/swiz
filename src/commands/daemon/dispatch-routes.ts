@@ -22,6 +22,7 @@ import {
   shouldCaptureIncomingPayloads,
 } from "../../dispatch/incoming-capture.ts"
 import { DISPATCH_ROUTES } from "../../dispatch/index.ts"
+import { isSubagentUsageKey, sessionUsageKey } from "../../dispatch/session-usage-key.ts"
 import {
   DEFAULT_STOP_DISPATCH_ALLOW_CONTEXT,
   isStopLikeDispatchEvent,
@@ -404,7 +405,13 @@ async function captureParsedToolUse(
       ),
     })
   }
-  captureSessionToolUsage(ctx.sessionToolUsage, sessionId, toolName, parsed.toolInput, nowMs)
+  captureSessionToolUsage(
+    ctx.sessionToolUsage,
+    sessionUsageKey(sessionId, parsed.agentId),
+    toolName,
+    parsed.toolInput,
+    nowMs
+  )
 }
 
 async function hydrateDivergence(
@@ -464,6 +471,9 @@ async function getCurrentSessionToolUsageFromDaemon(
     }
   }
 
+  // The parent transcript does not hold a subagent's calls; seeding from it would hand the
+  // subagent the parent's streak (#962). An unseen subagent starts with an empty stream.
+  if (isSubagentUsageKey(sessionId)) return { toolNames: [], skillInvocations: [], events: [] }
   if (!transcriptPath) return null
   const index = await ctx.transcriptIndex.get(transcriptPath)
   if (!index) return null

@@ -58,6 +58,7 @@ import {
 } from "./index.ts"
 import { backfillPayloadDefaults } from "./payload-backfill.ts"
 import { normalizeAgentHookPayload } from "./payload-normalize.ts"
+import { sessionUsageKey } from "./session-usage-key.ts"
 import { injectProjectStateProvenance } from "./state-provenance.ts"
 import { isStopLikeDispatchEvent, normalizeStopDispatchResponseInPlace } from "./stop-response.ts"
 import { STRATEGY_REGISTRY } from "./strategies.ts"
@@ -306,9 +307,10 @@ async function enrichPayloadForHooks(opts: EnrichPayloadOptions): Promise<Enrich
   const transcriptPath = payload.transcript_path as string | undefined
   const sessionId = typeof payload.session_id === "string" ? payload.session_id : undefined
 
+  const agentId = typeof payload.agent_id === "string" ? payload.agent_id : undefined
   const usagePromise =
     currentSessionToolUsageProvider && sessionId
-      ? currentSessionToolUsageProvider(sessionId, transcriptPath)
+      ? currentSessionToolUsageProvider(sessionUsageKey(sessionId, agentId), transcriptPath)
       : Promise.resolve(null)
   const summaryPromise = resolveTranscriptSummary(
     transcriptPath,
