@@ -14,6 +14,7 @@ import { resolveProjectIdentity } from "../src/project-identity.ts"
 import type { ShellHookInput } from "../src/schemas.ts"
 import { swizPushCooldownSentinelPath } from "../src/temp-paths.ts"
 import { FORCE_PUSH_RE, hasGitPushForceFlag } from "../src/utils/git-utils.ts"
+import { evaluatePosttoolusePushCooldown } from "./posttooluse-push-cooldown.ts"
 import { evaluatePretoolusePushCooldown } from "./pretooluse-push-cooldown.ts"
 
 // ── FORCE_PUSH_RE regression tests ───────────────────────────────────────────
@@ -195,4 +196,75 @@ describe("project identity", () => {
       ])
     }
   })
+})
+
+describe("arming-session attribution (#847)", () => {
+  async function withRepo(fn: (cwd: string, sentinelPath: string) => Promise<void>) {
+    const base = await mkdtemp(join(tmpdir(), "swiz-push-attr-"))
+    const cwd = join(base, "plain")
+    await mkdir(cwd, { recursive: true })
+    const { repoKey } = await resolveProjectIdentity(cwd)
+    const sentinelPath = swizPushCooldownSentinelPath(repoKey)
+    await rm(sentinelPath, { force: true })
+    try {
+      await fn(cwd, sentinelPath)
+    } finally {
+      await Promise.all([
+        rm(sentinelPath, { force: true }),
+        rm(base, { recursive: true, force: true }),
+      ])
+    }
+  }
+
+  async function pushAs(cwd: string, sessionId?: string) {
+    const result = await evaluatePretoolusePushCooldown({
+      cwd,
+      ...(sessionId ? { session_id: sessionId } : {}),
+      tool_name: "Bash",
+      tool_input: { command: "git push origin main", cwd },
+    } as ShellHookInput)
+    const out = "hookSpecificOutput" in result ? result.hookSpecificOutput : undefined
+    return { decision: out?.permissionDecision, reason: out?.permissionDecisionReason ?? "" }
+  }
+
+  async function armAs(cwd: string, sessionId?: string) {
+    await evaluatePosttoolusePushCooldown({
+      cwd,
+      ...(sessionId ? { session_id: sessionId } : {}),
+      tool_name: "Bash",
+      tool_input: { command: "git push origin main" },
+      tool_response: "",
+    })
+  }
+
+  it("delays a peer session and names the session that armed the cooldown", () =>
+    withRepo(async (cwd) => {
+      await armAs(cwd, "session-a")
+      const peer = await pushAs(cwd, "session-b")
+      expect(peer.decision).toBe("deny")
+      expect(peer.reason).toContain("by another session (`session-a`)")
+      expect(peer.reason).not.toContain("by this session")
+    }))
+
+  it("tells the arming session that it armed the cooldown", () =>
+    withRepo(async (cwd) => {
+      await armAs(cwd, "session-a")
+      const same = await pushAs(cwd, "session-a")
+      expect(same.decision).toBe("deny")
+      expect(same.reason).toContain("by this session")
+    }))
+
+  it("reports unknown provenance for a legacy timestamp sentinel without changing the decision", () =>
+    withRepo(async (cwd, sentinelPath) => {
+      await Bun.write(sentinelPath, String(Date.now()))
+      const peer = await pushAs(cwd, "session-b")
+      expect(peer.decision).toBe("deny")
+      expect(peer.reason).toContain("by an unknown session")
+    }))
+
+  it("allows a push once a corrupt sentinel is found", () =>
+    withRepo(async (cwd, sentinelPath) => {
+      await Bun.write(sentinelPath, "{not json")
+      expect((await pushAs(cwd, "session-b")).decision).toBe("allow")
+    }))
 })

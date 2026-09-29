@@ -15,6 +15,7 @@
 // pretooluse hook reading the stale sentinel.
 
 import { resolveProjectIdentity } from "../src/project-identity.ts"
+import { serializePushCooldownRecord } from "../src/push-cooldown-state.ts"
 import type { SwizHook, SwizHookOutput } from "../src/SwizHook.ts"
 import { runSwizHookAsMain } from "../src/SwizHook.ts"
 import type { PostToolHookInput } from "../src/schemas.ts"
@@ -53,7 +54,7 @@ export async function evaluatePosttoolusePushCooldown(input: unknown): Promise<S
   const sentinelPath = swizPushCooldownSentinelPath(repoKey)
 
   try {
-    await Bun.write(sentinelPath, String(Date.now()))
+    await Bun.write(sentinelPath, serializePushCooldownRecord(Date.now(), hookInput.session_id))
   } catch {
     // Non-fatal: if we can't write the sentinel, cooldown simply won't apply.
   }

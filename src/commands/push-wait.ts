@@ -1,6 +1,7 @@
 import { requiresPeerReview } from "../collaboration-policy.ts"
 import { getGitClient } from "../git/client.ts"
 import { resolveProjectIdentity } from "../project-identity.ts"
+import { readPushCooldownRecord } from "../push-cooldown-state.ts"
 import {
   type EffectiveSwizSettings,
   getEffectiveSwizSettings,
@@ -18,18 +19,10 @@ export const COOLDOWN_MS = 60_000
 const POLL_INTERVAL_MS = 2_000
 
 export async function getRemainingCooldownMs(sentinelPath: string): Promise<number> {
-  try {
-    const file = Bun.file(sentinelPath)
-    if (!(await file.exists())) return 0
-    const raw = (await file.text()).trim()
-    if (raw === "") return 0
-    const lastPush = Number(raw)
-    if (!Number.isFinite(lastPush)) return 0
-    const remaining = COOLDOWN_MS - (Date.now() - lastPush)
-    return remaining > 0 ? remaining : 0
-  } catch {
-    return 0
-  }
+  const record = await readPushCooldownRecord(sentinelPath)
+  if (!record) return 0
+  const remaining = COOLDOWN_MS - (Date.now() - record.at)
+  return remaining > 0 ? remaining : 0
 }
 
 interface WaitForCooldownOptions {

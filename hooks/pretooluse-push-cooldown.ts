@@ -18,6 +18,7 @@
  */
 
 import { resolveProjectIdentity } from "../src/project-identity.ts"
+import { describePushCooldownArmer, readPushCooldownRecord } from "../src/push-cooldown-state.ts"
 import {
   preToolUseAllow,
   preToolUseDeny,
@@ -41,15 +42,13 @@ async function resolveCooldownMs(): Promise<number> {
 
 async function checkCooldown(
   sentinelPath: string,
-  cooldownMs: number
+  cooldownMs: number,
+  sessionId?: string
 ): Promise<{ blocked: boolean; message?: string }> {
-  const sentinel = Bun.file(sentinelPath)
-  if (!(await sentinel.exists())) return { blocked: false }
-  const raw = (await sentinel.text()).trim()
-  const lastPush = parseInt(raw, 10)
-  if (Number.isNaN(lastPush)) return { blocked: false }
+  const record = await readPushCooldownRecord(sentinelPath)
+  if (!record) return { blocked: false }
 
-  const elapsed = Date.now() - lastPush
+  const elapsed = Date.now() - record.at
   if (elapsed >= cooldownMs) return { blocked: false }
 
   const remaining = Math.ceil((cooldownMs - elapsed) / 1000)
@@ -57,7 +56,8 @@ async function checkCooldown(
     blocked: true,
     message:
       `BLOCKED: git push cooldown active — ${remaining}s remaining.\n\n` +
-      `A push was made ${Math.floor(elapsed / 1000)}s ago. ` +
+      `A push was made ${Math.floor(elapsed / 1000)}s ago ${describePushCooldownArmer(record, sessionId)}; ` +
+      `the cooldown is shared by every session in this repository. ` +
       `Wait ${remaining}s before pushing again.\n\n` +
       `Use \`swiz push-wait origin <branch>\` to automatically wait and push when the cooldown clears.`,
   }
@@ -77,7 +77,7 @@ export async function evaluatePretoolusePushCooldown(
   const sentinelPath = swizPushCooldownSentinelPath(repoKey)
 
   const cooldownMs = await resolveCooldownMs()
-  const result = await checkCooldown(sentinelPath, cooldownMs)
+  const result = await checkCooldown(sentinelPath, cooldownMs, input.session_id)
   if (result.blocked) return preToolUseDeny(result.message!)
 
   return preToolUseAllow(

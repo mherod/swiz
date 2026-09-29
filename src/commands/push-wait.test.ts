@@ -168,6 +168,12 @@ describe("getRemainingCooldownMs", () => {
     expect(await getRemainingCooldownMs(p)).toBe(0)
   })
 
+  it("honours an active new-format sentinel written with the arming session (#847)", async () => {
+    const p = uniqueSentinel("-record")
+    writeFileSync(p, JSON.stringify({ at: Date.now(), sessionId: "session-a" }))
+    expect(await getRemainingCooldownMs(p)).toBeGreaterThan(0)
+  })
+
   it("returns 0 when sentinel contains whitespace only", async () => {
     const p = uniqueSentinel("-ws")
     writeFileSync(p, "   \n  ")
