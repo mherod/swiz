@@ -18,23 +18,8 @@ interface HookResult {
   exitedCleanly: boolean
 }
 
-// Lazy-initialize temp HOME so tests don't pick up real user settings
-let _testHome: string | null = null
-
-async function getTestHome(): Promise<string> {
-  if (_testHome === null) {
-    _testHome = (await Bun.file(join(tmpdir(), `swiz-test-home-${Date.now()}`))
-      .json()
-      .catch(() => null)) as string | null
-    if (!_testHome) {
-      const tempDir = join(tmpdir(), `swiz-test-home-${Date.now()}`)
-      await mkdir(tempDir, { recursive: true })
-      _testHome = tempDir
-    }
-  }
-  return _testHome
-}
-
+// HOME defaults to runHookInProcess's per-process sandbox (removed by the test preload), so no
+// real user settings leak in and no temporary home outlives the run (#975).
 async function runHook(
   command: string,
   toolName = "Bash",
@@ -42,7 +27,6 @@ async function runHook(
   envOverrides: Record<string, string | undefined> = {},
   cwd = "/tmp"
 ): Promise<HookResult> {
-  const testHome = await getTestHome()
   const payload = {
     tool_name: toolName,
     tool_input: { command },
@@ -58,7 +42,6 @@ async function runHook(
   const result = await runHookInProcess("hooks/posttooluse-git-task-autocomplete.ts", payload, {
     env: neutralAgentEnvOverrides({
       ...agentEnvOverrides,
-      HOME: testHome,
       ...envOverrides,
     }),
   })
@@ -144,6 +127,7 @@ describe("posttooluse-git-task-autocomplete: git push emits additionalContext", 
       expect(result.additionalContext).not.toContain("Wait for CI")
     } finally {
       await rm(home, { recursive: true, force: true })
+      await rm(cwd, { recursive: true, force: true })
     }
   })
 
@@ -164,6 +148,7 @@ describe("posttooluse-git-task-autocomplete: git push emits additionalContext", 
       expect(result.additionalContext).toBe("git push succeeded.")
     } finally {
       await rm(home, { recursive: true, force: true })
+      await rm(cwd, { recursive: true, force: true })
     }
   })
 
