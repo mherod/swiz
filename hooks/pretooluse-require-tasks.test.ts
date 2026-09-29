@@ -122,6 +122,7 @@ async function writeTask(
     elapsedMs,
     startedAt,
     completedAt,
+    updatedAt,
   }: {
     id: string
     subject: string
@@ -131,6 +132,7 @@ async function writeTask(
     elapsedMs?: number
     startedAt?: number | null
     completedAt?: number | null
+    updatedAt?: string
   }
 ) {
   const dir = getSessionTasksDir(sessionId, homeDir)
@@ -151,6 +153,7 @@ async function writeTask(
         ...(elapsedMs !== undefined ? { elapsedMs } : {}),
         ...(startedAt !== undefined ? { startedAt } : {}),
         ...(completedAt !== undefined ? { completedAt } : {}),
+        ...(updatedAt ? { updatedAt } : {}),
       },
       null,
       2
@@ -694,6 +697,56 @@ describe("pretooluse-require-tasks", () => {
 
     const result = await runHook({ homeDir, toolName: "Bash", sessionId })
     expect(result.decision).toBeUndefined()
+  })
+
+  describe("day-old active task gate", () => {
+    const DAY_MS = 24 * 60 * 60_000
+
+    async function seedLongRunningTask(sessionId: string, updatedAgoMs: number) {
+      const homeDir = await createTempHome()
+      const startedAt = Date.now() - 2 * DAY_MS
+      await writeTask(homeDir, sessionId, {
+        id: "1",
+        subject: "Long-running task",
+        status: "in_progress",
+        statusChangedAt: new Date(startedAt).toISOString(),
+        startedAt,
+        updatedAt: new Date(Date.now() - updatedAgoMs).toISOString(),
+      })
+      await writeTask(homeDir, sessionId, { id: "2", subject: "Next step", status: "pending" })
+      return homeDir
+    }
+
+    test("denies Bash while an in_progress task is over a day old without a refresh", async () => {
+      const sessionId = `session-day-old-task-${Date.now()}`
+      const homeDir = await seedLongRunningTask(sessionId, 2 * DAY_MS)
+      const result = await runHook({ homeDir, toolName: "Bash", sessionId, command: "bun test" })
+      expect(result.decision).toBe("deny")
+      expect(result.reason).toContain("in_progress for over 1 day without a refresh")
+      expect(result.reason).toContain("#1: Long-running task")
+    })
+
+    test("allows Bash once the day-old task was refreshed within the last day", async () => {
+      const sessionId = `session-day-old-refreshed-${Date.now()}`
+      const homeDir = await seedLongRunningTask(sessionId, 60_000)
+      const result = await runHook({ homeDir, toolName: "Bash", sessionId, command: "bun test" })
+      // The slow-task advisory still allows with context; only the refresh gate must not deny.
+      expect(result.decision).not.toBe("deny")
+      expect(result.reason ?? "").not.toContain("without a refresh")
+    })
+
+    test("does not apply the day-old gate to Edit", async () => {
+      const sessionId = `session-day-old-edit-${Date.now()}`
+      const homeDir = await seedLongRunningTask(sessionId, 2 * DAY_MS)
+      const result = await runHook({
+        homeDir,
+        toolName: "Edit",
+        sessionId,
+        filePath: join(PROJECT_ROOT, "src/example.ts"),
+        newString: "x",
+      })
+      expect(result.reason ?? "").not.toContain("without a refresh")
+    })
   })
 
   describe("shell task governance", () => {
