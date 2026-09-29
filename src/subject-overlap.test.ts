@@ -153,6 +153,72 @@ describe("subjectsOverlap", () => {
   })
 })
 
+describe("subjectsOverlap separates workflow stages (#953)", () => {
+  // Different leading actions on one object are separate steps with separate evidence.
+  const distinctActions: Array<[string, string]> = [
+    ["Triage session follow-ups", "Verify published follow-ups"],
+    ["Validate issue 943", "Resolve issue 943"],
+    ["Fix task tool defects", "Push task tool fixes"],
+    ["Fix login bug", "Test login bug"],
+    ["Fix login bug", "Document login bug"],
+    ["Write parser tests", "Run parser tests"],
+    ["Update README", "Update CHANGELOG"],
+  ]
+  for (const [a, b] of distinctActions) {
+    test(`"${a}" and "${b}" are distinct`, () => {
+      expect(subjectsOverlap(a, b)).toBe(false)
+    })
+  }
+
+  // Controls: the same action on the same object, spelled differently, still collides.
+  const genuineDuplicates: Array<[string, string]> = [
+    ["Verify issue 943", "Validate issue 943"],
+    ["Fix login bug", "Resolve login bug"],
+    ["Fix login bug", "Fix the login bug"],
+    ["Update parser tests", "Update the tests for the parser"],
+  ]
+  for (const [a, b] of genuineDuplicates) {
+    test(`"${a}" and "${b}" still collide`, () => {
+      expect(subjectsOverlap(a, b)).toBe(true)
+    })
+  }
+
+  test("unrelated topics with the same action stay distinct", () => {
+    expect(subjectsOverlap("Fix login bug", "Fix billing export")).toBe(false)
+  })
+
+  test("the action is the leading word, not an object noun", () => {
+    expect(explainSubjectOverlap("Write parser tests", "Run parser tests").verbA).toBe("write")
+  })
+
+  test("every compound split suggestion can be created alongside its sibling", async () => {
+    const { detect } = await import("./tasks/task-subject-validation.ts")
+    for (const compound of [
+      "Fix login bug and add login bug test",
+      "Implement cache and document cache",
+      "Update README and update CHANGELOG",
+    ]) {
+      const result = detect(compound)
+      const suggestions = "suggestions" in result ? (result.suggestions ?? []) : []
+      expect(suggestions.length).toBeGreaterThanOrEqual(2)
+      for (let i = 0; i < suggestions.length; i++) {
+        for (let j = i + 1; j < suggestions.length; j++) {
+          expect(subjectsOverlap(suggestions[i]!, suggestions[j]!)).toBe(false)
+        }
+      }
+    }
+  })
+
+  test("split suggestions are capitalised", async () => {
+    const { detect } = await import("./tasks/task-subject-validation.ts")
+    const result = detect("Update README and update CHANGELOG")
+    expect("suggestions" in result ? result.suggestions : []).toEqual([
+      "Update README",
+      "Update CHANGELOG",
+    ])
+  })
+})
+
 describe("explainSubjectOverlap", () => {
   test("names the rule that produced an overlap", () => {
     // Control for the density gate: the pipeline rule must still fire for a

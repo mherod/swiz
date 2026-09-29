@@ -467,11 +467,41 @@ function sameWorkflowPipeline(verbA: string, verbB: string): boolean {
   return false
 }
 
+/**
+ * The subject's action: its leading canonical word. Task subjects are imperative by contract, so
+ * the first word is the verb; scanning for any ACTION_VERBS member instead picked object nouns
+ * ("Write parser tests" → "test") and missed verbs outside the list (#953). Synonyms still compare
+ * equal because canonicalWords maps them (validate → verify, resolve → fix).
+ */
 function extractVerb(words: Set<string>): string | null {
-  for (const w of words) {
-    if (ACTION_VERBS.has(w)) return w
-  }
-  return null
+  const [leading] = words
+  return leading ?? null
+}
+
+/** Canonical words other than the action, or null when that would leave nothing to compare. */
+function objectWords(words: Set<string>, action: string | null): Set<string> | null {
+  if (!action) return null
+  const objects = new Set(words)
+  objects.delete(action)
+  return objects.size > 0 ? objects : null
+}
+
+/**
+ * Word overlap between two subjects' objects. A shared verb alone is not shared work ("Update
+ * README" / "Update CHANGELOG"), and different actions on one object are different steps, so
+ * those return 0. Subjects too short to split fall back to the whole-set ratio.
+ */
+function objectOverlapRatio(
+  wordsA: Set<string>,
+  wordsB: Set<string>,
+  actionA: string | null,
+  actionB: string | null
+): number {
+  const objectsA = objectWords(wordsA, actionA)
+  const objectsB = objectWords(wordsB, actionB)
+  if (!objectsA || !objectsB) return wordOverlapRatio(wordsA, wordsB)
+  if (actionA !== actionB) return 0
+  return wordOverlapRatio(objectsA, objectsB)
 }
 
 function wordOverlapRatio(wordsA: Set<string>, wordsB: Set<string>): number {
@@ -570,15 +600,18 @@ export interface SubjectOverlapExplanation {
 export function explainSubjectOverlap(a: string, b: string): SubjectOverlapExplanation {
   const wordsA = canonicalWords(normalizeSubject(a))
   const wordsB = canonicalWords(normalizeSubject(b))
+  const verbA = extractVerb(wordsA)
+  const verbB = extractVerb(wordsB)
   const base: SubjectOverlapExplanation = {
     wordsA: [...wordsA],
     wordsB: [...wordsB],
-    overlapRatio: wordsA.size > 0 && wordsB.size > 0 ? wordOverlapRatio(wordsA, wordsB) : 0,
+    overlapRatio:
+      wordsA.size > 0 && wordsB.size > 0 ? objectOverlapRatio(wordsA, wordsB, verbA, verbB) : 0,
     sharedDomain: null,
     domainDensityA: 0,
     domainDensityB: 0,
-    verbA: extractVerb(wordsA),
-    verbB: extractVerb(wordsB),
+    verbA,
+    verbB,
     rule: null,
     overlap: false,
   }

@@ -42,7 +42,7 @@ function withVerb(verb: string | null, parts: string[]): string[] {
     .map((p) => {
       if (!verb) return capitalize(p)
       // Don't prepend if part already starts with the same verb or any action verb
-      if (new RegExp(`^${verb}\\b`, "i").test(p)) return p
+      if (new RegExp(`^${verb}\\b`, "i").test(p)) return capitalize(p)
       if (ACTION_VERBS.test(p)) return capitalize(p)
       return `${verb} ${p.trim()}`
     })
