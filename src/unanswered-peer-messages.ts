@@ -48,7 +48,16 @@ interface PeerState {
   address: string | null
   lastInboundLine: number
   lastOutboundLine: number
+  /** The latest inbound message explicitly asked for no reply (#966). */
+  noReplyNeeded: boolean
 }
+
+/**
+ * Explicit "no reply" markers, matched anywhere in the delivered text. A trailing condition
+ * ("no reply needed unless …") still counts: the sender owns the condition (#966).
+ */
+const NO_REPLY_RE =
+  /\b(?:no (?:reply|response) (?:needed|required)|needs no (?:reply|response)|no need to (?:reply|respond))\b/i
 
 /**
  * Normalise an address for comparison.
@@ -146,13 +155,16 @@ function readOutboundRecipients(record: TranscriptRecord): string[] {
 function recordInbound(
   states: Map<string, PeerState>,
   inbound: { peer: string; address: string | null },
-  line: number
+  line: number,
+  text: string
 ): void {
   const key = normalizeAddress(inbound.peer)
+  const noReplyNeeded = NO_REPLY_RE.test(text)
   const existing = states.get(key)
   if (existing) {
     existing.lastInboundLine = line
     existing.address = inbound.address ?? existing.address
+    existing.noReplyNeeded = noReplyNeeded
     return
   }
   states.set(key, {
@@ -160,6 +172,7 @@ function recordInbound(
     address: inbound.address,
     lastInboundLine: line,
     lastOutboundLine: -1,
+    noReplyNeeded,
   })
 }
 
@@ -192,7 +205,7 @@ function scanLine(line: string, states: Map<string, PeerState>, index: number): 
 
   const delivered = deliveryText(record, line)
   const inbound = delivered ? readInbound(delivered) : null
-  if (inbound) recordInbound(states, inbound, index)
+  if (inbound && delivered) recordInbound(states, inbound, index, delivered)
 
   recordOutbound(states, readOutboundRecipients(record), index)
   return toolUseBlocks(record).length
@@ -214,7 +227,7 @@ export function findUnansweredPeerMessages(lines: readonly string[]): Unanswered
 
   const unanswered: UnansweredPeer[] = []
   for (const state of states.values()) {
-    if (state.lastOutboundLine >= state.lastInboundLine) continue
+    if (state.lastOutboundLine >= state.lastInboundLine || state.noReplyNeeded) continue
     let toolCallsSince = 0
     for (let i = state.lastInboundLine + 1; i < toolUsesAtLine.length; i++) {
       toolCallsSince += toolUsesAtLine[i] ?? 0

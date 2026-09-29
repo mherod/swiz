@@ -7,12 +7,16 @@ import {
 /** The tag is assembled at runtime so this test file does not trip the detector it exercises. */
 const TAG = `<cross${"-"}session-message`
 
-function inboundLine(peer: string, address = "uds:/tmp/cc-socks/1234.sock"): string {
+function inboundLine(
+  peer: string,
+  address = "uds:/tmp/cc-socks/1234.sock",
+  body = "hello"
+): string {
   return JSON.stringify({
     type: "user",
     message: {
       role: "user",
-      content: `${TAG} from="${address}" from-name="${peer}" from-mode="bypass">\nhello\n</cross${"-"}session-message>`,
+      content: `${TAG} from="${address}" from-name="${peer}" from-mode="bypass">\n${body}\n</cross${"-"}session-message>`,
     },
   })
 }
@@ -33,6 +37,37 @@ function toolCallLine(name = "Bash"): string {
     message: { role: "assistant", content: [{ type: "tool_use", name, input: {} }] },
   })
 }
+
+describe("explicit no-reply messages (#966)", () => {
+  const ADDR = "uds:/tmp/cc-socks/1234.sock"
+  const tools = [toolCallLine(), toolCallLine(), toolCallLine()]
+
+  it("does not report a latest message that says no reply is needed", () => {
+    const lines = [inboundLine("peer-a", ADDR, "CLOSED window. No reply needed."), ...tools]
+    expect(findUnansweredPeerMessages(lines)).toEqual([])
+  })
+
+  it("treats a conditional marker as no reply needed", () => {
+    const body = "Done here; no reply needed unless you hold the git index."
+    expect(findUnansweredPeerMessages([inboundLine("peer-a", ADDR, body), ...tools])).toEqual([])
+  })
+
+  it("reports a later question from the same peer again", () => {
+    const lines = [
+      inboundLine("peer-a", ADDR, "No reply needed."),
+      toolCallLine(),
+      inboundLine("peer-a", ADDR, "Are you holding the index?"),
+      ...tools,
+    ]
+    expect(findUnansweredPeerMessages(lines).map((p) => p.peer)).toEqual(["peer-a"])
+  })
+
+  it("control: still reports an unanswered question", () => {
+    const lines = [inboundLine("peer-a", ADDR, "Can you rebase first?"), ...tools]
+    expect(findUnansweredPeerMessages(lines)).toHaveLength(1)
+    expect(formatUnansweredPeerContext(findUnansweredPeerMessages(lines))).not.toBeNull()
+  })
+})
 
 describe("findUnansweredPeerMessages", () => {
   it("reports a peer whose message was never answered", () => {
