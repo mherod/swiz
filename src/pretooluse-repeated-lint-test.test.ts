@@ -376,6 +376,33 @@ describe("commandLabel", () => {
 
 // ── detectOverfiltering ───────────────────────────────────────────────────────
 
+describe("detectOverfiltering on chained statements (#965)", () => {
+  test("ignores a short filter on a non-test statement", () => {
+    const cmd =
+      'rg -n "export function getAgent" src/agents.ts | head -3; bun test hooks/x.test.ts 2>&1 | tail -30'
+    expect(detectOverfiltering(cmd, "test")).toBeNull()
+  })
+
+  test("ignores a short filter on a formatter statement before the tests", () => {
+    const cmd =
+      "bunx biome check --write a.ts 2>&1 | tail -3; bun test --reporter=dots 2>&1 | tail -10"
+    expect(detectOverfiltering(cmd, "test")).toBeNull()
+  })
+
+  test("control: blocks a short filter on the test statement itself", () => {
+    const cmd = "rg -n foo src | head -30; bun test hooks/x.test.ts 2>&1 | tail -3"
+    const result = detectOverfiltering(cmd, "test")
+    expect(result).toContain("tail -3")
+    expect(result).toContain("Run without filters: `bun test hooks/x.test.ts 2>&1`")
+  })
+
+  test("labels the classified statement, not the first one", () => {
+    expect(commandLabel("rg -n foo src | head -3; bun test a.test.ts | tail -30", "test")).toBe(
+      "bun test a.test.ts"
+    )
+  })
+})
+
 describe("detectOverfiltering", () => {
   // ── tail with too few lines ─────────────────────────────────────────────
   test("blocks tail -5 on build commands", () => {

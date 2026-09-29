@@ -164,10 +164,33 @@ export function classifyCommand(cmd: string): CommandKind | null {
  * by stripping pipe suffixes, redirect suffixes, and trimming to a reasonable length.
  * Falls back to "test"/"build"/etc. if extraction fails.
  */
+/** Top-level statements of a command line (split on `;`, `&&`, `||` and newlines, not on `|`). */
+function shellStatements(cmd: string): string[] {
+  return cmd
+    .split(/\s*(?:&&|\|\||;|\n)\s*/)
+    .map((s) => s.trim())
+    .filter(Boolean)
+}
+
+/** The command at the head of a statement's own pipe chain. */
+function pipeHead(statement: string): string {
+  return statement.split(/\s*\|\s*/)[0]?.trim() ?? ""
+}
+
+/**
+ * Statements whose own head command classifies as `kind` (#965). A filter elsewhere in a
+ * chained command belongs to another statement and must not be judged against this kind.
+ * Falls back to the whole command when no single statement classifies.
+ */
+function statementsOfKind(cmd: string, kind: CommandKind): string[] {
+  const matching = shellStatements(cmd).filter((s) => classifyCommand(pipeHead(s)) === kind)
+  return matching.length > 0 ? matching : [cmd]
+}
+
 export function commandLabel(cmd: string, kind: CommandKind): string {
-  // Strip everything after the first pipe or semicolon boundary.
+  // Label the classified statement's own command, without its pipe suffix.
   // Keep > because it may be part of 2>&1 FD redirects, not file redirects.
-  const core = cmd.split(/\s*[|;]\s*/)[0]?.trim() ?? ""
+  const core = pipeHead(statementsOfKind(cmd, kind)[0] ?? cmd)
   // Remove prefix wrappers (timeout, nice, env, etc.) for a cleaner label
   const cleaned = normalizeCommand(core).trim()
   // Truncate to a reasonable length for display
@@ -640,15 +663,28 @@ export function detectOverfiltering(cmd: string, kind: CommandKind): string | nu
   if (!cmdForMatching.includes("|")) return null
 
   const kindLabel = kind === "test" ? "test" : kind === "build" ? "build" : kind
+  for (const statement of statementsOfKind(cmdForMatching, kind)) {
+    const issue = statementOverfilterIssue(statement, kindLabel)
+    if (issue) return issue
+  }
+  return null
+}
+
+/**
+ * The block message for one classified statement, or null. `stripProsePayloadFlagValues` keeps
+ * grep patterns intact, so the statement also serves as the pattern source for the grep check.
+ */
+function statementOverfilterIssue(statement: string, kindLabel: string): string | null {
+  if (!statement.includes("|")) return null
   const issues = [
-    checkLineLimitFilter(TAIL_LINES_RE, cmdForMatching, "tail", kindLabel),
-    checkLineLimitFilter(HEAD_LINES_RE, cmdForMatching, "head", kindLabel),
-    checkNarrowGrep(cmdForMatching, cmd),
+    checkLineLimitFilter(TAIL_LINES_RE, statement, "tail", kindLabel),
+    checkLineLimitFilter(HEAD_LINES_RE, statement, "head", kindLabel),
+    checkNarrowGrep(statement, statement),
   ].filter((x): x is string => x !== null)
 
   if (issues.length === 0) return null
 
-  const unfiltered = cmd.replace(/\s*\|.*$/, "").trim()
+  const unfiltered = pipeHead(statement)
   return [
     `**Overly restrictive output filtering on \`${kindLabel}\` command.**`,
     issues.join("\n"),
