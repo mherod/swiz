@@ -9,7 +9,7 @@ import { preProcessFile } from "typescript"
  */
 
 function getGitOutput(args: string[]): string {
-  const proc = spawnSync("git", args, { encoding: "utf8" })
+  const proc = spawnSync("git", args, { encoding: "utf8", timeout: 20_000 })
   if (proc.status !== 0) return ""
   return proc.stdout.trim()
 }

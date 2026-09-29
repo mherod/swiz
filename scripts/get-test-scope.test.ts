@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { spawnSync } from "node:child_process"
+import { spawnSync as nodeSpawnSync, type SpawnSyncOptions } from "node:child_process"
 import { mkdirSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -18,6 +18,15 @@ import { useTempDir } from "../src/utils/test-utils.ts"
 const PROJECT_ROOT = new URL("..", import.meta.url).pathname
 const SCOPE_SCRIPT = join(PROJECT_ROOT, "scripts/get-test-scope.ts")
 
+/**
+ * Blocking spawns cannot be interrupted by a test timeout, so a stuck child would
+ * stall the whole worker (#986). Bound every child so it fails the test instead.
+ */
+const CHILD_TIMEOUT_MS = 30_000
+function spawnSync(command: string, args: string[], options: SpawnSyncOptions) {
+  return nodeSpawnSync(command, args, { timeout: CHILD_TIMEOUT_MS, ...options, encoding: "utf8" })
+}
+
 describe("get-test-scope import discovery", () => {
   const tmp = useTempDir("swiz-scope-imports-")
 
@@ -31,6 +40,7 @@ describe("get-test-scope import discovery", () => {
     const proc = Bun.spawnSync([process.execPath, SCOPE_SCRIPT, ...files], {
       cwd,
       env: { ...process.env, HOME: cwd, CI_BASE: "" },
+      timeout: CHILD_TIMEOUT_MS,
     })
     expect(proc.exitCode).toBe(0)
     return proc.stdout.toString().trim().split(/\s+/)
