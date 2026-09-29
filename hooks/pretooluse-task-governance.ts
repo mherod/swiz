@@ -782,10 +782,12 @@ async function checkInProgressCap(
   toolName: string,
   sessionId: string,
   cwd: string | undefined,
-  allTasks: Array<{ id: string; status: string; subject: string; ownership?: string }>
+  allTasks: Array<LongRunningTaskLike & { ownership?: string }>
 ): Promise<SwizHookOutput | undefined> {
   const inProgressTasks = allTasks.filter((t) => t.status === "in_progress")
-  if (!exceedsInProgressCap(inProgressTasks.length)) return undefined
+  if (!exceedsInProgressCap(inProgressTasks.length)) {
+    return checkLongRunningActiveTasks(toolName, allTasks)
+  }
   const taskList =
     inProgressTasks.map((t) => `  • #${t.id}: ${t.subject}${taskOwnershipSuffix(t)}`).join("\n") +
     `\n${TASK_QUEUE_RECOVERY}`
@@ -799,6 +801,48 @@ async function checkInProgressCap(
       cap: getInProgressCap(),
       taskList,
     })
+  )
+}
+
+export const LONG_RUNNING_ACTIVE_TASK_MS = 24 * 60 * 60_000
+
+type LongRunningTaskLike = SlowTaskEntry & { updatedAt?: string }
+
+/**
+ * An in_progress task started over a day ago no longer describes the work in flight unless it was
+ * refreshed since. A TaskUpdate stamps `updatedAt`, so refreshing within the last day releases it.
+ */
+export function findLongRunningActiveTasks<T extends LongRunningTaskLike>(
+  allTasks: readonly T[],
+  nowMs = Date.now()
+): T[] {
+  return allTasks.filter((task) => {
+    if (task.status !== "in_progress") return false
+    if (getTaskCurrentDurationMs(task, nowMs) <= LONG_RUNNING_ACTIVE_TASK_MS) return false
+    const lastUpdatedMs = getTaskLastUpdatedMs(task)
+    return lastUpdatedMs === null || nowMs - lastUpdatedMs > LONG_RUNNING_ACTIVE_TASK_MS
+  })
+}
+
+function checkLongRunningActiveTasks(
+  toolName: string,
+  allTasks: readonly LongRunningTaskLike[]
+): SwizHookOutput | undefined {
+  if (!isShellTool(toolName)) return undefined
+  const nowMs = Date.now()
+  const stale = findLongRunningActiveTasks(allTasks, nowMs)
+  if (stale.length === 0) return undefined
+  const list = stale
+    .map(
+      (t) =>
+        `  • #${t.id}: ${t.subject} (in_progress for ${formatDuration(getTaskCurrentDurationMs(t, nowMs))})`
+    )
+    .join("\n")
+  return preToolUseDeny(
+    `Active tasks have been in_progress for over 1 day without a refresh — refresh them before ${toolName} can continue.\n\n` +
+      `${list}\n\n` +
+      `Use ${taskUpdateToolName()} on each task: complete it with evidence if the work is done, ` +
+      `cancel it if it is stale, or update its description with current progress if it is still real work.`
   )
 }
 
@@ -1307,6 +1351,7 @@ async function runTaskStateChecks(context: TaskStateCheckContext): Promise<SwizH
   const immediateOutcome = runImmediateTaskStateChecks(context)
   if (immediateOutcome) return immediateOutcome
 
+  // Also refuses Bash while an in_progress task has run over a day without a refresh.
   const capOutcome = await checkInProgressCap(
     context.toolName,
     context.sessionId,
