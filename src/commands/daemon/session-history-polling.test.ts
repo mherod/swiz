@@ -23,6 +23,7 @@ const POLL_MS = 2_000
 const originalHome = process.env.HOME
 let home: string
 let projectCwd: string
+let knownProjects: string[]
 let clock: number
 
 function transcriptLine(text: string): string {
@@ -31,6 +32,16 @@ function transcriptLine(text: string): string {
     timestamp: "2026-09-29T10:00:00Z",
     message: { content: text },
   })}\n`
+}
+
+/** A realistic transcript: hundreds of long messages, so its retained view is ~1 MB like real ones. */
+async function writeLargeSession(cwd: string, sessionId: string): Promise<void> {
+  const dir = join(home, ".claude", "projects", projectKeyFromCwd(cwd))
+  await mkdir(dir, { recursive: true })
+  const body = Array.from({ length: 300 }, (_, i) =>
+    transcriptLine(`${sessionId} message ${i} ${"x".repeat(2_000)}`)
+  ).join("")
+  await Bun.write(join(dir, `${sessionId}.jsonl`), body)
 }
 
 async function writeSession(cwd: string, sessionId: string, text: string): Promise<string> {
@@ -45,7 +56,7 @@ function routeContext(): SessionRoutesContext {
   return {
     touchProject: () => {},
     registerProjectWatchers: () => {},
-    getKnownProjects: () => [projectCwd],
+    getKnownProjects: () => knownProjects,
     getProjectLastSeen: () => clock,
     getProjectStatusLine: async () => "",
     listProjectSessions: (cwd, limit, pinned) => listProjectSessions(cwd, limit, undefined, pinned),
@@ -94,6 +105,7 @@ afterAll(() => {
 })
 
 beforeEach(() => {
+  knownProjects = [projectCwd]
   providerSessionIndex.clear()
   sessionDataCache.invalidateAll()
   clock = Date.parse("2026-09-29T12:00:00.000Z")
@@ -188,4 +200,34 @@ describe("dashboard history polling through the session routes (#809)", () => {
     expect(after.bodyBytesRead - before.bodyBytesRead).toBe(Buffer.byteLength(added))
     expect(after.coldRebuilds).toBe(before.coldRebuilds)
   })
+
+  test("previews for two large projects do not evict each other between unchanged polls (#985)", async () => {
+    const projects = [join(home, "work", "big-b"), join(home, "work", "big-c")]
+    for (const cwd of projects) {
+      await mkdir(cwd, { recursive: true })
+      for (let i = 0; i < 20; i++) await writeLargeSession(cwd, `${cwd.split("/").at(-1)}-${i}`)
+    }
+    knownProjects = projects
+    // The dashboard asks for 10 per project, which previews limit * 2 = 20 candidates each.
+    const list = () =>
+      post("/sessions/projects", {
+        selectedProjectCwd: projects[0],
+        limitProjects: 2,
+        limitSessionsPerProject: 10,
+      })
+
+    const warm = await list()
+    expect(warm.projects).toHaveLength(2)
+    const before = sessionDataCache.getReadStats()
+    advance(POLL_MS)
+    const again = await list()
+    const after = sessionDataCache.getReadStats()
+
+    const sessionsOf = (r: any) => r.projects.map((p: { sessions: unknown }) => p.sessions)
+    expect(sessionsOf(again)).toEqual(sessionsOf(warm))
+    expect(sessionsOf(warm).flat()).toHaveLength(20)
+    // An unchanged second poll must not rebuild or re-read any transcript.
+    expect(after.coldRebuilds - before.coldRebuilds).toBe(0)
+    expect(after.bodyBytesRead - before.bodyBytesRead).toBe(0)
+  }, 60_000)
 })

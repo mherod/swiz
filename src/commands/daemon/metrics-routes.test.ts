@@ -116,6 +116,8 @@ const sessionReadStats = {
   coldRebuilds: 1,
   fallbackReads: 0,
   bodyBytesRead: 9090,
+  summaryHits: 38,
+  summaryMisses: 2,
 }
 
 describe("metrics routes", () => {

@@ -113,6 +113,26 @@ function resolveSessionProjectIdentity(sessionPath: string, cwd?: string): strin
   return match ? match[1]! : "unknown"
 }
 
+/** Stamp a freshly built view with its source identity, revision and retained size. */
+function finishLoadedView(
+  next: CachedSessionData,
+  cached: CachedSessionData | undefined,
+  format: Session["format"],
+  metadata: JsonlAppendMetadata
+): void {
+  next.format = format
+  next.metadata = metadata
+  next.size = metadata.size
+  stampMessageRevision(next, cached)
+  next.retainedBytes =
+    estimateRetainedBytes(next, Math.min(metadata.size, MAX_SESSION_PREVIEW_BYTES)) +
+    (next.jsonl?.retainedBytes ?? 0)
+}
+
+function sameFingerprint(a: JsonlAppendMetadata, b: JsonlAppendMetadata): boolean {
+  return a.size === b.size && a.mtimeMs === b.mtimeMs && a.dev === b.dev && a.ino === b.ino
+}
+
 function isCacheFresh(
   cached: CachedSessionData | undefined,
   metadata: JsonlAppendMetadata,
@@ -172,7 +192,18 @@ export class SessionDataCache {
     coldRebuilds: 0,
     fallbackReads: 0,
     bodyBytesRead: 0,
+    summaryHits: 0,
+    summaryMisses: 0,
   }
+  /**
+   * List previews need three scalars, not a retained message view (#985). Keeping them here, keyed
+   * by file fingerprint, stops a multi-project preview scan from evicting the full views the
+   * selected session depends on: real views retain 0.5–2.7 MB each, so 20 candidates per project
+   * across two projects overran `MAX_SESSION_CACHE_BYTES` and turned every poll into a cold scan.
+   */
+  private readonly summaries = new LRUCache<string, SessionSummaryEntry>({
+    max: MAX_SESSION_SUMMARIES,
+  })
 
   constructor(private readonly fileForPath = (path: string) => Bun.file(path)) {}
 
@@ -370,32 +401,79 @@ export class SessionDataCache {
     return { seed, startedAt, lastMessageAt }
   }
 
+  /**
+   * `retain: false` builds the view without storing it, so a transient reader cannot evict
+   * resident views. A session that is already resident is always updated in place: its JSONL
+   * cursor is shared with the new view, and advancing it without storing would desynchronise it.
+   */
   async get(
     session: Pick<Session, "path" | "format">,
-    cwd?: string
+    cwd?: string,
+    options: { retain?: boolean } = {}
   ): Promise<CachedSessionData | null> {
-    const key = `${session.path}\0${session.format ?? ""}`
+    const retain = options.retain !== false || this.entries.has(session.path)
+    const key = `${session.path}\0${session.format ?? ""}\0${retain ? "r" : "t"}`
     const pending = this.inflight.get(key)
     if (pending) return pending
 
-    const loading = this.loadWithSlot(session, cwd).finally(() => {
+    const loading = this.loadWithSlot(session, cwd, retain).finally(() => {
       this.inflight.delete(key)
     })
     this.inflight.set(key, loading)
     return loading
   }
 
+  /** Preview scalars for a session, served by fingerprint without retaining its view (#985). */
+  async summarize(
+    session: Pick<Session, "path" | "format">,
+    cwd?: string
+  ): Promise<SessionScanResult | null> {
+    const key = `${session.path}\0${session.format ?? ""}`
+    let metadata: JsonlAppendMetadata
+    try {
+      const info = await this.fileForPath(session.path).stat()
+      metadata = { size: info.size, mtimeMs: info.mtimeMs ?? 0, dev: info.dev, ino: info.ino }
+    } catch {
+      this.summaries.delete(key)
+      return null
+    }
+    const known = this.summaries.get(key)
+    if (known && sameFingerprint(known.metadata, metadata) && known.format === session.format) {
+      this.readStats.summaryHits++
+      return known.scan
+    }
+    this.readStats.summaryMisses++
+    const view = await this.get(session, cwd, { retain: false })
+    if (!view) {
+      this.summaries.delete(key)
+      return null
+    }
+    const scan = {
+      hasMessages: view.messages.length > 0,
+      startedAt: view.startedAt,
+      lastMessageAt: view.lastMessageAt,
+    }
+    this.summaries.set(key, {
+      format: session.format,
+      metadata: view.metadata ?? metadata,
+      projectIdentity: resolveSessionProjectIdentity(session.path, cwd),
+      scan,
+    })
+    return scan
+  }
+
   /** Multiple dashboard projects share the same two read/parse slots. */
   private async loadWithSlot(
     session: Pick<Session, "path" | "format">,
-    cwd?: string
+    cwd: string | undefined,
+    retain: boolean
   ): Promise<CachedSessionData | null> {
     const generation = this.generation
     if (this.activeLoads >= 2) await new Promise<void>((resolve) => this.waitingLoads.push(resolve))
     else this.activeLoads++
     try {
       if (generation !== this.generation) return null
-      return await this.load(session, cwd, generation)
+      return await this.load(session, cwd, generation, retain)
     } finally {
       const next = this.waitingLoads.shift()
       if (next) next()
@@ -406,7 +484,8 @@ export class SessionDataCache {
   private async load(
     session: Pick<Session, "path" | "format">,
     cwd: string | undefined,
-    generation: number
+    generation: number,
+    retain: boolean
   ): Promise<CachedSessionData | null> {
     try {
       const file = this.fileForPath(session.path)
@@ -430,14 +509,8 @@ export class SessionDataCache {
       }
       next.projectIdentity = projectIdentity
       if (next === cached) return next
-      next.format = session.format
-      next.metadata = metadata
-      next.size = size
-      stampMessageRevision(next, cached)
-      next.retainedBytes =
-        estimateRetainedBytes(next, Math.min(size, MAX_SESSION_PREVIEW_BYTES)) +
-        (next.jsonl?.retainedBytes ?? 0)
-      if (generation === this.generation) this.entries.set(session.path, next)
+      finishLoadedView(next, cached, session.format, metadata)
+      if (retain && generation === this.generation) this.entries.set(session.path, next)
       return next
     } catch {
       this.entries.delete(session.path)
@@ -510,6 +583,9 @@ export class SessionDataCache {
   /** Invalidate only entries owned by the exact canonical project identity for `cwd`. */
   invalidateProject(cwd: string): void {
     const projectKey = projectKeyFromCwd(cwd)
+    for (const [key, summary] of this.summaries.entries()) {
+      if (summary.projectIdentity === projectKey) this.summaries.delete(key)
+    }
     for (const [key, entry] of this.entries.entries()) {
       if (entry.projectIdentity === projectKey) {
         this.entries.delete(key)
@@ -546,6 +622,7 @@ export class SessionDataCache {
   invalidateAll(): void {
     this.generation++
     this.entries.clear()
+    this.summaries.clear()
   }
 
   getMemoryStats(): { entries: number; estimatedBytes: number } {
@@ -569,6 +646,19 @@ export interface SessionDataReadStats {
   coldRebuilds: number
   fallbackReads: number
   bodyBytesRead: number
+  /** Preview summaries served from the fingerprint cache without loading a view. */
+  summaryHits: number
+  summaryMisses: number
+}
+
+/** Metadata-only preview entries are a few hundred bytes, so a count bound suffices. */
+export const MAX_SESSION_SUMMARIES = 2_000
+
+interface SessionSummaryEntry {
+  format: Session["format"]
+  metadata: JsonlAppendMetadata
+  projectIdentity: string
+  scan: SessionScanResult
 }
 
 /** Compact JSONL owns its strings; fallback formats retain their conservative source allowance. */
@@ -597,15 +687,9 @@ async function scanSession(
   session: Pick<Session, "path" | "format">,
   cwd?: string
 ): Promise<SessionScanResult> {
-  const empty = { hasMessages: false, startedAt: 0, lastMessageAt: 0 }
-  const cached = await sessionDataCache.get(session, cwd)
-  if (!cached) return empty
-  if (cached.messages.length === 0) return empty
-  return {
-    hasMessages: true,
-    startedAt: cached.startedAt,
-    lastMessageAt: cached.lastMessageAt,
-  }
+  const summary = await sessionDataCache.summarize(session, cwd)
+  if (!summary?.hasMessages) return { hasMessages: false, startedAt: 0, lastMessageAt: 0 }
+  return summary
 }
 
 function ensurePinnedInList<T extends { session: Session }>(
