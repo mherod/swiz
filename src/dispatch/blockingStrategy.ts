@@ -171,8 +171,14 @@ export async function shouldSkipPostToolUseHooks(
  * context) and must keep running even during the skill-recency skip window.
  * `/commit` and `/push` are themselves skills, so suppressing these would
  * starve the IssueStore refresh exactly when it matters most.
+ *
+ * `posttooluse-session-edits.ts` finishes the edit observation its PreToolUse
+ * half began; skipping it records no edits and leaks an unfinished observation.
  */
-const SIDE_EFFECT_POST_TOOL_HOOKS = new Set(["posttooluse-upstream-sync-on-push.ts"])
+const SIDE_EFFECT_POST_TOOL_HOOKS = new Set([
+  "posttooluse-upstream-sync-on-push.ts",
+  "posttooluse-session-edits.ts",
+])
 
 /**
  * Reduce postToolUse groups to only side-effect hooks for the skill-recency

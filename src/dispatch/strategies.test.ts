@@ -535,6 +535,18 @@ describe("keepSideEffectPostToolGroups", () => {
     expect(kept[0]?.hooks).toEqual([{ file: "posttooluse-upstream-sync-on-push.ts" }])
   })
 
+  it("keeps session-edit recording so observations begun in PreToolUse finish", () => {
+    const groups = [
+      {
+        event: "postToolUse",
+        hooks: [{ file: "posttooluse-session-edits.ts" }, { file: "posttooluse-git-context.ts" }],
+      },
+    ]
+    expect(keepSideEffectPostToolGroups(groups)[0]?.hooks).toEqual([
+      { file: "posttooluse-session-edits.ts" },
+    ])
+  })
+
   it("returns empty when no side-effect hooks are present", () => {
     const groups = [
       {

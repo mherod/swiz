@@ -221,6 +221,26 @@ describe("session edit observation", () => {
     expect(store.listSessionEdits(fileClaimProjectKey(cwd), "peer")).toEqual([])
   })
 
+  test("ignores a peer observation left unfinished past the stale window", async () => {
+    const { cwd, input, store, paths } = await fixture()
+    const project = fileClaimProjectKey(cwd)
+    // A peer call whose PostToolUse never arrived, begun just past the stale window.
+    store.editObservations.begin(project, "peer", "leaked-call", Date.now() - 31 * 60 * 1000)
+    await observeBefore(input)
+    await Bun.write(join(cwd, "after-leak.ts"), "written by owner")
+    expect(JSON.stringify(await observeAfter(input))).not.toContain("uncertain")
+    expect(paths()).toEqual([join(cwd, "after-leak.ts")])
+  })
+
+  test("discards unfinished observations older than a day", async () => {
+    const { cwd, store } = await fixture()
+    const project = fileClaimProjectKey(cwd)
+    store.editObservations.begin(project, "peer", "ancient-call", Date.now() - 25 * 60 * 60 * 1000)
+    store.editObservations.begin(project, "owner", "fresh-call")
+    expect(store.editObservations.get(project, "peer", "ancient-call")).toBeNull()
+    expect(store.editObservations.get(project, "owner", "fresh-call")).not.toBeNull()
+  })
+
   test("cancels a denied call so it cannot poison later ownership", async () => {
     const { cwd, input, paths } = await fixture()
     const controller = new AbortController()

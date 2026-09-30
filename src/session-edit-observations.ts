@@ -2,6 +2,15 @@ import type { Database } from "bun:sqlite"
 
 export type FileSnapshot = Record<string, string | null>
 
+/**
+ * An observation still unfinished after this long belongs to a tool call whose
+ * PostToolUse never arrived (skipped, crashed or cancelled). It must not keep
+ * other sessions' edits "overlapping" forever. Tool calls run far shorter.
+ */
+export const STALE_OBSERVATION_MS = 30 * 60 * 1000
+/** Unfinished observations older than this are discarded as leaked. */
+const LEAKED_OBSERVATION_MS = 86_400_000
+
 export interface EditObservation {
   project_key: string
   session_id: string
@@ -38,6 +47,10 @@ export class SessionEditObservationStore {
   begin(project: string, session: string, tool: string, now = Date.now()): boolean {
     return this.db
       .transaction(() => {
+        this.db
+          .query(`DELETE FROM session_edit_observations
+        WHERE finished_at IS NULL AND started_at < ?`)
+          .run(now - LEAKED_OBSERVATION_MS)
         this.db
           .query(`DELETE FROM session_edit_observations
         WHERE finished_at IS NOT NULL AND finished_at < ?
@@ -122,8 +135,8 @@ export class SessionEditObservationStore {
         const overlap = this.db
           .query(`SELECT 1 FROM session_edit_observations
         WHERE project_key = ? AND session_id != ? AND started_at <= ?
-        AND (finished_at IS NULL OR finished_at >= ?) LIMIT 1`)
-          .get(project, session, now, observation.started_at)
+        AND ((finished_at IS NULL AND started_at >= ?) OR finished_at >= ?) LIMIT 1`)
+          .get(project, session, now, now - STALE_OBSERVATION_MS, observation.started_at)
         if (overlap) return null
         const insert = this.db.query(`INSERT INTO session_edits
         (project_key, session_id, file_path, updated_at) VALUES (?, ?, ?, ?)
