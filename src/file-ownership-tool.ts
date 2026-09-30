@@ -17,10 +17,10 @@ import { CONCURRENT_EDIT_WINDOW_MS } from "./utils/session-file-ownership.ts"
 
 export const fileOwnershipInputSchema = {
   action: z
-    .enum(["list", "claim", "hold", "release"])
+    .enum(["list", "claim", "hold", "release", "disown"])
     .optional()
     .describe(
-      "Defaults to list. claim reserves files; hold renews existing owned leases; release frees them."
+      "Defaults to list. claim reserves files; hold renews existing owned leases; release frees them; disown records that this session did not make these changes (no lease is taken or freed)."
     ),
   sessionId: z
     .string()
@@ -65,7 +65,7 @@ const claimSchema = z.object({
 })
 
 export const fileOwnershipResultSchema = z.object({
-  action: z.enum(["list", "claim", "hold", "release"]),
+  action: z.enum(["list", "claim", "hold", "release", "disown"]),
   cwd: z.string(),
   sessionId: z.string().optional(),
   ok: z.boolean(),
@@ -129,16 +129,17 @@ function validateOwnershipInput(raw: McpToolInput): OwnershipInput {
   const input = inputSchema.parse(raw)
   const action = input.action ?? "list"
   if (action !== "list" && (!input.sessionId || !input.paths)) {
-    throw new Error("sessionId and paths are required for claim, hold and release")
+    throw new Error("sessionId and paths are required for claim, hold, release and disown")
   }
-  if (
-    (action === "list" || action === "release") &&
-    (input.leaseSeconds !== undefined || input.lane !== undefined)
-  ) {
+  const hasLeaseOptions = input.leaseSeconds !== undefined || input.lane !== undefined
+  if (hasLeaseOptions && !LEASE_ACTIONS.has(action)) {
     throw new Error("lane and leaseSeconds apply only to claim and hold")
   }
   return input
 }
+
+/** Only these actions take or renew a lease; disown is a statement about authorship. */
+const LEASE_ACTIONS = new Set(["claim", "hold"])
 
 function applyOwnershipAction(
   store: IssueStore,
@@ -160,6 +161,7 @@ function applyOwnershipAction(
       released: [],
     }
   }
+  if (action === "disown") return { ok: true, claims: [], conflicts: [], missing: [], released: [] }
   return store.fileClaims.mutate({
     projectKey,
     sessionId: input.sessionId!,
@@ -282,6 +284,10 @@ export function renderFileOwnership(result: FileOwnershipResult): string {
     )
   if (result.action === "release")
     lines.push(`Released ${result.released.length} lease(s). Edit history is preserved.`)
+  if (result.action === "disown")
+    lines.push(
+      "Recorded that this session did not make these changes; the unowned-changes stop gate will skip them. Leases are unchanged."
+    )
   if (result.action === "list" && !result.claims.length)
     lines.push("No active leases for this selection.")
   lines.push(...renderSelectionWarnings(result), ...renderOwnershipHistory(result))

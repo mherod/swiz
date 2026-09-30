@@ -6,7 +6,7 @@ One manifest of TypeScript hook scripts gets installed across Claude Code, Curso
 
 When `swiz idea` and `swiz continue` are used together, the system can enter a **self-directed loop** — a closed-loop state where the agent's own outputs become the next inputs, expanding the project without external prompts. See [docs/ai-providers.md](docs/ai-providers.md#self-directed-loop) for the canonical terminology.
 
-**166 hooks. 17 event types. Every agent. Zero compromises.**
+**167 hooks. 17 event types. Every agent. Zero compromises.**
 
 ## Install
 
@@ -104,7 +104,7 @@ The JSON must name a supported agent and contain only valid tool-name strings. M
 
 The bundled hooks cover seven events: Stop, PreToolUse, PostToolUse, SessionStart, PreCompact, UserPromptSubmit, and Notification. Five additional events — **SubagentStart**, **SubagentStop**, **TaskCreated**, **TaskCompleted**, and **SessionEnd** — are formally registered in the dispatch system. Claude supports all five; other agents retain their existing event surface. Task lifecycle events update a daemon-owned registry and feed unfinished background work into a non-blocking Stop advisory. For the full picture of which Claude lifecycle events swiz maps versus intentionally leaves reserved (and why), see [docs/lifecycle-event-coverage.md](docs/lifecycle-event-coverage.md).
 
-### Stop (28)
+### Stop (29)
 
 Stop hooks run before the agent is allowed to end a session. They're the last line of defense — and the most powerful. A blocking stop hook keeps the agent working until the problem is resolved.
 
@@ -136,6 +136,7 @@ Stop hooks run before the agent is allowed to end a session. They're the last li
 | `stop-memory-update-reminder.ts` | Checks whether CLAUDE.md or MEMORY.md was recently updated. If not, blocks with a suggestion to reflect on session learnings and update memory. 30-minute cooldown prevents nagging.                                                                                                                                                                                                                     |
 | `stop-auto-continue.ts`          | Blocks stop with an AI-generated "what should you do next?" suggestion. Instead of ending, the agent gets a concrete next step. Combined with `swiz continue`, this creates an autonomous work loop.                                                                                                                                                                                                     |
 | `speak-narrator.ts`  | Speaks new assistant text aloud using platform-native TTS (macOS `say`, Linux `espeak-ng`/`espeak`/`spd-say`, Windows PowerShell). Tracks position per session so only incremental text is spoken. Uses PID-aware file locking with heartbeats to queue speech in order. Runs async so it never blocks the session.                                                                                      |
+| `stop-unowned-changes.ts` | Blocks stop while uncommitted files in the project have no owning session (no recorded edit or FileOwnership lease). The agent must `claim` each file it wrote and `disown` each it did not; disowned files are then left uncommitted for their owner by `stop-git-status`. Fails open when ownership discovery is unavailable. |
 | `stop-git-status.ts` | Modular git workflow validation — detects uncommitted changes, unpushed commits, branch divergence. Blocks stop until git state is clean. Separated into independent validators (context, uncommitted-changes, remote-state, push-cooldown, background-push-detector, action-plan, evaluate) for testability and reusability. See [hook-extraction-pattern.md](docs/hook-extraction-pattern.md) for modular architecture details. |
 | `stop-personal-repo-issues.ts` | Blocks stop if there are unassigned issues on a personal repository. |
 

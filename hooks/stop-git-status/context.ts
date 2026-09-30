@@ -23,6 +23,7 @@ import {
   getGitStatusV2,
   getUnpushedCommitSummaries,
 } from "../../src/utils/git-utils.ts"
+import { applyDisowns, readDisownedPaths } from "../../src/utils/session-file-disowns.ts"
 import {
   appendSessionFileOwnershipContext,
   hasOnlyPeerOwnedChanges,
@@ -138,6 +139,28 @@ function gitStatusWarrantsStopHook(gitStatus: GitStatus): boolean {
   return ahead > 0 || behind > 0 || gitStatus.upstreamGone
 }
 
+/** Files this session explicitly disowned are left for their owner, like a peer's files. */
+async function withTranscriptDisowns(
+  result: SessionFileOwnershipResult,
+  input: StopHookInput,
+  cwd: string
+): Promise<SessionFileOwnershipResult> {
+  if (!result.known) return result
+  const disowned = await readDisownedPaths(input.transcript_path, cwd)
+  if (disowned.size === 0) return result
+  const gitRoot = (await git(["rev-parse", "--show-toplevel"], cwd)).trim()
+  if (!gitRoot) return result
+  const ownership = await applyDisowns(result.ownership, {
+    gitRoot,
+    disowned,
+    expandDirectory: async (dir) =>
+      (await git(["ls-files", "--others", "--exclude-standard", "-z", "--", dir], gitRoot))
+        .split("\0")
+        .filter(Boolean),
+  })
+  return { known: true, ownership }
+}
+
 function hasPeerOwnedChanges(files: string[], ownership: SessionFileOwnershipResult): boolean {
   return ownership.known && files.some((file) => ownership.ownership.editedByOthers.includes(file))
 }
@@ -166,7 +189,11 @@ export async function resolveGitContext(input: StopHookInput): Promise<GitContex
   const upstream = gitStatus.upstream ?? `origin/${branch}`
   // Resolved once here so both the prose summary and the action plan see the
   // same ownership snapshot — the plan previously ignored it (issue #841).
-  const ownership = await resolveSessionFileOwnershipResult(cwd, input.session_id, gitStatus.lines)
+  const ownership = await withTranscriptDisowns(
+    await resolveSessionFileOwnershipResult(cwd, input.session_id, gitStatus.lines),
+    input,
+    cwd
+  )
   const peerOnlyChanges = hasOnlyPeerOwnedChanges(gitStatus.lines, ownership)
   const peerOwnedChanges = hasPeerOwnedChanges(gitStatus.lines, ownership)
   const hasUncommitted = gitStatus.total > 0 && !peerOwnedChanges

@@ -167,6 +167,7 @@ import stopSecretScanner from "../hooks/stop-secret-scanner.ts"
 import stopShipChecklist from "../hooks/stop-ship-checklist.ts"
 import stopSuppressionPatterns from "../hooks/stop-suppression-patterns.ts"
 import stopTodoTracker from "../hooks/stop-todo-tracker.ts"
+import stopUnownedChanges from "../hooks/stop-unowned-changes.ts"
 import stopUpstreamBranchCount from "../hooks/stop-upstream-branch-count.ts"
 import stopWorkflowPermissions from "../hooks/stop-workflow-permissions.ts"
 import userpromptsubmitGitContext from "../hooks/userpromptsubmit-git-context.ts"
@@ -272,6 +273,7 @@ export const bundledHookManifest: HookGroup[] = [
       { hook: stopTodoTracker },
 
       // Git state & branch policy
+      { hook: stopUnownedChanges },
       { hook: stopGitStatus },
       { hook: stopLockfileDrift },
       { hook: stopBranchConflicts },
