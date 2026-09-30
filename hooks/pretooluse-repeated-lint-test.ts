@@ -642,6 +642,20 @@ function checkLineLimitFilter(
   return `\`${direction} -${n}\` only shows the ${direction === "tail" ? "last" : "first"} ${n} lines — ${kindLabel} output often needs ${MIN_TAIL_HEAD_LINES}+ lines for meaningful context.`
 }
 
+/**
+ * Remove `$(…)` and backtick command substitutions. A pipe inside one only
+ * shapes an argument (e.g. the file list), not the command's output (#1002).
+ */
+export function stripCommandSubstitutions(statement: string): string {
+  let out = statement.replace(/`[^`]*`/g, "")
+  // Remove innermost `$(…)` first until none remain, so nesting unwinds.
+  for (let previous = ""; previous !== out; ) {
+    previous = out
+    out = out.replace(/\$\([^()]*\)/g, "")
+  }
+  return out
+}
+
 const GREP_PIPE_PRESENT_RE = /\|\s*(?:rg|grep)\s+/
 
 function checkNarrowGrep(cmdStripped: string, cmdOriginal: string): string | null {
@@ -675,11 +689,12 @@ export function detectOverfiltering(cmd: string, kind: CommandKind): string | nu
  * grep patterns intact, so the statement also serves as the pattern source for the grep check.
  */
 function statementOverfilterIssue(statement: string, kindLabel: string): string | null {
-  if (!statement.includes("|")) return null
+  const outer = stripCommandSubstitutions(statement)
+  if (!outer.includes("|")) return null
   const issues = [
-    checkLineLimitFilter(TAIL_LINES_RE, statement, "tail", kindLabel),
-    checkLineLimitFilter(HEAD_LINES_RE, statement, "head", kindLabel),
-    checkNarrowGrep(statement, statement),
+    checkLineLimitFilter(TAIL_LINES_RE, outer, "tail", kindLabel),
+    checkLineLimitFilter(HEAD_LINES_RE, outer, "head", kindLabel),
+    checkNarrowGrep(outer, outer),
   ].filter((x): x is string => x !== null)
 
   if (issues.length === 0) return null

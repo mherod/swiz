@@ -47,6 +47,18 @@ describe("classifyCommand — real commands still classified correctly", () => {
   })
 })
 
+describe("detectOverfiltering — command substitutions (#1002)", () => {
+  test("head inside a substitution that builds the file list is allowed", () => {
+    const cmd = `bun test --parallel=2 a.test.ts $(rg -l "x" src --glob '*.test.ts' | head -1 | tr '\\n' ' ')`
+    expect(detectOverfiltering(cmd, "test")).toBeNull()
+    expect(detectOverfiltering("bun test `ls src/*.test.ts | head -2`", "test")).toBeNull()
+  })
+
+  test("a short head on the test output itself is still denied", () => {
+    expect(detectOverfiltering("bun test $(ls src/*.test.ts) | head -3", "test")).not.toBeNull()
+  })
+})
+
 describe("detectOverfiltering — quoted pipe characters do not trigger false positives", () => {
   test("does not fire for gh command body containing pipe characters", () => {
     // classifyCommand would return null for this gh command, so detectOverfiltering
