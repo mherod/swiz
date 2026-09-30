@@ -5,6 +5,7 @@ import { join } from "node:path"
 import { applyDisowns, readDisownedPaths } from "../src/utils/session-file-disowns.ts"
 import { buildUnownedChangesReason, parseDirtyFiles } from "./stop-unowned-changes.ts"
 
+// PROCESS_CONTRACT_TEST: verifies the stop hook's block/allow stdout from real git state and a transcript at the executable boundary.
 const hookPath = join(process.cwd(), "hooks", "stop-unowned-changes.ts")
 const tempDirs: string[] = []
 

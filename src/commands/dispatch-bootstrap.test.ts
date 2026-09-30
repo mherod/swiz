@@ -5,6 +5,7 @@ import { join } from "node:path"
 import { DISPATCH_TIMEOUTS } from "../dispatch/timeouts.ts"
 import { daemonClientTimeoutMs } from "./dispatch-bootstrap.ts"
 
+// PROCESS_CONTRACT_TEST: verifies the dispatch client's timeout fallback (exit code, stdout envelope, stderr notice) at the CLI boundary.
 const indexPath = join(process.cwd(), "index.ts")
 const tempDirs: string[] = []
 
