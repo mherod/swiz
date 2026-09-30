@@ -36,6 +36,42 @@ describe("posttooluse push cooldown project identity", () => {
     }
   })
 
+  test("a rejected push reported through a masking pipe does not arm the cooldown", async () => {
+    const base = await mkdtemp(join(tmpdir(), "swiz-postpush-rejected-"))
+    const root = join(base, "repo")
+    await mkdir(join(root, ".git"), { recursive: true })
+    const { repoKey } = await resolveProjectIdentity(root)
+    const sentinelPath = swizPushCooldownSentinelPath(repoKey)
+    await rm(sentinelPath, { force: true })
+
+    try {
+      await evaluatePosttoolusePushCooldown({
+        cwd: root,
+        tool_name: "Bash",
+        tool_input: { command: "git push origin main 2>&1 | tail -6" },
+        tool_response: {
+          stdout: "🥊 test (34.08 seconds)\nerror: failed to push some refs to 'origin'",
+          stderr: "",
+        },
+      })
+      expect(await Bun.file(sentinelPath).exists()).toBe(false)
+
+      // Control: the same command with a successful push arms it.
+      await evaluatePosttoolusePushCooldown({
+        cwd: root,
+        tool_name: "Bash",
+        tool_input: { command: "git push origin main 2>&1 | tail -6" },
+        tool_response: { stdout: "   1c007e02..f33a9dde  main -> main", stderr: "" },
+      })
+      expect(await Bun.file(sentinelPath).exists()).toBe(true)
+    } finally {
+      await Promise.all([
+        rm(sentinelPath, { force: true }),
+        rm(base, { recursive: true, force: true }),
+      ])
+    }
+  })
+
   test("keeps hook repo-key ownership in project-identity", async () => {
     const hookPaths = [
       "pretooluse-push-cooldown.ts",

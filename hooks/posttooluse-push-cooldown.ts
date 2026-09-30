@@ -41,6 +41,19 @@ function isBackgroundPush(hookInput: PostToolHookInput, command: string): boolea
   )
 }
 
+/**
+ * git's own rejection line. A piped push (`git push … | tail`) can exit 0 even
+ * when git refused, so the tool call still reaches PostToolUse; a rejected
+ * push delivered nothing and must not arm the cooldown.
+ */
+const REJECTED_PUSH_RE = /error: failed to push some refs|! \[(?:remote )?rejected\]/
+
+function pushWasRejected(hookInput: PostToolHookInput): boolean {
+  const response = hookInput.tool_response
+  const text = typeof response === "string" ? response : JSON.stringify(response ?? "")
+  return REJECTED_PUSH_RE.test(text)
+}
+
 export async function evaluatePosttoolusePushCooldown(input: unknown): Promise<SwizHookOutput> {
   const hookInput = input as PostToolHookInput
 
@@ -48,6 +61,7 @@ export async function evaluatePosttoolusePushCooldown(input: unknown): Promise<S
   if (!command) return {}
 
   if (isBackgroundPush(hookInput, command)) return {}
+  if (pushWasRejected(hookInput)) return {}
 
   const cwd = hookInput.cwd ?? process.cwd()
   const { repoKey } = await resolveProjectIdentity(cwd)
