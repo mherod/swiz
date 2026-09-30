@@ -104,7 +104,8 @@ describe("Gemini API-key transport", () => {
     expect(await promptGeminiObject("count", schema)).toEqual({ count: 42 })
     const config = JSON.parse(String(requests[0]?.init?.body)).generationConfig
     expect(config.responseMimeType).toBe("application/json")
-    expect(config.responseSchema.properties.count.type).toBe("number")
+    // @ai-sdk/google 4.x sends standard JSON Schema as responseJsonSchema.
+    expect(config.responseJsonSchema.properties.count.type).toBe("number")
     respondWith('{"count":"wrong type"}')
     await expect(promptGeminiObject("count", schema)).rejects.toThrow()
     expect(oauthCalls).toHaveLength(0)
