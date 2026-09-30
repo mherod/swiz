@@ -28,7 +28,7 @@
     "@openrouter/ai-sdk-provider": "3.0.0",
     "agent-hook-schemas": "0.4.0",
     "ai": "7.0.97",
-    "ai-sdk-provider-claude-code": "^3.4.4",
+    "ai-sdk-provider-claude-code": "^4.3.2",
     "ai-sdk-provider-gemini-cli": "^2.0.1",
     "applescript-node": "^1.0.3",
     "date-fns": "4.4.0",
@@ -41,7 +41,7 @@
     "tailwindcss": "^4.2.1",
     "ufo": "1.6.4",
     "yaml": "^2.8.3",
-    "zod": "^4.5.4"
+    "zod": "^4.6.5"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.4.4",
@@ -57,12 +57,12 @@
     "bun-plugin-tailwind": "^0.1.2",
     "eslint": "^10.10.0",
     "globals": "^17.4.0",
-    "happy-dom": "^20.13.2",
+    "happy-dom": "^20.14.5",
     "lefthook": "^2.1.1",
     "lint-staged": "^16.2.7",
     "typescript-eslint": "^8.57.0",
     "vite": "8.3.0",
-    "vitest": "^5.0.0"
+    "vitest": "^5.0.1"
   },
   "overrides": {
     "@grpc/grpc-js": "1.14.4",
