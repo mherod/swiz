@@ -120,6 +120,8 @@ const hook: SwizHook<PostToolHookInput> = {
   name: "posttooluse-session-edits",
   event: "postToolUse",
   timeout: 10,
+  // Finishes the edit observation its PreToolUse half began.
+  sideEffect: true,
   run: evaluatePosttooluseSessionEdits,
 }
 

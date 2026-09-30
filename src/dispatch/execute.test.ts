@@ -592,6 +592,26 @@ describe("dispatch execute integration", () => {
       expect(result.response).toEqual({})
     })
 
+    it("still dispatches postToolUse for mcp__* tools so stateful hooks run", async () => {
+      let providerCalled = false
+      const req: DispatchRequest = {
+        canonicalEvent: "postToolUse",
+        hookEventName: "PostToolUse",
+        payloadStr: JSON.stringify({
+          cwd: process.cwd(),
+          session_id: "mcp-post-session",
+          tool_name: "mcp__swiz__TaskList",
+          tool_input: {},
+        }),
+        manifestProvider: async () => {
+          providerCalled = true
+          return []
+        },
+      }
+      await executeDispatch(req)
+      expect(providerCalled).toBe(true)
+    })
+
     it("runs dispatch normally for non-mcp tool names", async () => {
       let providerCalled = false
       const req: DispatchRequest = {

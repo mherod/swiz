@@ -453,6 +453,13 @@ export interface SwizHookMeta {
    * Skips agent eventMap validation and `swiz install`.
    */
   scheduled?: boolean
+  /**
+   * When true, the hook writes state that other hooks or gates read (sentinels,
+   * stores, cooldowns another gate checks), so it keeps running while a skill
+   * is active. PostToolUse hooks without it are skipped as advisory in that
+   * window (see `keepSideEffectPostToolGroups`).
+   */
+  sideEffect?: boolean
 }
 
 // ─── Core interface ───────────────────────────────────────────────────────────

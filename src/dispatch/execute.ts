@@ -785,11 +785,15 @@ function assertDispatchResponseMatchesWire(
  * MCP tool names follow the convention `mcp__<server>__<tool>`. When the
  * `ignoreMcpTools` setting is enabled (default), dispatch returns an allow
  * envelope without loading the manifest or running any hooks for these calls.
- * Only events that carry a tool_name (preToolUse/postToolUse) are short-circuited.
+ * Only preToolUse is short-circuited here; postToolUse dispatches so hooks
+ * flagged `sideEffect` still run (advisory ones are dropped in blockingStrategy).
  */
 async function shouldSkipMcpToolDispatch(ctx: DispatchContext): Promise<boolean> {
   if (!ctx.toolName?.startsWith("mcp__")) return false
   if (TOOL_NAME_OPTIONAL_EVENTS.has(ctx.canonicalEvent)) return false
+  // PostToolUse still dispatches so stateful hooks run; the blocking strategy
+  // drops the advisory ones for ignored MCP tools (#994).
+  if (ctx.canonicalEvent === "postToolUse") return false
   const settings = await readSwizSettings(
     ctx.settingsHomeOverride ? { home: ctx.settingsHomeOverride } : undefined
   )

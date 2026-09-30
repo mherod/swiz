@@ -271,11 +271,13 @@ describe("manifest.ts", () => {
           const tools = matcher.split("|")
           tools.forEach((tool) => {
             expect(tool.length).toBeGreaterThan(0)
-            // Tools should be capitalized or snake_case (cross-agent aliases)
+            // Tools should be capitalized, snake_case (cross-agent aliases), or an
+            // exact MCP tool name (`mcp__<server>__<Tool>`, matched verbatim).
             if (tool.length > 0) {
               const isCapitalized = tool[0] === tool[0]?.toUpperCase()
               const isSnakeCase = /^(?:functions\.)?[a-z][a-z0-9_]*$/.test(tool)
-              expect(isCapitalized || isSnakeCase).toBe(true)
+              const isMcpTool = /^mcp__[a-z0-9_]+__[A-Za-z][\w-]*$/.test(tool)
+              expect(isCapitalized || isSnakeCase || isMcpTool).toBe(true)
             }
           })
         }

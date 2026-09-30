@@ -87,6 +87,8 @@ const posttooluseGitTaskAutocomplete: SwizHook<Record<string, any>> = {
   event: "postToolUse",
   matcher: "Bash",
   timeout: 5,
+  // Completes tasks after commits, which mostly happen inside /commit.
+  sideEffect: true,
   run(input) {
     return evaluatePosttooluseGitTaskAutocomplete(input)
   },

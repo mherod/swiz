@@ -135,6 +135,8 @@ const posttoolusUpstreamSyncOnPush: SwizShellHook = {
   event: "postToolUse",
   matcher: "Bash",
   timeout: 5,
+  // Refreshes the IssueStore right after /push, itself a skill.
+  sideEffect: true,
 
   run(input) {
     return evaluate(input)

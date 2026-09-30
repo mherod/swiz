@@ -67,6 +67,8 @@ const posttoolusePushCooldown: SwizHook<PostToolHookInput> = {
   event: "postToolUse",
   matcher: "Bash",
   timeout: 5,
+  // Arms the cooldown pretooluse-push-cooldown enforces; pushes happen inside /push.
+  sideEffect: true,
   run(input) {
     return evaluatePosttoolusePushCooldown(input)
   },

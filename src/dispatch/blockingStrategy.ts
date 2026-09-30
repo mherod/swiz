@@ -1,5 +1,5 @@
 import { merge } from "lodash-es"
-import { type HookGroup, hookIdentifier } from "../hook-types.ts"
+import { type HookDef, type HookGroup, hookIdentifier, isInlineHookDef } from "../hook-types.ts"
 import type { HookOutput } from "../schemas.ts"
 import { readStopActions, type StopFinding, selectStopAction } from "../stop-actions.ts"
 import { mergeHookSpecificOutputClone } from "../utils/hook-specific-output.ts"
@@ -167,18 +167,21 @@ export async function shouldSkipPostToolUseHooks(
 }
 
 /**
- * PostToolUse hooks that perform real side effects (state sync, not advisory
- * context) and must keep running even during the skill-recency skip window.
- * `/commit` and `/push` are themselves skills, so suppressing these would
- * starve the IssueStore refresh exactly when it matters most.
- *
- * `posttooluse-session-edits.ts` finishes the edit observation its PreToolUse
- * half began; skipping it records no edits and leaks an unfinished observation.
+ * File-based hook definitions cannot carry `sideEffect`, so these names stand
+ * in for the flag. Inline hooks declare `sideEffect: true` on the hook itself;
+ * `/commit` and `/push` are skills, so skipping a stateful hook during them
+ * starves state that other gates read (#994).
  */
-const SIDE_EFFECT_POST_TOOL_HOOKS = new Set([
+const SIDE_EFFECT_FILE_HOOKS = new Set([
   "posttooluse-upstream-sync-on-push.ts",
   "posttooluse-session-edits.ts",
 ])
+
+/** True when a hook must keep running during the skill-recency skip window. */
+export function runsDuringSkills(def: HookDef): boolean {
+  if (isInlineHookDef(def)) return def.hook.sideEffect === true
+  return SIDE_EFFECT_FILE_HOOKS.has(hookIdentifier(def))
+}
 
 /**
  * Reduce postToolUse groups to only side-effect hooks for the skill-recency
@@ -188,7 +191,7 @@ const SIDE_EFFECT_POST_TOOL_HOOKS = new Set([
 export function keepSideEffectPostToolGroups(groups: HookGroup[]): HookGroup[] {
   const kept: HookGroup[] = []
   for (const group of groups) {
-    const hooks = group.hooks.filter((h) => SIDE_EFFECT_POST_TOOL_HOOKS.has(hookIdentifier(h)))
+    const hooks = group.hooks.filter(runsDuringSkills)
     if (hooks.length > 0) kept.push({ ...group, hooks })
   }
   return kept
@@ -330,6 +333,17 @@ export function processAggregatedStopResults(
   applyMergedContextToResponse(finalResponse, contexts, hookEventName)
 }
 
+/**
+ * ignoreMcpTools silences advisory hooks for mcp__* tools, but stateful hooks
+ * (e.g. the TaskList sync sentinel for the swiz MCP task tools) must still run.
+ */
+function isIgnoredMcpTool(payload: Record<string, any>): boolean {
+  return (
+    String(payload.tool_name ?? "").startsWith("mcp__") &&
+    payload._effectiveSettings?.ignoreMcpTools !== false
+  )
+}
+
 async function checkPostToolUseSkillSkip(
   ctx: HookStrategyContext
 ): Promise<{ shortCircuit?: Record<string, any>; updatedCtx?: HookStrategyContext }> {
@@ -338,10 +352,11 @@ async function checkPostToolUseSkillSkip(
   try {
     payload = JSON.parse(ctx.enrichedPayloadStr)
   } catch {}
-  if (await shouldSkipPostToolUseHooks(payload, ctx.cwd)) {
+  const ignoredMcpTool = isIgnoredMcpTool(payload)
+  if (ignoredMcpTool || (await shouldSkipPostToolUseHooks(payload, ctx.cwd))) {
     const sideEffectGroups = keepSideEffectPostToolGroups(ctx.filteredGroups)
     log(
-      `   postToolUse: skill recently active — skipping advisory hooks` +
+      `   postToolUse: ${ignoredMcpTool ? "ignoreMcpTools" : "skill recently active"} — skipping advisory hooks` +
         (sideEffectGroups.length > 0
           ? ` (keeping ${sideEffectGroups.length} side-effect group(s))`
           : "")

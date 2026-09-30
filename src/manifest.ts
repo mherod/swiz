@@ -478,7 +478,8 @@ export const bundledHookManifest: HookGroup[] = [
   },
   {
     event: "postToolUse",
-    matcher: "TaskList",
+    // The MCP name matches exactly; toolMatchesToken only aliases native task tools.
+    matcher: "TaskList|mcp__swiz__TaskList",
     hooks: [{ hook: posttooluseTaskListSync }],
   },
   {

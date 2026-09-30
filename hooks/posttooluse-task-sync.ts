@@ -42,6 +42,7 @@ import {
 } from "../src/tasks/task-recovery.ts"
 import { writeCanonicalTaskListSyncSentinel } from "../src/tasks/task-state-cache.ts"
 import { findDuplicateSubjectGroups } from "../src/tasks/task-subject-duplicates.ts"
+import { isAnyProviderTaskListTool } from "../src/tool-matchers.ts"
 
 // ═══════════════════════════════════════════════════════════════════════════
 // § 1. Task Audit Sync (TaskCreate / TaskUpdate / TodoWrite)
@@ -205,6 +206,7 @@ export const taskAuditSyncHook: SwizHook<Record<string, any>> = {
   event: "postToolUse",
   matcher: "TaskUpdate|TaskCreate|TodoWrite",
   timeout: 5,
+  sideEffect: true,
   run(input) {
     return evaluatePosttooluseTaskAuditSync(input)
   },
@@ -298,14 +300,31 @@ function formatDuplicateSubjectNotice(
   )
 }
 
+/**
+ * An MCP listing (e.g. mcp__swiz__TaskList) is a real sync for the session's
+ * governance gate, but its project-keyed store must not be reconciled into
+ * native session task files. Record the sync only (#994). Returns true when
+ * the call was an MCP listing and has been handled.
+ */
+async function recordMcpTaskListSync(
+  input: PostToolHookInput,
+  dependencies: TaskListSyncDependencies
+): Promise<boolean> {
+  const toolName = input.tool_name ?? ""
+  if (toolName === "TaskList" || !isAnyProviderTaskListTool(toolName)) return false
+  const sessionId = resolveSafeSessionId(input.session_id)
+  if (sessionId) await dependencies.writeSentinel(sessionId)
+  return true
+}
+
 export async function evaluatePosttooluseTaskListSync(
   input: unknown,
   dependencies: Partial<TaskListSyncDependencies> = {}
 ): Promise<SwizHookOutput> {
   const hookInput = input as PostToolHookInput
-  if (!agentHasTaskToolsForHookPayload(hookInput as Record<string, any>)) return {}
-
   const effectiveDependencies = resolveTaskListSyncDependencies(dependencies)
+  if (await recordMcpTaskListSync(hookInput, effectiveDependencies)) return {}
+  if (!agentHasTaskToolsForHookPayload(hookInput as Record<string, any>)) return {}
   const resolved = await resolveListSyncInput(hookInput, effectiveDependencies.home)
   if (resolved.kind === "unrecognized") {
     return resolved.hasContent
@@ -361,6 +380,8 @@ export const taskListSyncHook: SwizHook<PostToolHookInput> = {
   event: "postToolUse",
   matcher: "TaskList",
   timeout: 5,
+  // Writes the canonical TaskList sync sentinel the Bash sync gate reads (#994).
+  sideEffect: true,
   run(input) {
     return evaluatePosttooluseTaskListSync(input)
   },
@@ -374,6 +395,7 @@ const posttooluseTaskSync: SwizHook<Record<string, any>> = {
   name: "posttooluse-task-sync",
   event: "postToolUse",
   timeout: 5,
+  sideEffect: true,
 
   async run(input) {
     const rec = input as Record<string, any>

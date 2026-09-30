@@ -177,6 +177,49 @@ describe("posttooluse-task-list-sync", () => {
     }
   })
 
+  test("an MCP TaskList records the sync without reconciling native task files", async () => {
+    const sentinelSessions: string[] = []
+    let reconciled = false
+    const output = await evaluatePosttooluseTaskListSync(
+      {
+        _agent: "claude",
+        cwd: "/tmp",
+        session_id: `${SESSION_ID}-mcp`,
+        tool_name: "mcp__swiz__TaskList",
+        tool_response: "Task queue for this project.\n\nIN PROGRESS (1)\n    #abc-1  Do work",
+      },
+      {
+        home: TMP_HOME,
+        reconcile() {
+          reconciled = true
+          return Promise.reject(new Error("MCP listings must not reconcile"))
+        },
+        writeSentinel(sessionId) {
+          sentinelSessions.push(sessionId)
+          return Promise.resolve(Date.now())
+        },
+      }
+    )
+    expect(output).toEqual({})
+    expect(sentinelSessions).toEqual([`${SESSION_ID}-mcp`])
+    expect(reconciled).toBe(false)
+  })
+
+  test("an unrelated MCP tool writes no sync", async () => {
+    let sentinelWrites = 0
+    await evaluatePosttooluseTaskListSync(
+      { _agent: "claude", cwd: "/tmp", session_id: SESSION_ID, tool_name: "mcp__swiz__TaskUpdate" },
+      {
+        home: TMP_HOME,
+        writeSentinel() {
+          sentinelWrites++
+          return Promise.resolve(Date.now())
+        },
+      }
+    )
+    expect(sentinelWrites).toBe(0)
+  })
+
   test("persistence failures do not advance sentinel, cache, or event state", async () => {
     const cache = new TaskStateCache({ maxEntries: 10 })
     setGlobalTaskStateCache(cache)
