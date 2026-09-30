@@ -340,12 +340,23 @@ function parseXYStatus(xy: string, counts: FileCounts): void {
   else if (xy[1] !== ".") counts.modified++
 }
 
+/**
+ * Porcelain v2 path of an ordinary (`1`) or renamed/copied (`2`) entry. The
+ * path starts after 8 (`1`) or 9 (`2`) space-separated fields and may itself
+ * contain spaces; a `2` entry ends with `\t<origPath>`, so the current path is
+ * the part before the tab (#995).
+ */
+function porcelainEntryPath(line: string): string {
+  const fieldsBeforePath = line.startsWith("2 ") ? 9 : 8
+  const [head = ""] = line.split("\t")
+  return head.split(" ").slice(fieldsBeforePath).join(" ")
+}
+
 function parseFileEntry(line: string, counts: FileCounts, lines: string[]): void {
   if (line.startsWith("1 ") || line.startsWith("2 ")) {
     const xy = line.split(" ")[1] ?? ".."
     parseXYStatus(xy, counts)
-    const path = line.includes("\t") ? line.split("\t").pop()! : line.split(" ").pop()!
-    lines.push(path)
+    lines.push(porcelainEntryPath(line))
   } else if (line.startsWith("? ")) {
     counts.untracked++
     lines.push(line.slice(2))

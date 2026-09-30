@@ -45,6 +45,34 @@ import {
   TEST_FILE_RE,
 } from "./git-utils.ts"
 
+// ── parseGitStatusV2Output — entry paths (#995) ─────────────────────────────
+
+describe("parseGitStatusV2Output — entry paths", () => {
+  const header = ["# branch.oid abc123", "# branch.head main"]
+
+  test("reports a staged rename under its new path", () => {
+    const out = [
+      ...header,
+      "2 R. N... 100644 100644 100644 4171549 4171549 R100 new-name.ts\told-name.ts",
+    ].join("\n")
+    expect(parseGitStatusV2Output(out)?.lines).toEqual(["new-name.ts"])
+  })
+
+  test("keeps spaces in ordinary and renamed paths", () => {
+    const out = [
+      ...header,
+      "1 .M N... 100644 100644 100644 abc abc src/a file.ts",
+      "2 R. N... 100644 100644 100644 abc abc R090 docs/new name.md\tdocs/old name.md",
+      "? untracked file.ts",
+    ].join("\n")
+    expect(parseGitStatusV2Output(out)?.lines).toEqual([
+      "src/a file.ts",
+      "docs/new name.md",
+      "untracked file.ts",
+    ])
+  })
+})
+
 // ── parseGitStatusV2Output — upstreamGone detection ──────────────────────────
 // These tests verify that a "gone" upstream (branch.upstream present but
 // branch.ab absent) is correctly detected and does not get confused with
