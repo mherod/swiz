@@ -48,6 +48,8 @@ describe("runThinDispatch daemon timeout", () => {
           ...process.env,
           HOME: tempDir,
           SWIZ_DIRECT: "1",
+          // CI sets SWIZ_NO_DAEMON=1, which would skip the daemon path under test.
+          SWIZ_NO_DAEMON: "",
           SWIZ_DAEMON_PORT: String(server.port),
           AI_TEST_NO_BACKEND: "1",
         },
