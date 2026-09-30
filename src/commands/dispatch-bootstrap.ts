@@ -25,6 +25,9 @@ import { detectTerminal } from "../utils/terminal-detection.ts"
 const DEFAULT_DAEMON_PORT = 7_943
 const DEFAULT_DAEMON_TIMEOUT_MS = 30_000
 const STDIN_PAYLOAD_TIMEOUT_MS = 2_000
+/** Headroom left for process startup, stdin, and writing the response. */
+const DAEMON_CLIENT_MARGIN_MS = 3_000
+const MIN_DAEMON_CLIENT_TIMEOUT_MS = 1_000
 
 interface ParsedDispatchArgs {
   agentId?: string
@@ -143,16 +146,33 @@ function daemonPort(): number {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_DAEMON_PORT
 }
 
+/**
+ * Client-side budget for the daemon request. `swiz install` writes the agent's
+ * hook timeout from the same DISPATCH_TIMEOUTS value, so the client must give
+ * up early enough to still print a response before the agent kills it.
+ */
+export function daemonClientTimeoutMs(canonicalEvent: string): number {
+  const agentBudgetMs =
+    (DISPATCH_TIMEOUTS[canonicalEvent] ?? DEFAULT_DAEMON_TIMEOUT_MS / 1000) * 1000
+  return Math.max(MIN_DAEMON_CLIENT_TIMEOUT_MS, agentBudgetMs - DAEMON_CLIENT_MARGIN_MS)
+}
+
+type DaemonDispatchResult =
+  | { kind: "response"; response: Record<string, any> }
+  /** Daemon not reachable or rejected the request — local execution can help. */
+  | { kind: "unavailable" }
+  /** Daemon is busy; re-running every hook cold would only overrun the agent timeout. */
+  | { kind: "timeout" }
+
 async function tryDaemonDispatch(
   canonicalEvent: string,
   hookEventName: string,
   payloadStr: string
-): Promise<Record<string, any> | null> {
-  if (process.env.SWIZ_NO_DAEMON === "1") return null
+): Promise<DaemonDispatchResult> {
+  if (process.env.SWIZ_NO_DAEMON === "1") return { kind: "unavailable" }
 
-  const timeoutMs = (DISPATCH_TIMEOUTS[canonicalEvent] ?? DEFAULT_DAEMON_TIMEOUT_MS / 1000) * 1000
   const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), timeoutMs)
+  const timer = setTimeout(() => controller.abort(), daemonClientTimeoutMs(canonicalEvent))
   try {
     const response = await fetch(
       `http://127.0.0.1:${daemonPort()}/dispatch?event=${encodeURIComponent(canonicalEvent)}&hookEventName=${encodeURIComponent(hookEventName)}`,
@@ -163,13 +183,17 @@ async function tryDaemonDispatch(
         signal: controller.signal,
       }
     )
-    if (!response.ok) return null
+    if (!response.ok) return { kind: "unavailable" }
     const value: unknown = await response.json()
-    return value !== null && typeof value === "object" && !Array.isArray(value)
-      ? (value as Record<string, any>)
-      : {}
+    return {
+      kind: "response",
+      response:
+        value !== null && typeof value === "object" && !Array.isArray(value)
+          ? (value as Record<string, any>)
+          : {},
+    }
   } catch {
-    return null
+    return controller.signal.aborted ? { kind: "timeout" } : { kind: "unavailable" }
   } finally {
     clearTimeout(timer)
   }
@@ -315,9 +339,18 @@ export async function runThinDispatch(
     const payload = await preparePayload(rawPayloadStr, canonicalEvent, hookEventName)
     enrichPayload(payload, parsedArgs.agentId, processStartedAt)
 
-    const response = await tryDaemonDispatch(canonicalEvent, hookEventName, JSON.stringify(payload))
-    if (response !== null) {
-      process.stdout.write(`${JSON.stringify(sanitizeHookOutputForCurrentAgent(response))}\n`)
+    const result = await tryDaemonDispatch(canonicalEvent, hookEventName, JSON.stringify(payload))
+    if (result.kind === "response") {
+      process.stdout.write(
+        `${JSON.stringify(sanitizeHookOutputForCurrentAgent(result.response))}\n`
+      )
+      return
+    }
+    if (result.kind === "timeout") {
+      process.stderr.write(
+        `swiz daemon did not answer ${canonicalEvent} within ${daemonClientTimeoutMs(canonicalEvent)}ms; allowing without local re-run\n`
+      )
+      process.stdout.write("{}\n")
       return
     }
 
