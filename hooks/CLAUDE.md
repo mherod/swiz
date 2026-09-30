@@ -20,6 +20,8 @@
 - Keep `src/dispatch-routing.test.ts` passing.
 - Add hooks to existing preToolUse matcher groups; duplicates are shadowed because `manifest.find()` returns the first match.
 - DO NOT add sync hooks to unmatchered preToolUse groups — `manifest.test.ts` requires `matcher` for groups with sync hooks; async-only groups are exempt.
+- **DO**: Set `sideEffect: true` (`src/SwizHook.ts`) on any postToolUse hook that writes state another hook or gate reads (sentinels, stores, cooldowns). Without it the hook is silently skipped while a skill is active and for `mcp__*` tools under `ignoreMcpTools` (`keepSideEffectPostToolGroups` in `src/dispatch/blockingStrategy.ts`); list advice-only writers in `ADVISORY_WRITE_HOOKS` (`src/dispatch/side-effect-hooks.test.ts`), which fails on an unclassified writer (#994).
+- Matchers alias native task tools only (`toolMatchesToken`); name an MCP tool verbatim, e.g. `TaskList|mcp__swiz__TaskList`.
 - DON'T hard-code agent event or tool names in hook scripts.
 - `classifyHookOutput` (`src/dispatch/worker-types.ts`) validates subprocess stdout with `hookOutputSchema`; failures return `"invalid-schema"`. Rejected silent output requires `systemMessage`, `reason`, `stopReason`, or `additionalContext`; `{}` is valid. **Stop/SubagentStop** responses use `stopHookOutputSchema` (`src/dispatch/stop-response.ts`); see `hooks/schemas.ts` for event stdout fields.
 - In `lefthook.yml`, use `SWIZ_DIRECT=1 bun run index.ts dispatch <event>`; omitting triggers the global-link check.
