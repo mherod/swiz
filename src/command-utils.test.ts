@@ -31,6 +31,20 @@ describe("isSingleFileBunTestArgs", () => {
     expect(isSingleFileBunTestArgs(" src/foo.test.ts src/bar.test.ts")).toBe(false)
     expect(isSingleFileBunTestArgs(" src/")).toBe(false)
   })
+
+  test("treats substitutions and globs as an unknown file count (#1000)", () => {
+    expect(
+      isSingleFileBunTestArgs(
+        ` --parallel=2 src/a.test.ts $(rg -l "zod" src --glob '*.test.ts' | head -6 | tr '\\n' ' ')`
+      )
+    ).toBe(false)
+    expect(isSingleFileBunTestArgs(" --parallel=2 `ls src/*.test.ts`")).toBe(false)
+    expect(isSingleFileBunTestArgs(" --parallel=2 hooks/*.test.ts")).toBe(false)
+  })
+
+  test("still counts a genuine single file with a trailing pipe", () => {
+    expect(isSingleFileBunTestArgs(" --parallel=2 src/foo.test.ts 2>&1 | tail -20")).toBe(true)
+  })
 })
 
 describe("findNonCanonicalGitInvocation", () => {

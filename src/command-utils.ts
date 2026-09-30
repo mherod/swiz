@@ -46,8 +46,14 @@ export function bunTestArgSegments(command: string): string[] {
     .filter((segment): segment is string => segment !== null)
 }
 
+/** Command substitutions and globs expand to an unknown number of files. */
+const UNKNOWN_FILE_COUNT_RE = /\$\(|`|(?:^|\s)[^\s-][^\s]*[*?[]/
+
 /** Returns true when `bun test` args target exactly one test file. */
 export function isSingleFileBunTestArgs(segment: string): boolean {
+  // A substitution such as `$(rg -l x | head)` may contain a pipe; cutting at
+  // it would leave one visible file and misreport a multi-file run (#1000).
+  if (UNKNOWN_FILE_COUNT_RE.test(segment)) return false
   const stripped = segment
     .replace(/\s+--\w[\w-]*(?:=\S+)?/g, "") // flags (--flag or --flag=value)
     .replace(/\s*(?:[12]?>>?|2>&1|>&)\s*\S+/g, "") // redirections
