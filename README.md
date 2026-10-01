@@ -445,7 +445,7 @@ For a remote PR head, fetch it normally, then use `git worktree add --detach <pa
 | `transcriptMonitorMaxConcurrentDispatches` / `transcript-monitor-max-concurrent-dispatches` | `0` | No | global, project | Cap concurrent transcript dispatches; `0` is unlimited | `2` |
 | `updateMemoryFooter` / `update-memory-footer` | `false` | No | global | Add memory-update guidance to stop footers | `true` |
 | `gitStatusGate` / `git-status-gate` | `true` | No | global | Block stop while the worktree is dirty | `true` |
-| `nonDefaultBranchGate` / `non-default-branch-gate` | `true` | No | global | Block stop with unmerged work on a non-default branch | `true` |
+| `nonDefaultBranchGate` / `non-default-branch-gate` | `true` | No | global | Block stop with unmerged work on a non-default branch (a branch whose PR is already merged is always blocked) | `true` |
 | `githubCiGate` / `github-ci-gate` | `true` | No | global, project | Block stop when current GitHub Actions CI is failing | `true` |
 | `ignoreCi` / `ignore-ci` | `false` | No | global, project | Suppress all GitHub Actions integration | `true` |
 | `changesRequestedGate` / `changes-requested-gate` | `true` | No | global | Block stop with unresolved changes-requested reviews | `true` |

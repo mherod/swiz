@@ -4,6 +4,7 @@ import { join } from "node:path"
 import { stopHookOutputSchema } from "../src/schemas.ts"
 import { type HookResult, runHookInProcess, useTempDir } from "../src/utils/test-utils.ts"
 import {
+  buildMergedPrReason,
   buildStandardFeatureBranchReason,
   buildTrunkModeOutput,
   evaluateStopNonDefaultBranch,
@@ -232,5 +233,44 @@ describe("peer-held file caution (issue #842)", () => {
     )
     expect(output.reason).toContain("missing-cwd")
     expect(output.reason).not.toContain("git checkout")
+  })
+})
+
+describe("merged PR branch guidance", () => {
+  test("tells the agent to switch to the default branch and pull", () => {
+    const reason = buildMergedPrReason("feat/x", "main", { number: 42, headRefOid: "abc" }, 0)
+    expect(reason).toContain("PR #42")
+    expect(reason).toContain("already been merged")
+    expect(reason).toContain("git checkout main && git pull")
+    expect(reason).not.toContain("commit(s) made after")
+  })
+
+  test("warns about commits added after the merged head", () => {
+    const reason = buildMergedPrReason("feat/x", "main", { number: 42, headRefOid: "abc" }, 3)
+    expect(reason).toContain("3 commit(s) made after the merged PR head")
+  })
+})
+
+describe("nonDefaultBranchGate setting", () => {
+  test("gate off skips the generic feature-branch block", async () => {
+    const dir = await createGitRepo("feature/off")
+    const result = await evaluateStopNonDefaultBranch({
+      session_id: "test-session",
+      cwd: dir,
+      transcript_path: "",
+      _effectiveSettings: { nonDefaultBranchGate: false },
+    } as never)
+    expect(result).toEqual({})
+  })
+
+  test("control: gate on still blocks the feature branch", async () => {
+    const dir = await createGitRepo("feature/on")
+    const result = await evaluateStopNonDefaultBranch({
+      session_id: "test-session",
+      cwd: dir,
+      transcript_path: "",
+      _effectiveSettings: { nonDefaultBranchGate: true },
+    } as never)
+    expect(result).toHaveProperty("decision", "block")
   })
 })

@@ -14,6 +14,7 @@ import {
   forkPrCreateCmd,
   forkPushCmd,
   getOpenPrForBranch,
+  ghJson,
   git,
   hasGhCli,
 } from "../src/git-helpers.ts"
@@ -38,11 +39,72 @@ interface OpenBranchPr {
   number: number
 }
 
+export interface MergedBranchPr {
+  number: number
+  headRefOid: string
+}
+
 type ForkTopology = Awaited<ReturnType<typeof detectForkTopology>>
 
 async function getOpenBranchPr(branch: string, cwd: string): Promise<OpenBranchPr | null> {
   if (!hasGhCli()) return null
   return await getOpenPrForBranch<OpenBranchPr>(branch, cwd, "mergeable,number")
+}
+
+/** Most recent merged PR whose head is this branch, or null when none (or gh unavailable). */
+async function getMergedBranchPr(branch: string, cwd: string): Promise<MergedBranchPr | null> {
+  if (!hasGhCli() || !branch) return null
+  const prs = await ghJson<MergedBranchPr[]>(
+    [
+      "pr",
+      "list",
+      "--head",
+      branch,
+      "--state",
+      "merged",
+      "--limit",
+      "1",
+      "--json",
+      "number,headRefOid",
+    ],
+    cwd
+  )
+  return prs?.[0] ?? null
+}
+
+export function buildMergedPrReason(
+  branch: string,
+  defaultBranch: string,
+  pr: MergedBranchPr,
+  unmergedCommits: number
+): string {
+  let reason = `PR #${pr.number} for branch '${branch}' has already been merged upstream — this branch is finished.\n\n`
+  reason += `Switch back to '${defaultBranch}' and pull the merged changes:\n`
+  reason += `  \`git checkout ${defaultBranch} && git pull\`\n`
+  if (unmergedCommits > 0) {
+    reason += `\n'${branch}' has ${unmergedCommits} commit(s) made after the merged PR head. Carry them onto '${defaultBranch}' (or a fresh branch) before switching so they are not stranded.\n`
+  }
+  reason += `\nDo not keep working on a merged PR branch.`
+  return reason
+}
+
+async function countCommitsAfter(headRefOid: string, cwd: string): Promise<number> {
+  const out = await git(["rev-list", "--count", `${headRefOid}..HEAD`], cwd)
+  const n = Number(out)
+  return Number.isFinite(n) ? n : 0
+}
+
+async function resolveMergedPrBlock(
+  branch: string,
+  defaultBranch: string,
+  pr: OpenBranchPr | null,
+  cwd: string
+): Promise<SwizHookOutput | null> {
+  if (pr) return null
+  const merged = await getMergedBranchPr(branch, cwd)
+  if (!merged) return null
+  const extra = await countCommitsAfter(merged.headRefOid, cwd)
+  return blockStopObj(buildMergedPrReason(branch, defaultBranch, merged, extra))
 }
 
 export function buildTrunkModeOutput(
@@ -166,10 +228,32 @@ export async function evaluateStopNonDefaultBranch(input: StopHookInput): Promis
   const hold = buildOwnershipHoldReason(peerHeldFiles)
   if (hold) return blockStopObj(hold)
 
+  const pr = await getOpenBranchPr(branch, cwd)
+  // The merged-PR block always runs; nonDefaultBranchGate only governs the rest.
+  const mergedBlock = await resolveMergedPrBlock(branch, defaultBranch, pr, cwd)
+  if (mergedBlock) return mergedBlock
+  if (!isNonDefaultBranchGateEnabled(input)) return {}
+
+  return await evaluateUnmergedFeatureBranch(cwd, branch, defaultBranch, pr, peerHeldFiles)
+}
+
+/** Payload-supplied gate value; defaults to enabled when dispatch did not inject settings. */
+function isNonDefaultBranchGateEnabled(input: StopHookInput): boolean {
+  const settings = (input as Record<string, unknown>)._effectiveSettings as
+    | { nonDefaultBranchGate?: unknown }
+    | undefined
+  return settings?.nonDefaultBranchGate !== false
+}
+
+async function evaluateUnmergedFeatureBranch(
+  cwd: string,
+  branch: string,
+  defaultBranch: string,
+  pr: OpenBranchPr | null,
+  peerHeldFiles: PeerHeldFilesResult
+): Promise<SwizHookOutput> {
   const trunkMode = (await readProjectSettings(cwd))?.trunkMode === true
   if (trunkMode) return buildTrunkModeOutput(branch, defaultBranch, peerHeldFiles)
-
-  const pr = await getOpenBranchPr(branch, cwd)
 
   const preservation = await resolveWorktreePreservation(cwd, branch, defaultBranch, pr)
 
@@ -187,7 +271,6 @@ const stopNonDefaultBranch: SwizStopHook = {
   name: "stop-non-default-branch",
   event: "stop",
   timeout: 10,
-  requiredSettings: ["nonDefaultBranchGate"],
 
   run(input) {
     return evaluateStopNonDefaultBranch(input)
