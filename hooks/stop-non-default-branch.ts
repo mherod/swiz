@@ -233,8 +233,15 @@ export async function evaluateStopNonDefaultBranch(input: StopHookInput): Promis
   const mergedBlock = await resolveMergedPrBlock(branch, defaultBranch, pr, cwd)
   if (mergedBlock) return mergedBlock
   if (!isNonDefaultBranchGateEnabled(input)) return {}
+  if (isRestrictedStopContinuation(input)) return {}
 
   return await evaluateUnmergedFeatureBranch(cwd, branch, defaultBranch, pr, peerHeldFiles)
+}
+
+/** Commit/delivery stop modes keep this hook only for the merged-PR block. */
+function isRestrictedStopContinuation(input: StopHookInput): boolean {
+  const mode = input._stopContinuationMode
+  return mode === "commit" || mode === "delivery"
 }
 
 /** Payload-supplied gate value; defaults to enabled when dispatch did not inject settings. */

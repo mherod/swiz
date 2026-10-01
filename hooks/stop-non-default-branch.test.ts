@@ -274,3 +274,27 @@ describe("nonDefaultBranchGate setting", () => {
     expect(result).toHaveProperty("decision", "block")
   })
 })
+
+describe("restricted stop continuation", () => {
+  test("commit mode skips the generic feature-branch block", async () => {
+    const dir = await createGitRepo("feature/commit-mode")
+    const result = await evaluateStopNonDefaultBranch({
+      session_id: "test-session",
+      cwd: dir,
+      transcript_path: "",
+      _stopContinuationMode: "commit",
+    } as never)
+    expect(result).toEqual({})
+  })
+
+  test("control: all mode still blocks the feature branch", async () => {
+    const dir = await createGitRepo("feature/all-mode")
+    const result = await evaluateStopNonDefaultBranch({
+      session_id: "test-session",
+      cwd: dir,
+      transcript_path: "",
+      _stopContinuationMode: "all",
+    } as never)
+    expect(result).toHaveProperty("decision", "block")
+  })
+})
