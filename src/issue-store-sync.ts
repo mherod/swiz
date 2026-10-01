@@ -298,7 +298,9 @@ function syncEntityGroup(
         })
       }
     }
-    if (changed.length > 0) ops.upsert(repo, changed)
+    // Upsert unchanged rows too: TTL-filtered readers (status line, listIssues)
+    // treat a row as live only while synced_at is recent.
+    if (open.length > 0) ops.upsert(repo, open)
     bucket.removed = ops.removeClosed(repo, new Set(open.map((i) => i.number)))
     bucket.upserted = changed.length
   }

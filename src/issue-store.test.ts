@@ -1,5 +1,5 @@
 import { Database } from "bun:sqlite"
-import { afterEach, describe, expect, test } from "bun:test"
+import { afterEach, describe, expect, setSystemTime, test } from "bun:test"
 import { mkdirSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -1999,6 +1999,42 @@ describe("syncUpstreamState with labels, milestones, and branch data", () => {
       expect(prCommentCalls).toEqual([])
       expect(reviewCalls).toEqual([])
     } finally {
+      store.close()
+    }
+  })
+
+  test("unchanged issues and PRs stay inside the read TTL after a resync", async () => {
+    const store = createStore()
+    const issues = [{ number: 1, title: "Issue 1", updatedAt: "2024-01-01T00:00:00Z" }]
+    const prs = [{ number: 11, title: "PR 11", headRefName: "feat/a" }]
+    const client: GitHubClient = {
+      listIssues: async (_cwd, state) => (state === "open" ? issues : []),
+      listPullRequests: async (_cwd, state) => (state === "open" ? prs : []),
+      listWorkflowRuns: async () => [],
+      listIssueComments: async () => [],
+      listLabels: async () => [],
+      listMilestones: async () => [],
+      listBranchWorkflowRuns: async () => [],
+      getBranchProtection: async () => null,
+      listIssueEventsSince: async () => null,
+      listPullRequestReviews: async () => [],
+    }
+    const hourMs = 60 * 60 * 1000
+    const start = Date.now()
+
+    try {
+      await syncUpstreamState("test/repo", "/tmp", { store, client })
+      setSystemTime(new Date(start + 2 * hourMs))
+      // Control: without a resync the rows have aged out of a 1h window.
+      expect(store.listIssues("test/repo", hourMs)).toHaveLength(0)
+
+      const result = await syncUpstreamState("test/repo", "/tmp", { store, client })
+      expect(result.issues.skipped).toBe(1)
+      expect(result.issues.upserted).toBe(0)
+      expect(store.listIssues("test/repo", hourMs)).toHaveLength(1)
+      expect(store.listPullRequests("test/repo", hourMs)).toHaveLength(1)
+    } finally {
+      setSystemTime()
       store.close()
     }
   })
