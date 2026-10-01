@@ -484,6 +484,7 @@ esac
           SWIZ_DIRECT: "1",
           AI_TEST_NO_BACKEND: "1",
           RESTART_SCENARIO: scenario,
+          SWIZ_DAEMON_RESTART_TIMEOUT_MS: "1000",
         },
         stdout: "pipe",
         stderr: "pipe",

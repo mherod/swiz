@@ -170,13 +170,23 @@ async function probeReplacementHealth(
   }
 }
 
+function restartStartupTimeout(): number {
+  // Cold session discovery can exceed ten seconds on large transcript stores.
+  const configuredTimeout = Number(process.env.SWIZ_DAEMON_RESTART_TIMEOUT_MS)
+  return Number.isInteger(configuredTimeout) &&
+    configuredTimeout > 0 &&
+    configuredTimeout <= 120_000
+    ? configuredTimeout
+    : 60_000
+}
+
 async function waitForReplacement(
   port: number,
   pid: number,
   target: string,
   options: RestartDaemonOptions
 ): Promise<void> {
-  const deadline = performance.now() + (options.timeoutMs ?? 10_000)
+  const deadline = performance.now() + (options.timeoutMs ?? restartStartupTimeout())
   const fetchHealth = options.fetchHealth ?? fetch
   let detail = "replacement has not become healthy"
   while (performance.now() < deadline) {
