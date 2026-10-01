@@ -31,9 +31,9 @@ async function runCiWaitFixture(
     mkdir(join(cwd, ".swiz"), { recursive: true }),
     mkdir(bin),
   ])
-  await Bun.write(join(home, ".swiz/settings.json"), JSON.stringify({ ignoreCi: globalIgnoreCi }))
+  await Bun.write(join(home, ".swiz/settings.json"), JSON.stringify({ ci: !globalIgnoreCi }))
   if (projectIgnoreCi !== undefined) {
-    await Bun.write(join(cwd, ".swiz/config.json"), JSON.stringify({ ignoreCi: projectIgnoreCi }))
+    await Bun.write(join(cwd, ".swiz/config.json"), JSON.stringify({ ci: !projectIgnoreCi }))
   }
   await Bun.write(callsPath, "")
   const ghPath = join(bin, "gh")

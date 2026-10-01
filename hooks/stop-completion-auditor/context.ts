@@ -66,7 +66,7 @@ export async function resolveCompletionAuditContext(
     const gates: CompletionValidationGate = {
       taskCreation: true, // Always check task creation
       auditLog: true, // Always try audit log fallback
-      ciEvidence: !(effective.ignoreCi ?? false), // Respect ignoreCi setting
+      ciEvidence: effective.ci, // Respect CI setting
     }
 
     // Load fresh task state

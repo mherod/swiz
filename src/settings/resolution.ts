@@ -143,8 +143,7 @@ const PROJECT_OVERRIDABLE_KEYS = [
   "autoSteerTranscriptWatching",
   "transcriptMonitorMaxConcurrentDispatches",
   "actionPlanMerge",
-  "ignoreCi",
-  "githubCiGate",
+  "ci",
 ] as const satisfies ReadonlyArray<keyof ProjectSwizSettings & keyof SwizSettings>
 
 /** Resolve fields that support project-level overrides. */
@@ -164,8 +163,6 @@ function buildBaseSettings(
   projectSettings?: ProjectSwizSettings | null
 ): EffectiveSettingsBase {
   const overrides = resolveProjectOverrides(settings, projectSettings)
-  // Preserve the invariant: when ignoreCi is on (at any tier), githubCiGate is forced off.
-  const githubCiGate = overrides.ignoreCi ? false : overrides.githubCiGate
   return {
     critiquesEnabled: settings.critiquesEnabled,
     narratorVoice: settings.narratorVoice,
@@ -200,7 +197,6 @@ function buildBaseSettings(
     enforceMorningStandup: settings.enforceMorningStandup,
     enforceWeeklyRetro: settings.enforceWeeklyRetro,
     ...overrides,
-    githubCiGate,
   }
 }
 

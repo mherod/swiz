@@ -60,7 +60,7 @@ export interface WarmStatusLineSnapshot {
   gitInfo: string
   gitBranch: string
   activeSegments: string[]
-  /** When true (global ignore-ci), the status line must not render CI — even if ciState was populated. */
+  /** When true (CI disabled), the status line must not render CI — even if ciState was populated. */
   ignoreCi?: boolean
   ciState?: GitHubCiState
   ciLabel?: string
@@ -180,7 +180,7 @@ interface StatusLineDaemonMetrics {
 
 interface StatusLineRenderSettings {
   activeSegments: string[]
-  ignoreCi: boolean
+  ci: boolean
   settingsParts: string[]
 }
 
@@ -515,7 +515,7 @@ const COVERED_SETTING_KEYS = new Set([
   "pushGate",
   "strictNoDirectMain",
   "sandboxedEdits",
-  "ignoreCi",
+  "ci",
 ])
 
 // Keys that cannot be compared with simple equality (arrays, objects, metadata).
@@ -530,7 +530,7 @@ const BOOLEAN_FLAGS: BooleanFlagDef[] = [
   ["pushGate", `\x1b[93m🚧 push-gate:on${R}`, `\x1b[90m🚧 push-gate:off${R}`],
   ["strictNoDirectMain", `\x1b[91m🛡 direct-main:off${R}`, `\x1b[90m🛡 direct-main:on${R}`],
   ["sandboxedEdits", `\x1b[92m🧪 sandbox:on${R}`, `\x1b[93m🧪 sandbox:off${R}`],
-  ["ignoreCi", `\x1b[93m⏭ ignore-ci${R}`, `\x1b[90m⏭ ignore-ci:off${R}`],
+  ["ci", `\x1b[93m✓ ci${R}`, `\x1b[90m⏭ ci:off${R}`],
 ]
 
 const AMBITION_LABELS: Record<string, string> = {
@@ -704,7 +704,7 @@ async function resolveStatusLineRenderSettings(
   const effective = getEffectiveSwizSettings(swizSettings, sessionId ?? null, projectSettings)
   return {
     activeSegments: activeSegmentsFromEffective(effective),
-    ignoreCi: Boolean(effective.ignoreCi),
+    ci: effective.ci,
     settingsParts: buildSettingsFlags(effective),
   }
 }
@@ -717,7 +717,7 @@ function applyRenderSettingsToSnapshot(
   return {
     ...snapshot,
     activeSegments: renderSettings.activeSegments,
-    ignoreCi: renderSettings.ignoreCi,
+    ignoreCi: !renderSettings.ci,
     settingsParts: renderSettings.settingsParts,
   }
 }
@@ -833,7 +833,7 @@ function assembleSnapshot(options: {
     execStats,
     queuedSteers,
   } = options
-  const suppressCi = Boolean(effective?.ignoreCi)
+  const suppressCi = effective?.ci === false
   const ciSummary = suppressCi ? null : summarizeGitHubCiRuns(gh.ciData)
   return {
     shortCwd,
@@ -885,7 +885,7 @@ export async function computeWarmStatusLineSnapshot(
   const activeSegments = activeSegmentsFromEffective(effective)
   const needs = computeSegmentNeeds(activeSegments)
   if (!ciProviders.has("github-actions")) needs.ci = false
-  if (effective?.ignoreCi) needs.ci = false
+  if (effective?.ci === false) needs.ci = false
   const gh = await fetchGhData(cwd, gitResult.branch, needs)
   const taskCounts =
     sessionTasks && sessionTasks.length > 0 ? buildTaskCountsFromTasks(sessionTasks) : null

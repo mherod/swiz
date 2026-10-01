@@ -24,7 +24,7 @@ describe("filterRequiredSettingsHooks", () => {
     const groups: HookGroup[] = [
       makeGroup([
         { file: "hook-a.ts", requiredSettings: ["qualityChecksGate"] },
-        { file: "hook-b.ts", requiredSettings: ["githubCiGate"] },
+        { file: "hook-b.ts", requiredSettings: ["ci"] },
       ]),
     ]
     const result = filterRequiredSettingsHooks(groups, makeEffective())
@@ -54,7 +54,7 @@ describe("filterRequiredSettingsHooks", () => {
       makeGroup([
         { file: "hook-keep.ts" },
         { file: "hook-gate.ts", requiredSettings: ["qualityChecksGate"] },
-        { file: "hook-also-keep.ts", requiredSettings: ["githubCiGate"] },
+        { file: "hook-also-keep.ts", requiredSettings: ["ci"] },
       ]),
     ]
     const result = filterRequiredSettingsHooks(groups, makeEffective({ qualityChecksGate: false }))
@@ -68,14 +68,14 @@ describe("filterRequiredSettingsHooks", () => {
 
   test("hooks with multiple required settings — all must be truthy", () => {
     const groups: HookGroup[] = [
-      makeGroup([{ file: "hook-a.ts", requiredSettings: ["qualityChecksGate", "githubCiGate"] }]),
+      makeGroup([{ file: "hook-a.ts", requiredSettings: ["qualityChecksGate", "ci"] }]),
     ]
     // Both truthy
     const result1 = filterRequiredSettingsHooks(groups, makeEffective())
     expect(result1).toHaveLength(1)
 
     // One falsy
-    const result2 = filterRequiredSettingsHooks(groups, makeEffective({ githubCiGate: false }))
+    const result2 = filterRequiredSettingsHooks(groups, makeEffective({ ci: false }))
     expect(result2).toHaveLength(0)
   })
 

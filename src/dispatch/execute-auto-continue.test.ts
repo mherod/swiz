@@ -242,7 +242,7 @@ describe("idle delivery stop selection", () => {
             autoContinue: false,
             idleDeliveryMinutes: 5,
             gitStatusGate: true,
-            githubCiGate: true,
+            ci: true,
             personalRepoIssuesGate: true,
           },
           { home }

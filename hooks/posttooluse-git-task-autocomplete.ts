@@ -30,7 +30,7 @@ async function buildPushContext(sessionId: string, cwd: string): Promise<string>
   const settings = await readSwizSettings()
   const projectSettings = await readProjectSettings(cwd)
   const effective = getEffectiveSwizSettings(settings, sessionId, projectSettings)
-  if (effective.ignoreCi) {
+  if (!effective.ci) {
     return "git push succeeded."
   }
   if (projectSettings?.trunkMode) {

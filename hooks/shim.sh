@@ -1205,9 +1205,9 @@ gh() {
       return 1
       ;;
     *--skip-status-check*)
-      local ignore_ci
-      ignore_ci="$(_swiz_get_setting "ignoreCi")"
-      if [[ "$ignore_ci" != "true" ]]; then
+      local ci
+      ci="$(_swiz_get_setting "ci")"
+      if [[ "$ci" != "false" ]]; then
         echo "Error: gh --skip-status-check is blocked for security reasons" >&2
         echo "This flag bypasses required CI/CD status checks" >&2
         echo "Please wait for all required checks to pass before merging" >&2

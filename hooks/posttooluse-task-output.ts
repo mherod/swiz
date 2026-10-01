@@ -729,7 +729,7 @@ async function handlePushCiContext(output: string, cwd: string): Promise<SwizHoo
     readProjectSettings(pushCwd),
   ])
   const effectivePush = getEffectiveSwizSettings(globalSettings, null, projectSettings)
-  if (effectivePush.ignoreCi) return null
+  if (!effectivePush.ci) return null
 
   const ciContext = await buildCiContext(output, pushCwd)
   if (!ciContext) return null

@@ -3,7 +3,7 @@
 // Unified stop gate: git sync, GitHub CI (feature-branch peer-review mode), and
 // actionable issues/PRs — one preamble and one numbered action plan for the agent.
 //
-// Respects per-gate settings: gitStatusGate, githubCiGate, personalRepoIssuesGate.
+// Respects per-gate settings: gitStatusGate, ci, personalRepoIssuesGate.
 //
 // This hook is a thin wrapper around the modular stop-ship-checklist/evaluate module
 // that orchestrates three separable workflow concerns.

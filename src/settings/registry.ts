@@ -320,30 +320,15 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
     },
   },
   {
-    key: "githubCiGate",
-    aliases: ["github-ci-gate", "githubcigate", "github_ci_gate", "ci-gate"],
+    key: "ci",
+    aliases: ["ci"],
     kind: "boolean",
     scopes: ["global", "project"],
     default: true,
     docs: {
-      description: "Block session stop when the latest GitHub Actions CI run is failing",
+      description: "Enable GitHub Actions CI awareness and checks",
       effectExplanation:
-        "When enabled, the stop hook checks the most recent CI run for the current commit and blocks if it has failed. Ensures you don't leave a session with broken CI.",
-    },
-  },
-  {
-    key: "ignoreCi",
-    aliases: ["ignore-ci", "ignoreci", "ignore_ci", "no-ci"],
-    kind: "boolean",
-    scopes: ["global", "project"],
-    default: false,
-    docs: {
-      description: "Completely suppress all GitHub Actions CI integration",
-      effectExplanation:
-        "When enabled, disables all CI-related behavior: no gh run polling, no CI stop hooks, no CI data in the status line, and CI evidence gates are treated as satisfied. Useful for repos without GitHub Actions.",
-      enableDescription:
-        "Suppress CI interactions (no CI wait/poll, CI hooks, CI status-line data, or CI evidence gates)",
-      disableDescription: "Use normal GitHub Actions CI integration",
+        "When enabled, fetch CI status, watch runs, and enforce CI checks and evidence. When disabled, skip CI polling, status-line data, watches, and CI enforcement.",
     },
   },
   {

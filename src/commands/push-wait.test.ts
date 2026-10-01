@@ -399,7 +399,7 @@ describe("executePushFlow", () => {
     mkdirSync(join(repo, ".swiz"))
     writeFileSync(
       join(repo, ".swiz", "config.json"),
-      JSON.stringify({ ignoreCi: true, collaborationMode: "solo" })
+      JSON.stringify({ ci: false, collaborationMode: "solo" })
     )
 
     const result = await executePushFlow({
@@ -434,7 +434,7 @@ describe("executePushFlow", () => {
     mkdirSync(join(repo, ".swiz"))
     writeFileSync(
       join(repo, ".swiz", "config.json"),
-      JSON.stringify({ ignoreCi: true, collaborationMode: "team", trunkMode: true })
+      JSON.stringify({ ci: false, collaborationMode: "team", trunkMode: true })
     )
 
     const result = await executePushFlow({
@@ -470,7 +470,7 @@ describe("executePushFlow", () => {
     writeFileSync(
       join(repo, ".swiz", "config.json"),
       JSON.stringify({
-        ignoreCi: true,
+        ci: false,
         collaborationMode: "team",
         trunkMode: true,
         strictNoDirectMain: true,

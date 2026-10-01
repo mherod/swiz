@@ -12,7 +12,7 @@ const DEFAULT_POLL_INTERVAL_MS = 5_000
 const PASSING_JOB_CONCLUSIONS = new Set(["success", "skipped", "neutral"])
 
 export interface CiWatchStartResponse {
-  /** Set when global `ignore-ci` is enabled — daemon did not register a watch. */
+  /** Set when `ci` is disabled — daemon did not register a watch. */
   ignored?: boolean
   deduped?: boolean
   watch?: {
@@ -471,7 +471,7 @@ export function summarizeCiJobs(jobs: GhRunJob[]): string {
 
 export const ciWaitCommand: Command = {
   name: "ci-wait",
-  description: "Wait for authoritative CI (exit 3 when ignore-ci skips verification)",
+  description: "Wait for authoritative CI (exit 3 when ci disables verification)",
   usage: "swiz ci-wait <commit-sha> [--cwd <dir>] [--timeout <seconds>]",
   options: [
     { flags: "--cwd <dir>", description: "Repository containing the commit (default: cwd)" },
@@ -485,10 +485,10 @@ export const ciWaitCommand: Command = {
       readProjectSettings(cwd),
     ])
     const effective = getEffectiveSwizSettings(globalSettings, undefined, projectSettings)
-    if (effective.ignoreCi) {
+    if (!effective.ci) {
       stderrLog(
-        "ignore-ci",
-        "ignore-ci is enabled — CI was not checked (exit 3). " +
+        "ci",
+        "ci is disabled — CI was not checked (exit 3). " +
           "Verify with gh run view <run-id> --json conclusion,status,jobs."
       )
       process.exitCode = 3

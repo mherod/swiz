@@ -19,7 +19,7 @@ function resolveWorkflowGates(
 ): WorkflowGates {
   return {
     git: settings.gitStatusGate ?? true,
-    ci: settings.githubCiGate ?? false,
+    ci: settings.ci ?? false,
     issues: !deliveryOnly && (settings.personalRepoIssuesGate ?? false),
   }
 }

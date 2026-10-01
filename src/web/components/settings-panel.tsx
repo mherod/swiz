@@ -22,8 +22,7 @@ interface GlobalSettingsForm {
   prAgeGateMinutes: number
   updateMemoryFooter: boolean
   nonDefaultBranchGate: boolean
-  ignoreCi: boolean
-  githubCiGate: boolean
+  ci: boolean
   changesRequestedGate: boolean
   personalRepoIssuesGate: boolean
   issueCloseGate: boolean
@@ -66,8 +65,7 @@ const DEFAULT_GLOBAL_FORM: GlobalSettingsForm = {
   prAgeGateMinutes: 15,
   updateMemoryFooter: true,
   nonDefaultBranchGate: true,
-  ignoreCi: false,
-  githubCiGate: true,
+  ci: true,
   changesRequestedGate: true,
   personalRepoIssuesGate: true,
   issueCloseGate: false,
@@ -200,8 +198,7 @@ function globalSettingsToForm(settings: Record<string, unknown>): GlobalSettings
     prAgeGateMinutes: readNumberSetting(settings, "prAgeGateMinutes", 15),
     updateMemoryFooter: readBooleanSetting(settings, "updateMemoryFooter", true),
     nonDefaultBranchGate: readBooleanSetting(settings, "nonDefaultBranchGate", true),
-    ignoreCi: readBooleanSetting(settings, "ignoreCi"),
-    githubCiGate: readBooleanSetting(settings, "githubCiGate", true),
+    ci: readBooleanSetting(settings, "ci", true),
     changesRequestedGate: readBooleanSetting(settings, "changesRequestedGate", true),
     personalRepoIssuesGate: readBooleanSetting(settings, "personalRepoIssuesGate", true),
     issueCloseGate: readBooleanSetting(settings, "issueCloseGate"),
@@ -528,14 +525,9 @@ const GLOBAL_TOGGLES: Array<{
     desc: "Block completion on the default branch to encourage feature branch workflows.",
   },
   {
-    key: "ignoreCi",
-    label: "Ignore CI",
-    desc: "Disable CI integration: no CI waits, CI hooks, CI status-line data, or CI evidence enforcement.",
-  },
-  {
-    key: "githubCiGate",
-    label: "GitHub CI gate",
-    desc: "Block completion if GitHub Actions CI checks are failing.",
+    key: "ci",
+    label: "CI",
+    desc: "Enable CI awareness, status, watches, and checks.",
   },
   {
     key: "changesRequestedGate",
@@ -613,7 +605,6 @@ const RISKY_GLOBAL_TOGGLES = new Set<keyof GlobalSettingsForm>([
   "autoContinue",
   "autoSteer",
   "autoSteerTranscriptWatching",
-  "ignoreCi",
   "issueCloseGate",
   "skipSecretScan",
 ])
@@ -646,9 +637,8 @@ const GLOBAL_TOGGLE_GROUPS: Array<{
       "pushGate",
       "gitStatusGate",
       "nonDefaultBranchGate",
-      "githubCiGate",
+      "ci",
       "changesRequestedGate",
-      "ignoreCi",
     ],
   },
   {

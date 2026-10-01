@@ -3,7 +3,7 @@
  * Extracted from web-server.ts (issue #685) to keep routing code focused.
  */
 import { resolveProjectRoot } from "../../project-identity.ts"
-import { readSwizSettings } from "../../settings.ts"
+import { getEffectiveSwizSettings, readProjectSettings, readSwizSettings } from "../../settings.ts"
 import type { CiWatchRegistry } from "./ci-watch-registry.ts"
 import { verifyWebhookSignature } from "./ci-watch-registry.ts"
 import { registerProjectAndTouch } from "./route-helpers.ts"
@@ -22,11 +22,12 @@ async function handleCiWatchPost(req: Request, ctx: CiRoutesContext): Promise<Re
       { status: 400 }
     )
   }
-  const global = await readSwizSettings()
-  if (global.ignoreCi) {
+  const projectCwd = (await resolveProjectRoot(body.cwd)) ?? body.cwd
+  const [global, project] = await Promise.all([readSwizSettings(), readProjectSettings(projectCwd)])
+  if (!getEffectiveSwizSettings(global, undefined, project).ci) {
     return Response.json({ ignored: true })
   }
-  const projectCwd = (await registerProjectAndTouch(ctx, body.cwd)) ?? body.cwd
+  await registerProjectAndTouch(ctx, projectCwd)
   const started = ctx.ciWatchRegistry.start(projectCwd, body.sha)
   return Response.json(started)
 }

@@ -470,7 +470,7 @@ describe("CI check advisory — prHooksActive modes", () => {
       tool_input: { command: "git push origin main", cwd: projectDir },
       transcript_path: tPath,
       session_id: "test",
-      _effectiveSettings: buildEffectiveTestSettings({ collaborationMode: mode, ignoreCi: false }),
+      _effectiveSettings: buildEffectiveTestSettings({ collaborationMode: mode, ci: true }),
     }
     const output = await evaluatePretoolusePushChecksGate(payload, UNIT_DEPENDENCIES)
     return parseHookOutput(output)
@@ -518,8 +518,8 @@ describe("CI check advisory — prHooksActive modes", () => {
     expect(result.reason).toContain("All pre-push checks found")
   })
 
-  test("ignore-ci skips CI advisory for team mode", async () => {
-    const projectDir = await mkdtemp(join(tmpDir, "team-ignore-ci-"))
+  test("ci skips CI advisory for team mode", async () => {
+    const projectDir = await mkdtemp(join(tmpDir, "team-ci-"))
     const swizDir = join(projectDir, ".swiz")
     await mkdir(swizDir, { recursive: true })
     await Bun.write(join(swizDir, "config.json"), JSON.stringify({ collaborationMode: "team" }))
@@ -536,7 +536,7 @@ describe("CI check advisory — prHooksActive modes", () => {
       session_id: "test",
       _effectiveSettings: buildEffectiveTestSettings({
         collaborationMode: "team",
-        ignoreCi: true,
+        ci: false,
       }),
     }
     const output = await evaluatePretoolusePushChecksGate(payload, UNIT_DEPENDENCIES)
@@ -714,7 +714,7 @@ async function runHookInRepo(opts: {
     tool_input: { command: opts.command, cwd: opts.repoDir },
     transcript_path: tPath,
     session_id: "test",
-    _effectiveSettings: buildEffectiveTestSettings({ ignoreCi: false }),
+    _effectiveSettings: buildEffectiveTestSettings({ ci: true }),
   }
   const out = (await runHookInProcess("hooks/pretooluse-push-checks-gate.ts", payload)).stdout
   if (!out.trim()) return { blocked: false, reason: "", advisory: false }

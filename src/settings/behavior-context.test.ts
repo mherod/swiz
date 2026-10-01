@@ -69,7 +69,7 @@ describe("buildBehaviorSteeringContext", () => {
 describe("BEHAVIOR_STEERING_SETTING_GROUPS", () => {
   test("keeps high-value blocking concerns visible", () => {
     expect(BEHAVIOR_STEERING_SETTING_GROUPS.workflow).toContain("trunkMode")
-    expect(BEHAVIOR_STEERING_SETTING_GROUPS.stopGates).toContain("githubCiGate")
+    expect(BEHAVIOR_STEERING_SETTING_GROUPS.stopGates).toContain("ci")
     expect(BEHAVIOR_STEERING_SETTING_GROUPS.taskGovernance).toContain("auditStrictness")
     expect(BEHAVIOR_STEERING_SETTING_GROUPS.taskGovernance).toContain("enforceUnblockMyself")
     expect(BEHAVIOR_STEERING_SETTING_GROUPS.safeguards).toContain("dirtyWorktreeThreshold")

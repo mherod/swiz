@@ -15,6 +15,7 @@ import {
   ambitionModeSchema,
   auditStrictnessSchema,
   collaborationModeSchema,
+  migrateCiSettings,
   type ProjectSwizSettings,
   type SessionSwizSettings,
   type StateData,
@@ -129,7 +130,7 @@ function inheritTaskAutoTransition(raw: unknown): unknown {
  * Non-registry fields (statusLineSegments, sessions, disabledHooks) are added here.
  */
 export const swizSettingsSchema: z.ZodType<SwizSettings> = z.preprocess(
-  inheritTaskAutoTransition,
+  (raw) => inheritTaskAutoTransition(migrateCiSettings(raw)),
   z
     .object({
       ...deriveSchemaShape(),
@@ -144,7 +145,7 @@ export const swizSettingsSchema: z.ZodType<SwizSettings> = z.preprocess(
 )
 
 const swizSettingsWithoutSessionsSchema = z.preprocess(
-  inheritTaskAutoTransition,
+  (raw) => inheritTaskAutoTransition(migrateCiSettings(raw)),
   z
     .object({
       ...deriveSchemaShape(),
@@ -327,6 +328,7 @@ function applyConcurrentDispatches(obj: Record<string, any>, result: ProjectSwiz
 }
 
 function normalizeProjectSettings(value: unknown): ProjectSwizSettings | null {
+  value = migrateCiSettings(value)
   if (!value || typeof value !== "object" || Array.isArray(value)) return null
   const obj = value as Record<string, any>
   const result: ProjectSwizSettings = {}
@@ -365,8 +367,7 @@ function normalizeProjectSettings(value: unknown): ProjectSwizSettings | null {
     "autoSteerTranscriptWatching",
     "strictNoDirectMain",
     "trunkMode",
-    "ignoreCi",
-    "githubCiGate",
+    "ci",
     // Declared on ProjectSwizSettings and listed in PROJECT_OVERRIDABLE_KEYS, but missing
     // here, so a project `actionPlanMerge` was parsed away before it could reach the
     // resolver — the override was silently unreachable in both directions (#875).
@@ -555,7 +556,9 @@ export async function writeProjectSettings(
       )
     }
   }
-  const existing = source === undefined ? {} : parseProjectSettingsForWrite(source, path)
+  const existing = migrateCiSettings(
+    source === undefined ? {} : parseProjectSettingsForWrite(source, path)
+  ) as Record<string, unknown>
   await ensureProjectSettingsIgnored(cwd)
   await mkdir(dirname(path), { recursive: true })
   if (source !== undefined) await Bun.write(`${path}.bak`, source)
@@ -658,7 +661,7 @@ export async function readGlobalExplicitSettingKeys(home?: string): Promise<Set<
   try {
     const raw: unknown = await file.json()
     if (!raw || typeof raw !== "object" || Array.isArray(raw)) return new Set()
-    return new Set(Object.keys(raw as Record<string, unknown>))
+    return new Set(Object.keys(migrateCiSettings(raw) as Record<string, unknown>))
   } catch {
     return new Set()
   }

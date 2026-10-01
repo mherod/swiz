@@ -13,8 +13,7 @@ export const BEHAVIOR_STEERING_SETTING_GROUPS = {
   stopGates: [
     "gitStatusGate",
     "nonDefaultBranchGate",
-    "githubCiGate",
-    "ignoreCi",
+    "ci",
     "changesRequestedGate",
     "personalRepoIssuesGate",
     "issueCloseGate",
@@ -129,8 +128,8 @@ function buildWorkflowContext(
 }
 
 function describeCiGate(settings: EffectiveSwizSettings): string {
-  if (settings.ignoreCi) return "CI integration is ignored"
-  return settings.githubCiGate ? "passing GitHub CI" : ""
+  if (!settings.ci) return "CI integration is ignored"
+  return "passing GitHub CI"
 }
 
 function enabledGateRows(settings: EffectiveSwizSettings): Array<[boolean, string]> {

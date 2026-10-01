@@ -22,7 +22,7 @@ Configure swiz settings using presets or individual changes. Parses `$ARGUMENTS`
 
 | Preset | Commands | Description |
 |--------|----------|-------------|
-| `backlog` | `enable auto-continue` + `set ambition-mode aggressive` + `set collaboration-mode solo` + `enable personal-repo-issues-gate` + `enable git-status-gate` + `enable github-ci-gate` | Autonomous backlog worker — picks up issues, implements, commits, pushes, and moves to the next one |
+| `backlog` | `enable auto-continue` + `set ambition-mode aggressive` + `set collaboration-mode solo` + `enable personal-repo-issues-gate` + `enable git-status-gate` + `enable ci` | Autonomous backlog worker — picks up issues, implements, commits, pushes, and moves to the next one |
 | `creative` | `enable auto-continue` + `set ambition-mode creative` | Auto-continue with creative issue drafting |
 | `aggressive` | `enable auto-continue` + `set ambition-mode aggressive` | Auto-continue focused on biggest missing capability |
 | `reflective` | `enable auto-continue` + `set ambition-mode reflective` | Auto-continue driven by session reflections |
@@ -43,7 +43,7 @@ Configure swiz settings using presets or individual changes. Parses `$ARGUMENTS`
 
 | Preset | Commands | Description |
 |--------|----------|-------------|
-| `lockdown` | `enable sandboxed-edits` + `enable push-gate` + `enable git-status-gate` + `enable github-ci-gate` + `enable changes-requested-gate` + `enable non-default-branch-gate` | All safety gates enabled — maximum guardrails |
+| `lockdown` | `enable sandboxed-edits` + `enable push-gate` + `enable git-status-gate` + `enable ci` + `enable changes-requested-gate` + `enable non-default-branch-gate` | All safety gates enabled — maximum guardrails |
 | `relaxed` | `disable push-gate` + `disable non-default-branch-gate` + `disable changes-requested-gate` | Fewer gates — trust the developer |
 
 ## Step 1: Parse Arguments

@@ -116,13 +116,8 @@ export interface ProjectSwizSettings {
   collaborationMode?: CollaborationMode
   /** Run lint and typecheck quality checks before allowing session stop. */
   qualityChecksGate?: boolean
-  /**
-   * Suppress all GitHub Actions CI integration for this project (no `gh run` polling,
-   * no CI hooks, no CI status-line fetches; advisory gates treat CI pre-checks as satisfied).
-   */
-  ignoreCi?: boolean
-  /** Block session stop when the latest GitHub Actions CI run is failing. */
-  githubCiGate?: boolean
+  /** Enable GitHub Actions CI awareness and checks. */
+  ci?: boolean
   /** Block git push unless the user has explicitly approved it. */
   pushGate?: boolean
   /** Read agent output aloud using text-to-speech. */
@@ -220,12 +215,8 @@ export interface SwizSettings {
   updateMemoryFooter: boolean
   gitStatusGate: boolean
   nonDefaultBranchGate: boolean
-  /**
-   * When true, suppress CI-facing behavior: no `gh run` polling, no CI hooks, no CI status-line fetches,
-   * and advisory gates treat CI pre-checks as satisfied.
-   */
-  ignoreCi: boolean
-  githubCiGate: boolean
+  /** Enable GitHub Actions CI awareness and checks. */
+  ci: boolean
   changesRequestedGate: boolean
   personalRepoIssuesGate: boolean
   /** When true, blocks issue close commands unless explicitly allowed. */
@@ -321,36 +312,51 @@ export const sessionSwizSettingsSchema = z.object({
   speak: z.boolean().optional(),
 })
 
-export const projectSettingsSchema = z.object({
-  autoContinue: z.boolean().optional(),
-  idleDeliveryMinutes: z.number().int().min(0).max(1440).optional(),
-  profile: policyProfileSchema.optional(),
-  trivialMaxFiles: z.number().int().min(1).optional(),
-  trivialMaxLines: z.number().int().min(1).optional(),
-  defaultBranch: z.string().min(1).regex(/^\S+$/).optional(),
-  memoryLineThreshold: z.number().int().min(1).optional(),
-  divergenceAdvisoryThreshold: z.number().int().min(1).optional(),
-  divergenceSteerThreshold: z.number().int().min(1).optional(),
-  memoryWordThreshold: z.number().int().min(1).optional(),
-  largeFileSizeKb: z.number().int().min(1).optional(),
-  dirtyWorktreeThreshold: z.number().int().min(1).optional(),
-  ambitionMode: ambitionModeSchema.optional(),
-  collaborationMode: collaborationModeSchema.optional(),
-  speak: z.boolean().optional(),
-  autoSteerTranscriptWatching: z.boolean().optional(),
-  transcriptMonitorMaxConcurrentDispatches: z.number().int().min(0).max(64).optional(),
-  pushGate: z.boolean().optional(),
-  qualityChecksGate: z.boolean().optional(),
-  ignoreCi: z.boolean().optional(),
-  githubCiGate: z.boolean().optional(),
-  strictNoDirectMain: z.boolean().optional(),
-  trunkMode: z.boolean().optional(),
-  auditStrictness: auditStrictnessSchema.optional(),
-  taskDurationWarningMinutes: z.number().int().min(1).optional(),
-  skillRecencyMaxTurns: z.number().int().min(1).optional(),
-  skillRecencyMaxAgeMinutes: z.number().int().min(1).optional(),
-  disabledHooks: z.array(z.string().min(1)).optional(),
-  plugins: z.array(z.string().min(1)).optional(),
-  largeFileAllowPatterns: z.array(z.string().min(1)).optional(),
-  actionPlanMerge: z.boolean().optional(),
-})
+export function migrateCiSettings(raw: unknown): unknown {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return raw
+  const obj = { ...(raw as Record<string, unknown>) }
+  if (typeof obj.ci !== "boolean") {
+    if (typeof obj.ignoreCi === "boolean" || typeof obj.githubCiGate === "boolean") {
+      obj.ci = obj.ignoreCi !== true && obj.githubCiGate !== false
+    }
+  }
+  delete obj.ignoreCi
+  delete obj.githubCiGate
+  return obj
+}
+
+export const projectSettingsSchema = z.preprocess(
+  migrateCiSettings,
+  z.object({
+    autoContinue: z.boolean().optional(),
+    idleDeliveryMinutes: z.number().int().min(0).max(1440).optional(),
+    profile: policyProfileSchema.optional(),
+    trivialMaxFiles: z.number().int().min(1).optional(),
+    trivialMaxLines: z.number().int().min(1).optional(),
+    defaultBranch: z.string().min(1).regex(/^\S+$/).optional(),
+    memoryLineThreshold: z.number().int().min(1).optional(),
+    divergenceAdvisoryThreshold: z.number().int().min(1).optional(),
+    divergenceSteerThreshold: z.number().int().min(1).optional(),
+    memoryWordThreshold: z.number().int().min(1).optional(),
+    largeFileSizeKb: z.number().int().min(1).optional(),
+    dirtyWorktreeThreshold: z.number().int().min(1).optional(),
+    ambitionMode: ambitionModeSchema.optional(),
+    collaborationMode: collaborationModeSchema.optional(),
+    speak: z.boolean().optional(),
+    autoSteerTranscriptWatching: z.boolean().optional(),
+    transcriptMonitorMaxConcurrentDispatches: z.number().int().min(0).max(64).optional(),
+    pushGate: z.boolean().optional(),
+    qualityChecksGate: z.boolean().optional(),
+    ci: z.boolean().optional(),
+    strictNoDirectMain: z.boolean().optional(),
+    trunkMode: z.boolean().optional(),
+    auditStrictness: auditStrictnessSchema.optional(),
+    taskDurationWarningMinutes: z.number().int().min(1).optional(),
+    skillRecencyMaxTurns: z.number().int().min(1).optional(),
+    skillRecencyMaxAgeMinutes: z.number().int().min(1).optional(),
+    disabledHooks: z.array(z.string().min(1)).optional(),
+    plugins: z.array(z.string().min(1)).optional(),
+    largeFileAllowPatterns: z.array(z.string().min(1)).optional(),
+    actionPlanMerge: z.boolean().optional(),
+  })
+)

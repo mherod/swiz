@@ -294,7 +294,7 @@ async function checkLargeFiles(
 
 interface PushCheckSettings {
   collaborationMode: string
-  ignoreCi?: boolean
+  ci?: boolean
   strictNoDirectMain?: boolean
   trunkMode?: boolean
 }
@@ -321,7 +321,7 @@ function resolvePriorCheckStatus(
   return {
     hasBranchCheck: priorCommands.some((command) => BRANCH_CHECK_RE.test(command)),
     hasCICheck:
-      eff.ignoreCi || !modePolicy.prHooksActive
+      !eff.ci || !modePolicy.prHooksActive
         ? true
         : priorCommands.some((command) => CI_WAIT_RE.test(command)),
     hasPRCheck:

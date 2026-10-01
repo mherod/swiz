@@ -131,8 +131,8 @@ describe("posttooluse-git-task-autocomplete: git push emits additionalContext", 
     }
   })
 
-  test("git push with ignore-ci omits CI and PR workflow guidance", async () => {
-    const home = await createTempHomeWithSettings({ ignoreCi: true })
+  test("git push with ci omits CI and PR workflow guidance", async () => {
+    const home = await createTempHomeWithSettings({ ci: false })
     const cwd = await isolatedProjectCwd()
     try {
       const result = await runHook(

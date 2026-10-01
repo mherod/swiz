@@ -368,8 +368,8 @@ async function waitForCiAfterPush(
   context: PushExecutionContext,
   ciTimeout: number
 ): Promise<ExecutePushFlowResult> {
-  if (context.effective.ignoreCi) {
-    console.log("ℹ ignore-ci enabled — skipping CI verification.")
+  if (!context.effective.ci) {
+    console.log("ℹ ci disabled — skipping CI verification.")
     await persistPushOutcome(context, { success: true, exitCode: 0 })
     return flowResult(context)
   }
@@ -394,12 +394,12 @@ async function startBackgroundCiWatch(
   context: PushExecutionContext
 ): Promise<ExecutePushFlowResult> {
   let ciWatchStarted = false
-  if (context.effective.ignoreCi) {
-    console.log("ℹ ignore-ci enabled — skipping background CI watch.")
+  if (!context.effective.ci) {
+    console.log("ℹ ci disabled — skipping background CI watch.")
   } else {
     const watchResult = await startCiWatchViaDaemon(context.commitSha, context.cwd)
     if (watchResult?.ignored) {
-      console.log("ℹ ignore-ci enabled — skipping background CI watch.")
+      console.log("ℹ ci disabled — skipping background CI watch.")
     } else if (watchResult?.watch) {
       ciWatchStarted = true
       const mode = watchResult.deduped ? "already active" : "started"

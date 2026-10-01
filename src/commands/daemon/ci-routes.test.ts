@@ -7,12 +7,14 @@ import type { CiRoutesContext } from "./ci-routes.ts"
 import { CiWatchRegistry } from "./ci-watch-registry.ts"
 
 const webhookSettings = {
-  ignoreCi: false,
+  ci: true,
   githubWebhookSecret: "test-webhook-secret",
 }
 
 void mock.module("../../settings.ts", () => ({
   readSwizSettings: async () => webhookSettings,
+  readProjectSettings: async () => null,
+  getEffectiveSwizSettings: (settings: typeof webhookSettings) => settings,
 }))
 
 let routes: typeof import("./ci-routes.ts")

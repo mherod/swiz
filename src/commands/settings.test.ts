@@ -237,7 +237,7 @@ describe("swiz settings", () => {
     expect(parsed).toHaveProperty("ignoreMcpTools")
     expect(parsed).toHaveProperty("relaxSubagentHooks")
     expect(parsed).toHaveProperty("gitStatusGate")
-    expect(parsed).toHaveProperty("ignoreCi")
+    expect(parsed).toHaveProperty("ci")
     expect(parsed).toHaveProperty("memoryLineThreshold")
     expect(parsed).toHaveProperty("source")
   })
@@ -1205,8 +1205,7 @@ describe("SETTINGS_REGISTRY", () => {
       "updateMemoryFooter",
       "gitStatusGate",
       "nonDefaultBranchGate",
-      "githubCiGate",
-      "ignoreCi",
+      "ci",
       "changesRequestedGate",
       "personalRepoIssuesGate",
       "issueCloseGate",
@@ -1525,32 +1524,13 @@ describe("collaborationMode settings", () => {
     expect(effective.collaborationMode).toBe("solo")
   })
 
-  test("getEffectiveSwizSettings forces githubCiGate off when ignoreCi is enabled", () => {
-    const settings = buildTestSettings({ ignoreCi: true })
-    const effective = getEffectiveSwizSettings(settings)
-    expect(effective.ignoreCi).toBe(true)
-    expect(effective.githubCiGate).toBe(false)
-  })
-
-  test("project ignoreCi overrides global ignoreCi=false and forces githubCiGate off", () => {
-    const settings = buildTestSettings()
-    const effective = getEffectiveSwizSettings(settings, null, { ignoreCi: true })
-    expect(effective.ignoreCi).toBe(true)
-    expect(effective.githubCiGate).toBe(false)
-  })
-
-  test("project githubCiGate=false overrides global githubCiGate=true when ignoreCi is off", () => {
-    const settings = buildTestSettings()
-    const effective = getEffectiveSwizSettings(settings, null, { githubCiGate: false })
-    expect(effective.ignoreCi).toBe(false)
-    expect(effective.githubCiGate).toBe(false)
-  })
-
-  test("global ignoreCi=true still forces githubCiGate off even when project sets githubCiGate=true", () => {
-    const settings = buildTestSettings({ ignoreCi: true })
-    const effective = getEffectiveSwizSettings(settings, null, { githubCiGate: true })
-    expect(effective.ignoreCi).toBe(true)
-    expect(effective.githubCiGate).toBe(false)
+  test("project ci overrides global ci in both directions", () => {
+    expect(getEffectiveSwizSettings(buildTestSettings({ ci: false }), null, { ci: true }).ci).toBe(
+      true
+    )
+    expect(getEffectiveSwizSettings(buildTestSettings({ ci: true }), null, { ci: false }).ci).toBe(
+      false
+    )
   })
 
   test("mcpChannels defaults to false and propagates to effective settings", async () => {
@@ -1997,10 +1977,10 @@ describe("strictNoDirectMain setting", () => {
     expect(stdout).toContain("strict-no-direct-main")
   })
 
-  test("swiz settings show surfaces ignore-ci", async () => {
+  test("swiz settings show surfaces ci", async () => {
     const home = await createTempHome()
     const { stdout } = await runSwiz(["settings", "show"], home)
-    expect(stdout).toContain("ignore-ci:")
+    expect(stdout).toContain("ci:")
   })
 
   test("swiz settings show reports project source for strict-no-direct-main", async () => {
@@ -2024,5 +2004,29 @@ describe("strictNoDirectMain setting", () => {
     const settings = buildTestSettings()
     const effective = getEffectiveSwizSettings(settings, null, { strictNoDirectMain: true })
     expect(effective.strictNoDirectMain).toBe(true)
+  })
+})
+
+describe("unified CI setting", () => {
+  test.each([
+    [{}, true],
+    [{ ignoreCi: true }, false],
+    [{ ignoreCi: false }, true],
+    [{ githubCiGate: false }, false],
+    [{ githubCiGate: true, ignoreCi: true }, false],
+    [{ ci: true, ignoreCi: true, githubCiGate: false }, true],
+    [{ ci: false, ignoreCi: false, githubCiGate: true }, false],
+  ])("migrates legacy CI config %j", (raw, enabled) => {
+    const parsed = swizSettingsSchema.parse(raw)
+    expect(parsed.ci).toBe(enabled)
+    expect(parsed).not.toHaveProperty("ignoreCi")
+    expect(parsed).not.toHaveProperty("githubCiGate")
+  })
+
+  test("reads legacy project CI configuration", async () => {
+    const cwd = await _tmp.create("legacy-ci-project-")
+    await mkdir(join(cwd, ".swiz"), { recursive: true })
+    await Bun.write(join(cwd, ".swiz/config.json"), JSON.stringify({ ignoreCi: true }))
+    expect(await readProjectSettings(cwd, { strict: true })).toEqual({ ci: false })
   })
 })
