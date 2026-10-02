@@ -49,6 +49,7 @@ import precommitStagedValidation from "../hooks/precommit-staged-validation.ts"
 import precompactSpeak from "../hooks/precompact-speak.ts"
 import precompactTaskSnapshot from "../hooks/precompact-task-snapshot.ts"
 import pretooluseActiveSkills from "../hooks/pretooluse-active-skills.ts"
+import pretooluseApplyDashboardPolishGate from "../hooks/pretooluse-apply-dashboard-polish-gate.ts"
 import pretooluseApplyRscGate from "../hooks/pretooluse-apply-rsc-gate.ts"
 import pretooluseBannedCommands from "../hooks/pretooluse-banned-commands.ts"
 import pretooluseBlockCommitToMain from "../hooks/pretooluse-block-commit-to-main.ts"
@@ -360,6 +361,7 @@ export const bundledHookManifest: HookGroup[] = [
     matcher: "Edit|Write|NotebookEdit",
     hooks: [
       { hook: pretooluseConcurrentSessionEdits },
+      { hook: pretooluseApplyDashboardPolishGate },
       { hook: pretooluseApplyRscGate },
       { hook: pretooluseRequireConvertToKotlin },
       { hook: pretooluseSandboxedEdits },

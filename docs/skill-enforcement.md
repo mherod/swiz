@@ -6,7 +6,7 @@ some other outcome.
 
 ## Quick reference
 
-Swiz has **12 invocation-gated skills that apply to Codex** and **4 additional stop-gated
+Swiz has **13 invocation-gated skills that apply to Codex** and **4 additional stop-gated
 skills for agents with a native `Skill` tool**.
 
 ### Invocation gates active for Codex
@@ -24,11 +24,12 @@ skills for agents with a native `Skill` tool**.
 | `update-memory` | Edits to `CLAUDE.md`, `GEMINI.md`, `AGENTS.md`, or `.cursorrules`. After a memory-capture reminder, normal work can also be blocked until `update-memory/SKILL.md` has been read and a Markdown file has been written. | `hooks/pretooluse-claude-md-update-memory-gate.ts`; `hooks/pretooluse-update-memory-enforcement.ts` |
 | `generate-requirements` | Edits to `REQUIREMENTS.md`. | `hooks/pretooluse-requirements-generate-gate.ts` |
 | `apply-rsc` | Edits to nested App Router `app/**/page.tsx` files, any `layout.tsx`, App Router `error.tsx` or `loading.tsx`, and colocated `*-client.tsx` files under `app/`. The current page matcher requires at least one directory between `app/` and `page.tsx`. | `hooks/pretooluse-apply-rsc-gate.ts` |
+| `apply-dashboard-polish` | Edits to `.tsx` files at any depth beneath an exact `admin/` or `dashboard/` directory segment, including `components/admin/campaigns/campaign-brief-card.tsx`. Multi-file patches are checked for any matching target. | `hooks/pretooluse-apply-dashboard-polish-gate.ts` |
 | `convert-to-kotlin` | Editing Java, or creating a Kotlin counterpart for neighbouring Java, when both Gradle and Kotlin are detected. | `hooks/pretooluse-require-convert-to-kotlin.ts` |
 
 Codex is explicitly supported by the filesystem-backed skill lookup: a direct read of an
 installed `SKILL.md` counts as usage even though Codex has no native `Skill` tool
-(`src/skill-utils.ts`, `skillExistsForHookPayload`). All 12 skills above are installed in the
+(`src/skill-utils.ts`, `skillExistsForHookPayload`). All 13 skills above are installed in the
 current Codex skill directories.
 
 ### Native-`Skill`-tool stop gates
@@ -47,7 +48,7 @@ are not currently enforced in Codex sessions.
 
 ## Gate-skill drift detection
 
-`src/gate-required-skills.ts` is the canonical registry for all 15 skill names whose absence
+`src/gate-required-skills.ts` is the canonical registry for all 16 skill names whose absence
 can make an enforcement decision fail open. The central command gate, specialized file and
 PR-comment gates, memory follow-through gate, and ordered Stop rules consume those entries
 instead of owning duplicate skill-name strings.
@@ -79,7 +80,7 @@ window (`skillRecencyMaxTurns` and `skillRecencyMaxAgeMinutes`).
 
 ### Specialized file and PR-comment gates
 
-The `generate-requirements`, `apply-rsc`, `convert-to-kotlin`, memory-file, and PR-comment-read
+The `generate-requirements`, `apply-rsc`, `apply-dashboard-polish`, `convert-to-kotlin`, memory-file, and PR-comment-read
 gates re-check invocation on each matching call and do not use the central gate's 2-minute
 cooldown. They still fail open when the skill is unavailable, the transcript is unavailable,
 or their project/file/branch preconditions do not apply.
@@ -123,6 +124,7 @@ auto-continue suggestions are prompts only and are not skill-invocation enforcem
 - Specialized invocation gates: [`pretooluse-claude-md-update-memory-gate.ts`](../hooks/pretooluse-claude-md-update-memory-gate.ts),
   [`pretooluse-requirements-generate-gate.ts`](../hooks/pretooluse-requirements-generate-gate.ts),
   [`pretooluse-apply-rsc-gate.ts`](../hooks/pretooluse-apply-rsc-gate.ts),
+  [`pretooluse-apply-dashboard-polish-gate.ts`](../hooks/pretooluse-apply-dashboard-polish-gate.ts),
   [`pretooluse-require-convert-to-kotlin.ts`](../hooks/pretooluse-require-convert-to-kotlin.ts),
   [`pretooluse-pr-comment-read-gate.ts`](../hooks/pretooluse-pr-comment-read-gate.ts), and
   [`pretooluse-update-memory-enforcement.ts`](../hooks/pretooluse-update-memory-enforcement.ts).

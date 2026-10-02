@@ -56,6 +56,10 @@ export const GATE_REQUIRED_SKILLS = {
     name: "apply-rsc",
     hooks: ["pretooluse-apply-rsc-gate"],
   },
+  applyDashboardPolish: {
+    name: "apply-dashboard-polish",
+    hooks: ["pretooluse-apply-dashboard-polish-gate"],
+  },
   convertToKotlin: {
     name: "convert-to-kotlin",
     hooks: ["pretooluse-require-convert-to-kotlin"],

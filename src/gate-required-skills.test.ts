@@ -15,6 +15,7 @@ describe("gate-required skill registry", () => {
       "update-memory",
       "generate-requirements",
       "apply-rsc",
+      "apply-dashboard-polish",
       "convert-to-kotlin",
       "collaborate-with-another-agent",
       "end-of-day",
