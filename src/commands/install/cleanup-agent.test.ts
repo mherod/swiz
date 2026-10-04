@@ -275,6 +275,8 @@ describe("default install integration", () => {
         homeDir: f.homeDir,
         bunAvailable: () => true,
         cleanupAgentOptions: f.options,
+        // The real doctor reports on the cleanup job; these tests assert install's own output.
+        postInstallDoctor: async () => {},
       },
     })
   }
