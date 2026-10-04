@@ -7,7 +7,12 @@ import { SWIZ_ROOT } from "../swiz-hook-commands.ts"
 import type { Command } from "../types.ts"
 import { isDaemonReady } from "./daemon/daemon-admin.ts"
 import { type AggressiveHookReplacement, replaceAgentHooksWithSwiz } from "./doctor/aggressive.ts"
-import { type AutoFixContext, runDoctorChecks } from "./doctor/check-runner.ts"
+import {
+  type AutoFixContext,
+  collectDoctorChecks,
+  printDoctorReport,
+  runDoctorChecks,
+} from "./doctor/check-runner.ts"
 import { DIAGNOSTIC_CHECKS } from "./doctor/checks"
 import { needsCleanupLaunchAgentRepair } from "./doctor/checks/cleanup-launch-agent.ts"
 import { codexHookCheckName, codexHookDirectories } from "./doctor/checks/codex-hook-sources.ts"
@@ -80,6 +85,7 @@ async function fixStaleConfigs(results: CheckResult[]): Promise<void> {
   if (staleConfigs.length === 0) return
   console.log(`  ${BOLD}Auto-fixing stale configs...${RESET}\n`)
   // Scope this hook repair to agents; the cleanup LaunchAgent is repaired after auto-cleanup.
+  // --no-doctor: this doctor run already owns diagnostics, so don't nest another.
   const proc = Bun.spawn(
     [
       process.execPath,
@@ -87,6 +93,7 @@ async function fixStaleConfigs(results: CheckResult[]): Promise<void> {
       join(SWIZ_ROOT, "index.ts"),
       "install",
       ...AGENTS.map((a) => `--${a.id}`),
+      "--no-doctor",
     ],
     { stdout: "inherit", stderr: "inherit" }
   )
@@ -297,11 +304,13 @@ async function applyDoctorFixes(
   await dependencies.fixCleanupLaunchAgent(ctx.results)
 }
 
+function hasCodexHookSourceWarnings(results: CheckResult[]): boolean {
+  return results.some((r) => r.name.startsWith("Codex hook sources (") && r.status === "warn")
+}
+
 function reportAvailableFixes(ctx: AutoFixContext): void {
   const fixables = [
-    ctx.results.some((r) => r.name.startsWith("Codex hook sources (") && r.status === "warn")
-      ? "conflicting Codex hook sources"
-      : null,
+    hasCodexHookSourceWarnings(ctx.results) ? "conflicting Codex hook sources" : null,
     hasStaleConfigWarnings(ctx.results) ? "stale configs" : null,
     needsCleanupLaunchAgentRepair(ctx.results) ? "cleanup LaunchAgent issues" : null,
     ctx.invalidSkillEntries.length > 0 ? "invalid skill entries" : null,
@@ -323,6 +332,44 @@ async function handleAutoFixes(
   }
   if (ctx.fix) return applyDoctorFixes(ctx, dependencies)
   reportAvailableFixes(ctx)
+}
+
+export interface PostInstallDoctorOptions {
+  /** False when the install did not target Codex, so its hook files stay untouched. */
+  repairCodexHooks?: boolean
+  allChecks?: DiagnosticCheck[]
+  fixCodexHookSources?: typeof fixCodexHookSources
+}
+
+/**
+ * Run the full doctor after `swiz install` and repair the problems install owns:
+ * conflicting Codex hook sources and config-referenced scripts that are missing.
+ * Skill, plugin-cache, and session cleanup repairs stay behind `swiz doctor --fix`
+ * because they trash user-owned files.
+ */
+export async function runPostInstallDoctor(options: PostInstallDoctorOptions = {}): Promise<void> {
+  const allChecks = options.allChecks ?? DIAGNOSTIC_CHECKS
+  const fixCodex = options.fixCodexHookSources ?? fixCodexHookSources
+  try {
+    await runWithTimeout("post-install doctor", DOCTOR_CHECK_TIMEOUT_MS, async () => {
+      console.log(`  ${BOLD}Post-install doctor:${RESET}\n`)
+      let collected = await collectDoctorChecks(false, allChecks)
+      const repairCodex =
+        options.repairCodexHooks !== false && hasCodexHookSourceWarnings(collected.results)
+      const missingScripts = (await findMissingConfigScriptPaths()).length > 0
+      if (repairCodex) await fixCodex(collected.results)
+      if (missingScripts) await fixMissingConfigs()
+      if (repairCodex || missingScripts) collected = await collectDoctorChecks(false, allChecks)
+      printDoctorReport(collected, false)
+      reportAvailableFixes({ fix: false, aggressive: false, verbose: false, ...collected })
+    })
+  } catch (error) {
+    // Hooks are already written; a slow or broken check must not fail the install.
+    stderrLog(
+      "post-install doctor",
+      `  ${YELLOW}Warning: post-install doctor did not finish: ${error}${RESET}\n`
+    )
+  }
 }
 
 /** Best-effort daemon notification after fixing issues (similar to settings write). */

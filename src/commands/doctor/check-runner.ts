@@ -144,25 +144,30 @@ function formatSummaryCounts(
   )
 }
 
+/** Print each diagnostic row (skill conflicts grouped unless verbose) followed by the summary counts. */
+export function printDoctorReport(collected: DoctorCheckResults, verbose: boolean): void {
+  const { results, skillConflicts } = collected
+  const displayResults = prepareResultsForDisplay(results, skillConflicts, verbose)
+  for (const result of displayResults) {
+    printResult(result)
+  }
+
+  console.log()
+  console.log(formatSummaryCounts(results, displayResults, verbose))
+  console.log()
+}
+
 export async function runDoctorChecks(args: string[], deps: DoctorCheckRunnerDeps): Promise<void> {
   const fix = args.includes("--fix")
   const aggressive = args.includes("--aggressive")
   const verbose = args.includes("--verbose")
   console.log(`\n  ${BOLD}swiz doctor${RESET}\n`)
 
-  const { results, skillConflicts, invalidSkillEntries, pluginCacheInfos } =
-    await collectDoctorChecks(fix, deps.allChecks)
-
-  const displayResults = prepareResultsForDisplay(results, skillConflicts, verbose)
-  for (const result of displayResults) {
-    printResult(result)
-  }
+  const collected = await collectDoctorChecks(fix, deps.allChecks)
+  const { results, skillConflicts, invalidSkillEntries, pluginCacheInfos } = collected
+  printDoctorReport(collected, verbose)
 
   const failures = results.filter((r) => r.status === "fail")
-
-  console.log()
-  console.log(formatSummaryCounts(results, displayResults, verbose))
-  console.log()
 
   await deps.handleAutoFixes({
     fix,

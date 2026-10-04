@@ -41,7 +41,8 @@ const INSTALL_TIMEOUT_MS = 10_000
 const DISPATCH_RE = /swiz dispatch (\S+)/
 
 async function runInstall(swizRoot: string): Promise<boolean> {
-  const args = ["bun", join(swizRoot, "index.ts"), "install"]
+  // --no-doctor: the full doctor can exceed INSTALL_TIMEOUT_MS.
+  const args = ["bun", join(swizRoot, "index.ts"), "install", "--no-doctor"]
 
   if (process.env.GEMINI_CLI) {
     args.push("--gemini")

@@ -3,6 +3,7 @@ import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { describe, expect, it } from "vitest"
 import { runCommandInProcess } from "../utils/test-utils.ts"
+import type { PostInstallDoctorOptions } from "./doctor.ts"
 import {
   buildDaemonLaunchAgentPlist,
   DAEMON_OPENROUTER_API_KEY_ENV,
@@ -25,17 +26,49 @@ async function readJson<T>(path: string): Promise<T> {
 
 async function runInstall(
   args: string[],
-  home: string
+  home: string,
+  postInstallDoctor: (options?: PostInstallDoctorOptions) => Promise<void> = async () => {}
 ): Promise<{ stdout: string; stderr: string; exitCode: number }> {
   return runCommandInProcess(installCommand, args, {
     commandOptions: {
       bunAvailable: () => true,
       homeDir: home,
+      postInstallDoctor,
     },
     cwd: home,
     env: { HOME: home, AI_TEST_NO_BACKEND: "1" },
   })
 }
+
+describe("install post-install doctor", () => {
+  async function installRecordingDoctor(args: string[]): Promise<PostInstallDoctorOptions[]> {
+    const home = await mkdtemp(join(tmpdir(), "swiz-install-doctor-"))
+    const calls: PostInstallDoctorOptions[] = []
+    const result = await runInstall(args, home, async (options = {}) => {
+      calls.push(options)
+    })
+    expect(result.exitCode).toBe(0)
+    return calls
+  }
+
+  it("runs after a hook install and allows Codex repair when Codex is targeted", async () => {
+    expect(await installRecordingDoctor(["--claude", "--codex"])).toEqual([
+      { repairCodexHooks: true },
+    ])
+  })
+
+  it("leaves Codex hook files alone when the install did not target Codex", async () => {
+    expect(await installRecordingDoctor(["--claude"])).toEqual([{ repairCodexHooks: false }])
+  })
+
+  it("is skipped by --no-doctor", async () => {
+    expect(await installRecordingDoctor(["--claude", "--no-doctor"])).toEqual([])
+  })
+
+  it("is skipped by --dry-run", async () => {
+    expect(await installRecordingDoctor(["--claude", "--dry-run"])).toEqual([])
+  })
+})
 
 describe("daemon LaunchAgent environment", () => {
   it("includes OPENROUTER_API_KEY from the current process", () => {

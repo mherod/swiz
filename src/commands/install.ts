@@ -1,6 +1,6 @@
 import { getAgentSettingsPath } from "../agent-paths.ts"
 import { AGENTS, getAgentByFlag, hasAnyAgentFlag } from "../agents.ts"
-import { BOLD, DIM, GREEN, RED, RESET, YELLOW } from "../ansi.ts"
+import { DIM, GREEN, RED, RESET, YELLOW } from "../ansi.ts"
 import { getHomeDirOrNull } from "../home.ts"
 import { loadAllPlugins, pluginErrorHint, pluginResultsToJson } from "../plugins.ts"
 import { pauseSessionstartSelfHeal } from "../sessionstart-self-heal-state.ts"
@@ -8,10 +8,7 @@ import { readProjectSettings, writeProjectSettings } from "../settings.ts"
 import { HOOKS_DIR } from "../swiz-hook-commands.ts"
 import type { Command } from "../types.ts"
 import { DAEMON_PORT } from "./daemon/daemon-admin.ts"
-import { agentConfigSyncCheck } from "./doctor/checks/agent-config-sync.ts"
-import { configScriptsCheck } from "./doctor/checks/config-scripts.ts"
-import { scriptPermissionsCheck } from "./doctor/checks/script-permissions.ts"
-import type { CheckResult, DiagnosticCheck, DiagnosticContext } from "./doctor/types.ts"
+import { runPostInstallDoctor } from "./doctor.ts"
 import { installAgent } from "./install/agent-helpers.ts"
 import {
   type CleanupAgentOptions,
@@ -303,44 +300,6 @@ async function installProjectHooks(dryRun: boolean): Promise<void> {
   )
 }
 
-const VERIFY_CHECKS: DiagnosticCheck[] = [
-  agentConfigSyncCheck,
-  configScriptsCheck,
-  scriptPermissionsCheck,
-]
-
-function printVerifyResult(result: CheckResult): void {
-  const icon =
-    result.status === "pass"
-      ? `${GREEN}✓${RESET}`
-      : result.status === "warn"
-        ? `${YELLOW}!${RESET}`
-        : `${RED}✗${RESET}`
-  const detailColor = result.status === "fail" ? RED : result.status === "warn" ? YELLOW : DIM
-  console.log(`    ${icon} ${BOLD}${result.name}${RESET}  ${detailColor}${result.detail}${RESET}`)
-}
-
-async function verifyInstallation(dryRun: boolean): Promise<void> {
-  if (dryRun) return
-  console.log(`  ${BOLD}Post-install verification:${RESET}`)
-  const ctx: DiagnosticContext = { fix: false, store: {} }
-  const results: CheckResult[] = []
-  for (const check of VERIFY_CHECKS) {
-    const r = await check.run(ctx)
-    if (Array.isArray(r)) results.push(...r)
-    else results.push(r)
-  }
-  for (const r of results) printVerifyResult(r)
-  const failures = results.filter((r) => r.status === "fail").length
-  const warnings = results.filter((r) => r.status === "warn").length
-  const passes = results.filter((r) => r.status === "pass").length
-  const summary =
-    `${GREEN}${passes} passed${RESET}` +
-    (warnings > 0 ? `, ${YELLOW}${warnings} warning(s)${RESET}` : "") +
-    (failures > 0 ? `, ${RED}${failures} failure(s) — run: swiz doctor${RESET}` : "")
-  console.log(`    ${summary}\n`)
-}
-
 async function uninstallProjectHooks(dryRun: boolean): Promise<void> {
   const settings = await readProjectSettings(process.cwd())
   if (!settings?.hooks?.length) return
@@ -375,6 +334,7 @@ export interface InstallCommandOptions {
   bunAvailable?: () => boolean
   homeDir?: string | null
   cleanupAgentOptions?: CleanupAgentOptions
+  postInstallDoctor?: typeof runPostInstallDoctor
 }
 
 function assertBunAvailable(bunAvailable: () => boolean): void {
@@ -411,7 +371,8 @@ async function runUninstallMode(
 async function runInstallMode(
   args: string[],
   opts: InstallRunOptions,
-  cleanupOptions: CleanupAgentOptions
+  cleanupOptions: CleanupAgentOptions,
+  postInstallDoctor: typeof runPostInstallDoctor
 ): Promise<void> {
   console.log(`\n  swiz install${opts.dryRun ? " (dry run)" : ""}\n`)
   if (opts.mcpOnly) {
@@ -426,13 +387,15 @@ async function runInstallMode(
   if (await installHooksForTargets(args, opts)) return
   await runCleanupAgentStep(args, opts, cleanupOptions)
   if (opts.dryRun) console.log("  No changes written.\n")
-  else if (shouldInstallHooks(args, opts)) await verifyInstallation(opts.dryRun)
+  else if (shouldInstallHooks(args, opts) && !args.includes("--no-doctor")) {
+    await postInstallDoctor({ repairCodexHooks: opts.targets.some((a) => a.id === "codex") })
+  }
 }
 
 export const installCommand: Command<InstallCommandOptions> = {
   name: "install",
   description: "Install swiz hooks into agent settings",
-  usage: `swiz install [${AGENTS.map((a) => `--${a.id}`).join("] [")}] [--dry-run] [--mcp] [--merge-tool] [--daemon [--port <n>]] [--uninstall]`,
+  usage: `swiz install [${AGENTS.map((a) => `--${a.id}`).join("] [")}] [--dry-run] [--json] [--mcp] [--merge-tool] [--status-line] [--daemon [--port <n>]] [--no-doctor] [--uninstall]`,
   options: [
     ...AGENTS.map((a) => ({ flags: `--${a.id}`, description: `Install for ${a.name} only` })),
     { flags: "--dry-run", description: "Preview changes without writing to disk" },
@@ -451,8 +414,14 @@ export const installCommand: Command<InstallCommandOptions> = {
     { flags: "--port <port>", description: "Port for daemon when using --daemon (default: 7943)" },
     { flags: "--json", description: "Output plugin status as JSON (implies --dry-run)" },
     {
+      flags: "--no-doctor",
+      description:
+        "Skip the post-install doctor (by default it runs after hook installs and repairs Codex hook conflicts and missing config scripts)",
+    },
+    {
       flags: "(no flags)",
-      description: "Install for all detected agents and schedule daily cleanup on macOS",
+      description:
+        "Install for all detected agents, schedule daily cleanup on macOS, then run the post-install doctor",
     },
   ],
   async run(args, dependencies = {}) {
@@ -465,6 +434,11 @@ export const installCommand: Command<InstallCommandOptions> = {
       await runUninstallMode(args, opts, cleanupOptions)
       return
     }
-    await runInstallMode(args, opts, cleanupOptions)
+    await runInstallMode(
+      args,
+      opts,
+      cleanupOptions,
+      dependencies.postInstallDoctor ?? runPostInstallDoctor
+    )
   },
 }

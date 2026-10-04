@@ -3,10 +3,17 @@ import { mkdir, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { AGENTS } from "../agents.ts"
 import { hookIdentifier, isInlineHookDef, manifest } from "../manifest.ts"
+import type { Command } from "../types.ts"
 import { runCommandInProcess, useTempDir } from "../utils/test-utils.ts"
 import { CLEANUP_LAUNCH_AGENT_CHECK_NAME } from "./doctor/checks/cleanup-launch-agent.ts"
 import { DIAGNOSTIC_CHECKS } from "./doctor/checks/index.ts"
-import { type DoctorCommandOptions, doctorCommand } from "./doctor.ts"
+import type { DiagnosticCheck } from "./doctor/types.ts"
+import {
+  type DoctorCommandOptions,
+  doctorCommand,
+  type PostInstallDoctorOptions,
+  runPostInstallDoctor,
+} from "./doctor.ts"
 import { collectCommands } from "./install/config-helpers.ts"
 
 const { create: createTempHome } = useTempDir("swiz-doctor-test-")
@@ -99,6 +106,82 @@ describe("swiz doctor", () => {
     const fixed = await runCommandInProcess(doctorCommand, ["--fix"], options)
     expect(fixed.exitCode).toBe(0)
     expect(calls).toEqual(["cleanup", "repair"])
+  })
+
+  describe("post-install doctor", () => {
+    const CODEX_CHECK = "Codex hook sources (/fake/.codex)"
+    const postInstallDoctorCommand: Command<PostInstallDoctorOptions> = {
+      name: "post-install-doctor",
+      description: "runs runPostInstallDoctor for tests",
+      run: (_args, options) => runPostInstallDoctor(options),
+    }
+
+    function codexConflictCheck(state: { repaired: boolean }): DiagnosticCheck {
+      return {
+        name: "codex-hook-sources",
+        run: async () => ({
+          name: CODEX_CHECK,
+          status: state.repaired ? "pass" : "warn",
+          detail: state.repaired ? "No conflicting hook representations" : "conflict",
+        }),
+      }
+    }
+
+    async function runPostInstall(options: PostInstallDoctorOptions) {
+      const home = await createTempHome()
+      return runCommandInProcess(postInstallDoctorCommand, [], {
+        commandOptions: options,
+        cwd: home,
+        env: { HOME: home, AI_TEST_NO_BACKEND: "1" },
+      })
+    }
+
+    test("repairs Codex hook conflicts and reports the rechecked state", async () => {
+      const state = { repaired: false }
+      const repairs: string[][] = []
+      const result = await runPostInstall({
+        allChecks: [codexConflictCheck(state)],
+        fixCodexHookSources: async (results) => {
+          repairs.push(results.map((r) => `${r.name}:${r.status}`))
+          state.repaired = true
+        },
+      })
+      expect(result.exitCode).toBe(0)
+      expect(repairs).toEqual([[`${CODEX_CHECK}:warn`]])
+      expect(result.stdout).toContain("Post-install doctor")
+      expect(result.stdout).toContain("No conflicting hook representations")
+      expect(result.stdout).not.toContain("swiz doctor --fix")
+    })
+
+    test("leaves Codex hooks alone when Codex was not installed", async () => {
+      let repaired = false
+      const result = await runPostInstall({
+        repairCodexHooks: false,
+        allChecks: [codexConflictCheck({ repaired: false })],
+        fixCodexHookSources: async () => {
+          repaired = true
+        },
+      })
+      expect(result.exitCode).toBe(0)
+      expect(repaired).toBe(false)
+      expect(result.stdout).toContain("conflicting Codex hook sources detected")
+    })
+
+    test("warns instead of failing the install when a check throws", async () => {
+      const result = await runPostInstall({
+        allChecks: [
+          {
+            name: "broken",
+            run: async () => {
+              throw new Error("check exploded")
+            },
+          },
+        ],
+      })
+      expect(result.exitCode).toBe(0)
+      expect(result.stderr).toContain("post-install doctor did not finish")
+      expect(result.stderr).toContain("check exploded")
+    })
   })
 
   // ── Clean-home tests: share a single command invocation ───────────────
