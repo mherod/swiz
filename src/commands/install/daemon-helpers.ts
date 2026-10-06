@@ -115,13 +115,11 @@ export function buildDaemonLaunchAgentPlist(port: number): string {
       <key>RunAtLoad</key>
       <true/>
 
+      <!-- Unconditional: a SIGTERM shutdown exits 143, which is neither a
+           crash nor a successful exit, so conditional KeepAlive left the
+           daemon down. Intentional stops use bootout, which removes the job. -->
       <key>KeepAlive</key>
-      <dict>
-        <key>Crashed</key>
-        <true/>
-        <key>SuccessfulExit</key>
-        <true/>
-      </dict>
+      <true/>
 
       <key>AbandonProcessGroup</key>
       <true/>

@@ -71,6 +71,16 @@ describe("install post-install doctor", () => {
 })
 
 describe("daemon LaunchAgent environment", () => {
+  it("keeps the daemon alive unconditionally", () => {
+    // A SIGTERM shutdown exits 143 — neither Crashed nor SuccessfulExit — so a
+    // conditional KeepAlive dict leaves launchd with the daemon down.
+    const plist = buildDaemonLaunchAgentPlist(7943)
+
+    expect(plist).toMatch(/<key>KeepAlive<\/key>\s*<true\/>/)
+    expect(plist).not.toContain("<key>Crashed</key>")
+    expect(plist).not.toContain("<key>SuccessfulExit</key>")
+  })
+
   it("includes OPENROUTER_API_KEY from the current process", () => {
     const original = process.env[DAEMON_OPENROUTER_API_KEY_ENV]
     process.env[DAEMON_OPENROUTER_API_KEY_ENV] = `router&<>"'key`
