@@ -176,6 +176,7 @@ export const ALL_STATUS_LINE_SEGMENTS = [
   "backlog",
   "checks",
   "reads",
+  "owners",
   "metrics",
   "mode",
   "flags",

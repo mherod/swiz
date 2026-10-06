@@ -17,6 +17,7 @@ import {
   formatActiveSkillsSegment,
   formatCountSegment,
   formatExecStatsSegment,
+  formatFileOwnershipSegment,
   formatGitHubCiSegment,
   formatProjectState,
   formatQueuedSteersSegment,
@@ -117,6 +118,25 @@ describe("computeReadsPerMinute", () => {
 
   it("is zero with no reads", () => {
     expect(computeReadsPerMinute([], start)).toBe(0)
+  })
+})
+
+describe("formatFileOwnershipSegment", () => {
+  const plain = (s: string) =>
+    s.replace(new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, "g"), "")
+
+  it("shows owning sessions, owned and unowned totals", () => {
+    expect(plain(formatFileOwnershipSegment({ sessions: 2, owned: 5, unowned: 3 }))).toBe(
+      "👥 2 sessions · 5 owned · 3 unowned"
+    )
+    expect(plain(formatFileOwnershipSegment({ sessions: 1, owned: 1, unowned: 0 }))).toBe(
+      "👥 1 session · 1 owned · 0 unowned"
+    )
+  })
+
+  it("hides on a clean tree or unknown ownership", () => {
+    expect(formatFileOwnershipSegment({ sessions: 0, owned: 0, unowned: 0 })).toBe("")
+    expect(formatFileOwnershipSegment(null)).toBe("")
   })
 })
 

@@ -296,3 +296,97 @@ export function appendSessionFileOwnershipContext(
 
 /** How recently another session must have touched a file to count as concurrent work. */
 export const CONCURRENT_EDIT_WINDOW_MS = 2 * 60 * 60 * 1000
+
+export interface ProjectFileOwnershipSummary {
+  /** Distinct sessions that own at least one dirty file. */
+  sessions: number
+  /** Dirty files with an owner. */
+  owned: number
+  /** Dirty files with no owner. */
+  unowned: number
+}
+
+interface SummarizeFileOwnershipOptions {
+  cwd: string
+  gitRoot: string
+  files: readonly string[]
+  edits: readonly (SessionFileEdit & { session_id: string })[]
+  claims: SessionFileClaim[]
+}
+
+/** Latest editing session per git-root-relative path. */
+function latestEditors(
+  gitRoot: string,
+  cwd: string,
+  edits: SummarizeFileOwnershipOptions["edits"]
+): Map<string, { session: string; at: number }> {
+  const editors = new Map<string, { session: string; at: number }>()
+  const canonicalRoot = canonicalClaimPath(gitRoot)
+  for (const edit of edits) {
+    const path = resolveSessionEditPath(gitRoot, resolve(cwd, edit.file_path))
+    if (!path) continue
+    const file = relative(canonicalRoot, path)
+    const at = edit.updated_at ?? 0
+    const previous = editors.get(file)
+    if (!previous || at >= previous.at) editors.set(file, { session: edit.session_id, at })
+  }
+  return editors
+}
+
+/**
+ * Project-wide attribution of dirty files, independent of any one session's viewpoint: an active
+ * claim owns a file (every claiming session counts); otherwise its most recent live editor does;
+ * otherwise it is unowned. Same evidence and precedence as `classifyWithClaims`.
+ */
+export function summarizeFileOwnership({
+  cwd,
+  gitRoot,
+  files,
+  edits,
+  claims,
+}: SummarizeFileOwnershipOptions): ProjectFileOwnershipSummary {
+  const claimIndex = indexFileClaims(claims)
+  const editors = latestEditors(gitRoot, cwd, edits)
+  const canonicalRoot = canonicalClaimPath(gitRoot)
+  const owners = new Set<string>()
+  let owned = 0
+  for (const file of files) {
+    const absolute = canonicalClaimPath(resolve(gitRoot, file))
+    const claimants = claimIndex.get(fileClaimIdentity(absolute))?.map((claim) => claim.session_id)
+    const editor = editors.get(relative(canonicalRoot, absolute))?.session
+    const fileOwners = claimants?.length ? claimants : editor ? [editor] : []
+    if (fileOwners.length === 0) continue
+    owned++
+    for (const owner of fileOwners) owners.add(owner)
+  }
+  return { sessions: owners.size, owned, unowned: files.length - owned }
+}
+
+/** Ownership totals for the project's dirty files, or null when git or the store is unavailable. */
+export async function resolveProjectFileOwnershipSummary(
+  cwd: string,
+  nowMs = Date.now()
+): Promise<ProjectFileOwnershipSummary | null> {
+  try {
+    const [{ getGitStatusV2 }, { getIssueStore }, { git }] = await Promise.all([
+      import("./git-utils.ts"),
+      import("../issue-store.ts"),
+      import("../git-helpers.ts"),
+    ])
+    const status = await getGitStatusV2(cwd)
+    if (!status) return null
+    if (status.total === 0) return { sessions: 0, owned: 0, unowned: 0 }
+    const store = getIssueStore()
+    if (store.isNoOp) return null
+    const gitRoot = (await git(["rev-parse", "--show-toplevel"], cwd)).trim()
+    if (!gitRoot) return null
+    // `session_id != ""` excludes nobody: every session's live edits.
+    const edits = sessionEditProjectKeys(cwd).flatMap((key) =>
+      store.listOtherSessionEdits(key, "", nowMs - CONCURRENT_EDIT_WINDOW_MS)
+    )
+    const claims = store.fileClaims.list(fileClaimProjectKey(cwd), nowMs)
+    return summarizeFileOwnership({ cwd, gitRoot, files: status.lines, edits, claims })
+  } catch {
+    return null
+  }
+}

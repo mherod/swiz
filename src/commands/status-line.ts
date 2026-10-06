@@ -38,6 +38,10 @@ import {
   type ProjectExecutionStats,
   readProjectExecutionStats,
 } from "../utils/execution-stats.ts"
+import {
+  type ProjectFileOwnershipSummary,
+  resolveProjectFileOwnershipSummary,
+} from "../utils/session-file-ownership.ts"
 import { readAllTranscriptLines, readSessionLines } from "../utils/transcript.ts"
 import type { SerializedDaemonMetrics } from "./daemon/cache/metrics.ts"
 import { getDaemonPort } from "./daemon/daemon-admin.ts"
@@ -83,8 +87,10 @@ export interface WarmStatusLineSnapshot {
   /** Transcript-derived wanted level captured with the warm snapshot. */
   infractionWantedLevel?: number | null
   activeSkills?: string[] | null
-  /** Session-average file reads per minute. Undefined when the snapshot predates this field. */
+  /** Distinct files read in the last minute. Undefined when the snapshot predates this field. */
   readsPerMinute?: number | null
+  /** Owning sessions and owned/unowned totals for the project's dirty files. Null when unknown. */
+  fileOwnership?: ProjectFileOwnershipSummary | null
   /** True when the daemon's upstream sync hasn't succeeded for this project in over 10 minutes. Null/undefined when unknown (non-daemon path). */
   issueSyncStale?: boolean | null
   /** Average test/lint execution times recorded by the measure-*-time hooks. Null when no runs recorded. */
@@ -171,6 +177,21 @@ export function computeReadsPerMinute(
 export function formatReadRateSegment(readsPerMinute: number | null | undefined): string {
   if (typeof readsPerMinute !== "number" || readsPerMinute <= 0) return ""
   return `\x1b[96m📖 ${readsPerMinute}${R}${DIM}/min${R}`
+}
+
+/** e.g. `👥 2 sessions · 5 owned · 3 unowned`; empty when unknown or the tree is clean. */
+export function formatFileOwnershipSegment(
+  summary: ProjectFileOwnershipSummary | null | undefined
+): string {
+  if (!summary || summary.owned + summary.unowned === 0) return ""
+  const sessionLabel = summary.sessions === 1 ? "session" : "sessions"
+  const sessionColor = summary.sessions > 1 ? "\x1b[93m" : "\x1b[96m"
+  const unownedColor = summary.unowned > 0 ? "\x1b[93m" : DIM
+  return [
+    `${sessionColor}👥 ${summary.sessions}${R} ${DIM}${sessionLabel}${R}`,
+    `\x1b[92m${summary.owned}${R} ${DIM}owned${R}`,
+    `${unownedColor}${summary.unowned}${R} ${DIM}unowned${R}`,
+  ].join(` ${DIM}·${R} `)
 }
 
 type GitHubCiState = "success" | "pending" | "failure" | "neutral" | "none"
@@ -908,6 +929,7 @@ export async function computeWarmStatusLineSnapshot(
     sessionStatus,
     execStats,
     queuedSteers,
+    fileOwnership,
   ] = await Promise.all([
     getGitBranchAndInfo(cwd),
     readSwizSettings().catch(() => null),
@@ -917,6 +939,7 @@ export async function computeWarmStatusLineSnapshot(
     computeSessionStatusSnapshot(cwd, sessionId),
     readExecStatsForCwd(cwd),
     readQueuedSteerCounts(sessionId),
+    resolveProjectFileOwnershipSummary(cwd),
   ])
 
   const effective = swizSettings
@@ -944,6 +967,7 @@ export async function computeWarmStatusLineSnapshot(
     sessionPath: sessionStatus.sessionPath,
     infractionWantedLevel: sessionStatus.infractionWantedLevel,
     readsPerMinute: sessionStatus.readsPerMinute,
+    fileOwnership,
   }
 }
 
@@ -1257,6 +1281,7 @@ function buildLine3(options: {
   const steersSeg = formatQueuedSteersSegment(snapshot.queuedSteers)
   const checksSeg = formatExecStatsSegment(snapshot.execStats)
   const readsSeg = formatReadRateSegment(snapshot.readsPerMinute)
+  const ownersSeg = formatFileOwnershipSegment(snapshot.fileOwnership)
   const modeSeg = buildModeSeg(a4, agentName, vimMode)
   const flagsStr = snapshot.settingsParts.join(" ")
   return joinGroups([
@@ -1267,6 +1292,7 @@ function buildLine3(options: {
     labeledSegment(seg("backlog"), "backlog", ghCountSeg),
     labeledSegment(seg("checks"), "checks", checksSeg),
     labeledSegment(seg("reads"), "reads", readsSeg),
+    labeledSegment(seg("owners"), "owners", ownersSeg),
     labeledSegment(seg("metrics"), "metrics", daemonMetricsSeg),
     labeledSegment(seg("mode"), "mode", modeSeg),
     labeledSegment(seg("flags"), "flags", flagsStr),
@@ -1389,6 +1415,9 @@ async function applySnapshotFallbacks(
     snapshot.readsPerMinute = await readAllTranscriptLines(sessionPath)
       .then((lines) => computeReadsPerMinute(lines, Date.now(), cwd))
       .catch(() => null)
+  }
+  if (snapshot.fileOwnership === undefined) {
+    snapshot.fileOwnership = await resolveProjectFileOwnershipSummary(cwd)
   }
   return activeSkills
 }
