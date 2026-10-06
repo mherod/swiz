@@ -528,8 +528,13 @@ function shouldIgnoreCiRun(run: GitHubCiRun): boolean {
   return run.event === "dynamic" || run.event === "workflow_run"
 }
 
-function ciWorkflowKey(run: GitHubCiRun, index: number): string {
-  return run.workflowName || `\0run-${run.databaseId ?? index}`
+/**
+ * The store-served shape blanks workflowName, so unnamed runs can't be told apart by
+ * workflow. They share one slot so the newest run decides — keeping each unnamed run
+ * separately let an old cancelled run stop a newer success from reading as passing.
+ */
+function ciWorkflowKey(run: GitHubCiRun): string {
+  return run.workflowName || "\0unnamed"
 }
 
 export function summarizeGitHubCiRuns(
@@ -537,13 +542,9 @@ export function summarizeGitHubCiRuns(
 ): { state: GitHubCiState; label: string } | null {
   if (!Array.isArray(runs) || runs.length === 0) return null
   const latest = new Map<string, GitHubCiRun>()
-  for (let i = 0; i < runs.length; i++) {
-    const run = runs[i]!
+  for (const run of runs) {
     if (shouldIgnoreCiRun(run)) continue
-    // The store-served shape blanks workflowName; keying every empty-name run
-    // under "" collapses distinct runs into one slot (oldest wins). Fall back to
-    // a per-run key so each run is kept and recency is decided by isNewerCiRun.
-    const key = ciWorkflowKey(run, i)
+    const key = ciWorkflowKey(run)
     const existing = latest.get(key)
     if (!existing || isNewerCiRun(run, existing)) {
       latest.set(key, run)
@@ -554,7 +555,7 @@ export function summarizeGitHubCiRuns(
 }
 
 const CI_STATE_FORMAT: Record<string, { color: string; icon: string; fallback: string }> = {
-  success: { color: "\x1b[92m", icon: "✓", fallback: "passing" },
+  success: { color: `${BOLD}\x1b[92m`, icon: "✔", fallback: "passing" },
   pending: { color: "\x1b[93m", icon: "⏳", fallback: "running" },
   failure: { color: "\x1b[91m", icon: "✗", fallback: "failed" },
   neutral: { color: DIM, icon: "○", fallback: "unknown" },
@@ -595,7 +596,7 @@ const BOOLEAN_FLAGS: BooleanFlagDef[] = [
   ["pushGate", `\x1b[93m🚧 push-gate:on${R}`, `\x1b[90m🚧 push-gate:off${R}`],
   ["strictNoDirectMain", `\x1b[91m🛡 direct-main:off${R}`, `\x1b[90m🛡 direct-main:on${R}`],
   ["sandboxedEdits", `\x1b[92m🧪 sandbox:on${R}`, `\x1b[93m🧪 sandbox:off${R}`],
-  ["ci", `\x1b[93m✓ ci${R}`, `\x1b[90m⏭ ci:off${R}`],
+  ["ci", `\x1b[92m✔ ci${R}`, `\x1b[90m⏭ ci:off${R}`],
 ]
 
 const AMBITION_LABELS: Record<string, string> = {

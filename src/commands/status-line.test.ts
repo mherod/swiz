@@ -613,6 +613,23 @@ describe("summarizeGitHubCiRuns", () => {
     ])
     expect(summary).toEqual({ state: "failure", label: "failed" })
   })
+
+  it("reports passing when the newest unnamed run succeeded after an older cancelled run", () => {
+    const run = (databaseId: number, conclusion: string) => ({
+      databaseId,
+      status: "completed",
+      conclusion,
+      workflowName: "",
+      createdAt: "",
+      event: "",
+    })
+    const summary = summarizeGitHubCiRuns([
+      run(100, "success"),
+      run(200, "cancelled"),
+      run(300, "success"),
+    ])
+    expect(summary).toEqual({ state: "success", label: "passing" })
+  })
 })
 
 describe("formatTaskCountSegment", () => {
@@ -753,6 +770,14 @@ describe("formatGitHubCiSegment", () => {
 
   it("renders a passing CI badge", () => {
     expect(formatGitHubCiSegment("success", "passing")).toContain("passing")
+  })
+
+  it("renders CI success as a bold green heavy tick", () => {
+    expect(formatGitHubCiSegment("success", "passing")).toStartWith("\x1b[1m\x1b[92m✔ passing")
+  })
+
+  it("keeps failure red with a cross", () => {
+    expect(formatGitHubCiSegment("failure", "failed")).toStartWith("\x1b[91m✗ failed")
   })
 })
 
