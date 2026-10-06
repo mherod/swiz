@@ -17,6 +17,21 @@ describe("getFileReadTargets", () => {
     expect(getFileReadTargets("view_file", { path: "/b.ts" })).toEqual(["/b.ts"])
   })
 
+  test("returns paths viewed through shell and Codex exec tools", () => {
+    expect(getFileReadTargets("Bash", { command: "sed -n 1,9p src/a.ts" })).toEqual(["src/a.ts"])
+    expect(getFileReadTargets("exec_command", { cmd: "cat b.ts" })).toEqual(["b.ts"])
+    expect(getFileReadTargets("shell", { command: ["bash", "-lc", "head c.ts"] })).toEqual(["c.ts"])
+    const code = `await tools.exec_command({ cmd: "cat d.ts" })`
+    expect(getFileReadTargets("exec", { code })).toEqual(["d.ts"])
+    expect(getFileReadTargets("Bash", { command: "rm a.ts" })).toEqual([])
+  })
+
+  test("keeps the markdown-read exemption to read tools", () => {
+    expect(
+      isMarkdownOnlyFileReadPayload("Bash", { tool_input: { command: "cat a.md && rm -rf x" } })
+    ).toBeFalse()
+  })
+
   test("returns [] for non-read tools and missing input", () => {
     expect(getFileReadTargets("Edit", { file_path: "/a.ts" })).toEqual([])
     expect(getFileReadTargets(undefined, { file_path: "/a.ts" })).toEqual([])

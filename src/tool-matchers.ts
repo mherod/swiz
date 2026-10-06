@@ -15,6 +15,8 @@
 //   NotebookEdit | EditNotebook | apply_patch / functions.apply_patch | —
 //   Task/planning| TodoWrite    | —                  | write_todos
 
+import { extractCodexExecCommands, extractShellReadTargetPaths } from "./utils/shell-patterns.ts"
+
 export const SHELL_TOOLS = new Set([
   "Bash",
   "Shell",
@@ -273,13 +275,39 @@ export function extractFileReadTargetPaths(toolInput: ToolMatcherValue | object)
   return [...paths]
 }
 
-/** File paths a tool call reads, or [] when the tool is not a file-read tool. */
+/** Shell command text from a shell tool's input: a string, or the script of an argv array. */
+function shellCommandFromInput(toolInput: ToolMatcherValue | object | undefined): string {
+  if (!isRecord(toolInput)) return ""
+  const command = toolInput.command ?? toolInput.cmd
+  if (typeof command === "string") return command
+  if (Array.isArray(command)) {
+    const last = command[command.length - 1]
+    return typeof last === "string" ? last : ""
+  }
+  return ""
+}
+
+function codexExecReadTargets(toolInput: ToolMatcherValue | object | undefined): string[] {
+  if (!isRecord(toolInput)) return []
+  const code = toolInput.code ?? toolInput.input
+  if (typeof code !== "string") return []
+  return [...new Set(extractCodexExecCommands(code).flatMap(extractShellReadTargetPaths))]
+}
+
+/**
+ * File paths a tool call reads, or [] when it reads none. Covers read tools (`Read`, `read_file`,
+ * ...), shell file-viewing commands (`cat`, `sed -n`, `head`, ...) and the shell commands inside
+ * Codex's `exec` wrapper.
+ */
 export function getFileReadTargets(
   toolName: string | undefined,
   toolInput: ToolMatcherValue | object | undefined
 ): string[] {
-  if (!toolName || !READ_TOOLS.has(toolName)) return []
-  return extractFileReadTargetPaths(toolInput ?? {})
+  if (!toolName) return []
+  if (READ_TOOLS.has(toolName)) return extractFileReadTargetPaths(toolInput ?? {})
+  if (isShellTool(toolName)) return extractShellReadTargetPaths(shellCommandFromInput(toolInput))
+  if (toolName === "exec" || toolName === "functions.exec") return codexExecReadTargets(toolInput)
+  return []
 }
 
 export function isSkillMdOnlyFileEditPayload(
@@ -296,6 +324,8 @@ export function isMarkdownOnlyFileReadPayload(
   toolName: string | undefined,
   payload: ToolMatcherRecord
 ): boolean {
+  // Read tools only: a shell `cat a.md && rm x` names a markdown read but runs more than a read.
+  if (!toolName || !READ_TOOLS.has(toolName)) return false
   const targets = getFileReadTargets(toolName, payload.tool_input ?? payload.toolInput)
   return targets.length > 0 && targets.every(isMarkdownPath)
 }

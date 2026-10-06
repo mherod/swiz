@@ -1,10 +1,13 @@
 import { describe, expect, test } from "bun:test"
 import {
+  extractCodexExecCommands,
+  extractShellReadTargetPaths,
   hasGitNoVerifyFlag,
   hasGitPushForceFlag,
   hasGitStashMutation,
   hasUnsafeGitPushForceFlag,
   isReadOnlyInspectionCommand,
+  isShellFileReadSegment,
   quotePosixShellArg,
   splitShellSegments,
   stripQuotedShellStrings,
@@ -239,5 +242,52 @@ describe("hasGitStashMutation", () => {
 
   test("ignores stash examples inside another command's quoted argument", () => {
     expect(hasGitStashMutation('echo "do not run git stash push"')).toBe(false)
+  })
+})
+
+describe("extractShellReadTargetPaths", () => {
+  test("reads every file-viewing command's operands", () => {
+    expect(extractShellReadTargetPaths("cat a.ts b.ts")).toEqual(["a.ts", "b.ts"])
+    expect(extractShellReadTargetPaths("sed -n 10,40p src/x.ts")).toEqual(["src/x.ts"])
+    expect(extractShellReadTargetPaths("head -n 20 a.ts; tail -5 b.ts")).toEqual(["a.ts", "b.ts"])
+    expect(extractShellReadTargetPaths("bat -l ts a.ts && nl b.md | less")).toEqual([
+      "a.ts",
+      "b.md",
+    ])
+    expect(extractShellReadTargetPaths("/bin/cat 'with space.md'")).toEqual(["with space.md"])
+  })
+
+  test("skips the pattern and directories for grep and rg", () => {
+    expect(extractShellReadTargetPaths("rg -n 'foo' src/a.ts src/")).toEqual(["src/a.ts"])
+    expect(extractShellReadTargetPaths("grep -e foo -A 3 x.ts")).toEqual(["x.ts"])
+    expect(extractShellReadTargetPaths("rg foo")).toEqual([])
+  })
+
+  test("ignores writes, in-place sed, stdin and non-read commands", () => {
+    expect(extractShellReadTargetPaths("cat a.ts > b.ts")).toEqual([])
+    expect(extractShellReadTargetPaths("sed -i 's/a/b/' a.ts")).toEqual([])
+    expect(extractShellReadTargetPaths("sed 's/a/b/' a.ts")).toEqual([])
+    expect(extractShellReadTargetPaths("echo x | cat -")).toEqual([])
+    expect(extractShellReadTargetPaths("ls src && git status")).toEqual([])
+  })
+
+  test("dedupes repeated paths", () => {
+    expect(extractShellReadTargetPaths("cat a.ts; head a.ts")).toEqual(["a.ts"])
+  })
+})
+
+describe("isShellFileReadSegment", () => {
+  test("matches the shared vocabulary and rejects sed without -n", () => {
+    expect(isShellFileReadSegment("less SKILL.md")).toBe(true)
+    expect(isShellFileReadSegment("sed -n 1p a")).toBe(true)
+    expect(isShellFileReadSegment("sed s/a/b/ a")).toBe(false)
+    expect(isShellFileReadSegment("echo cat")).toBe(false)
+  })
+})
+
+describe("extractCodexExecCommands", () => {
+  test("decodes the cmd of each exec_command call", () => {
+    const code = `await tools.exec_command({ cmd: "sed -n 1,5p \\"a.ts\\"" }); tools.exec_command({cmd: 'cat b.ts'})`
+    expect(extractCodexExecCommands(code)).toEqual(['sed -n 1,5p "a.ts"', "cat b.ts"])
   })
 })

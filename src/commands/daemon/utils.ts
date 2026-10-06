@@ -30,6 +30,7 @@ import {
   READ_TOOLS,
 } from "../../tool-matchers.ts"
 import { extractText } from "../../transcript-utils.ts"
+import { extractShellReadTargetPaths } from "../../utils/shell-patterns.ts"
 
 export interface TranscriptWatchPath {
   path: string
@@ -333,6 +334,13 @@ function capturedSkillInvocations(call: CapturedToolCall): string[] {
   return skill ? [skill] : []
 }
 
+/** Files a persisted call read: the read tool's path, or the paths its shell command views. */
+function capturedReadTargets(call: CapturedToolCall): string[] {
+  if (!call.detail) return []
+  if (READ_TOOLS.has(call.name)) return [call.detail]
+  return isShellTool(call.name) ? extractShellReadTargetPaths(call.detail) : []
+}
+
 function usageEventsFromCapturedCalls(calls: CapturedToolCall[]): CurrentSessionUsageEvent[] {
   const events: CurrentSessionUsageEvent[] = []
   for (let index = 0; index < calls.length; index++) {
@@ -347,10 +355,10 @@ function usageEventsFromCapturedCalls(calls: CapturedToolCall[]): CurrentSession
         source: "agent",
       })
     }
-    if (READ_TOOLS.has(call.name) && call.detail) {
+    for (const filePath of capturedReadTargets(call)) {
       events.push({
         kind: "read-file",
-        value: call.detail,
+        value: filePath,
         turnIndex: index,
         timestamp: call.timestamp,
         source: "agent",
@@ -383,9 +391,8 @@ function accumulateCapturedCallDetails(calls: CapturedToolCall[]): {
   const writtenFiles: string[] = []
   for (const call of calls) {
     for (const skill of capturedSkillInvocations(call)) appendUnique(skillInvocations, skill)
-    if (READ_TOOLS.has(call.name)) {
-      appendUnique(readFiles, call.detail)
-    } else if (isFileEditTool(call.name)) {
+    for (const filePath of capturedReadTargets(call)) appendUnique(readFiles, filePath)
+    if (isFileEditTool(call.name)) {
       appendUnique(writtenFiles, call.detail)
     }
   }
@@ -577,9 +584,10 @@ function captureReadFileTargets(
   turnIndex: number,
   timestamp: string
 ): void {
-  if (!READ_TOOLS.has(toolName)) return
+  const targets = getFileReadTargets(toolName, toolInput)
+  if (targets.length === 0) return
   if (!entry.readFiles) entry.readFiles = []
-  for (const filePath of getFileReadTargets(toolName, toolInput)) {
+  for (const filePath of targets) {
     entry.readFiles.push(filePath)
     entry.events?.push({
       kind: "read-file",

@@ -448,8 +448,171 @@ export function hasGitStashMutation(command: string): boolean {
   )
 }
 
+/**
+ * Shell commands whose operands are files the agent reads. The single vocabulary for shell file-read
+ * detection: read counting, skill-file reads and the read-only inspection gate all derive from it.
+ * `sed` counts only in its `-n` form; bare `sed` can carry `-i` and edit in place.
+ */
+export const SHELL_FILE_READ_COMMANDS: ReadonlySet<string> = new Set([
+  "cat",
+  "bat",
+  "less",
+  "more",
+  "head",
+  "tail",
+  "nl",
+  "sed",
+  "grep",
+  "rg",
+])
+
+/** Option flags that consume the following token as their value, per read command. */
+const _READ_OPTION_VALUE_FLAGS: Readonly<Record<string, ReadonlySet<string>>> = {
+  head: new Set(["-n", "-c"]),
+  tail: new Set(["-n", "-c"]),
+  sed: new Set(["-e", "-f"]),
+  grep: new Set(["-e", "-f", "-m", "-A", "-B", "-C", "--max-count", "--include", "--exclude"]),
+  rg: new Set([
+    "-e",
+    "-f",
+    "-g",
+    "-t",
+    "-T",
+    "-m",
+    "-A",
+    "-B",
+    "-C",
+    "--glob",
+    "--type",
+    "--type-not",
+    "--max-count",
+  ]),
+  bat: new Set(["-l", "--language", "-r", "--line-range"]),
+}
+
+/** Commands whose first operand is a pattern or script rather than a file (unless -e/-f gave it). */
+const _PATTERN_FIRST_COMMANDS: ReadonlySet<string> = new Set(["sed", "grep", "rg"])
+
+function _isSedInPlace(args: string[]): boolean {
+  return args.some((arg) => /^-[a-z]*i/.test(arg) || arg.startsWith("--in-place"))
+}
+
+/** Non-option arguments, skipping the values of flags that take one; everything after `--`. */
+function _collectOperands(
+  args: string[],
+  valueFlags: ReadonlySet<string> | undefined
+): { operands: string[]; patternGiven: boolean } {
+  const operands: string[] = []
+  let patternGiven = false
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i]!
+    if (arg === "--") return { operands: [...operands, ...args.slice(i + 1)], patternGiven }
+    if (!arg.startsWith("-") || arg === "-") {
+      operands.push(arg)
+      continue
+    }
+    if (arg === "-e" || arg === "-f") patternGiven = true
+    if (valueFlags?.has(arg)) i++
+  }
+  return { operands, patternGiven }
+}
+
+function _readOperands(command: string, args: string[]): string[] {
+  const { operands, patternGiven } = _collectOperands(args, _READ_OPTION_VALUE_FLAGS[command])
+  const files = _PATTERN_FIRST_COMMANDS.has(command) && !patternGiven ? operands.slice(1) : operands
+  return files.filter((file) => file !== "-")
+}
+
+/** grep/rg operands are often directories; count only operands that name a file. */
+function _looksLikeFilePath(operand: string): boolean {
+  return !operand.endsWith("/") && /\.[^./\\]+$/.test(operand)
+}
+
+/** The read command and its arguments when a statement views files, else null. */
+function _parseReadCommand(segment: string): { command: string; args: string[] } | null {
+  const [rawCommand, ...args] = tokenizeShellSegment(segment.trim())
+  const command = rawCommand?.split("/").pop()
+  if (!command || !SHELL_FILE_READ_COMMANDS.has(command)) return null
+  if (command === "sed" && (!args.includes("-n") || _isSedInPlace(args))) return null
+  return { command, args }
+}
+
+function _segmentReadTargets(segment: string): string[] {
+  if (_hasWriteRedirect(segment)) return []
+  const parsed = _parseReadCommand(segment)
+  if (!parsed || (parsed.command === "rg" && _hasLongFlag(parsed.args, "--pre"))) return []
+  const operands = _readOperands(parsed.command, parsed.args)
+  const isSearch = parsed.command === "grep" || parsed.command === "rg"
+  return isSearch ? operands.filter(_looksLikeFilePath) : operands
+}
+
+/**
+ * File paths a shell command reads with a file-viewing command (`cat`, `sed -n`, `head`, `rg`
+ * on a file, ...), across every `|`/`;`/`&&` statement. Segments that redirect output are skipped:
+ * `cat a > b` copies rather than reads for the agent.
+ */
+export function extractShellReadTargetPaths(command: string): string[] {
+  const paths = new Set<string>()
+  for (const segment of splitShellSegments(command)) {
+    for (const path of _segmentReadTargets(segment)) paths.add(path)
+  }
+  return [...paths]
+}
+
+/** True when a single shell statement starts with a file-viewing command. */
+export function isShellFileReadSegment(segment: string): boolean {
+  return _parseReadCommand(segment) !== null
+}
+
+const CODEX_EXEC_COMMAND_CALL_RE =
+  /\btools(?:\.exec_command|\[\s*["']exec_command["']\s*\])\s*\(\s*\{([\s\S]*?)\}\s*\)/g
+const CODEX_COMMAND_FIELD_RE =
+  /\b(?:cmd|command)\s*:\s*(?:"((?:\\.|[^"\\])*)"|'((?:\\.|[^'\\])*)'|`((?:\\.|[^`\\])*)`)/
+
+const _CODEX_ESCAPES: Record<string, string> = {
+  "\\": "\\",
+  n: "\n",
+  r: "\r",
+  t: "\t",
+  b: "\b",
+  f: "\f",
+  v: "\v",
+  "0": "\0",
+  "'": "'",
+  '"': '"',
+  "`": "`",
+}
+
+function _decodeCodexCommandString(raw: string, quote: '"' | "'" | "`"): string {
+  if (quote === '"') {
+    try {
+      return JSON.parse(`"${raw}"`) as string
+    } catch {
+      return raw
+    }
+  }
+  return raw.replace(
+    /\\(\\|n|r|t|b|f|v|0|'|"|`)/g,
+    (_match, escaped: string) => _CODEX_ESCAPES[escaped] ?? escaped
+  )
+}
+
+/** Shell commands passed to `tools.exec_command({ cmd })` inside the body of Codex's `exec` tool. */
+export function extractCodexExecCommands(code: string): string[] {
+  const commands: string[] = []
+  for (const call of code.matchAll(CODEX_EXEC_COMMAND_CALL_RE)) {
+    const field = call[1]?.match(CODEX_COMMAND_FIELD_RE)
+    if (!field) continue
+    const raw = field[1] ?? field[2] ?? field[3]
+    if (raw === undefined) continue
+    const quote = field[1] !== undefined ? '"' : field[2] !== undefined ? "'" : "`"
+    commands.push(_decodeCodexCommandString(raw, quote))
+  }
+  return commands
+}
+
 /** Commands that only read in every form this predicate admits (see the per-command guards below). */
-const READ_ONLY_COMMANDS: ReadonlySet<string> = new Set(["ls", "rg", "grep", "cat", "head", "tail"])
+const READ_ONLY_COMMANDS: ReadonlySet<string> = new Set(["ls", ...SHELL_FILE_READ_COMMANDS])
 
 /** Git subcommands with no mutating form. `branch`, `tag` and `remote` are excluded: they mutate. */
 const READ_ONLY_GIT_SUBCOMMANDS: ReadonlySet<string> = new Set([

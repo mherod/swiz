@@ -7,7 +7,11 @@
  */
 
 import { extractSkillNamesFromCodexSkillQueryCode } from "./skill-query-usage.ts"
-import { splitShellSegments } from "./utils/shell-patterns.ts"
+import {
+  extractCodexExecCommands,
+  isShellFileReadSegment,
+  splitShellSegments,
+} from "./utils/shell-patterns.ts"
 
 interface SkillUsageToolInput {
   args?: string
@@ -29,15 +33,10 @@ interface SkillInvocationPreamble {
 const SKILL_MD_DIRECTORY_PATH_RE =
   /(?:^|[\\/])\.?skills[\\/](?:[^\\/\s"'`]+[\\/])*([a-z][a-z0-9-]*)[\\/]SKILL\.md\b/gi
 const SKILL_MD_BASENAME_PATH_RE = /(?:^|[\\/])([a-z][a-z0-9-]*)[\\/]SKILL\.md\b/gi
-const SKILL_MD_SHELL_READ_RE = /^(?:(?:cat|bat|less|more|head|tail|nl|grep|rg)\b|sed\s+-n\b)/i
 const SWIZ_SKILL_COMMAND_RE = /^(?:swiz\s+skill|bun\s+run\s+(?:\.\/)?index\.ts\s+skill)\b(.*)$/i
 const SWIZ_SKILL_MANAGEMENT_FLAG_RE =
   /(?:^|\s)--(?:sync|sync-gemini|convert|to-command)(?:[=\s]|$)/i
 const SKILL_NAME_RE = /^[a-z][a-z0-9-]*$/
-const CODEX_EXEC_COMMAND_CALL_RE =
-  /\btools(?:\.exec_command|\[\s*["']exec_command["']\s*\])\s*\(\s*\{([\s\S]*?)\}\s*\)/g
-const CODEX_COMMAND_FIELD_RE =
-  /\b(?:cmd|command)\s*:\s*(?:"((?:\\.|[^"\\])*)"|'((?:\\.|[^'\\])*)'|`((?:\\.|[^`\\])*)`)/
 
 const COMMAND_NAME_RE = /<command-name>([a-z][a-z0-9-]*)<\/command-name>/g
 const QUEUED_SKILL_PROMPT_RE = /^\s*[/$]([a-z][a-z0-9-]*)\b/
@@ -77,14 +76,10 @@ export function extractSkillNameFromSkillMdPathText(
   return extractSkillNamesFromSkillMdPathText(text, options)[0] ?? null
 }
 
-function isSkillMdShellReadCommand(command: string): boolean {
-  return SKILL_MD_SHELL_READ_RE.test(command.trim())
-}
-
 export function extractSkillNamesFromShellSkillReadCommand(command: string): string[] {
   const skills: string[] = []
   for (const segment of splitShellSegments(command)) {
-    if (!isSkillMdShellReadCommand(segment)) continue
+    if (!isShellFileReadSegment(segment)) continue
     for (const skill of extractSkillNamesFromSkillMdPathText(segment, {
       allowBasenamePath: true,
     })) {
@@ -118,42 +113,10 @@ export function extractSkillNamesFromShellSkillUsageCommand(command: string): st
   return skills
 }
 
-function decodeCodexCommandString(raw: string, quote: '"' | "'" | "`"): string {
-  if (quote === '"') {
-    try {
-      return JSON.parse(`"${raw}"`) as string
-    } catch {
-      return raw
-    }
-  }
-  return raw.replace(/\\(\\|n|r|t|b|f|v|0|'|"|`)/g, (_match, escaped: string) => {
-    const replacements: Record<string, string> = {
-      "\\": "\\",
-      n: "\n",
-      r: "\r",
-      t: "\t",
-      b: "\b",
-      f: "\f",
-      v: "\v",
-      "0": "\0",
-      "'": "'",
-      '"': '"',
-      "`": "`",
-    }
-    return replacements[escaped] ?? escaped
-  })
-}
-
 /** Extract skill usage from the JavaScript body of Codex's `exec` custom tool wrapper. */
 export function extractSkillNamesFromCodexExecCode(code: string): string[] {
   const skills = extractSkillNamesFromCodexSkillQueryCode(code)
-  for (const call of code.matchAll(CODEX_EXEC_COMMAND_CALL_RE)) {
-    const field = call[1]?.match(CODEX_COMMAND_FIELD_RE)
-    if (!field) continue
-    const raw = field[1] ?? field[2] ?? field[3]
-    if (raw === undefined) continue
-    const quote = field[1] !== undefined ? '"' : field[2] !== undefined ? "'" : "`"
-    const command = decodeCodexCommandString(raw, quote)
+  for (const command of extractCodexExecCommands(code)) {
     for (const skill of extractSkillNamesFromShellSkillUsageCommand(command)) {
       pushUniqueSkill(skills, skill)
     }

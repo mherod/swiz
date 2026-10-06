@@ -15,6 +15,7 @@ import { SWIZ_CMD_RE } from "./inline-hook-helpers.ts"
 import {
   GIT_GLOBAL_OPTS,
   gitSubcommandRe,
+  isShellFileReadSegment,
   type ParsedGitInvocationTokens,
   parseGitInvocationTokens,
   shellStatementCommandRe,
@@ -827,7 +828,8 @@ export const FORCE_PUSH_RE = new RegExp(
 export const READ_CMD_RE = shellStatementCommandRe("(ls|rg|grep|curl|wget)\\b")
 
 /**
- * File-inspection commands: `cat`, `head`, `tail`, and read-only `sed -n`.
+ * File-inspection commands: the shared `SHELL_FILE_READ_COMMANDS` vocabulary (`cat`, `head`,
+ * `tail`, `sed -n`, `bat`, `nl`, ...) via `isShellFileReadSegment`.
  *
  * Separate from READ_CMD_RE because these need a redirect check. Reading a file is how an agent
  * decides what to plan, so gating it behind "you must already have a task" forces the plan to be
@@ -838,7 +840,9 @@ export const READ_CMD_RE = shellStatementCommandRe("(ls|rg|grep|curl|wget)\\b")
  *
  * `sed` is admitted only in its `-n` form: bare `sed` can carry `-i` and edit in place.
  */
-const INSPECT_CMD_RE = shellStatementCommandRe("(cat|head|tail)\\b|sed\\s+-n\\b")
+function hasInspectStatement(command: string): boolean {
+  return splitShellSegments(command).some(isShellFileReadSegment)
+}
 
 /**
  * Any redirect or pipe-to-write that would turn an inspection command into a write.
@@ -848,7 +852,7 @@ const WRITE_REDIRECT_RE = /(^|[^0-9<>])>{1,2}[^&]|\|\s*tee\b/
 
 /** True for a file-inspection command that cannot write. */
 function isReadOnlyInspectCommand(command: string): boolean {
-  return INSPECT_CMD_RE.test(command) && !WRITE_REDIRECT_RE.test(command)
+  return hasInspectStatement(command) && !WRITE_REDIRECT_RE.test(command)
 }
 
 /** Matches diagnostic/cleanup commands recommended by other hooks (e.g., index-lock recovery). */
