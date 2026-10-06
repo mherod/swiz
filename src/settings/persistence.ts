@@ -95,6 +95,23 @@ const PRE_CHECKS_DEFAULT_STATUS_LINE_SEGMENTS: readonly StatusLineSegment[] = [
   "time",
 ]
 
+const PRE_READS_DEFAULT_STATUS_LINE_SEGMENTS: readonly StatusLineSegment[] = [
+  "repo",
+  "git",
+  "pr",
+  "model",
+  "ctx",
+  "state",
+  "tasks",
+  "skills",
+  "backlog",
+  "checks",
+  "metrics",
+  "mode",
+  "flags",
+  "time",
+]
+
 /**
  * DEFAULT_SETTINGS is derived from SETTINGS_REGISTRY defaults.
  * Non-registry fields (statusLineSegments, sessions) are added here.
@@ -177,6 +194,7 @@ const LEGACY_DEFAULT_SEGMENT_SETS = [
   PRE_TASKS_DEFAULT_STATUS_LINE_SEGMENTS,
   PRE_SKILLS_DEFAULT_STATUS_LINE_SEGMENTS,
   PRE_CHECKS_DEFAULT_STATUS_LINE_SEGMENTS,
+  PRE_READS_DEFAULT_STATUS_LINE_SEGMENTS,
 ] as const
 
 function isAnyLegacyDefault(segments: readonly StatusLineSegment[]): boolean {

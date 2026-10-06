@@ -10,6 +10,7 @@ import { acquireEnvLock, releaseEnvLockFn, useTempDir } from "../utils/test-util
 import {
   buildSettingsFlags,
   buildTaskCountsFromTasks,
+  computeReadsPerMinute,
   computeSessionStatusSnapshot,
   computeWantedLevel,
   computeWarmStatusLineSnapshot,
@@ -19,6 +20,7 @@ import {
   formatGitHubCiSegment,
   formatProjectState,
   formatQueuedSteersSegment,
+  formatReadRateSegment,
   formatTaskCountSegment,
   getContextStatsPath,
   readContextStats,
@@ -42,6 +44,7 @@ describe("warm session status snapshots", () => {
         calls.lines++
         return []
       },
+      readAllLines: async () => [],
       readSkills: async () => {
         calls.skills++
         return ["morning-standup"]
@@ -52,6 +55,7 @@ describe("warm session status snapshots", () => {
       sessionPath: "/transcript.jsonl",
       activeSkills: ["morning-standup"],
       infractionWantedLevel: 0,
+      readsPerMinute: null,
     })
     expect(calls).toEqual({ find: 1, lines: 1, skills: 1 })
   })
@@ -76,6 +80,44 @@ describe("warm session status snapshots", () => {
 function makeTempProject(): string {
   return mkdtempSync(join(tmpdir(), "swiz-ctx-stats-test-"))
 }
+
+describe("computeReadsPerMinute", () => {
+  const toolLine = (timestamp: string, name: string, input: Record<string, unknown>) =>
+    JSON.stringify({
+      type: "assistant",
+      timestamp,
+      message: { role: "assistant", content: [{ type: "tool_use", id: timestamp, name, input }] },
+    })
+  const start = Date.parse("2026-10-06T12:00:00.000Z")
+
+  it("averages read events over the elapsed session minutes", () => {
+    const lines = [
+      toolLine("2026-10-06T12:00:00.000Z", "Bash", { command: "ls" }),
+      toolLine("2026-10-06T12:01:00.000Z", "Read", { file_path: "/a.ts" }),
+      toolLine("2026-10-06T12:02:00.000Z", "Read", { file_path: "/b.ts" }),
+      toolLine("2026-10-06T12:03:00.000Z", "Edit", { file_path: "/a.ts" }),
+    ]
+    expect(computeReadsPerMinute(lines, start + 4 * 60_000)).toBe(0.5)
+  })
+
+  it("floors elapsed time at one minute", () => {
+    const lines = [toolLine("2026-10-06T12:00:00.000Z", "Read", { file_path: "/a.ts" })]
+    expect(computeReadsPerMinute(lines, start + 5_000)).toBe(1)
+  })
+
+  it("returns null without timestamped tool events", () => {
+    expect(computeReadsPerMinute([], start)).toBeNull()
+  })
+})
+
+describe("formatReadRateSegment", () => {
+  it("renders the rate and hides zero or unknown", () => {
+    expect(formatReadRateSegment(2.25)).toContain("2.3")
+    expect(formatReadRateSegment(12.4)).toContain("12")
+    expect(formatReadRateSegment(0)).toBe("")
+    expect(formatReadRateSegment(null)).toBe("")
+  })
+})
 
 describe("readContextStats", () => {
   it("returns null when no stats file exists", async () => {

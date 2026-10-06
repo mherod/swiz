@@ -31,13 +31,14 @@ import { findTaskStoreForSession } from "../task-roots.ts"
 import { isIncompleteTaskStatus } from "../tasks/task-recovery.ts"
 import { readTasksAcrossStores } from "../tasks/task-repository.ts"
 import { findAllProviderSessions } from "../transcript-sessions.ts"
+import { collectCurrentSessionUsageEvents } from "../transcript-summary.ts"
 import type { Command } from "../types.ts"
 import {
   type ExecutionStatsSummary,
   type ProjectExecutionStats,
   readProjectExecutionStats,
 } from "../utils/execution-stats.ts"
-import { readSessionLines } from "../utils/transcript.ts"
+import { readAllTranscriptLines, readSessionLines } from "../utils/transcript.ts"
 import type { SerializedDaemonMetrics } from "./daemon/cache/metrics.ts"
 import { getDaemonPort } from "./daemon/daemon-admin.ts"
 
@@ -82,6 +83,8 @@ export interface WarmStatusLineSnapshot {
   /** Transcript-derived wanted level captured with the warm snapshot. */
   infractionWantedLevel?: number | null
   activeSkills?: string[] | null
+  /** Session-average file reads per minute. Undefined when the snapshot predates this field. */
+  readsPerMinute?: number | null
   /** True when the daemon's upstream sync hasn't succeeded for this project in over 10 minutes. Null/undefined when unknown (non-daemon path). */
   issueSyncStale?: boolean | null
   /** Average test/lint execution times recorded by the measure-*-time hooks. Null when no runs recorded. */
@@ -93,12 +96,15 @@ export interface WarmStatusLineSnapshot {
 interface SessionStatusSnapshotDependencies {
   findSessions: typeof findAllProviderSessions
   readLines: typeof readSessionLines
+  /** Whole transcript, ignoring compaction/system boundaries — the read rate spans the session. */
+  readAllLines: typeof readAllTranscriptLines
   readSkills: typeof getRecentlyInvokedSkillsForCurrentSession
 }
 
 const DEFAULT_SESSION_STATUS_DEPENDENCIES: SessionStatusSnapshotDependencies = {
   findSessions: findAllProviderSessions,
   readLines: readSessionLines,
+  readAllLines: readAllTranscriptLines,
   readSkills: getRecentlyInvokedSkillsForCurrentSession,
 }
 
@@ -110,27 +116,61 @@ export async function computeSessionStatusSnapshot(
   sessionPath: string | null
   activeSkills: string[] | null
   infractionWantedLevel: number | null
+  readsPerMinute: number | null
 }> {
+  const empty = {
+    sessionPath: null,
+    activeSkills: null,
+    infractionWantedLevel: null,
+    readsPerMinute: null,
+  }
   try {
     const sessions = await dependencies.findSessions(cwd)
     const session = sessionId
       ? sessions.find((candidate) => candidate.id === sessionId)
       : sessions[0]
-    if (!session?.path) {
-      return { sessionPath: null, activeSkills: null, infractionWantedLevel: null }
-    }
-    const [activeSkills, lines] = await Promise.all([
+    if (!session?.path) return empty
+    const [activeSkills, lines, allLines] = await Promise.all([
       dependencies.readSkills(session.path).catch(() => null),
       dependencies.readLines(session.path).catch(() => null),
+      dependencies.readAllLines(session.path).catch(() => null),
     ])
     return {
       sessionPath: session.path,
       activeSkills,
       infractionWantedLevel: lines ? standingWantedLevel(lines).wantedLevel : null,
+      readsPerMinute: allLines ? computeReadsPerMinute(allLines) : null,
     }
   } catch {
-    return { sessionPath: null, activeSkills: null, infractionWantedLevel: null }
+    return empty
   }
+}
+
+/**
+ * Average file reads per minute across the session, measured from the first
+ * timestamped tool event to `nowMs`. Elapsed time is floored at one minute so a
+ * burst of reads at session start doesn't render as an absurd rate.
+ */
+export function computeReadsPerMinute(lines: string[], nowMs: number = Date.now()): number | null {
+  const events = collectCurrentSessionUsageEvents(lines)
+  let startMs: number | null = null
+  let reads = 0
+  for (const event of events) {
+    if (event.kind === "read-file") reads++
+    if (startMs !== null || !event.timestamp) continue
+    const ms = Date.parse(event.timestamp)
+    if (Number.isFinite(ms)) startMs = ms
+  }
+  if (startMs === null) return null
+  const minutes = Math.max((nowMs - startMs) / 60_000, 1)
+  return reads / minutes
+}
+
+/** e.g. `📖 4.2/min`; empty when unknown or no reads yet. */
+export function formatReadRateSegment(readsPerMinute: number | null | undefined): string {
+  if (typeof readsPerMinute !== "number" || readsPerMinute <= 0) return ""
+  const rate = readsPerMinute >= 10 ? readsPerMinute.toFixed(0) : readsPerMinute.toFixed(1)
+  return `\x1b[96m📖 ${rate}${R}${DIM}/min${R}`
 }
 
 type GitHubCiState = "success" | "pending" | "failure" | "neutral" | "none"
@@ -903,6 +943,7 @@ export async function computeWarmStatusLineSnapshot(
     }),
     sessionPath: sessionStatus.sessionPath,
     infractionWantedLevel: sessionStatus.infractionWantedLevel,
+    readsPerMinute: sessionStatus.readsPerMinute,
   }
 }
 
@@ -1215,6 +1256,7 @@ function buildLine3(options: {
   const skillsSeg = formatActiveSkillsSegment(activeSkills)
   const steersSeg = formatQueuedSteersSegment(snapshot.queuedSteers)
   const checksSeg = formatExecStatsSegment(snapshot.execStats)
+  const readsSeg = formatReadRateSegment(snapshot.readsPerMinute)
   const modeSeg = buildModeSeg(a4, agentName, vimMode)
   const flagsStr = snapshot.settingsParts.join(" ")
   return joinGroups([
@@ -1224,6 +1266,7 @@ function buildLine3(options: {
     labeledSegment(seg("steers"), "steers", steersSeg),
     labeledSegment(seg("backlog"), "backlog", ghCountSeg),
     labeledSegment(seg("checks"), "checks", checksSeg),
+    labeledSegment(seg("reads"), "reads", readsSeg),
     labeledSegment(seg("metrics"), "metrics", daemonMetricsSeg),
     labeledSegment(seg("mode"), "mode", modeSeg),
     labeledSegment(seg("flags"), "flags", flagsStr),
@@ -1341,6 +1384,11 @@ async function applySnapshotFallbacks(
   if (snapshot.execStats === undefined) snapshot.execStats = await readExecStatsForCwd(cwd)
   if (snapshot.queuedSteers === undefined) {
     snapshot.queuedSteers = await readQueuedSteerCounts(sessionId)
+  }
+  if (snapshot.readsPerMinute === undefined && sessionPath) {
+    snapshot.readsPerMinute = await readAllTranscriptLines(sessionPath)
+      .then((lines) => computeReadsPerMinute(lines))
+      .catch(() => null)
   }
   return activeSkills
 }
