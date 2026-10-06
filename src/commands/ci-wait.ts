@@ -4,6 +4,7 @@ import { git } from "../git-helpers.ts"
 import { getEffectiveSwizSettings, readProjectSettings, readSwizSettings } from "../settings.ts"
 import type { Command } from "../types.ts"
 import { buildConcurrentWaitGuidance } from "../utils/concurrent-work-guidance.ts"
+import { pollUntil } from "../utils/poll-until.ts"
 import { getDaemonPort } from "./daemon/daemon-admin.ts"
 
 const DAEMON_PORT = getDaemonPort()
@@ -253,15 +254,15 @@ export async function discoverRunId(
     onWaiting,
   }: DiscoverRunIdOptions = {}
 ): Promise<number | null> {
-  for (let attempt = 0; attempt < maxAttempts; attempt++) {
-    const id = await findFn(fullSha, cwd)
-    if (id !== null) return id
-    if (attempt < maxAttempts - 1) {
-      onWaiting?.(attempt + 1, maxAttempts)
-      await sleep(intervalMs)
-    }
-  }
-  return null
+  const { value } = await pollUntil({
+    fetch: () => findFn(fullSha, cwd),
+    isDone: (id) => id !== null,
+    intervalMs,
+    maxAttempts,
+    sleep,
+    onWaiting: (_id, { attempt }) => onWaiting?.(attempt, maxAttempts),
+  })
+  return value
 }
 
 export function evaluateCiRun(
@@ -293,18 +294,22 @@ interface CiDiscoveryContext {
 }
 
 async function discoverCiRunUntilTimeout(context: CiDiscoveryContext): Promise<number> {
-  while (true) {
-    const elapsed = Date.now() - context.startTime
-    if (elapsed >= context.timeoutMs) {
-      throw new Error(
-        `No CI run found for commit ${context.commitSha} within ${context.timeoutSeconds}s timeout`
-      )
-    }
-    const runId = await context.findFn(context.fullSha, context.cwd)
-    if (runId !== null) return runId
-    context.log(`⏳ Waiting for CI run to appear... (${Math.round(elapsed / 1000)}s)`)
-    await context.sleepFn(Math.min(context.pollMs, context.timeoutMs - elapsed))
+  const { value: runId } = await pollUntil({
+    fetch: () => context.findFn(context.fullSha, context.cwd),
+    isDone: (id) => id !== null,
+    intervalMs: context.pollMs,
+    timeoutMs: context.timeoutMs,
+    startTime: context.startTime,
+    sleep: context.sleepFn,
+    onWaiting: (_id, { elapsedMs }) =>
+      context.log(`⏳ Waiting for CI run to appear... (${Math.round(elapsedMs / 1000)}s)`),
+  })
+  if (runId === null) {
+    throw new Error(
+      `No CI run found for commit ${context.commitSha} within ${context.timeoutSeconds}s timeout`
+    )
   }
+  return runId
 }
 
 interface CiStatusContext {
@@ -321,40 +326,41 @@ interface CiStatusContext {
 
 async function pollCiRunUntilComplete(context: CiStatusContext): Promise<CiCompletionResult> {
   let reportedReadFailure = false
-  while (true) {
-    const elapsed = Date.now() - context.startTime
-    if (elapsed >= context.timeoutMs) {
-      throw new Error(
-        `CI run ${context.runId} still running after ${context.timeoutSeconds}s timeout`
+  const { value: data } = await pollUntil({
+    fetch: () => context.viewFn(context.runId, context.cwd),
+    isDone: (run) => run !== null && evaluateCiRun(run).state === "completed",
+    intervalMs: context.pollMs,
+    timeoutMs: context.timeoutMs,
+    startTime: context.startTime,
+    sleep: context.sleepFn,
+    onWaiting: (run, { elapsedMs }) => {
+      if (!run) {
+        if (!reportedReadFailure) {
+          context.log("⚠ Could not read CI status from GitHub; retrying...")
+          reportedReadFailure = true
+        }
+        return
+      }
+      reportedReadFailure = false
+      const completedJobs = run.jobs.filter((job) => job.status === "completed").length
+      context.log(
+        `⏳ CI: ${run.status} — ${completedJobs}/${run.jobs.length} job(s) done ` +
+          `(${Math.round(elapsedMs / 1000)}s)`
       )
-    }
+    },
+  })
 
-    const data = await context.viewFn(context.runId, context.cwd)
-    if (!data) {
-      if (!reportedReadFailure) {
-        context.log("⚠ Could not read CI status from GitHub; retrying...")
-        reportedReadFailure = true
-      }
-      await context.sleepFn(Math.min(context.pollMs, context.timeoutMs - elapsed))
-      continue
-    }
-
-    reportedReadFailure = false
-    const evaluation = evaluateCiRun(data)
-    if (evaluation.state === "completed") {
-      return {
-        conclusion: evaluation.conclusion,
-        elapsed: Date.now() - context.startTime,
-        runId: context.runId,
-        jobs: data.jobs,
-      }
-    }
-
-    context.log(
-      `⏳ CI: ${data.status} — ${evaluation.completedJobs}/${data.jobs.length} job(s) done ` +
-        `(${Math.round(elapsed / 1000)}s)`
+  const evaluation = data ? evaluateCiRun(data) : null
+  if (!data || evaluation?.state !== "completed") {
+    throw new Error(
+      `CI run ${context.runId} still running after ${context.timeoutSeconds}s timeout`
     )
-    await context.sleepFn(Math.min(context.pollMs, context.timeoutMs - elapsed))
+  }
+  return {
+    conclusion: evaluation.conclusion,
+    elapsed: Date.now() - context.startTime,
+    runId: context.runId,
+    jobs: data.jobs,
   }
 }
 

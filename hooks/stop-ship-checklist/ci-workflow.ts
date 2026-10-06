@@ -15,6 +15,7 @@ import {
   resolveCurrentFeatureBranch,
   resolveCurrentGitHubBranch,
 } from "../../src/utils/git-utils.ts"
+import { pollUntil } from "../../src/utils/poll-until.ts"
 
 import type { WorkflowStep } from "./types.ts"
 
@@ -104,16 +105,15 @@ export async function pollUntilComplete(
   cwd: string,
   deps: PollDeps = defaultPollDeps
 ): Promise<CIRun[]> {
-  let relevant = await deps.fetcher(branch, cwd)
-  if (!relevant.length) return relevant
-  if (findActive(relevant).length === 0) return relevant
-
-  const deadline = deps.now() + MAX_POLL_MS
-  while (deps.now() < deadline && findActive(relevant).length > 0) {
-    await deps.sleep(POLL_INTERVAL_MS)
-    relevant = await deps.fetcher(branch, cwd)
-  }
-  return relevant
+  const { value } = await pollUntil({
+    fetch: () => deps.fetcher(branch, cwd),
+    isDone: (runs) => findActive(runs).length === 0,
+    intervalMs: POLL_INTERVAL_MS,
+    timeoutMs: MAX_POLL_MS,
+    sleep: deps.sleep,
+    now: deps.now,
+  })
+  return value
 }
 
 function buildFailingResult(
