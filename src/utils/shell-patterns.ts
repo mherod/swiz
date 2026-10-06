@@ -520,7 +520,8 @@ function _collectOperands(
 function _readOperands(command: string, args: string[]): string[] {
   const { operands, patternGiven } = _collectOperands(args, _READ_OPTION_VALUE_FLAGS[command])
   const files = _PATTERN_FIRST_COMMANDS.has(command) && !patternGiven ? operands.slice(1) : operands
-  return files.filter((file) => file !== "-")
+  // An unexpanded glob (`src/*.ts`) names no single file; the transcript cannot expand it.
+  return files.filter((file) => file !== "-" && !/[*?[]/.test(file))
 }
 
 /** grep/rg operands are often directories; count only operands that name a file. */

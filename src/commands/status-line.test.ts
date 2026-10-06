@@ -55,7 +55,7 @@ describe("warm session status snapshots", () => {
       sessionPath: "/transcript.jsonl",
       activeSkills: ["morning-standup"],
       infractionWantedLevel: 0,
-      readsPerMinute: null,
+      readsPerMinute: 0,
     })
     expect(calls).toEqual({ find: 1, lines: 1, skills: 1 })
   })
@@ -90,30 +90,39 @@ describe("computeReadsPerMinute", () => {
     })
   const start = Date.parse("2026-10-06T12:00:00.000Z")
 
-  it("averages read events over the elapsed session minutes", () => {
+  it("counts distinct files read in the last 60 seconds only", () => {
     const lines = [
-      toolLine("2026-10-06T12:00:00.000Z", "Bash", { command: "ls" }),
-      toolLine("2026-10-06T12:01:00.000Z", "Read", { file_path: "/a.ts" }),
-      toolLine("2026-10-06T12:02:00.000Z", "Read", { file_path: "/b.ts" }),
-      toolLine("2026-10-06T12:03:00.000Z", "Edit", { file_path: "/a.ts" }),
+      toolLine("2026-10-06T12:00:00.000Z", "Read", { file_path: "/old.ts" }),
+      toolLine("2026-10-06T12:01:10.000Z", "Read", { file_path: "/a.ts" }),
+      toolLine("2026-10-06T12:01:20.000Z", "Bash", { command: "sed -n 1,9p /b.ts" }),
+      toolLine("2026-10-06T12:01:30.000Z", "Bash", { command: "cat /a.ts" }),
+      toolLine("2026-10-06T12:01:40.000Z", "Edit", { file_path: "/c.ts" }),
     ]
-    expect(computeReadsPerMinute(lines, start + 4 * 60_000)).toBe(0.5)
+    expect(computeReadsPerMinute(lines, start + 2 * 60_000)).toBe(2)
   })
 
-  it("floors elapsed time at one minute", () => {
+  it("counts a file read by absolute and relative path once", () => {
+    const lines = [
+      toolLine("2026-10-06T12:00:10.000Z", "Read", { file_path: "/repo/src/a.ts" }),
+      toolLine("2026-10-06T12:00:20.000Z", "Bash", { command: "cat src/a.ts" }),
+    ]
+    expect(computeReadsPerMinute(lines, start + 30_000, "/repo")).toBe(1)
+  })
+
+  it("is zero once the reads are more than a minute old", () => {
     const lines = [toolLine("2026-10-06T12:00:00.000Z", "Read", { file_path: "/a.ts" })]
-    expect(computeReadsPerMinute(lines, start + 5_000)).toBe(1)
+    expect(computeReadsPerMinute(lines, start + 30_000)).toBe(1)
+    expect(computeReadsPerMinute(lines, start + 61_000)).toBe(0)
   })
 
-  it("returns null without timestamped tool events", () => {
-    expect(computeReadsPerMinute([], start)).toBeNull()
+  it("is zero with no reads", () => {
+    expect(computeReadsPerMinute([], start)).toBe(0)
   })
 })
 
 describe("formatReadRateSegment", () => {
-  it("renders the rate and hides zero or unknown", () => {
-    expect(formatReadRateSegment(2.25)).toContain("2.3")
-    expect(formatReadRateSegment(12.4)).toContain("12")
+  it("renders the count and hides zero or unknown", () => {
+    expect(formatReadRateSegment(6)).toContain("📖 6")
     expect(formatReadRateSegment(0)).toBe("")
     expect(formatReadRateSegment(null)).toBe("")
   })

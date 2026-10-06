@@ -3,7 +3,7 @@
 // Uses time-based rainbow cycling so colors shift on each render.
 
 import { mkdir } from "node:fs/promises"
-import { basename, join } from "node:path"
+import { basename, join, resolve } from "node:path"
 import { debugLog } from "../debug.ts"
 import { detectCiProviders } from "../detect.ts"
 import {
@@ -139,38 +139,38 @@ export async function computeSessionStatusSnapshot(
       sessionPath: session.path,
       activeSkills,
       infractionWantedLevel: lines ? standingWantedLevel(lines).wantedLevel : null,
-      readsPerMinute: allLines ? computeReadsPerMinute(allLines) : null,
+      readsPerMinute: allLines ? computeReadsPerMinute(allLines, Date.now(), cwd) : null,
     }
   } catch {
     return empty
   }
 }
 
+const READ_WINDOW_MS = 60_000
+
 /**
- * Average file reads per minute across the session, measured from the first
- * timestamped tool event to `nowMs`. Elapsed time is floored at one minute so a
- * burst of reads at session start doesn't render as an absurd rate.
+ * Number of distinct files read in the 60 seconds before `nowMs`. Read tools record absolute
+ * paths and shell commands usually relative ones, so paths are resolved against `cwd` before
+ * deduping — the same file read both ways counts once.
  */
-export function computeReadsPerMinute(lines: string[], nowMs: number = Date.now()): number | null {
-  const events = collectCurrentSessionUsageEvents(lines)
-  let startMs: number | null = null
-  let reads = 0
-  for (const event of events) {
-    if (event.kind === "read-file") reads++
-    if (startMs !== null || !event.timestamp) continue
+export function computeReadsPerMinute(
+  lines: string[],
+  nowMs: number = Date.now(),
+  cwd: string = process.cwd()
+): number {
+  const files = new Set<string>()
+  for (const event of collectCurrentSessionUsageEvents(lines)) {
+    if (event.kind !== "read-file" || !event.timestamp) continue
     const ms = Date.parse(event.timestamp)
-    if (Number.isFinite(ms)) startMs = ms
+    if (ms > nowMs - READ_WINDOW_MS && ms <= nowMs) files.add(resolve(cwd, event.value))
   }
-  if (startMs === null) return null
-  const minutes = Math.max((nowMs - startMs) / 60_000, 1)
-  return reads / minutes
+  return files.size
 }
 
-/** e.g. `📖 4.2/min`; empty when unknown or no reads yet. */
+/** e.g. `📖 6/min`; empty when unknown or nothing was read in the last minute. */
 export function formatReadRateSegment(readsPerMinute: number | null | undefined): string {
   if (typeof readsPerMinute !== "number" || readsPerMinute <= 0) return ""
-  const rate = readsPerMinute >= 10 ? readsPerMinute.toFixed(0) : readsPerMinute.toFixed(1)
-  return `\x1b[96m📖 ${rate}${R}${DIM}/min${R}`
+  return `\x1b[96m📖 ${readsPerMinute}${R}${DIM}/min${R}`
 }
 
 type GitHubCiState = "success" | "pending" | "failure" | "neutral" | "none"
@@ -1387,7 +1387,7 @@ async function applySnapshotFallbacks(
   }
   if (snapshot.readsPerMinute === undefined && sessionPath) {
     snapshot.readsPerMinute = await readAllTranscriptLines(sessionPath)
-      .then((lines) => computeReadsPerMinute(lines))
+      .then((lines) => computeReadsPerMinute(lines, Date.now(), cwd))
       .catch(() => null)
   }
   return activeSkills

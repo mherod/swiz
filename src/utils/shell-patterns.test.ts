@@ -271,6 +271,13 @@ describe("extractShellReadTargetPaths", () => {
     expect(extractShellReadTargetPaths("ls src && git status")).toEqual([])
   })
 
+  test("drops unexpanded glob operands", () => {
+    expect(extractShellReadTargetPaths("rg -n x src/a*.ts src/b/*.ts src/c.ts")).toEqual([
+      "src/c.ts",
+    ])
+    expect(extractShellReadTargetPaths("cat src/?.md")).toEqual([])
+  })
+
   test("dedupes repeated paths", () => {
     expect(extractShellReadTargetPaths("cat a.ts; head a.ts")).toEqual(["a.ts"])
   })
