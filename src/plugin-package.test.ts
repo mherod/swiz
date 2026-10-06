@@ -183,6 +183,8 @@ describe("dual host plugin package", () => {
     const bin = join(home, "bin")
     await mkdir(bin, { recursive: true })
     const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`
+    // PROCESS_CONTRACT_TEST: the packaged mcp.json must launch a working swiz MCP server over
+    // stdio, which only a real child process behind a `swiz` shim can prove.
     await executable(
       join(bin, "swiz"),
       `#!/bin/sh\nexec ${quote(process.execPath)} ${quote(join(repoRoot, "index.ts"))} "$@"\n`
