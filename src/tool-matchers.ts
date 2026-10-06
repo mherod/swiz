@@ -273,6 +273,15 @@ export function extractFileReadTargetPaths(toolInput: ToolMatcherValue | object)
   return [...paths]
 }
 
+/** File paths a tool call reads, or [] when the tool is not a file-read tool. */
+export function getFileReadTargets(
+  toolName: string | undefined,
+  toolInput: ToolMatcherValue | object | undefined
+): string[] {
+  if (!toolName || !READ_TOOLS.has(toolName)) return []
+  return extractFileReadTargetPaths(toolInput ?? {})
+}
+
 export function isSkillMdOnlyFileEditPayload(
   toolName: string | undefined,
   payload: ToolMatcherRecord
@@ -287,8 +296,6 @@ export function isMarkdownOnlyFileReadPayload(
   toolName: string | undefined,
   payload: ToolMatcherRecord
 ): boolean {
-  if (!toolName || !READ_TOOLS.has(toolName)) return false
-  const toolInput = payload.tool_input ?? payload.toolInput
-  const targets = extractFileReadTargetPaths(toolInput)
+  const targets = getFileReadTargets(toolName, payload.tool_input ?? payload.toolInput)
   return targets.length > 0 && targets.every(isMarkdownPath)
 }

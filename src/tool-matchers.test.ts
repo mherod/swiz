@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import {
+  getFileReadTargets,
   isAnyProviderTaskCreateTool,
   isAnyProviderTaskListTool,
   isAnyProviderTaskUpdateTool,
@@ -9,6 +10,19 @@ import {
   stripMcpToolNamespace,
 } from "./tool-matchers.ts"
 import { isNativeTaskToolName } from "./utils/inline-hook-helpers.ts"
+
+describe("getFileReadTargets", () => {
+  test("returns read paths for every read tool", () => {
+    expect(getFileReadTargets("Read", { file_path: "/a.ts" })).toEqual(["/a.ts"])
+    expect(getFileReadTargets("view_file", { path: "/b.ts" })).toEqual(["/b.ts"])
+  })
+
+  test("returns [] for non-read tools and missing input", () => {
+    expect(getFileReadTargets("Edit", { file_path: "/a.ts" })).toEqual([])
+    expect(getFileReadTargets(undefined, { file_path: "/a.ts" })).toEqual([])
+    expect(getFileReadTargets("Read", undefined)).toEqual([])
+  })
+})
 
 describe("isSkillMdOnlyFileEditPayload", () => {
   test("accepts camelCase inputs and plain apply_patch SKILL.md targets", () => {

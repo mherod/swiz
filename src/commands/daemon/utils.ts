@@ -22,7 +22,7 @@ import {
 import { isIncompleteTaskStatus } from "../../tasks/task-repository.ts"
 import {
   extractFileEditTargetPaths,
-  extractFileReadTargetPaths,
+  getFileReadTargets,
   isCodeChangeTool,
   isFileEditTool,
   isShellTool,
@@ -572,12 +572,14 @@ function captureSkillInvocations(
 
 function captureReadFileTargets(
   entry: SessionToolUsageState,
+  toolName: string,
   toolInput: Record<string, any> | undefined,
   turnIndex: number,
   timestamp: string
 ): void {
+  if (!READ_TOOLS.has(toolName)) return
   if (!entry.readFiles) entry.readFiles = []
-  for (const filePath of extractFileReadTargetPaths(toolInput ?? {})) {
+  for (const filePath of getFileReadTargets(toolName, toolInput)) {
     entry.readFiles.push(filePath)
     entry.events?.push({
       kind: "read-file",
@@ -615,9 +617,7 @@ function captureFileTargets(
   turnIndex: number,
   timestamp: string
 ): void {
-  if (READ_TOOLS.has(toolName)) {
-    captureReadFileTargets(entry, toolInput, turnIndex, timestamp)
-  }
+  captureReadFileTargets(entry, toolName, toolInput, turnIndex, timestamp)
   if (isFileEditTool(toolName)) {
     captureWrittenFileTargets(entry, toolInput, turnIndex, timestamp)
   }

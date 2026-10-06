@@ -18,7 +18,7 @@ import {
 } from "./skill-usage.ts"
 import {
   extractFileEditTargetPaths,
-  extractFileReadTargetPaths,
+  getFileReadTargets,
   isFileEditTool,
   isShellTool,
   isTaskTool,
@@ -489,7 +489,7 @@ export function toolLoadsSkill(
   if (name === "Skill") return extractSkillNameFromToolInput(input) === skillName
   if (extractSkillQueryNames(name, input).includes(skillName)) return true
   if (!skillFilePath) return false
-  if (READ_TOOLS.has(name)) return extractFileReadTargetPaths(input ?? {}).includes(skillFilePath)
+  if (READ_TOOLS.has(name)) return getFileReadTargets(name, input).includes(skillFilePath)
   if (!extractDirectSkillReadInvocations({ input }, name).includes(skillName)) return false
   const text = skillReadCommandText(input)
   return text.split(/[\s"'`]+/).includes(skillFilePath)
@@ -561,10 +561,8 @@ function appendSkillInvocations(skills: string[], acc: SummaryAccumulator): void
 }
 
 function accumulateFilePaths(block: ToolBlock, name: string, acc: SummaryAccumulator): void {
-  if (READ_TOOLS.has(name)) {
-    for (const filePath of extractFileReadTargetPaths(block.input ?? {})) {
-      if (!acc.readFiles.includes(filePath)) acc.readFiles.push(filePath)
-    }
+  for (const filePath of getFileReadTargets(name, block.input)) {
+    if (!acc.readFiles.includes(filePath)) acc.readFiles.push(filePath)
   }
   if (isFileEditTool(name)) {
     for (const filePath of extractFileEditTargetPaths(block.input ?? {})) {
@@ -633,10 +631,8 @@ function collectFileUsageEventsFromBlock(
   timestamp: string | null
 ): CurrentSessionUsageEvent[] {
   const events: CurrentSessionUsageEvent[] = []
-  if (READ_TOOLS.has(name)) {
-    for (const filePath of extractFileReadTargetPaths(block.input ?? {})) {
-      events.push({ kind: "read-file", value: filePath, turnIndex, timestamp, source: "agent" })
-    }
+  for (const filePath of getFileReadTargets(name, block.input)) {
+    events.push({ kind: "read-file", value: filePath, turnIndex, timestamp, source: "agent" })
   }
   if (isFileEditTool(name)) {
     for (const filePath of extractFileEditTargetPaths(block.input ?? {})) {
@@ -1210,11 +1206,9 @@ function isMatchingAssistantToolBlock(
   const name = extractToolName(block)
   if (name === "Skill" && extractSkillNameFromToolInput(block.input) === skillName) return true
   if (extractDirectSkillReadInvocations(block, name).includes(skillName)) return true
-  if (READ_TOOLS.has(name)) {
-    const targets = extractFileReadTargetPaths(block.input ?? {})
-    return targets.some((t) => matchesSkillFilePath(t, skillName, skillFilePath))
-  }
-  return false
+  return getFileReadTargets(name, block.input).some((t) =>
+    matchesSkillFilePath(t, skillName, skillFilePath)
+  )
 }
 
 function hasMatchingSessionLineToolBlock(
