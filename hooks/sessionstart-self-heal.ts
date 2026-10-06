@@ -111,8 +111,16 @@ async function findMissingDispatchEntries(): Promise<string[]> {
   }
 }
 
+function isPluginDispatch(callerEnv: unknown): boolean {
+  // Plugin hooks belong to the host's plugin lifecycle. Creating global entries
+  // here would dispatch twice and leave hooks active after plugin removal.
+  if (isRecord(callerEnv)) return callerEnv.SWIZ_PLUGIN === "1"
+  return process.env.SWIZ_PLUGIN === "1"
+}
+
 export async function evaluateSessionstartSelfHeal(input: unknown): Promise<SwizHookOutput> {
-  sessionStartHookInputSchema.parse(input)
+  const payload = sessionStartHookInputSchema.parse(input)
+  if (isPluginDispatch(payload._env)) return {}
 
   if (await isSessionstartSelfHealPaused()) return {}
 

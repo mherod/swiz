@@ -53,7 +53,8 @@ describe("plugin marketplace scaffold", () => {
       "swiz-session",
     ]
     for (const skillName of commandSkills) {
-      const commandName = skillName.replace("swiz-", "")
+      const commandName =
+        skillName === "swiz-cleanup" ? "doctor clean" : skillName.replace("swiz-", "")
       const skillPath = join(pluginRoot, "skills", skillName, "SKILL.md")
       expect(existsSync(skillPath)).toBe(true)
       const skillText = readFileSync(skillPath, "utf-8")

@@ -3,22 +3,23 @@ name: swiz-continue
 description: "Run swiz continue to resume the agent's self-directed loop. Picks up the next task from the backlog or generates a new one based on ambition mode. Use when resuming autonomous work, continuing after a pause, or triggering the next iteration of the agent loop."
 category: workflow
 metadata:
-  allowed-tools: Bash
   argument-hint: "[arguments]"
 ---
+
+Use the current host's available shell tool. Arguments are the options requested by the user; substitute them for `<arguments>` in examples, never pass the placeholder literally. Respect explicit user instructions over this workflow. If `swiz` is missing, explain the Bun and linked CLI prerequisites in the plugin README.
 
 Run the swiz `continue` command to resume or advance the self-directed agent loop.
 
 ## Usage
 
 - `/swiz-continue` — resume the default continue flow
-- `/swiz-continue --pick-issue` — pick a specific issue to work on next
+- `/swiz-continue --print` — preview the suggested next step without resuming
 
 ## Step 1: Run the Command
 
-**If `$ARGUMENTS` is empty:** Run `swiz continue`.
+**If no arguments were requested:** Run `swiz continue`.
 
-**If `$ARGUMENTS` is present:** Run `swiz continue $ARGUMENTS`.
+**If arguments were requested:** Run `swiz continue <arguments>`.
 
 ## Step 2: Report Results
 

@@ -1,13 +1,8 @@
 ---
-description: Install swiz hooks into detected agent settings
-allowed-tools: Bash
-argument-hint: "[install flags]"
+description: Set up Swiz or migrate existing standalone registrations
+argument-hint: "[setup or migration request]"
 ---
 
-Run the swiz installer now.
-
-Rules:
-- If `$ARGUMENTS` is empty, run `swiz install`.
-- If `$ARGUMENTS` is present, run `swiz install $ARGUMENTS`.
-- Report the command output summary clearly.
-- If `swiz` is not available on PATH, tell the user to run `bun link` in the swiz repository first.
+Follow the bundled `swiz-install` skill for the user's request in `$ARGUMENTS`.
+The plugin already supplies hooks and MCP tools. Do not run `swiz install`
+on top of it; use the skill's host-scoped migration and verification steps.

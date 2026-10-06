@@ -6,7 +6,12 @@
     "name": "swiz maintainers"
   },
   "repository": "https://github.com/mherod/swiz",
-  "commands": "./commands",
-  "skills": "./skills",
-  "hooks": "./hooks/claude.json"
+  "skills": "./skills/",
+  "hooks": "./hooks/codex.json",
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "Swiz",
+    "shortDescription": "Workflow hooks and task tools",
+    "category": "Developer tools"
+  }
 }

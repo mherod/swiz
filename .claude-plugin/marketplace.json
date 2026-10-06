@@ -5,14 +5,14 @@
   },
   "metadata": {
     "description": "Marketplace for swiz Claude Code plugins",
-    "version": "1.0.0"
+    "version": "2.0.0"
   },
   "plugins": [
     {
       "name": "swiz-core",
       "source": "./plugins/swiz-core",
-      "description": "Install and manage swiz from Claude Code",
-      "version": "1.0.0",
+      "description": "Swiz workflow skills, lifecycle hooks, and task tools for Claude Code and Codex",
+      "version": "2.0.0",
       "author": {
         "name": "swiz maintainers"
       },

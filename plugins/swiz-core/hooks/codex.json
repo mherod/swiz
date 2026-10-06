@@ -1,0 +1,64 @@
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "command -v swiz >/dev/null 2>&1 || { printf '%s\\n' 'swiz-core: swiz is not on PATH. Install Bun and run bun install --frozen-lockfile && bun link in the swiz checkout; restart the agent.' >&2; exit 1; }; SWIZ_PLUGIN=1 swiz dispatch --agent codex stop Stop",
+            "timeout": 180,
+            "statusMessage": "Swizzling..."
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "command -v swiz >/dev/null 2>&1 || { printf '%s\\n' 'swiz-core: swiz is not on PATH. Install Bun and run bun install --frozen-lockfile && bun link in the swiz checkout; restart the agent.' >&2; exit 1; }; SWIZ_PLUGIN=1 swiz dispatch --agent codex preToolUse PreToolUse",
+            "timeout": 15,
+            "statusMessage": "Swizzling..."
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "command -v swiz >/dev/null 2>&1 || { printf '%s\\n' 'swiz-core: swiz is not on PATH. Install Bun and run bun install --frozen-lockfile && bun link in the swiz checkout; restart the agent.' >&2; exit 1; }; SWIZ_PLUGIN=1 swiz dispatch --agent codex postToolUse PostToolUse",
+            "timeout": 15,
+            "statusMessage": "Swizzling..."
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "command -v swiz >/dev/null 2>&1 || { printf '%s\\n' 'swiz-core: swiz is not on PATH. Install Bun and run bun install --frozen-lockfile && bun link in the swiz checkout; restart the agent.' >&2; exit 1; }; SWIZ_PLUGIN=1 swiz dispatch --agent codex sessionStart SessionStart",
+            "timeout": 20,
+            "statusMessage": "Swizzling..."
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "command -v swiz >/dev/null 2>&1 || { printf '%s\\n' 'swiz-core: swiz is not on PATH. Install Bun and run bun install --frozen-lockfile && bun link in the swiz checkout; restart the agent.' >&2; exit 1; }; SWIZ_PLUGIN=1 swiz dispatch --agent codex userPromptSubmit UserPromptSubmit",
+            "timeout": 15,
+            "statusMessage": "Swizzling..."
+          }
+        ]
+      }
+    ]
+  }
+}

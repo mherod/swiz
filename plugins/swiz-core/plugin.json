@@ -1,0 +1,20 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "swiz-core",
+  "version": "2.0.0",
+  "description": "Swiz workflow skills, lifecycle hooks, and task tools for Claude Code and Codex",
+  "author": {
+    "name": "swiz maintainers"
+  },
+  "repository": "https://github.com/mherod/swiz",
+  "extensions": {
+    "com.openai": {
+      "hooks": "./hooks/codex.json",
+      "interface": {
+        "displayName": "Swiz",
+        "shortDescription": "Workflow hooks and task tools",
+        "category": "Developer tools"
+      }
+    }
+  }
+}

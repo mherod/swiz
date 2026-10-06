@@ -1,0 +1,20 @@
+{
+  "name": "swiz-marketplace",
+  "interface": {
+    "displayName": "Swiz"
+  },
+  "plugins": [
+    {
+      "name": "swiz-core",
+      "source": {
+        "source": "local",
+        "path": "./plugins/swiz-core"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Developer tools"
+    }
+  ]
+}

@@ -1,12 +1,18 @@
 ---
-description: Run `swiz uninstall` from Claude Code
-allowed-tools: Bash
-argument-hint: "[arguments]"
+name: swiz-uninstall
+description: Remove the Swiz plugin or standalone hook registrations from the requested Claude Code or Codex host.
 ---
 
-Run the swiz `uninstall` command.
+Determine whether the user wants the plugin removed, standalone registrations
+removed, or both. Follow explicit user scope.
 
-Rules:
-- If `$ARGUMENTS` is empty, run `swiz uninstall`.
-- If `$ARGUMENTS` is present, run `swiz uninstall $ARGUMENTS`.
-- Summarize key output and report any errors clearly.
+- Remove the plugin through the host's plugin manager: `/plugin` in Claude
+  Code or `/plugins` in Codex CLI (Plugins in the desktop app). Use the host's
+  uninstall capability when available. Do not edit internal plugin caches.
+- `swiz uninstall --claude` or `swiz uninstall --codex` removes standalone
+  user-level hook registrations only. Preview with `--dry-run` when useful.
+- To remove a separately installed MCP server, use
+  `swiz install --uninstall --mcp --claude` or the `--codex` equivalent.
+- Never run an unscoped uninstall unless the user asked to remove all hosts.
+- Restart active sessions and verify removal. Plugin removal does not delete
+  project tasks, Swiz settings, or a separately installed CLI.

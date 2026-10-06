@@ -3,9 +3,10 @@ name: enable-auto-continue
 description: "Enable swiz auto-continue globally or for a specific session. Allows the agent to automatically continue working after task completion. Use when starting autonomous workflows, enabling backlog processing, or scoping auto-continue to a specific session."
 category: configuration
 metadata:
-  allowed-tools: Bash
   argument-hint: "[--session [id] --dir <path>]"
 ---
+
+Use the current host's available shell tool. Arguments are the options requested by the user; substitute them for `<arguments>` in examples, never pass the placeholder literally. Respect explicit user instructions over this workflow. If `swiz` is missing, explain the Bun and linked CLI prerequisites in the plugin README.
 
 Enable auto-continue by running the swiz settings command. Supports global or session-scoped enabling.
 
@@ -17,9 +18,9 @@ Enable auto-continue by running the swiz settings command. Supports global or se
 
 ## Step 1: Run the Command
 
-**If `$ARGUMENTS` is empty:** Run `swiz settings enable auto-continue`.
+**If no arguments were requested:** Run `swiz settings enable auto-continue`.
 
-**If `$ARGUMENTS` is present:** Run `swiz settings enable auto-continue $ARGUMENTS`.
+**If arguments were requested:** Run `swiz settings enable auto-continue <arguments>`.
 
 ## Step 2: Confirm
 

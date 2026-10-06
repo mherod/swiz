@@ -1,13 +1,14 @@
 ---
 name: swiz-cleanup
-description: "Run swiz cleanup to remove stale hook configurations, orphaned dispatch entries, and temporary files. Use when hooks are out of sync, after uninstalling plugins, or when swiz state needs a reset."
+description: "Run swiz doctor clean to remove old session data, archives, and backups. Use when the user requests session cleanup or wants to preview disk cleanup."
 category: maintenance
 metadata:
-  allowed-tools: Bash
   argument-hint: "[arguments]"
 ---
 
-Run the swiz `cleanup` command to remove stale configurations and restore a clean state.
+Use the current host's available shell tool. Arguments are the options requested by the user; substitute them for `<arguments>` in examples, never pass the placeholder literally. Respect explicit user instructions over this workflow. If `swiz` is missing, explain the Bun and linked CLI prerequisites in the plugin README.
+
+Run `swiz doctor clean` to clean old session data. It does not repair hook registrations.
 
 ## Usage
 
@@ -16,9 +17,9 @@ Run the swiz `cleanup` command to remove stale configurations and restore a clea
 
 ## Step 1: Run the Command
 
-**If `$ARGUMENTS` is empty:** Run `swiz cleanup`.
+**If no arguments were requested:** Run `swiz doctor clean`.
 
-**If `$ARGUMENTS` is present:** Run `swiz cleanup $ARGUMENTS`.
+**If arguments were requested:** Run `swiz doctor clean <arguments>`.
 
 ## Step 2: Report Results
 

@@ -344,23 +344,28 @@ from failed tools using the matching pre-tool observation.
 
 ## Plugin Marketplace
 
-swiz ships a Claude Code plugin with a marketplace catalog:
+The `swiz-core` package supports Claude Code and Codex with 17 shared skills,
+the Swiz MCP task server, and separate hook configurations generated from the
+canonical manifest. It requires Bun and a linked `swiz` CLI on the host's PATH.
 
 ```bash
-# Install from the public marketplace
+# In Claude Code
 /plugin marketplace add mherod/swiz
-/plugin install swiz-core@swiz-marketplace
-
-# Or test locally during development
-/plugin marketplace add .
 /plugin install swiz-core@swiz-marketplace
 ```
 
-The `swiz-core` plugin provides:
+```bash
+# In a terminal for Codex; then install swiz-core from /plugins
+codex plugin marketplace add mherod/swiz
+```
 
-- **Command**: `install` — runs `swiz install` with optional flags
-- **Skills**: `swiz-skill`, `swiz-hooks`, `swiz-install`, `swiz-uninstall`, `swiz-status`, `swiz-settings`, `swiz-tasks`, `swiz-shim`, `swiz-dispatch`, `swiz-transcript`, `swiz-continue`, `swiz-cleanup`, `swiz-session`
-- **Skills**: `enable-auto-continue`, `disable-auto-continue` — toggle the autonomous work loop per-session or globally
+Restart the session after installation. In Codex, review and trust the plugin
+definitions in `/hooks`. If Swiz is already installed through standalone
+settings, migrate those registrations before enabling the plugin to avoid
+running hooks twice. The plugin's setup skill guides this migration.
+
+See the [plugin guide](plugins/swiz-core/README.md) for prerequisites, local
+development, host limitations, migration, verification, and removal.
 
 ## Commands
 
@@ -378,7 +383,7 @@ swiz install --antigravity # Antigravity CLI only (~/.gemini/antigravity-cli/hoo
 swiz install --dry-run    # line-by-line unified diff, no writes
 ```
 
-- **Codex needs its feature flag** — `swiz install --codex` writes `~/.codex/hooks.json`, but Codex CLI only executes those hooks when its hooks feature is enabled: run `codex -c features.codex_hooks=true`, or set `features.codex_hooks = true` in `~/.codex/config.toml` to make it permanent. Without the flag the file is written and silently ignored.
+- **Codex hook settings and trust** — `swiz install --codex` writes `~/.codex/hooks.json`. Current clients use `features.hooks`; older versions may use `features.codex_hooks`. Check the running client's settings and review the hook definitions in `/hooks` where supported.
 - **Merge, not replace** — user-defined hooks (sound effects, agent hooks, inline scripts, etc.) are preserved. Only swiz-managed hooks are touched.
 - **Legacy replacement** — if you previously had hooks at `~/.claude/hooks/`, swiz detects and replaces them with the portable versions from the swiz project.
 - **Idempotent** — running install twice produces the same result. Old swiz hooks are stripped before new ones are added.

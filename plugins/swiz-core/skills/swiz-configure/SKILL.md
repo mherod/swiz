@@ -3,11 +3,12 @@ name: swiz-configure
 description: "Configure swiz settings with presets or individual changes. Supports workflow presets (backlog, creative, quiet), collaboration modes (solo, team), and safety presets (lockdown, relaxed). Use when changing agent behavior, switching workflow modes, or adjusting safety gates."
 category: configuration
 metadata:
-  allowed-tools: Bash
   argument-hint: "<preset | setting-change> [--global | --project | --session [id]]"
 ---
 
-Configure swiz settings using presets or individual changes. Parses `$ARGUMENTS` to match a preset keyword or passes raw settings to `swiz settings`.
+Use the current host's available shell tool. Arguments are the options requested by the user; substitute them for `<arguments>` in examples, never pass the placeholder literally. Respect explicit user instructions over this workflow. If `swiz` is missing, explain the Bun and linked CLI prerequisites in the plugin README.
+
+Configure swiz settings using presets or individual changes. Parses the requested arguments to match a preset keyword or passes raw settings to `swiz settings`.
 
 ## Usage
 
@@ -48,17 +49,17 @@ Configure swiz settings using presets or individual changes. Parses `$ARGUMENTS`
 
 ## Step 1: Parse Arguments
 
-Check if `$ARGUMENTS` matches a preset keyword from the tables above.
+Check if the requested arguments match a preset keyword from the tables above.
 
 ## Step 2: Execute Commands
 
 **If preset matched:** Run all commands for that preset sequentially, each prefixed with `swiz settings`.
 
-**If no preset matched:** Pass `$ARGUMENTS` directly to `swiz settings $ARGUMENTS`.
+**If no preset matched:** Pass the requested arguments directly to `swiz settings <arguments>`.
 
 ## Step 3: Apply Scope
 
-If `$ARGUMENTS` contains `--global`, `--project`, or `--session`, append that flag to every command.
+If the requested arguments contain `--global`, `--project`, or `--session`, append that flag to every command.
 
 ## Step 4: Confirm State
 
