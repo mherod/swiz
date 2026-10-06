@@ -6,7 +6,7 @@ One manifest of TypeScript hook scripts gets installed across Claude Code, Curso
 
 When `swiz idea` and `swiz continue` are used together, the system can enter a **self-directed loop** — a closed-loop state where the agent's own outputs become the next inputs, expanding the project without external prompts. See [docs/ai-providers.md](docs/ai-providers.md#self-directed-loop) for the canonical terminology.
 
-**168 hooks. 17 event types. Every agent. Zero compromises.**
+**169 hooks. 17 event types. Every agent. Zero compromises.**
 
 ## Install
 
@@ -233,7 +233,7 @@ PreToolUse hooks intercept tool calls *before* they execute. A blocking hook her
 
 | `pretooluse-session-edits.ts` | Captures file fingerprints before edit, shell and Codex code-mode calls; correlates observations by session and tool call. |
 
-### PostToolUse (35)
+### PostToolUse (36)
 
 PostToolUse hooks run after a tool completes. They can feed error context back to the agent or inject advisory information.
 
@@ -270,6 +270,7 @@ PostToolUse hooks run after a tool completes. They can feed error context back t
 | `posttooluse-auto-steer.ts` | Consumes any scheduled steer message and types it into the active terminal session after a tool call using AppleScript automation. Scheduled steers are humanised into a natural paragraph at enqueue (falling back to the raw text, e.g. "Continue"). Supports iTerm2 (`write text`) and Terminal.app (`do script`). Runs async. |
 | `posttooluse-mid-session-prompt.ts` | After 3+ hours of session activity, checks for drift signals (>10 uncommitted files, stale last commit with dirty tree, new review-requested PRs) and softly suggests /mid-session-checkin via additionalContext. Opt-in via `enforceMidSessionCheckin` setting (default off). Cooldown: 30 minutes. |
 | `posttooluse-session-edits.ts` | Records observed file changes from edit, shell and Codex code-mode calls in IssueStore; overlapping sessions produce an ownership warning instead of guessed attribution. |
+| `posttooluse-read-claims.ts` | When the agent reads a file (Read tool, shell file-viewing command, or Codex exec) that has uncommitted changes and no owner — no live edit record and no FileOwnership claim — claims it for the reading session with the standard 30-minute lease. Files another session owns, and files this session disowned, are left alone. |
 | `posttooluse-jbcontext-reindex.ts` | After git commit, merge, rebase, or pull, triggers background indexing via `jbcontext index --silent`. Keeps semantic search synchronized with recent changes without blocking agent execution. |
 | `posttooluse-measure-test-time.ts`            | Reads start time sentinels written by the preToolUse hook, computes the test run duration, updates average stats in `.swiz/test-execution-stats.json`, and reports the updated average via systemMessage. |
 | `posttooluse-measure-lint-time.ts`            | Reads start time sentinels written by the preToolUse hook, computes the lint run duration, updates average stats in `.swiz/lint-execution-stats.json`, and reports the updated average via systemMessage. |
