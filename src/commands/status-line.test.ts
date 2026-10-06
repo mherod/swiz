@@ -129,8 +129,14 @@ describe("formatFileOwnershipSegment", () => {
     expect(plain(formatFileOwnershipSegment({ sessions: 2, owned: 5, unowned: 3 }))).toBe(
       "👥 2 sessions · 5 owned · 3 unowned"
     )
-    expect(plain(formatFileOwnershipSegment({ sessions: 1, owned: 1, unowned: 0 }))).toBe(
-      "👥 1 session · 1 owned · 0 unowned"
+  })
+
+  it("omits zero counts", () => {
+    expect(plain(formatFileOwnershipSegment({ sessions: 1, owned: 6, unowned: 0 }))).toBe(
+      "👥 1 session · 6 owned"
+    )
+    expect(plain(formatFileOwnershipSegment({ sessions: 0, owned: 0, unowned: 3 }))).toBe(
+      "3 unowned"
     )
   })
 

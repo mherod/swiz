@@ -179,19 +179,23 @@ export function formatReadRateSegment(readsPerMinute: number | null | undefined)
   return `\x1b[96m📖 ${readsPerMinute}${R}${DIM}/min${R}`
 }
 
-/** e.g. `👥 2 sessions · 5 owned · 3 unowned`; empty when unknown or the tree is clean. */
+/**
+ * e.g. `👥 2 sessions · 5 owned · 3 unowned`; zero counts are omitted, and the segment is empty
+ * when ownership is unknown or the tree is clean.
+ */
 export function formatFileOwnershipSegment(
   summary: ProjectFileOwnershipSummary | null | undefined
 ): string {
   if (!summary || summary.owned + summary.unowned === 0) return ""
-  const sessionLabel = summary.sessions === 1 ? "session" : "sessions"
-  const sessionColor = summary.sessions > 1 ? "\x1b[93m" : "\x1b[96m"
-  const unownedColor = summary.unowned > 0 ? "\x1b[93m" : DIM
-  return [
-    `${sessionColor}👥 ${summary.sessions}${R} ${DIM}${sessionLabel}${R}`,
-    `\x1b[92m${summary.owned}${R} ${DIM}owned${R}`,
-    `${unownedColor}${summary.unowned}${R} ${DIM}unowned${R}`,
-  ].join(` ${DIM}·${R} `)
+  const parts: string[] = []
+  if (summary.sessions > 0) {
+    const sessionLabel = summary.sessions === 1 ? "session" : "sessions"
+    const sessionColor = summary.sessions > 1 ? "\x1b[93m" : "\x1b[96m"
+    parts.push(`${sessionColor}👥 ${summary.sessions}${R} ${DIM}${sessionLabel}${R}`)
+  }
+  if (summary.owned > 0) parts.push(`\x1b[92m${summary.owned}${R} ${DIM}owned${R}`)
+  if (summary.unowned > 0) parts.push(`\x1b[93m${summary.unowned}${R} ${DIM}unowned${R}`)
+  return parts.join(` ${DIM}·${R} `)
 }
 
 type GitHubCiState = "success" | "pending" | "failure" | "neutral" | "none"
