@@ -171,6 +171,12 @@ export async function resolveSessionFileOwnershipResult(
     if (files.length === 0) {
       return { known: true, ownership: { editedByUs: [], editedByOthers: [], unattributed: [] } }
     }
+    if (isSoleLiveSession(sessionId, await listLiveSessionIds(cwd, nowMs))) {
+      return {
+        known: true,
+        ownership: { editedByUs: [...files], editedByOthers: [], unattributed: [] },
+      }
+    }
     const [{ getIssueStore, getIssueStoreReader }, { git }] = await Promise.all([
       import("../issue-store.ts"),
       import("../git-helpers.ts"),
@@ -297,6 +303,38 @@ export function appendSessionFileOwnershipContext(
 /** How recently another session must have touched a file to count as concurrent work. */
 export const CONCURRENT_EDIT_WINDOW_MS = 2 * 60 * 60 * 1000
 
+/** How recently a session's transcript must have changed for it to count as running. */
+export const LIVE_SESSION_WINDOW_MS = 15 * 60 * 1000
+
+/** Sessions (any provider) whose transcript for this directory changed within the live window. */
+export async function listLiveSessionIds(
+  cwd: string,
+  nowMs = Date.now(),
+  home?: string
+): Promise<string[]> {
+  try {
+    const { findAllProviderSessions } = await import("../transcript-sessions.ts")
+    const sessions = await findAllProviderSessions(cwd, home)
+    return [
+      ...new Set(
+        sessions
+          .filter((session) => nowMs - (session.mtime ?? 0) <= LIVE_SESSION_WINDOW_MS)
+          .map((session) => session.id)
+      ),
+    ]
+  } catch {
+    return []
+  }
+}
+
+/**
+ * True when `sessionId` is the only session running for the directory. Its sole
+ * occupant inherits every dirty file: no live peer remains to own any of them.
+ */
+export function isSoleLiveSession(sessionId: string, liveSessionIds: readonly string[]): boolean {
+  return liveSessionIds.length === 1 && liveSessionIds[0] === sessionId
+}
+
 export interface ProjectFileOwnershipSummary {
   /** Distinct sessions that own at least one dirty file. */
   sessions: number
@@ -376,6 +414,9 @@ export async function resolveProjectFileOwnershipSummary(
     const status = await getGitStatusV2(cwd)
     if (!status) return null
     if (status.total === 0) return { sessions: 0, owned: 0, unowned: 0 }
+    if ((await listLiveSessionIds(cwd, nowMs)).length === 1) {
+      return { sessions: 1, owned: status.total, unowned: 0 }
+    }
     const store = getIssueStore()
     if (store.isNoOp) return null
     const gitRoot = (await git(["rev-parse", "--show-toplevel"], cwd)).trim()

@@ -1,11 +1,15 @@
 import { describe, expect, test } from "bun:test"
-import { mkdtempSync, realpathSync } from "node:fs"
+import { mkdirSync, mkdtempSync, realpathSync, utimesSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { projectKeyFromCwd } from "../project-key.ts"
 import type { SessionFileClaim } from "../session-file-claims.ts"
 import {
   appendSessionFileOwnershipContext,
   classifySessionFileOwnership,
+  isSoleLiveSession,
+  LIVE_SESSION_WINDOW_MS,
+  listLiveSessionIds,
   summarizeFileOwnership,
 } from "./session-file-ownership.ts"
 
@@ -111,5 +115,31 @@ describe("session file ownership", () => {
     })
     expect(concurrentContext).toContain("Edited or explicitly held by another session (confirmed):")
     expect(concurrentContext).toContain("Don't panic.")
+  })
+})
+
+describe("sole live session", () => {
+  test("only the sole running session inherits every file", () => {
+    expect(isSoleLiveSession("me", ["me"])).toBe(true)
+    expect(isSoleLiveSession("me", ["me", "peer"])).toBe(false)
+    expect(isSoleLiveSession("me", ["peer"])).toBe(false)
+    expect(isSoleLiveSession("me", [])).toBe(false)
+  })
+
+  test("lists sessions whose transcripts changed within the live window", async () => {
+    const home = realpathSync(mkdtempSync(join(tmpdir(), "swiz-live-home-")))
+    const cwd = realpathSync(mkdtempSync(join(tmpdir(), "swiz-live-cwd-")))
+    const dir = join(home, ".claude", "projects", projectKeyFromCwd(cwd))
+    mkdirSync(dir, { recursive: true })
+    const now = Date.now()
+    const transcript = (id: string, ageMs: number) => {
+      const path = join(dir, `${id}.jsonl`)
+      writeFileSync(path, "{}\n")
+      const at = (now - ageMs) / 1000
+      utimesSync(path, at, at)
+    }
+    transcript("fresh", 60_000)
+    transcript("stale", LIVE_SESSION_WINDOW_MS + 60_000)
+    expect(await listLiveSessionIds(cwd, now, home)).toEqual(["fresh"])
   })
 })
