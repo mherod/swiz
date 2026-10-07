@@ -95,6 +95,28 @@ export function deleteProjectSnapshots(
   }
 }
 
+const DAEMON_FLAGS = new Set(["--restart", "--install", "--uninstall", "status"])
+
+/**
+ * Reject unrecognised arguments. Unknown words previously fell through to starting a
+ * foreground daemon, so `swiz daemon restart` silently became a second server.
+ */
+export function validateDaemonArgs(args: readonly string[]): void {
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i]!
+    if (arg === "--port") {
+      const value = args[++i]
+      if (!value || !Number.isInteger(Number(value))) {
+        throw new Error("swiz daemon: --port requires a numeric port")
+      }
+      continue
+    }
+    if (DAEMON_FLAGS.has(arg)) continue
+    const hint = DAEMON_FLAGS.has(`--${arg}`) ? ` Did you mean --${arg}?` : ""
+    throw new Error(`swiz daemon: unknown argument "${arg}".${hint}`)
+  }
+}
+
 async function handleDaemonSubcommand(args: string[], port: number): Promise<boolean> {
   if (args.includes("status")) {
     await fetchDaemonStatus(port)
@@ -738,7 +760,7 @@ async function startDaemonProcess(_args: string[], port: number): Promise<void> 
 
   let isClosing = false
   let stopTranscriptMonitoring = () => {}
-  const cleanup = async (reason: string) => {
+  const cleanup = async (reason: string, exitCode = 0) => {
     if (isClosing) return
     isClosing = true
     stopTranscriptMonitoring()
@@ -765,7 +787,7 @@ async function startDaemonProcess(_args: string[], port: number): Promise<void> 
     setGlobalTaskStateCache(null)
     process.stderr.write("Task cache... ")
     process.stderr.write("Done.\n")
-    if (reason !== "exit") process.exit(0)
+    if (reason !== "exit") process.exit(exitCode)
   }
 
   process.on("SIGINT", () => void cleanup("SIGINT"))
@@ -808,41 +830,51 @@ async function startDaemonProcess(_args: string[], port: number): Promise<void> 
   // known-project list, so raw process.cwd() aliases never leak into identity maps.
   registerProjectWatchers(projectRoot)
 
-  const server = startDaemonWebServer({
-    port,
-    pruneTranscriptMemory,
-    transcriptIndex: caches.transcriptIndex,
-    manifestCache: caches.manifestCache,
-    globalMetrics: state.globalMetrics,
-    getProjectMetrics: state.getProjectMetrics,
-    touchProject: state.touchProject,
-    registerProjectWatchers,
-    sessionActivity: state.sessionActivity,
-    sessionToolCalls: state.sessionToolCalls,
-    sessionToolUsage: state.sessionToolUsage,
-    sessionDivergence: state.sessionDivergence,
-    activeHookDispatches: state.activeHookDispatches,
-    recentHookAllowMessages: state.recentHookAllowMessages,
-    sessionComplianceState: state.sessionComplianceState,
-    projectMetrics: state.projectMetrics,
-    ghCache: caches.ghCache,
-    eligibilityCache: caches.eligibilityCache,
-    cooldownRegistry: caches.cooldownRegistry,
-    gitStateCache: caches.gitStateCache,
-    repositoryCapabilityCache: caches.repositoryCapabilityCache,
-    lastUserMessageCache: caches.lastUserMessageCache,
-    ciWatchRegistry: caches.ciWatchRegistry,
-    upstreamSyncRegistry: caches.upstreamSyncRegistry,
-    projectSettingsCache: caches.projectSettingsCache,
-    registeredProjects,
-    projectLastSeen: state.projectLastSeen,
-    resolveSnapshot,
-    watchers: caches.watchers,
-    snapshots: caches.snapshots,
-    workerRuntime: caches.workerRuntime,
-    taskStateCache: caches.taskStateCache,
-    lifecycleTaskRegistry: caches.lifecycleTaskRegistry,
-  })
+  // Watchers and workers already started keep the process alive, so a failed bind
+  // (e.g. port in use) must tear them down and exit rather than idle forever.
+  let server: ReturnType<typeof startDaemonWebServer>
+  try {
+    server = startDaemonWebServer({
+      port,
+      pruneTranscriptMemory,
+      transcriptIndex: caches.transcriptIndex,
+      manifestCache: caches.manifestCache,
+      globalMetrics: state.globalMetrics,
+      getProjectMetrics: state.getProjectMetrics,
+      touchProject: state.touchProject,
+      registerProjectWatchers,
+      sessionActivity: state.sessionActivity,
+      sessionToolCalls: state.sessionToolCalls,
+      sessionToolUsage: state.sessionToolUsage,
+      sessionDivergence: state.sessionDivergence,
+      activeHookDispatches: state.activeHookDispatches,
+      recentHookAllowMessages: state.recentHookAllowMessages,
+      sessionComplianceState: state.sessionComplianceState,
+      projectMetrics: state.projectMetrics,
+      ghCache: caches.ghCache,
+      eligibilityCache: caches.eligibilityCache,
+      cooldownRegistry: caches.cooldownRegistry,
+      gitStateCache: caches.gitStateCache,
+      repositoryCapabilityCache: caches.repositoryCapabilityCache,
+      lastUserMessageCache: caches.lastUserMessageCache,
+      ciWatchRegistry: caches.ciWatchRegistry,
+      upstreamSyncRegistry: caches.upstreamSyncRegistry,
+      projectSettingsCache: caches.projectSettingsCache,
+      registeredProjects,
+      projectLastSeen: state.projectLastSeen,
+      resolveSnapshot,
+      watchers: caches.watchers,
+      snapshots: caches.snapshots,
+      workerRuntime: caches.workerRuntime,
+      taskStateCache: caches.taskStateCache,
+      lifecycleTaskRegistry: caches.lifecycleTaskRegistry,
+    })
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    process.stderr.write(`swiz daemon: ${message}\n`)
+    await cleanup("startup failure", 1)
+    return
+  }
 
   // Register initial project for periodic upstream sync
   void caches.upstreamSyncRegistry.register(projectRoot)
@@ -873,6 +905,7 @@ export const daemonCommand: Command = {
     { flags: "status", description: "Show daemon metrics and status" },
   ],
   async run(args) {
+    validateDaemonArgs(args)
     const portIndex = args.indexOf("--port")
     const port = portIndex !== -1 ? Number(args[portIndex + 1]) : DAEMON_PORT
 
