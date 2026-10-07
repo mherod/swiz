@@ -263,6 +263,7 @@ interface CliTimingInfo {
   toolUseId?: string
   totalMs: number
   stdinMs: number
+  prepareMs: number
   daemonMs: number
   localMs?: number
   route: "daemon" | "local"
@@ -285,6 +286,7 @@ function appendCliTimingLog(info: CliTimingInfo): Promise<void> {
     toolUseId: info.toolUseId,
     stdoutSnippet: [
       `stdin: ${info.stdinMs}ms`,
+      `prepare: ${info.prepareMs}ms`,
       `daemon: ${info.daemonMs}ms (${info.route === "daemon" ? "forwarded" : "fallback"})`,
       info.localMs !== undefined ? `local: ${info.localMs}ms` : null,
       `total: ${info.totalMs}ms`,
@@ -307,6 +309,7 @@ interface DispatchTiming {
   toolUseId?: string
   t0: number
   stdinMs: number
+  prepareMs: number
 }
 
 function isStopLikeEvent(canonicalEvent: string): boolean {
@@ -483,6 +486,7 @@ async function prepareDispatch(
   const inboundPayloadStr = await readStdinPayloadWithTimeout()
   const stdinMs = Math.round(performance.now() - t0)
   log(`   ⏱ cli:stdin: ${stdinMs}ms`)
+  const tPrepare = performance.now()
   const { payload, parseError } = parsePayload(inboundPayloadStr)
   if (parseError) {
     captureParsedPayload(canonicalEvent, hookEventName, inboundPayloadStr, payload, true)
@@ -490,8 +494,10 @@ async function prepareDispatch(
   assertDispatchInboundNotParseError(canonicalEvent, parseError)
   const dispatchId = ensureDispatchId(payload)
   const incomingBeforeNormalize = structuredClone(payload)
+  const tNormalize = performance.now()
   normalizeAgentHookPayload(payload)
   await backfillPayloadDefaults(payload)
+  log(`   ⏱ cli:normalize: ${Math.round(performance.now() - tNormalize)}ms`)
   if (shouldCaptureIncomingPayloads()) {
     scheduleIncomingDispatchCapture({
       canonicalEvent,
@@ -502,7 +508,14 @@ async function prepareDispatch(
       normalizedPayload: structuredClone(payload),
     })
   }
+  const tEnrich = performance.now()
   enrichDispatchPayload(payload, agentId)
+  log(`   ⏱ cli:enrich: ${Math.round(performance.now() - tEnrich)}ms`)
+  const tSerialize = performance.now()
+  const payloadStr = JSON.stringify(payload)
+  log(`   ⏱ cli:serialize: ${Math.round(performance.now() - tSerialize)}ms`)
+  const prepareMs = Math.round(performance.now() - tPrepare)
+  log(`   ⏱ cli:prepare: ${prepareMs}ms`)
   const timing: DispatchTiming = {
     canonicalEvent,
     hookEventName,
@@ -513,8 +526,9 @@ async function prepareDispatch(
     toolUseId: dispatchToolUseId(payload),
     t0,
     stdinMs,
+    prepareMs,
   }
-  return { payload, payloadStr: JSON.stringify(payload), timing }
+  return { payload, payloadStr, timing }
 }
 
 async function handleFastDispatchPaths(
@@ -536,6 +550,8 @@ async function executeLocalDispatch(
 ): Promise<void> {
   const tLocal = performance.now()
   const { executeDispatch } = await import("../dispatch/execute.ts")
+  log(`   ⏱ cli:local-import: ${Math.round(performance.now() - tLocal)}ms`)
+  const tExecute = performance.now()
   const { response } = await executeDispatch({
     canonicalEvent: timing.canonicalEvent,
     hookEventName: timing.hookEventName,
@@ -544,7 +560,7 @@ async function executeLocalDispatch(
   })
   const localMs = Math.round(performance.now() - tLocal)
   const totalMs = Math.round(performance.now() - timing.t0)
-  log(`   ⏱ cli:local-execute: ${localMs}ms`)
+  log(`   ⏱ cli:local-execute: ${Math.round(performance.now() - tExecute)}ms`)
   log(`   ⏱ cli:total: ${totalMs}ms`)
   void appendCliTimingLog({ ...timing, totalMs, daemonMs, localMs, route: "local" })
   void response
@@ -583,7 +599,14 @@ async function runDispatch(
   const t0 = performance.now()
   maybeForceDispatchFailureForTesting()
   const prepared = await prepareDispatch(canonicalEvent, hookEventName, agentId, t0)
-  if (await handleFastDispatchPaths(prepared.timing, prepared.payload)) return
+  const tFastPaths = performance.now()
+  let handled: boolean
+  try {
+    handled = await handleFastDispatchPaths(prepared.timing, prepared.payload)
+  } finally {
+    log(`   ⏱ cli:fast-paths: ${Math.round(performance.now() - tFastPaths)}ms`)
+  }
+  if (handled) return
   await dispatchPreparedRequest(prepared)
 }
 
