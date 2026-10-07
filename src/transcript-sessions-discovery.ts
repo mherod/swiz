@@ -305,15 +305,22 @@ async function readCodexSessionMeta(
   return meta
 }
 
+interface CodexScan {
+  targetPath: string
+  sessions: Session[]
+  limit?: number
+  modifiedSinceMs?: number
+}
+
 async function processCodexFileEntry(
   entryPath: string,
   entryName: string,
-  targetPath: string,
-  sessions: Session[],
-  limit?: number
+  { targetPath, sessions, limit, modifiedSinceMs }: CodexScan
 ): Promise<void> {
   try {
     const s = await stat(entryPath)
+    // Reading session metadata is the expensive step; skip files too old to qualify.
+    if (modifiedSinceMs !== undefined && s.mtimeMs < modifiedSinceMs) return
     const {
       id: parsedId,
       cwd,
@@ -342,12 +349,13 @@ async function processCodexFileEntry(
 export async function findCodexSessions(
   targetDir: string,
   home?: string,
-  limit?: number
+  limit?: number,
+  modifiedSinceMs?: number
 ): Promise<Session[]> {
   home = home ?? getHomeDir()
   const codexRoot = join(home, ".codex", "sessions")
-  const targetPath = resolve(targetDir)
   const sessions: Session[] = []
+  const scan: CodexScan = { targetPath: resolve(targetDir), sessions, limit, modifiedSinceMs }
   const pendingDirs = [codexRoot]
 
   while (pendingDirs.length > 0) {
@@ -366,7 +374,7 @@ export async function findCodexSessions(
         continue
       }
       if (!entry.isFile() || !entry.name.endsWith(".jsonl")) continue
-      await processCodexFileEntry(entryPath, entry.name, targetPath, sessions, limit)
+      await processCodexFileEntry(entryPath, entry.name, scan)
     }
   }
 

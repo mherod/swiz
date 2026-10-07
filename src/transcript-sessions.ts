@@ -50,12 +50,15 @@ function selectLatestProviderSession(providerArrays: Session[][]): Session[] {
  * @param projectDir - Project directory (used to compute Claude projectKey)
  * @param home
  * @param limit - Maximum number of sessions to return (returns most recent first). If undefined, returns all.
+ * @param modifiedSinceMs - When set, only sessions modified at or after this epoch-ms time are
+ *   returned; Codex skips reading older transcripts entirely, which dominates cold-scan cost.
  * @returns Aggregated sessions from all providers, sorted by mtime descending
  */
 export async function findAllProviderSessions(
   projectDir: string,
   home?: string,
-  limit?: number
+  limit?: number,
+  modifiedSinceMs?: number
 ): Promise<Session[]> {
   const targetDir = resolve(projectDir)
   const effectiveHome = home ?? getHomeDir()
@@ -73,7 +76,7 @@ export async function findAllProviderSessions(
     findCursorSessions(targetDir, effectiveHome, limit),
     findCursorAgentTranscriptSessions(targetDir, effectiveHome, limit),
     findAntigravitySessions(targetDir, effectiveHome, limit),
-    findCodexSessions(targetDir, effectiveHome, limit),
+    findCodexSessions(targetDir, effectiveHome, limit, modifiedSinceMs),
   ])
 
   // Merge already-limited provider results, sort deterministically, then truncate to limit.
@@ -84,7 +87,11 @@ export async function findAllProviderSessions(
     cursorAgentSessions,
     antigravitySessions,
     codexSessions,
-  ]
+  ].map((sessions) =>
+    modifiedSinceMs === undefined
+      ? sessions
+      : sessions.filter((session) => (session.mtime ?? 0) >= modifiedSinceMs)
+  )
 
   // Fast path for limit === 1: pick latest from each provider, sort only those candidates
   if (limit === 1) return selectLatestProviderSession(providerArrays)

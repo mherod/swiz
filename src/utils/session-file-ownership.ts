@@ -314,14 +314,13 @@ export async function listLiveSessionIds(
 ): Promise<string[]> {
   try {
     const { findAllProviderSessions } = await import("../transcript-sessions.ts")
-    const sessions = await findAllProviderSessions(cwd, home)
-    return [
-      ...new Set(
-        sessions
-          .filter((session) => nowMs - (session.mtime ?? 0) <= LIVE_SESSION_WINDOW_MS)
-          .map((session) => session.id)
-      ),
-    ]
+    const sessions = await findAllProviderSessions(
+      cwd,
+      home,
+      undefined,
+      nowMs - LIVE_SESSION_WINDOW_MS
+    )
+    return [...new Set(sessions.map((session) => session.id))]
   } catch {
     return []
   }

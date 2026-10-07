@@ -152,4 +152,19 @@ describe("Codex transcript discovery", () => {
     expect(afterModified.metadataMisses - afterUnchanged.metadataMisses).toBe(1)
     expect(sessions.map((session) => session.id)).toContain(secondId)
   })
+
+  it("skips reading transcripts older than modifiedSinceMs", async () => {
+    const id = "019fb700-0000-7000-8000-000000000009"
+    const { home, targetDir } = await createCodexRollout({ id, source: "vscode" })
+
+    const before = getCodexSessionDiscoveryMetrics()
+    const future = await findCodexSessions(targetDir, home, undefined, Date.now() + 60_000)
+    const afterSkip = getCodexSessionDiscoveryMetrics()
+    expect(future).toEqual([])
+    // Control: the cutoff must skip the metadata read, not just filter the result.
+    expect(afterSkip.metadataMisses).toBe(before.metadataMisses)
+
+    const recent = await findCodexSessions(targetDir, home, undefined, Date.now() - 60_000)
+    expect(recent.map((session) => session.id)).toContain(id)
+  })
 })
