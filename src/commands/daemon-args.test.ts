@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test"
 import { join } from "node:path"
-import { validateDaemonArgs } from "./daemon.ts"
+import { normalizeDaemonArgs, validateDaemonArgs } from "./daemon.ts"
 
 describe("validateDaemonArgs", () => {
   it("accepts every documented flag", () => {
@@ -11,9 +11,23 @@ describe("validateDaemonArgs", () => {
     expect(() => validateDaemonArgs(["--uninstall"])).not.toThrow()
   })
 
-  it("rejects a bare subcommand word and suggests its flag", () => {
-    expect(() => validateDaemonArgs(["restart"])).toThrow(
-      'unknown argument "restart". Did you mean --restart?'
+  it("accepts subcommands as bare words or flags", () => {
+    expect(normalizeDaemonArgs(["restart", "--port", "7943"])).toEqual([
+      "--restart",
+      "--port",
+      "7943",
+    ])
+    expect(normalizeDaemonArgs(["install"])).toEqual(["--install"])
+    expect(normalizeDaemonArgs(["uninstall"])).toEqual(["--uninstall"])
+    expect(normalizeDaemonArgs(["--status"])).toEqual(["status"])
+    for (const word of ["restart", "install", "uninstall", "--status"]) {
+      expect(() => validateDaemonArgs(normalizeDaemonArgs([word]))).not.toThrow()
+    }
+  })
+
+  it("still rejects a misspelled subcommand after normalising", () => {
+    expect(() => validateDaemonArgs(normalizeDaemonArgs(["restrat"]))).toThrow(
+      'unknown argument "restrat".'
     )
   })
 

@@ -97,9 +97,21 @@ export function deleteProjectSnapshots(
 
 const DAEMON_FLAGS = new Set(["--restart", "--install", "--uninstall", "status"])
 
+/** Subcommands work as bare words or flags: `swiz daemon restart` ≡ `--restart`. */
+const DAEMON_ALIASES: Record<string, string> = {
+  restart: "--restart",
+  install: "--install",
+  uninstall: "--uninstall",
+  "--status": "status",
+}
+
+export function normalizeDaemonArgs(args: readonly string[]): string[] {
+  return args.map((arg) => DAEMON_ALIASES[arg] ?? arg)
+}
+
 /**
  * Reject unrecognised arguments. Unknown words previously fell through to starting a
- * foreground daemon, so `swiz daemon restart` silently became a second server.
+ * foreground daemon, so a typo silently became a second server.
  */
 export function validateDaemonArgs(args: readonly string[]): void {
   for (let i = 0; i < args.length; i++) {
@@ -896,15 +908,19 @@ async function startDaemonProcess(_args: string[], port: number): Promise<void> 
 export const daemonCommand: Command = {
   name: "daemon",
   description: "Run a background web server",
-  usage: "swiz daemon [--port <port>] [--restart] [--install] [--uninstall] [status]",
+  usage: "swiz daemon [--port <port>] [restart | install | uninstall | status]",
   options: [
     { flags: "--port <port>", description: "Port to listen on (default: 7943)" },
-    { flags: "--restart", description: "Stop any daemon on the port, then start fresh" },
-    { flags: "--install", description: "Install as a LaunchAgent" },
-    { flags: "--uninstall", description: "Uninstall the LaunchAgent" },
-    { flags: "status", description: "Show daemon metrics and status" },
+    {
+      flags: "restart, --restart",
+      description: "Stop any daemon on the port, then start fresh",
+    },
+    { flags: "install, --install", description: "Install as a LaunchAgent" },
+    { flags: "uninstall, --uninstall", description: "Uninstall the LaunchAgent" },
+    { flags: "status, --status", description: "Show daemon metrics and status" },
   ],
-  async run(args) {
+  async run(rawArgs) {
+    const args = normalizeDaemonArgs(rawArgs)
     validateDaemonArgs(args)
     const portIndex = args.indexOf("--port")
     const port = portIndex !== -1 ? Number(args[portIndex + 1]) : DAEMON_PORT
