@@ -173,7 +173,7 @@ describe("isSafeReadOnlyShellCommand", () => {
   })
 })
 
-describe("pretooluse-protect-sandbox nvm sourcing", () => {
+describe("pretooluse-protect-sandbox hidden-home exceptions", () => {
   async function runSandboxHook(home: string, command: string) {
     await acquireEnvLock()
     const previousHome = process.env.HOME
@@ -193,6 +193,69 @@ describe("pretooluse-protect-sandbox nvm sourcing", () => {
       releaseEnvLockFn()
     }
   }
+
+  it("allows jq aggregation of the exact hook log", async () => {
+    const home = await mkdtemp(join(tmpdir(), "swiz-log-analysis-"))
+    try {
+      await mkdir(join(home, ".swiz"))
+      await Bun.write(join(home, ".swiz", "hook-logs.jsonl"), "{}\n")
+      for (const path of [
+        "~/.swiz/hook-logs.jsonl",
+        '"$HOME/.swiz/hook-logs.jsonl"',
+        `'${join(home, ".swiz", "hook-logs.jsonl")}'`,
+      ]) {
+        const result = await runSandboxHook(
+          home,
+          `jq -sc '[.[] | select(.kind == "dispatch")] | length' ${path}`
+        )
+        expect(result).toEqual({})
+      }
+    } finally {
+      await rm(home, { recursive: true, force: true })
+    }
+  })
+
+  it("keeps hook-log writes and other hidden files blocked", async () => {
+    const home = await mkdtemp(join(tmpdir(), "swiz-log-analysis-"))
+    try {
+      const log = "~/.swiz/hook-logs.jsonl"
+      for (const command of [
+        `jq '.' ${log} > ${log}`,
+        `jq '.' ${log}; touch ${log}`,
+        `jq '.' ${log} && touch ${log}`,
+        `jq '.' ${log} | tee ${log}`,
+        `jq '.' ${log} &`,
+        `jq\n'.' ${log}`,
+        `jq -f ${log} ${log}`,
+        `jq --rawfile other ~/.swiz/settings.json '.' ${log}`,
+        `jq '.' ${log} ~/.swiz/settings.json`,
+        `jq 'include "other"; .' ${log}`,
+        `jq '.' ${log}.bak`,
+        `jq '.' ${log}/nested`,
+        "jq '.' ~/.swiz/settings.json",
+        "jq '.' ~/.claude/tasks/session/1.json",
+        `bun -e 'await Bun.write("${join(home, ".swiz", "hook-logs.jsonl")}", "")'`,
+      ]) {
+        const result = await runSandboxHook(home, command)
+        expect(JSON.stringify(result), command).toContain('"permissionDecision":"deny"')
+      }
+    } finally {
+      await rm(home, { recursive: true, force: true })
+    }
+  })
+
+  it("does not allow a hook-log symlink to another hidden file", async () => {
+    const home = await mkdtemp(join(tmpdir(), "swiz-log-analysis-"))
+    try {
+      await mkdir(join(home, ".swiz"))
+      await Bun.write(join(home, ".swiz", "settings.json"), "{}")
+      await symlink("settings.json", join(home, ".swiz", "hook-logs.jsonl"))
+      const result = await runSandboxHook(home, "jq '.' ~/.swiz/hook-logs.jsonl")
+      expect(JSON.stringify(result)).toContain('"permissionDecision":"deny"')
+    } finally {
+      await rm(home, { recursive: true, force: true })
+    }
+  })
 
   it("allows sourcing nvm from tilde paths", async () => {
     const home = await mkdtemp(join(tmpdir(), "swiz-nvm-home-"))

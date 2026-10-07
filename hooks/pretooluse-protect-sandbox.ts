@@ -212,6 +212,19 @@ interface ShellPathContext {
   hasPathBuilder: boolean
 }
 
+/** Allow a single jq analysis of the log, without granting script or write access. */
+async function isHookLogAnalysis(ctx: ShellPathContext, resolved: string): Promise<boolean> {
+  const logPath = join(ctx.homeDir, ".swiz", "hook-logs.jsonl")
+  if (resolved !== logPath) return false
+  const command = ctx.command.trim()
+  if (/[\r\n]/.test(command)) return false
+  const match = command.match(
+    /^jq(?:[ \t]+(?:-[screM]+|--(?:slurp|raw-output|compact-output|exit-status)))*[ \t]+'([^']*)'[ \t]+([~/$\w.{}-]+|"[~/$\w.{} -]+"|'[~/$\w.{} -]+')$/
+  )
+  if (!match || /\b(?:import|include)\b/.test(match[1]!)) return false
+  return (await normalizeShellPath(match[2]!, ctx.cwd, ctx.homeDir)) === logPath
+}
+
 async function allowedHiddenHomeCandidate(
   candidate: string,
   resolvedCandidate: string | null,
@@ -219,6 +232,7 @@ async function allowedHiddenHomeCandidate(
 ): Promise<boolean> {
   if (await isAllowedTrashMoveCommand(ctx.command, ctx.cwd, ctx.homeDir)) return true
   if (!resolvedCandidate) return false
+  if (await isHookLogAnalysis(ctx, resolvedCandidate)) return true
   if (isAllowedNvmSourceShellCommand(ctx.command, candidate, resolvedCandidate, ctx.homeDir)) {
     return true
   }
