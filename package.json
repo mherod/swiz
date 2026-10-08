@@ -38,7 +38,7 @@
     "motion": "^12.36.0",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
-    "tailwindcss": "^4.2.1",
+    "tailwindcss": "^4.3.3",
     "ufo": "1.6.4",
     "yaml": "^2.8.3",
     "zod": "^4.6.5"
