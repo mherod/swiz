@@ -27,7 +27,7 @@
     "@modelcontextprotocol/sdk": "1.27.1",
     "@openrouter/ai-sdk-provider": "3.0.0",
     "agent-hook-schemas": "0.4.0",
-    "ai": "7.0.123",
+    "ai": "7.0.127",
     "ai-sdk-provider-claude-code": "^4.3.2",
     "ai-sdk-provider-gemini-cli": "^2.0.1",
     "applescript-node": "^1.0.3",
