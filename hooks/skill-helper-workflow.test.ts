@@ -18,12 +18,27 @@ describe("signed skill helper guard composition (#909)", () => {
   let project: string
   let skillRoot: string
   let helper: string
+  let skillRoots: string[]
 
   beforeAll(async () => {
     home = await temp.create()
     project = join(home, "project")
     skillRoot = join(home, ".agents", "skills")
     helper = join(skillRoot, "commit", "scripts", "check-gpg-signing.mjs")
+    skillRoots = [
+      skillRoot,
+      join(home, ".agents"),
+      join(home, ".claude", "skills"),
+      join(home, ".codex", "skills"),
+      join(home, ".cursor", "skills"),
+      join(home, ".gemini", "skills"),
+      join(home, ".gemini", "antigravity", "skills"),
+      join(home, ".gemini", "antigravity", "global_skills"),
+      join(home, ".codex", "plugins", "cache", "vendor", "plugin", "1.0.0", "skills"),
+      join(home, ".claude", "plugins", "cache", "vendor", "plugin", "1.0.0", "skills"),
+      join(project, ".skills"),
+      join(project, ".agents", "skills"),
+    ]
     await mkdir(project, { recursive: true })
     await Bun.write(join(project, "package.json"), '{"packageManager":"pnpm@11.9.0"}')
     await Bun.write(helper, "export const signingPreflight = () => true\n")
@@ -31,6 +46,9 @@ describe("signed skill helper guard composition (#909)", () => {
     await Bun.write(join(home, ".cursor", "skills", "commit", "scripts", "check.mjs"), "")
     await Bun.write(join(home, ".private", "injected.mjs"), "")
     await symlink(join(home, ".private", "injected.mjs"), join(skillRoot, "escape.mjs"))
+    for (const root of skillRoots) {
+      await Bun.write(join(root, "example", ".internal", "deep", "run.ts"), "export {}\n")
+    }
   })
 
   async function evaluate(command: string, workdir = project, commandField = "cmd") {
@@ -136,33 +154,96 @@ describe("signed skill helper guard composition (#909)", () => {
     }
   })
 
-  test("denies unsupported wrappers and imports with a direct Bun recipe", async () => {
+  test("permits wrappers and inline imports of skill helpers", async () => {
     for (const command of [
       `pnpm exec bun ${helper} preflight`,
+      `npx bun ${helper} preflight`,
       `bun -e 'import { signingPreflight } from "${helper}"'`,
     ]) {
-      const outputs = await evaluate(command, skillRoot, "command")
-      expect(outputs[2]?.decision).toBe("deny")
-      expect(outputs[2]?.reason).toContain(
-        "bun <configured-skill-root>/commit/scripts/check-gpg-signing.mjs preflight"
-      )
-      expect(outputs[2]?.reason).toContain("target repository")
+      for (const cwd of [project, skillRoot]) {
+        const outputs = await evaluate(command, cwd, "command")
+        expect(
+          outputs.map((output) => output.decision),
+          command
+        ).not.toContain("deny")
+      }
+    }
+  })
+
+  test("permits execution beneath every skill root, including hidden and deeply nested directories", async () => {
+    for (const root of skillRoots) {
+      const script = join(root, "example", ".internal", "deep", "run.ts")
+      for (const command of [
+        `bun ${script}`,
+        `node ${script}`,
+        `python3 ${script}`,
+        `custom-runner ${script}`,
+        `npx bun ${script}`,
+        `env SKILL_MODE=test bun ${script}`,
+        `source ${script}`,
+        `. ${script}`,
+        `bun -e 'await import("${script}")'`,
+        `bash -c 'source "${script}"'`,
+        `cat ${script} | sh`,
+        `awk -f ${script}`,
+        `bun --preload=${script} ${script}`,
+        `${script}`,
+      ]) {
+        const outputs = await evaluate(command)
+        expect(
+          outputs.map((output) => output.decision),
+          command
+        ).not.toContain("deny")
+      }
+      const outputs = await evaluate("bun run.ts", join(root, "example", ".internal", "deep"))
+      expect(
+        outputs.map((output) => output.decision),
+        root
+      ).not.toContain("deny")
+    }
+  })
+
+  test("permits execution from a skill root without a path operand", async () => {
+    const outputs = await evaluate("bun -e 'console.log(1)'", skillRoot)
+    expect(outputs.map((output) => output.decision)).not.toContain("deny")
+    expect((await evaluate("bun -e 'console.log(1)' > output.txt", skillRoot))[2]?.decision).toBe(
+      "deny"
+    )
+  })
+
+  test("permits inline code constructing a skill path beneath HOME", async () => {
+    for (const path of [
+      ".agents/skills/example/.internal/deep/run.ts",
+      ".claude/skills/example/.internal/deep/run.ts",
+      ".codex/plugins/cache/vendor/plugin/1.0.0/skills/example/.internal/deep/run.ts",
+    ]) {
+      const command = `bun -e 'import { join } from "node:path"; await import(join(process.env.HOME, "${path}"))'`
+      const outputs = await evaluate(command)
+      expect(
+        outputs.map((output) => output.decision),
+        path
+      ).not.toContain("deny")
     }
   })
 
   test("keeps helper exceptions bounded", async () => {
     for (const command of [
-      `bun --eval ${helper}`,
-      `bun --preload=/tmp/injected.mjs ${helper}`,
-      `BUN_OPTIONS=--preload=/tmp/injected.mjs bun ${helper}`,
-      `export BUN_OPTIONS=--preload=/tmp/injected.mjs; bun ${helper}`,
       `bun ${helper} > ${helper}`,
-      `$(printf bun) ${helper}`,
+      `bun ${helper} >${helper}`,
+      `env tee ${helper}`,
+      `bash -c 'tee "${helper}"'`,
+      `awk '{print > "${helper}"}' ${helper}`,
       `bun ${join(skillRoot, "escape.mjs")}`,
       `bun ${skillRoot}/../../.private/injected.mjs`,
+      `python3 ${helper} ${join(home, ".private", "injected.mjs")}`,
+      `bun ${join(home, ".claude", "skills-backup", "run.ts")}`,
+      `npx bun ${helper} && bun add dependency`,
     ]) {
       const outputs = await evaluate(command, project, "command")
-      expect(outputs[2]?.decision, command).toBe("deny")
+      expect(
+        outputs.map((output) => output.decision),
+        command
+      ).toContain("deny")
     }
   })
 

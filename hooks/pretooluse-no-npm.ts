@@ -7,8 +7,10 @@
  * executable as a standalone script for backwards compatibility and testing.
  */
 
+import { resolve } from "node:path"
 import { extractExecutableSubcommands } from "../src/command-utils.ts"
 import { resolveShellCwd } from "../src/cwd.ts"
+import { expandHomeVars, getHomeDirOrNull } from "../src/home.ts"
 import {
   preToolUseAllow,
   preToolUseDeny,
@@ -21,6 +23,7 @@ import { isShellTool } from "../src/tool-matchers.ts"
 import { evaluateBunCommandPolicy } from "../src/utils/bun-command-policy.ts"
 import { detectPackageManagerDetails, type PackageManager } from "../src/utils/package-detection.ts"
 import { splitShellSegments, tokenizeShellSegment } from "../src/utils/shell-patterns.ts"
+import { isConfiguredSkillPath, resolveCanonical } from "./sandbox-path-utils.ts"
 
 // Equivalent subcommands across package managers
 interface CmdMap {
@@ -241,15 +244,40 @@ async function evaluatePackageInvocations(
   const detection = await detectPackageManagerDetails(cwd)
   if (!detection) return bunOutput ?? {}
   const { packageManager: pm, signals } = detection
-  const implausible = invocations.find((parsed) =>
-    isImplausibleInvocation(parsed.invoked, pm, signals)
-  )
+  let implausible: ParsedInvocation | undefined
+  for (const parsed of invocations) {
+    if (!isImplausibleInvocation(parsed.invoked, pm, signals)) continue
+    if (await executesSkillFile(parsed, cwd)) continue
+    implausible = parsed
+    break
+  }
 
   if (!implausible) {
     return bunOutput ?? buildAcceptedInvocation(invocations[0]!, pm, signals)
   }
 
   return buildImplausibleDeny(implausible, pm)
+}
+
+/** A runtime wrapper for installed skill code does not manage project dependencies. */
+async function executesSkillFile(parsed: ParsedInvocation, cwd: string): Promise<boolean> {
+  if (!PACKAGE_RUNNERS.has(parsed.invoked) && !["exec", "run"].includes(parsed.subcmd)) {
+    return false
+  }
+  const home = getHomeDirOrNull()
+  if (!home) return false
+  const canonicalHome = await resolveCanonical(home)
+  for (const token of parsed.args) {
+    if (token.startsWith("-") || !token.includes("/")) continue
+    const path = await resolveCanonical(resolve(cwd, expandHomeVars(token, home)))
+    if (
+      (await isConfiguredSkillPath(path, canonicalHome, cwd)) &&
+      (await Bun.file(path).exists())
+    ) {
+      return true
+    }
+  }
+  return false
 }
 
 async function evaluate(input: ShellHookInput): Promise<SwizHookOutput> {

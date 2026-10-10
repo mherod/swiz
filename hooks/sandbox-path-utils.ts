@@ -2,8 +2,7 @@ import { lstat, realpath } from "node:fs/promises"
 import { basename, dirname, join as joinPath, resolve } from "node:path"
 import { normalizeCommand, stripHeredocs } from "../src/command-utils.ts"
 import { expandHomeVars, getHomeDirOrNull } from "../src/home.ts"
-import { getAllProviderSkillDirs } from "../src/provider-utils.ts"
-import { getAgentsSkillDir } from "../src/skill-utils.ts"
+import { getSkillDirs } from "../src/skill-utils.ts"
 import { isMarkdownPath } from "../src/tool-matchers.ts"
 import {
   type ShellTokenSpan,
@@ -32,8 +31,23 @@ const SAFE_READ_ONLY_COMMANDS = new Set([
   "tr",
 ])
 
-const SKILL_SCRIPT_RUNNERS = new Set(["bash", "bun", "sh", "zsh"])
-const SKILL_PROGRAM_FILE_FLAGS = new Set(["-f", "--from-file"])
+/** These operate on files directly rather than executing skill code. */
+const SKILL_FILE_MUTATORS = new Set([
+  "tee",
+  "touch",
+  "cp",
+  "mv",
+  "install",
+  "ln",
+  "mkdir",
+  "rmdir",
+  "rm",
+  "unlink",
+  "truncate",
+  "chmod",
+  "chown",
+  "chgrp",
+])
 const NVM_SOURCE_COMMANDS = new Set(["source", "."])
 
 export const SAFE_READ_ONLY_INSPECTION_HINT = [
@@ -402,51 +416,66 @@ function commandTokenIndex(tokens: string[]): number {
 
 function isAllowedSkillPathStage(tokens: string[], pathIndexes: number[]): boolean {
   const commandIndex = commandTokenIndex(tokens)
-  const commandName = tokens[commandIndex] ?? ""
-  if (!commandName || pathIndexes.length !== 1) return false
-  if (tokens.slice(0, commandIndex).some((token) => token.includes("="))) return false
-
-  const pathIndex = pathIndexes[0]!
-  if (pathIndex === commandIndex) return true
-
-  if (SKILL_SCRIPT_RUNNERS.has(commandName)) {
-    return tokens.slice(commandIndex + 1, pathIndex).every((token) => {
-      return commandName === "bun"
-        ? ["run", "--", "--no-install", "--no-env-file"].includes(token)
-        : ["--", "-e", "-u", "-eu"].includes(token)
-    })
+  const commandName = basename(tokens[commandIndex] ?? "")
+  if (!commandName) return false
+  if (pathIndexes.includes(commandIndex)) return true
+  const prefix = tokens.slice(commandIndex, pathIndexes[0] ?? tokens.length)
+  if (prefix.some((token) => SKILL_FILE_MUTATORS.has(basename(token)))) return false
+  if (
+    SAFE_READ_ONLY_COMMANDS.has(commandName) &&
+    !prefix.some((token) => ["-f", "--file", "--from-file", "-exec", "-execdir"].includes(token))
+  ) {
+    return false
   }
 
-  if (commandName !== "jq") return false
-  const pathToken = tokens[pathIndex]!
-  return (
-    SKILL_PROGRAM_FILE_FLAGS.has(tokens[pathIndex - 1] ?? "") ||
-    pathToken.startsWith("--from-file=")
+  const checkedIndexes = pathIndexes.length ? pathIndexes : tokens.map((_, index) => index)
+  return checkedIndexes.every(
+    (index) =>
+      !/^(?:\d*|&)>>?/.test(tokens[index]!) && !/^(?:\d*|&)>>?$/.test(tokens[index - 1] ?? "")
   )
 }
 
 /**
- * Returns true when every use of a shared skill path executes that script or
- * loads it as a jq program. Skill files are trusted user-installed code, but
- * the path must not also appear as a redirect or another command's write target.
+ * Skill code is trusted regardless of interpreter, wrapper, sourcing, or inline
+ * import syntax. Keep direct file mutations and output targets protected.
+ * An empty path checks execution from an already-validated skill working directory.
  */
-export function isAllowedSharedSkillShellCommand(command: string, skillPath: string): boolean {
-  if (!command.trim() || !skillPath.trim()) return false
+export function isAllowedSharedSkillShellCommand(
+  command: string,
+  skillPath: string,
+  depth = 0
+): boolean {
+  if (!command.trim() || depth > 8) return false
+  if (isSafeReadOnlyShellCommand(command)) return false
   const normalized = command.normalize("NFKC")
-  if (normalized.includes("`") || normalized.includes("$(")) return false
+  const path = normalizeShellPathToken(skillPath)
+  const segments = splitShellSegments(normalized).filter(
+    (segment) => !path || tokenizeShellSegment(segment).some((token) => token.includes(path))
+  )
+  return (
+    segments.length > 0 &&
+    segments.every((segment) => isAllowedSkillExecutionSegment(segment, path, depth))
+  )
+}
 
-  let matched = false
-  for (const segment of splitShellSegments(normalized)) {
-    const tokens = tokenizeShellSegment(segment)
-    if (["export", "env", "source", ".", "eval"].includes(tokens[0] ?? "")) return false
-    const pathIndexes = tokens.flatMap((token, index) =>
-      tokenReferencesPath(token, skillPath) ? [index] : []
-    )
-    if (pathIndexes.length === 0) continue
-    matched = true
-    if (!isAllowedSkillPathStage(tokens, pathIndexes)) return false
-  }
-  return matched
+function isAllowedSkillExecutionSegment(segment: string, path: string, depth: number): boolean {
+  if (isSafeReadOnlyShellCommand(segment)) return true
+  const tokens = tokenizeShellSegment(segment)
+  const nested = skillShellBody(tokens)
+  if (nested !== null) return isAllowedSharedSkillShellCommand(nested, path, depth + 1)
+  return isAllowedSkillPathStage(
+    tokens,
+    tokens.flatMap((token, index) => (path && token.includes(path) ? [index] : []))
+  )
+}
+
+function skillShellBody(tokens: string[]): string | null {
+  const index = commandTokenIndex(tokens)
+  const name = basename(tokens[index] ?? "")
+  if (name === "eval") return tokens.slice(index + 1).join(" ")
+  if (!["bash", "sh", "zsh", "dash", "fish"].includes(name)) return null
+  const flag = tokens.findIndex((token, position) => position > index && /^-[^-]*c/.test(token))
+  return flag < 0 ? null : (tokens[flag + 1] ?? "")
 }
 
 function isNvmPath(target: string, homeDir: string): boolean {
@@ -484,13 +513,21 @@ export function isAllowedNvmSourceShellCommand(
   return matched
 }
 
-export async function isConfiguredSkillPath(target: string, homeDir: string): Promise<boolean> {
-  const roots = [getAgentsSkillDir(homeDir), ...getAllProviderSkillDirs()]
-  for (const root of roots) {
+export async function isConfiguredSkillPath(
+  target: string,
+  homeDir: string,
+  cwd = process.cwd()
+): Promise<boolean> {
+  for (const root of getSkillDirs(cwd)) {
     const canonicalRoot = await resolveCanonical(root)
-    if (target !== canonicalRoot && isPathWithin(canonicalRoot, target)) return true
+    if (isPathWithin(canonicalRoot, target)) return true
   }
-  return false
+  /** Installed plugin packages carry their own nested skills directories. */
+  if (!isPathWithin(homeDir, target)) return false
+  const homeRelative = target.slice(homeDir.length + 1).replace(/\\/g, "/")
+  return /^\.(?:claude|codex|cursor|gemini)\/plugins\/(?:cache|marketplaces)\/(?:[^/]+\/)*(?:skills|global_skills)(?:\/|$)/.test(
+    homeRelative
+  )
 }
 
 export async function resolveCanonical(p: string): Promise<string> {

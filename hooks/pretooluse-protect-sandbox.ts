@@ -236,7 +236,7 @@ async function allowedHiddenHomeCandidate(
   if (isAllowedNvmSourceShellCommand(ctx.command, candidate, resolvedCandidate, ctx.homeDir)) {
     return true
   }
-  const isSharedSkill = await isConfiguredSkillPath(resolvedCandidate, ctx.homeDir)
+  const isSharedSkill = await isConfiguredSkillPath(resolvedCandidate, ctx.homeDir, ctx.sessionCwd)
   return isSharedSkill && isAllowedSharedSkillShellCommand(ctx.command, candidate)
 }
 
@@ -287,7 +287,10 @@ async function classifyShellCandidate(
     ctx.homeDir,
     ctx.allowCodexHome
   )
-  return hiddenViaBuilder ? { kind: "hidden-home", path: candidate } : null
+  if (!hiddenViaBuilder) return null
+  const builtPath = await normalizeShellPath(candidate, ctx.homeDir, ctx.homeDir)
+  const allowed = await allowedHiddenHomeCandidate(candidate, builtPath, ctx)
+  return allowed ? null : { kind: "hidden-home", path: candidate }
 }
 
 async function shouldBlockShellCommand(
@@ -345,14 +348,16 @@ async function classifyCommandPaths(ctx: ShellPathContext): Promise<BlockedShell
 }
 
 async function isAllowedHiddenCwdCommand(ctx: ShellPathContext): Promise<boolean> {
+  const skillCwd = await isConfiguredSkillPath(ctx.cwd, ctx.homeDir, ctx.sessionCwd)
   for (const segment of splitShellSegments(ctx.command)) {
     if (isSafeReadOnlyShellCommand(segment)) continue
+    if (skillCwd && isAllowedSharedSkillShellCommand(segment, "")) continue
     let helper = false
     for (const token of collectShellPathCandidates(segment, false)) {
       const resolved = await normalizeShellPath(token, ctx.cwd, ctx.homeDir)
       if (
         resolved &&
-        (await isConfiguredSkillPath(resolved, ctx.homeDir)) &&
+        (await isConfiguredSkillPath(resolved, ctx.homeDir, ctx.sessionCwd)) &&
         isAllowedSharedSkillShellCommand(segment, token)
       ) {
         helper = true
@@ -456,9 +461,8 @@ function blockedShellOutput(
       "",
       `Effective command cwd: ${policy.cwd} (source: ${policy.source}). Session access boundary: ${policy.sessionCwd}.`,
       "Changing tool workdir resolves relative paths there; it does not grant hidden-home write access.",
-      "To run the signing helper, keep workdir at the target repository and invoke the script directly:",
-      "  bun <configured-skill-root>/commit/scripts/check-gpg-signing.mjs preflight",
-      "Use the installed skill root. Package-manager wrappers and eval imports are not supported helper execution forms; pnpm exec may change the process cwd.",
+      "Scripts anywhere under configured skill directories may be executed with any interpreter, wrapper, sourcing, or inline import.",
+      "Skill execution does not grant access to other hidden-home paths or direct file-write targets.",
       "",
       SAFE_READ_ONLY_INSPECTION_HINT,
     ].join("\n")
