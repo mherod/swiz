@@ -230,6 +230,7 @@ describe("signed skill helper guard composition (#909)", () => {
     for (const command of [
       `bun ${helper} > ${helper}`,
       `bun ${helper} >${helper}`,
+      `${helper} > ${helper}`,
       `env tee ${helper}`,
       `bash -c 'tee "${helper}"'`,
       `awk '{print > "${helper}"}' ${helper}`,

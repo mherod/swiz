@@ -418,7 +418,7 @@ function isAllowedSkillPathStage(tokens: string[], pathIndexes: number[]): boole
   const commandIndex = commandTokenIndex(tokens)
   const commandName = basename(tokens[commandIndex] ?? "")
   if (!commandName) return false
-  if (pathIndexes.includes(commandIndex)) return true
+  if (pathIndexes.includes(commandIndex) && pathIndexes.length === 1) return true
   const prefix = tokens.slice(commandIndex, pathIndexes[0] ?? tokens.length)
   if (prefix.some((token) => SKILL_FILE_MUTATORS.has(basename(token)))) return false
   if (
