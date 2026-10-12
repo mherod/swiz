@@ -103,7 +103,7 @@ describe("Codex session cleanup", () => {
   test.each([
     { args: [] },
     { args: ["--older-than=1h"] },
-  ])("removes all archived codex chats regardless of age with %j", async ({ args }) => {
+  ])("removes eligible archived codex chats regardless of age window with %j", async ({ args }) => {
     const home = await tmp.create()
     const old = await rollout(home, true, OLD)
     const young = await rollout(home, true, NOW - 36 * HOUR_MS)
@@ -246,10 +246,10 @@ describe("Codex session cleanup", () => {
     expect(await Bun.file(file.path).text()).toBe(file.original)
   })
 
-  test.each([false, true])("removes all archives (skip Trash: %s)", async (skipTrash) => {
+  test.each([false, true])("removes eligible archives (skip Trash: %s)", async (skipTrash) => {
     const home = await tmp.create()
     const old = await rollout(home, false, OLD)
-    const archived = await rollout(home, true, RECENT)
+    const archived = await rollout(home, true, NOW - 4 * HOUR_MS)
     const recent = await rollout(home, false, RECENT)
     const trash = join(home, "fixture-trash")
     const bin = join(home, "bin")
@@ -295,12 +295,28 @@ describe("Codex cleanup process guard", () => {
 
   test("removes archived rollouts and deletes old tasks when idle", async () => {
     const home = await tmp.create()
-    const file = await rollout(home, true, RECENT)
+    const file = await rollout(home, true, NOW - 4 * HOUR_MS)
     const task = await oldTask(home, file.id)
     const result = await clean(home, ["--skip-trash", "--task-older-than=48h"])
     expect(result.exitCode).toBe(0)
     expect(await Bun.file(task).exists()).toBe(false)
     expect(await Bun.file(file.path).exists()).toBe(false)
+  })
+
+  test("protects recently changed archives and tasks even with force and a shorter age window", async () => {
+    const home = await tmp.create()
+    const file = await rollout(home, true, NOW - 2 * HOUR_MS)
+    const task = await oldTask(home, file.id)
+    const inspect = mock(async () => runningCodex)
+    const result = await clean(
+      home,
+      ["--force", "--older-than=1h", "--skip-trash", "--task-older-than=1h"],
+      { ...idleRuntime, inspect }
+    )
+    expect(result.exitCode).toBe(0)
+    expect(inspect).not.toHaveBeenCalled()
+    expect(await Bun.file(file.path).text()).toBe(file.original)
+    expect(await Bun.file(task).exists()).toBe(true)
   })
 
   test("force does not stop Codex when it has no eligible files", async () => {

@@ -407,8 +407,8 @@ describe("cleanup with partially corrupted project directory", () => {
 // directory exists the project must NOT be flagged stale.
 //
 // Conversely, a project whose encoded name resolves to no plausible path must
-// be flagged stale and all of its sessions moved to the trashable bucket,
-// regardless of session age.
+// be flagged stale and sessions outside the three-hour protection window
+// moved to the trashable bucket regardless of the requested age cutoff.
 //
 // Uses its own STALE_HOME so these fixtures don't perturb the shared TMP_HOME
 // tree (which other suites scan without --project filtering).
@@ -447,6 +447,9 @@ describe("cleanup stale-project detection", () => {
     // Gone project: session data exists but no real directory was ever created.
     await mkdir(GONE_SESSION, { recursive: true })
     await Bun.write(join(GONE_SESSION, "session.jsonl"), '{"type":"system"}\n')
+    const fourHoursAgo = new Date(Date.now() - 4 * 60 * 60 * 1000)
+    await utimes(join(GONE_SESSION, "session.jsonl"), fourHoursAgo, fourHoursAgo)
+    await utimes(GONE_SESSION, fourHoursAgo, fourHoursAgo)
     // Create a matching task directory for the gone session
     const goneSessionId = "00000000-0000-0000-0000-000000000006"
     await mkdir(join(STALE_HOME, ".claude", "tasks", goneSessionId), { recursive: true })
@@ -489,8 +492,8 @@ describe("cleanup stale-project detection", () => {
   })
 
   test("stale sessions are trashable even within the --older-than window", async () => {
-    // Sessions were just created so they are within any reasonable age window.
-    // The gone project must still report them as trashable due to staleness.
+    // The session is four hours old: outside protection, but inside the age window.
+    // The gone project must still report it as trashable due to staleness.
     const output = await runCleanup("--project", GONE_PROJECT, "--older-than", "30")
     expect(output).toMatch(/path gone/)
     expect(output).toMatch(/1 trashable/)
@@ -689,6 +692,9 @@ describe("cleanup old task files", () => {
     const sessionDir = join(TASK_FILE_HOME, ".claude", "projects", PROJECT_NAME, SESSION_ID)
     await mkdir(sessionDir, { recursive: true })
     await Bun.write(join(sessionDir, "session.jsonl"), '{"type":"system"}\n')
+    const fourHoursAgo = new Date(Date.now() - 4 * 60 * 60 * 1000)
+    await utimes(join(sessionDir, "session.jsonl"), fourHoursAgo, fourHoursAgo)
+    await utimes(sessionDir, fourHoursAgo, fourHoursAgo)
 
     const taskDir = join(TASK_FILE_HOME, ".claude", "tasks", SESSION_ID)
     await mkdir(taskDir, { recursive: true })

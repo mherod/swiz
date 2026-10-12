@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { mkdir, symlink } from "node:fs/promises"
+import { mkdir, symlink, utimes } from "node:fs/promises"
 import { dirname, join } from "node:path"
 import { runCommandInProcess, useTempDir } from "../../utils/test-utils.ts"
 import { doctorCommand } from "../doctor.ts"
@@ -78,6 +78,16 @@ describe("retained transcript truncation (#828)", () => {
     for (const path of [nested, topLevel, ...untouched]) {
       await mkdir(dirname(path), { recursive: true })
       await Bun.write(path, original)
+    }
+    // Eligible for truncation, but still recent enough to retain the session.
+    const fourHoursAgo = (Date.now() - 4 * 60 * 60 * 1000) / 1000
+    for (const path of [nested, topLevel, ...untouched]) {
+      await utimes(path, fourHoursAgo, fourHoursAgo)
+      let directory = dirname(path)
+      while (directory.startsWith(root)) {
+        await utimes(directory, fourHoursAgo, fourHoursAgo)
+        directory = dirname(directory)
+      }
     }
 
     const preview = await clean(home, "--dry-run")

@@ -30,7 +30,7 @@ import {
   createCodexProcessRuntime,
   prepareCodexCleanup,
 } from "./cleanup-codex-processes.ts"
-import { dirSize, type ProjectResult, type SessionInfo } from "./cleanup-fs.ts"
+import { dirSize, type ProjectResult, pathStats, type SessionInfo } from "./cleanup-fs.ts"
 import {
   type CleanupArgs,
   decodeProjectPath,
@@ -40,6 +40,8 @@ import {
 } from "./cleanup-path.ts"
 
 const DAEMON_LABEL = SWIZ_DAEMON_LABEL
+const MAX_SESSIONS_PER_PROJECT = 50
+const RECENT_SESSION_WINDOW_MS = 3 * 60 * 60 * 1000
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const ORPHAN_SESSION_ID_RE =
@@ -516,8 +518,9 @@ async function buildSessionMap(
     if (!sessionId) continue
     const existing = sessionMap.get(sessionId) ?? { paths: [], mtime: 0, size: 0 }
     existing.paths.push(p)
-    existing.mtime = Math.max(existing.mtime, s.mtimeMs)
-    existing.size += isDirectory ? await dirSize(p) : s.size
+    const info = isDirectory ? await pathStats(p) : { newestMtimeMs: s.mtimeMs, sizeBytes: s.size }
+    existing.mtime = Math.max(existing.mtime, info.newestMtimeMs)
+    existing.size += info.sizeBytes
     sessionMap.set(sessionId, existing)
   }
   return sessionMap
@@ -571,14 +574,21 @@ async function findSessions(
       taskDirSizeBytes,
     }
 
-    if (data.mtime < cutoffMs) {
-      old.push(info)
-    } else {
-      keep.push(info)
-    }
+    keep.push(info)
   }
 
-  return { keep, old }
+  // Count unique sessions, including sessions with both a directory and transcript.
+  keep.sort((a, b) => b.mtimeMs - a.mtimeMs || a.sessionId.localeCompare(b.sessionId))
+  return {
+    keep: keep.filter((session, index) => {
+      if (session.mtimeMs < cutoffMs || index >= MAX_SESSIONS_PER_PROJECT) {
+        old.push(session)
+        return false
+      }
+      return true
+    }),
+    old,
+  }
 }
 
 async function discoverProjectNames(
@@ -642,6 +652,21 @@ function collectSessionIds(results: ProjectResult[]): Set<string> {
   return ids
 }
 
+/** Recent activity overrides every cleanup rule, including stale paths and archives. */
+function protectRecentSessions(results: ProjectResult[], recentCutoffMs: number): void {
+  for (const group of results) {
+    const eligible: SessionInfo[] = []
+    for (const session of group.old) {
+      if (session.mtimeMs >= recentCutoffMs) group.keep.push(session)
+      else eligible.push(session)
+    }
+    group.old = eligible
+    for (const session of group.keep) {
+      if (session.mtimeMs >= recentCutoffMs) session.preserveTranscript = true
+    }
+  }
+}
+
 async function getRealSessionMtime(taskDirPath: string): Promise<number | null> {
   let taskEntries: string[] = []
   try {
@@ -693,14 +718,15 @@ async function orphanTaskSession(tasksDir: string, sessionId: string): Promise<S
   try {
     const taskDirStat = await stat(taskDirPath)
     if (!taskDirStat.isDirectory()) return null
-    const realMtimeMs = (await getRealSessionMtime(taskDirPath)) ?? taskDirStat.mtimeMs
+    const stats = await pathStats(taskDirPath)
+    const realMtimeMs = Math.max((await getRealSessionMtime(taskDirPath)) ?? 0, stats.newestMtimeMs)
     return {
       sessionId,
       paths: [],
       mtimeMs: realMtimeMs,
       sizeBytes: 0,
       taskDirPath,
-      taskDirSizeBytes: await dirSize(taskDirPath),
+      taskDirSizeBytes: stats.sizeBytes,
     }
   } catch {
     return null
@@ -883,6 +909,8 @@ async function printCleanupReport(opts: CleanupReportOpts): Promise<CleanupTotal
 
   const totals = await printProjectTable(results)
 
+  console.log("    Sessions changed in the last 3 hours are always protected.")
+  console.log("    Claude: sessions beyond the newest 50 per project are eligible for cleanup.")
   if (results.some((result) => result.provider === "codex")) {
     console.log("    Codex: archived sessions only; unarchived sessions protected.")
   }
@@ -1161,7 +1189,9 @@ export async function autoCleanup(codexRuntime = createCodexProcessRuntime()): P
     return
   }
 
-  console.log(`\n  ${BOLD}Cleaning up old session data (> 24h; all Codex archives)...${RESET}`)
+  console.log(
+    `\n  ${BOLD}Cleaning up session data (> 24h, beyond 50 per project, or Codex archives; last 3h protected)...${RESET}`
+  )
   await executeCleanup({
     results,
     claudeBackups,
@@ -1200,6 +1230,7 @@ async function gatherCleanupData(cleanupArgs: CleanupArgs, codexRuntime: CodexPr
   const tasksDir = join(claudeDir, "tasks")
 
   const cutoffMs = Date.now() - cleanupArgs.olderThanMs
+  const recentCutoffMs = Date.now() - RECENT_SESSION_WINDOW_MS
   const taskCutoffMs = cleanupArgs.taskOlderThanMs ? Date.now() - cleanupArgs.taskOlderThanMs : null
 
   let results: ProjectResult[] = []
@@ -1220,6 +1251,11 @@ async function gatherCleanupData(cleanupArgs: CleanupArgs, codexRuntime: CodexPr
     results = results.concat(codexGroups)
   }
 
+  if (!cleanupArgs.projectFilter) {
+    await appendOrphanTasks(results, tasksDir, cutoffMs)
+  }
+  protectRecentSessions(results, recentCutoffMs)
+
   const scopedSessionIds = collectSessionIds(results)
   let discoveredTaskFiles =
     taskCutoffMs === null
@@ -1229,7 +1265,7 @@ async function gatherCleanupData(cleanupArgs: CleanupArgs, codexRuntime: CodexPr
           taskCutoffMs,
           cleanupArgs.projectFilter ? scopedSessionIds : undefined
         )
-  discoveredTaskFiles = filterProtectedCodexTasks(discoveredTaskFiles, codexGroups)
+  discoveredTaskFiles = filterProtectedSessionTasks(discoveredTaskFiles, results, recentCutoffMs)
   const stopped = await guardCodexGroups(
     codexGroups,
     discoveredTaskFiles,
@@ -1241,14 +1277,11 @@ async function gatherCleanupData(cleanupArgs: CleanupArgs, codexRuntime: CodexPr
     results = results.filter((result) => result.provider !== "codex")
     codexGroups = await findCodexCleanupGroups(homeDir)
     results = results.concat(codexGroups)
+    protectRecentSessions(results, recentCutoffMs)
     if (taskCutoffMs !== null) discoveredTaskFiles = await findOldTaskFiles(tasksDir, taskCutoffMs)
   }
-  const oldTaskFiles = filterProtectedCodexTasks(discoveredTaskFiles, codexGroups)
+  const oldTaskFiles = filterProtectedSessionTasks(discoveredTaskFiles, results, recentCutoffMs)
   const oldTaskBytes = oldTaskFiles.reduce((sum, task) => sum + task.sizeBytes, 0)
-
-  if (!cleanupArgs.projectFilter) {
-    await appendOrphanTasks(results, tasksDir, cutoffMs)
-  }
 
   const [claudeBackups, geminiBackups] = await Promise.all([
     findClaudeBackups(claudeDir),
@@ -1257,12 +1290,17 @@ async function gatherCleanupData(cleanupArgs: CleanupArgs, codexRuntime: CodexPr
   return { results, oldTaskFiles, oldTaskBytes, taskCutoffMs, claudeBackups, geminiBackups }
 }
 
-function filterProtectedCodexTasks(
+function filterProtectedSessionTasks(
   tasks: OldTaskFileInfo[],
-  groups: ProjectResult[]
+  groups: ProjectResult[],
+  recentCutoffMs: number
 ): OldTaskFileInfo[] {
   const retainedIds = new Set(
-    groups.flatMap((group) => group.keep.map((session) => session.sessionId))
+    groups.flatMap((group) =>
+      group.keep
+        .filter((session) => group.provider === "codex" || session.mtimeMs >= recentCutoffMs)
+        .map((session) => session.sessionId)
+    )
   )
   return tasks.filter((task) => !retainedIds.has(task.sessionId))
 }
