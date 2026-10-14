@@ -137,6 +137,9 @@ async function validateSkillEntry(
   const base = { name: entry.name, skillDir, entryDir }
   const file = Bun.file(skillPath)
   if (!(await file.exists())) {
+    // Claude stores synchronized skill buckets here, not a skill named "synced".
+    const syncedContainer = join(getHomeDirWithFallback(""), ".claude", "skills", "synced")
+    if (entryDir === syncedContainer) return []
     return [{ ...base, kind: "missing_skill_md", reason: "missing SKILL.md" }]
   }
   const content = await file.text()

@@ -52,7 +52,8 @@ export function buildCleanupLaunchAgentConfig(options: CleanupAgentOptions = {})
 } {
   const home = options.homeDir ?? getHomeDir()
   const projectRoot = options.projectRoot ?? dirname(Bun.main)
-  const bunPath = options.bunPath ?? Bun.which("bun") ?? process.execPath
+  // Package runners prepend node_modules/.bin to PATH; keep the actual runtime stable.
+  const bunPath = options.bunPath ?? process.execPath
   const logs = join(home, "Library/Logs/Swiz")
   return {
     Label: SWIZ_CLEANUP_LABEL,

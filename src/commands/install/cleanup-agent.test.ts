@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test"
+import { describe, expect, spyOn, test } from "bun:test"
 import { mkdir, stat } from "node:fs/promises"
 import { dirname, join } from "node:path"
 import {
@@ -82,6 +82,17 @@ async function fixture() {
 }
 
 describe("daily cleanup LaunchAgent", () => {
+  test("uses the running Bun executable even when a package runner shadows PATH", () => {
+    const which = spyOn(Bun, "which").mockReturnValue("/project/node_modules/.bin/bun")
+    try {
+      const config = buildCleanupLaunchAgentConfig({ projectRoot: "/project" })
+      expect(config.ProgramArguments[0]).toBe(process.execPath)
+      expect(config.EnvironmentVariables.PATH).not.toContain("/project/node_modules/.bin")
+    } finally {
+      which.mockRestore()
+    }
+  })
+
   test("uses safe cleanup defaults, absolute arguments, logs, and the daily/on-load schedule", async () => {
     const f = await fixture()
     expect(f.expected.ProgramArguments).toEqual([
