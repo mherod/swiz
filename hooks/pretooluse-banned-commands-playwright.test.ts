@@ -20,6 +20,17 @@ describe("playwright-cli ban", () => {
     "command playwright-cli snapshot",
     "echo ready && playwright-cli snapshot",
     "echo ready;playwright-cli",
+    '"playwright-cli" snapshot',
+    "'playwright-cli' snapshot",
+    'playwright-"cli" snapshot',
+    '"/opt/my tools/playwright-cli" snapshot',
+    "echo ready\nplaywright-cli snapshot",
+    'echo "ready\nstill ready"\n"playwright-cli" snapshot',
+    'env CI=1 command -- "playwright-cli" snapshot',
+    'CI=1 command env MODE="two words" bunx "playwright-cli@latest" snapshot',
+    "env -u DISPLAY -- CI=1 playwright-cli snapshot",
+    "exec -a browser env CI=1 playwright-cli snapshot",
+    "npx --package playwright-cli -- playwright-cli snapshot",
   ])("blocks %s", async (command) => {
     const result = await runBashHook(HOOK, command)
     expect(result.decision).toBe("deny")
@@ -34,6 +45,12 @@ describe("playwright-cli ban", () => {
     'echo "playwright-cli snapshot"',
     "rg 'playwright-cli' hooks",
     "cat docs/playwright-cli.md",
+    'echo "ready\nplaywright-cli snapshot"',
+    "command -v playwright-cli",
+    "env LABEL=playwright-cli echo ready",
+    "env -u playwright-cli echo ready",
+    "npx --package playwright-cli echo ready",
+    "bunx another-tool playwright-cli",
   ])("allows %s", async (command) => {
     const result = await runBashHook(HOOK, command)
     expect(result.decision).not.toBe("deny")

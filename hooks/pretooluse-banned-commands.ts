@@ -5,7 +5,7 @@
 // Rules with severity "deny" (default) block the command entirely.
 
 import { stat } from "node:fs/promises"
-import { resolve } from "node:path"
+import { basename, resolve } from "node:path"
 import {
   findNonCanonicalGitInvocation,
   type NonCanonicalGitInvocation,
@@ -82,9 +82,57 @@ const SED_VALUE_LONG_FLAGS = new Set(["--expression", "--file"])
 const TOUCH_CMD_RE = shellSegmentCommandRe("touch(?:\\s|$)")
 const PYTHON_CMD_RE = shellSegmentCommandRe("python3?(?:\\s|$)")
 const NODE_TS_NODE_CMD_RE = shellSegmentCommandRe("(node|ts-node)\\s")
-const PLAYWRIGHT_CLI_CMD_RE = shellSegmentCommandRe(
-  "(?:[A-Za-z_][A-Za-z0-9_]*=\\S*\\s+)*(?:(?:command|exec|env)\\s+)*(?:(?:npx|bunx|bun\\s+x|pnpm\\s+(?:exec|dlx)|npm\\s+exec|yarn\\s+(?:exec|dlx))\\s+(?:-\\S+\\s+)*)?(?:[^\\s|;&]*/)?playwright-cli(?:@[^\\s|;&]+)?(?=\\s|$|[|;&])"
-)
+const PLAYWRIGHT_WRAPPERS = new Set(["command", "exec", "env", "noglob", "builtin"])
+const PLAYWRIGHT_RUNNERS = new Set(["npx", "bunx", "bun", "pnpm", "npm", "yarn"])
+const PLAYWRIGHT_VALUE_FLAGS: Record<string, Set<string>> = {
+  env: new Set(["-u", "--unset", "-C", "--chdir"]),
+  exec: new Set(["-a"]),
+  npx: new Set(["-p", "--package", "--registry", "--cache", "--userconfig"]),
+  bunx: new Set(["-p", "--package"]),
+}
+
+function skipPlaywrightOptions(tokens: string[], start: number, executable: string): number {
+  let index = start
+  while (tokens[index]?.startsWith("-")) {
+    const option = tokens[index++]!
+    if (option === "--") break
+    if (executable === "command" && /^-[p]*[vV]/.test(option)) return tokens.length
+    if (PLAYWRIGHT_VALUE_FLAGS[executable]?.has(option)) index++
+  }
+  return index
+}
+
+function playwrightExecutableIndex(tokens: string[]): number {
+  let index = 0
+  while (index < tokens.length) {
+    if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(tokens[index]!)) {
+      index++
+      continue
+    }
+    const executable = basename(tokens[index]!)
+    if (!PLAYWRIGHT_WRAPPERS.has(executable)) break
+    index = skipPlaywrightOptions(tokens, index + 1, executable)
+  }
+  return index
+}
+
+function hasPlaywrightCliCommand(command: string): boolean {
+  return splitShellSegments(command).some((segment) => {
+    const tokens = tokenizeShellSegment(segment)
+    let index = playwrightExecutableIndex(tokens)
+    const executable = basename(tokens[index] ?? "")
+    if (PLAYWRIGHT_RUNNERS.has(executable)) {
+      index++
+      if (executable === "bun") {
+        if (tokens[index++] !== "x") return false
+      } else if (executable !== "npx" && executable !== "bunx") {
+        if (!new Set(["exec", "dlx"]).has(tokens[index++] ?? "")) return false
+      }
+      index = skipPlaywrightOptions(tokens, index, executable)
+    }
+    return /^playwright-cli(?:@[^\s]+)?$/.test(basename(tokens[index] ?? ""))
+  })
+}
 
 // Generic shell output redirects to files — excludes fd-to-fd (2>&1) and /dev/ paths.
 // Matches: plain > / >>, &> / &>>, numbered N> / N>>, and noclobber-bypass >|.
@@ -260,7 +308,8 @@ export function isPlainRedirectOnly(c: string): boolean {
 function buildShellToolRules(payload: Record<string, unknown>): Rule[] {
   return [
     {
-      match: (c) => PLAYWRIGHT_CLI_CMD_RE.test(c),
+      useRawCommand: true,
+      match: hasPlaywrightCliCommand,
       message: "Do not use `playwright-cli`. Use the available browser automation tools instead.",
     },
     {
