@@ -82,6 +82,9 @@ const SED_VALUE_LONG_FLAGS = new Set(["--expression", "--file"])
 const TOUCH_CMD_RE = shellSegmentCommandRe("touch(?:\\s|$)")
 const PYTHON_CMD_RE = shellSegmentCommandRe("python3?(?:\\s|$)")
 const NODE_TS_NODE_CMD_RE = shellSegmentCommandRe("(node|ts-node)\\s")
+const PLAYWRIGHT_CLI_CMD_RE = shellSegmentCommandRe(
+  "(?:[A-Za-z_][A-Za-z0-9_]*=\\S*\\s+)*(?:(?:command|exec|env)\\s+)*(?:(?:npx|bunx|bun\\s+x|pnpm\\s+(?:exec|dlx)|npm\\s+exec|yarn\\s+(?:exec|dlx))\\s+(?:-\\S+\\s+)*)?(?:[^\\s|;&]*/)?playwright-cli(?:@[^\\s|;&]+)?(?=\\s|$|[|;&])"
+)
 
 // Generic shell output redirects to files — excludes fd-to-fd (2>&1) and /dev/ paths.
 // Matches: plain > / >>, &> / &>>, numbered N> / N>>, and noclobber-bypass >|.
@@ -256,6 +259,10 @@ export function isPlainRedirectOnly(c: string): boolean {
 
 function buildShellToolRules(payload: Record<string, unknown>): Rule[] {
   return [
+    {
+      match: (c) => PLAYWRIGHT_CLI_CMD_RE.test(c),
+      message: "Do not use `playwright-cli`. Use the available browser automation tools instead.",
+    },
     {
       match: (c) => GREP_CMD_RE.test(c),
       severity: "warn",
