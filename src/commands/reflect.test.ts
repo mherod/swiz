@@ -153,6 +153,7 @@ describe("parseReflectArgs", () => {
   it("parses --provider flag", () => {
     expect(parseReflectArgs(["--provider", "gemini"]).provider).toBe("gemini")
     expect(parseReflectArgs(["--provider", "openrouter"]).provider).toBe("openrouter")
+    expect(parseReflectArgs(["--provider", "codex"]).provider).toBe("codex")
   })
 
   it("defaults provider to undefined", () => {
@@ -161,7 +162,7 @@ describe("parseReflectArgs", () => {
 
   it("throws on invalid --provider value", () => {
     expect(() => parseReflectArgs(["--provider", "openai"])).toThrow(
-      'must be "gemini", "claude", or "openrouter"'
+      'must be "gemini", "claude", "openrouter", or "codex"'
     )
   })
 

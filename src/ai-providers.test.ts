@@ -101,10 +101,14 @@ describe("activeProvider", () => {
     expect(() => activeProvider("openai")).toThrow("Unknown AI provider")
   })
 
-  test("AI_PROVIDER=codex throws as unknown provider", () => {
+  test("AI_PROVIDER=codex resolves the CLI or reports it missing", () => {
     delete process.env.AI_TEST_NO_BACKEND
     process.env.AI_PROVIDER = "codex"
-    expect(() => activeProvider()).toThrow("Unknown AI provider")
+    if (Bun.which("codex")) {
+      expect(activeProvider()).toBe("codex")
+    } else {
+      expect(() => activeProvider()).toThrow("codex CLI is not installed")
+    }
   })
 
   test("AI_PROVIDER=claude is accepted as a valid provider ID", () => {

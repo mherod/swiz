@@ -24,8 +24,8 @@ Resolution runs in priority order on every call:
 
 ```
 1. options.provider (explicit per-call override)
-2. AI_PROVIDER env var ("gemini" | "codex" | "claude")
-3. Auto-select: Gemini → Codex CLI → Claude Code
+2. AI_PROVIDER env var ("gemini" | "claude" | "openrouter" | "codex")
+3. Auto-select: OpenRouter → Claude Code → Gemini → Codex CLI
 ```
 
 `activeProvider(override?)` in `src/ai-providers.ts` implements this. It throws an error (with a descriptive message) if an explicit override requests a provider that is not currently available.
@@ -35,10 +35,27 @@ Resolution runs in priority order on every call:
 | Provider ID | Availability check | Default model |
 |-------------|-------------------|---------------|
 | `gemini` | `GEMINI_API_KEY` env var OR `gemini` CLI in PATH | `gemini-flash-latest` |
-| `codex` | `codex` CLI in PATH | `codex-mini-latest` |
+| `codex` | `codex` CLI in PATH | `CODEX_MODEL` or `gpt-6-sol` |
 | `claude` | `claude` CLI in PATH | `sonnet` |
+| `openrouter` | `OPENROUTER_API_KEY` env var | `openrouter/auto` |
 
 `hasAiProvider()` returns true if any one of these is available.
+
+### Codex CLI provider
+
+Uses [`ai-sdk-provider-codex-cli`](https://github.com/ben-vargas/ai-sdk-provider-codex-cli) 2.3.0, the AI SDK v7 provider, through `createCodexExec`. Install a current Codex CLI (the provider targets 0.156.x), make `codex` available in PATH, and authenticate with `codex login` or `OPENAI_API_KEY`.
+
+```sh
+swiz idea --provider codex --model gpt-6-sol
+swiz reflect --provider codex
+AI_PROVIDER=codex swiz continue --print
+```
+
+Per-call `model` / supported `--model` flags take precedence over `CODEX_MODEL`, then `gpt-6-sol`. Codex is the final automatic fallback, preserving the existing provider priority; an explicit selection does not fall back to another provider.
+
+Each prompt runs the resolved PATH executable in read-only mode with approval policy `never`. Package-manager fallback is disabled. The adapter uses the existing timeout/abort handling and supplies native JSON Schema for `promptObject`, followed by Zod validation. Exec-mode streaming delivers completed messages rather than incremental tokens. `continue --provider codex` selects the suggestion backend; it does not change the command's Claude session-resumption behavior.
+
+The provider documents Node.js >=22; Swiz runs its adapter under Bun and tests the actual subprocess protocol with a fake executable, including text, streaming, structured output, errors and cancellation. Authentication and model availability still depend on the installed Codex CLI and account.
 
 ### Gemini key bootstrap
 
@@ -78,11 +95,11 @@ Default timeout for all AI commands: **90 000 ms** (90 seconds).
 
 | Flag | Short | Description |
 |------|-------|-------------|
-| `--provider <id>` | `-p` | Force a specific provider (`gemini`, `codex`, `claude`) |
+| `--provider <id>` | `-p` for `idea`/`continue` | Force a specific provider (`gemini`, `claude`, `openrouter`, `codex`) |
 | `--model <id>` | | Override the model identifier for the selected provider |
 | `--timeout <ms>` | | Override the 90 000 ms default |
 
-`--provider` is validated at parse time: values other than `"gemini"`, `"codex"`, or `"claude"` throw `'must be "gemini", "codex", or "claude"'`.
+`--provider` is validated at parse time by the shared `parseAiProvider()` helper. `mergetool` also accepts `--provider`. `reflect -p` remains its print-prompt flag; use `reflect --provider codex` for provider selection. `--model` and `--timeout` apply to `idea` and `reflect`; `continue` accepts `--provider` only.
 
 ---
 

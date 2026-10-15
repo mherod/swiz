@@ -398,6 +398,7 @@ describe("parseContinueArgs", () => {
   test("parses --provider flag", () => {
     expect(parseContinueArgs(["--provider", "gemini"]).provider).toBe("gemini")
     expect(parseContinueArgs(["--provider", "openrouter"]).provider).toBe("openrouter")
+    expect(parseContinueArgs(["--provider", "codex"]).provider).toBe("codex")
     expect(parseContinueArgs(["-p", "gemini"]).provider).toBe("gemini")
   })
 
@@ -407,7 +408,7 @@ describe("parseContinueArgs", () => {
 
   test("throws on invalid --provider value", () => {
     expect(() => parseContinueArgs(["--provider", "openai"])).toThrow(
-      'must be "gemini", "claude", or "openrouter"'
+      'must be "gemini", "claude", "openrouter", or "codex"'
     )
   })
 

@@ -3,6 +3,7 @@ import { z } from "zod"
 import {
   type AiProviderId,
   hasAiProvider,
+  parseAiProvider,
   promptObject,
   promptStreamText,
 } from "../ai-providers.ts"
@@ -73,11 +74,6 @@ type ReflectValueOption = {
   apply: (state: ReflectArgState, value: string, flag: string) => void
 }
 
-function parseProvider(value: string): AiProviderId {
-  if (value === "gemini" || value === "claude" || value === "openrouter") return value
-  throw new Error(`--provider must be "gemini", "claude", or "openrouter", got: ${value}`)
-}
-
 function applyPositionalCount(state: ReflectArgState, rawCount: string): void {
   if (state.countSpecified) throw new Error("Count already specified")
   state.count = parsePositiveInt(rawCount, "count")
@@ -126,7 +122,7 @@ const VALUE_OPTIONS: ReflectValueOption[] = [
     names: ["--provider"],
     missingMessage: "Missing value for --provider",
     apply: (state, value) => {
-      state.provider = parseProvider(value)
+      state.provider = parseAiProvider(value)
     },
   },
 ]
@@ -398,7 +394,7 @@ async function requestReflection(
 
 export const reflectCommand: Command<ReflectCommandOptions> = {
   name: "reflect",
-  description: "Use Gemini to reflect on mistakes in a session transcript",
+  description: "Use AI to reflect on mistakes in a session transcript",
   usage:
     "swiz reflect [count] [--dir <path>] [--session <id>] [--model <name>] [--timeout <ms>] [--json] [--print-prompt]",
   options: [
@@ -411,11 +407,11 @@ export const reflectCommand: Command<ReflectCommandOptions> = {
     { flags: "--session, -s <id>", description: "Reflect on a specific session (prefix match)" },
     {
       flags: "--model, -m <name>",
-      description: "Gemini model override (default: gemini-flash-latest)",
+      description: "Model override (provider-specific default applies when omitted)",
     },
     {
       flags: "--timeout, -t <ms>",
-      description: `Gemini request timeout in ms (default: ${DEFAULT_TIMEOUT_MS})`,
+      description: `Request timeout in ms (default: ${DEFAULT_TIMEOUT_MS})`,
     },
     {
       flags: "--json, -j",
@@ -424,7 +420,8 @@ export const reflectCommand: Command<ReflectCommandOptions> = {
     { flags: "--print-prompt, -p", description: "Print the generated prompt and exit" },
     {
       flags: "--provider <name>",
-      description: 'AI provider override: "gemini", "codex", or "claude" (default: auto-select)',
+      description:
+        'AI provider override: "gemini", "claude", "openrouter", or "codex" (default: auto-select)',
     },
   ],
   async run(args: string[], dependencies = {}) {
@@ -449,7 +446,7 @@ export const reflectCommand: Command<ReflectCommandOptions> = {
 
     if (!(dependencies.hasAiProvider ?? hasAiProvider)()) {
       throw new Error(
-        "No AI provider available. Set GEMINI_API_KEY, OPENROUTER_API_KEY, or install the claude CLI."
+        "No AI provider available. Set GEMINI_API_KEY, OPENROUTER_API_KEY, or install the claude or codex CLI."
       )
     }
 

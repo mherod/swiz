@@ -1,7 +1,7 @@
 import { resolve } from "node:path"
 import type { CanUseTool, SDKMessage } from "@anthropic-ai/claude-agent-sdk"
 import { detectBestAgentCli, promptBestAgent } from "../agent.ts"
-import { type AiProviderId, hasAiProvider, promptText } from "../ai-providers.ts"
+import { type AiProviderId, hasAiProvider, parseAiProvider, promptText } from "../ai-providers.ts"
 import { CYAN, DIM, GREEN, RED, RESET, YELLOW } from "../ansi.ts"
 import { stderrLog } from "../debug.ts"
 import {
@@ -47,15 +47,6 @@ export interface ContinueArgs {
   provider?: AiProviderId
 }
 
-const VALID_PROVIDERS = new Set(["gemini", "claude", "openrouter"])
-
-function validateProvider(value: string): AiProviderId {
-  if (!VALID_PROVIDERS.has(value)) {
-    throw new Error(`--provider must be "gemini", "claude", or "openrouter", got: ${value}`)
-  }
-  return value as AiProviderId
-}
-
 const CONTINUE_VALUE_FLAGS: Record<string, "dir" | "session" | "provider"> = {
   "--dir": "dir",
   "-d": "dir",
@@ -88,7 +79,7 @@ export function parseContinueArgs(args: string[]): ContinueArgs {
     i++
     if (field === "dir") targetDir = resolve(next)
     else if (field === "session") sessionQuery = next
-    else provider = validateProvider(next)
+    else provider = parseAiProvider(next)
   }
 
   return { targetDir, sessionQuery, printOnly, provider }
@@ -120,7 +111,7 @@ async function resolveSession(targetDir: string, sessionQuery: string | null): P
 function ensureAiBackend(): void {
   if (!hasAiProvider() && !detectBestAgentCli()) {
     throw new Error(
-      "No AI backend found. Set GEMINI_API_KEY, OPENROUTER_API_KEY, install the claude CLI, or install Cursor Agent."
+      "No AI backend found. Set GEMINI_API_KEY, OPENROUTER_API_KEY, install the claude or codex CLI, or install Cursor Agent."
     )
   }
 }
@@ -384,7 +375,7 @@ export const continueCommand: Command = {
     {
       flags: "--provider, -p <name>",
       description:
-        'AI provider override: "gemini", "claude", or "openrouter" (default: auto-select)',
+        'AI provider override: "gemini", "claude", "openrouter", or "codex" (default: auto-select)',
     },
   ],
   async run(args) {

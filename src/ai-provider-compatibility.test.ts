@@ -6,6 +6,13 @@ type ModelFactory = () => Promise<Exclude<LanguageModel, string>>
 
 const providers: Array<[string, ModelFactory]> = [
   [
+    "Codex CLI",
+    async () => {
+      const { createCodexExec } = await import("ai-sdk-provider-codex-cli")
+      return createCodexExec({ defaultSettings: { allowNpx: false, logger: false } })("gpt-6-sol")
+    },
+  ],
+  [
     "OpenRouter chat",
     async () => {
       const { createOpenRouter } = await import("@openrouter/ai-sdk-provider")

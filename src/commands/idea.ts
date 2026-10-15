@@ -4,6 +4,7 @@ import { z } from "zod"
 import {
   type AiProviderId,
   hasAiProvider,
+  parseAiProvider,
   promptObject,
   promptStreamText,
 } from "../ai-providers.ts"
@@ -70,11 +71,6 @@ function parsePositiveInt(value: string, flag: string): number {
   return parsed
 }
 
-function parseProvider(value: string): AiProviderId {
-  if (value === "gemini" || value === "claude" || value === "openrouter") return value
-  throw new Error(`--provider must be "gemini", "claude", or "openrouter", got: ${value}`)
-}
-
 type IdeaValueOption = {
   names: string[]
   missingMessage: string
@@ -107,7 +103,7 @@ const VALUE_OPTIONS: IdeaValueOption[] = [
     names: ["--provider", "-p"],
     missingMessage: "Missing value for --provider",
     apply: (state, value) => {
-      state.provider = parseProvider(value)
+      state.provider = parseAiProvider(value)
     },
   },
 ]
@@ -292,7 +288,7 @@ function parseIdeaFromJsonText(text: string): IssueIdea {
 
 export const ideaCommand: Command = {
   name: "idea",
-  description: "Use Gemini to propose a creative next idea for the current project",
+  description: "Use AI to propose a creative next idea for the current project",
   usage: "swiz idea [--dir <path>] [--model <name>] [--timeout <ms>] [--json] [--print-prompt]",
   options: [
     { flags: "--dir, -d <path>", description: "Project directory to analyze (default: cwd)" },
@@ -312,7 +308,7 @@ export const ideaCommand: Command = {
     {
       flags: "--provider, -p <name>",
       description:
-        'AI provider override: "gemini", "claude", or "openrouter" (default: auto-select)',
+        'AI provider override: "gemini", "claude", "openrouter", or "codex" (default: auto-select)',
     },
   ],
   async run(args: string[]) {
@@ -339,7 +335,7 @@ export const ideaCommand: Command = {
 
     if (!hasAiProvider()) {
       throw new Error(
-        "No AI provider available. Set GEMINI_API_KEY, OPENROUTER_API_KEY, or install the claude CLI."
+        "No AI provider available. Set GEMINI_API_KEY, OPENROUTER_API_KEY, or install the claude or codex CLI."
       )
     }
 
