@@ -110,6 +110,13 @@ export interface CreateTaskOptions {
  * Use this from hooks and services that need to create tasks without subprocess overhead.
  */
 export async function createTaskInProcess(opts: CreateTaskOptions): Promise<Task> {
+  return (await createTaskWithOutcome(opts)).task
+}
+
+/** Expose actual insertion separately from recovery of an idempotent deadline request. */
+export async function createTaskWithOutcome(
+  opts: CreateTaskOptions
+): Promise<{ task: Task; created: boolean }> {
   const { sessionId, subject, description, cwd = process.cwd() } = opts
   const storeKey = opts.storeKey ?? (await resolveLegacyTaskStoreKey(sessionId, cwd))
 
@@ -118,7 +125,7 @@ export async function createTaskInProcess(opts: CreateTaskOptions): Promise<Task
   const tasks = await readTaskStore(storeKey)
   // A retry after the task write but before its deadline binding must recover the same task.
   const retry = retriedDeadlineTask(tasks, opts.deadlineId)
-  if (retry) return retry
+  if (retry) return { task: retry, created: false }
 
   validateTaskCollision(subject, tasks)
 
@@ -156,7 +163,7 @@ export async function createTaskInProcess(opts: CreateTaskOptions): Promise<Task
     ...(opts.deadlineId ? { deadlineId: opts.deadlineId } : {}),
   })
 
-  return task
+  return { task, created: true }
 }
 
 function retriedDeadlineTask(tasks: Task[], deadlineId?: string): Task | undefined {

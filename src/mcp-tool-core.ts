@@ -65,7 +65,7 @@ import {
 } from "./tasks/task-repository.ts"
 import {
   completeTaskWithAutoTransition,
-  createTaskInProcess,
+  createTaskWithOutcome,
   updateStatus,
   validateTaskCollision,
   validateTaskSubject,
@@ -262,7 +262,7 @@ async function runTaskCreateTool(input: McpToolInput, cwd: string): Promise<McpT
               () => validateTaskCollision(input.subject as string, existingTasks)
             )
           ).deadline
-    const task = await createTaskInProcess({
+    const { task, created } = await createTaskWithOutcome({
       sessionId: projectKey,
       storeKey: projectStoreKey(cwd),
       subject: input.subject,
@@ -273,13 +273,13 @@ async function runTaskCreateTool(input: McpToolInput, cwd: string): Promise<McpT
     })
     if (deadline) await bindTaskDeadline(deadline.id, task.id, projectStoreKey(cwd))
     const tasks = projectQueueTasks(await readProjectQueueWithPrune(projectKey))
-    const headline = `Created #${task.id} — ${truncateForLine(task.subject)}`
+    const headline = `${created ? "Created" : "Recovered"} #${task.id} — ${truncateForLine(task.subject)}${created ? "" : " (no change)"}`
     const advice = await discoverRelatedTaskAdvice(cwd, task)
     return taskMutationResult(
       renderTaskToolResult(headline, tasks, task.id) +
         advice +
         (await renderTaskDeadlines(tasks, task.id)),
-      true
+      created
     )
   } catch (error) {
     return errorResult(`${name} failed: ${messageFromUnknownError(error)}`)

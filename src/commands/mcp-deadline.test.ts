@@ -115,11 +115,16 @@ test("task deadlines survive retries, description/status updates and completion 
   }
   const first = await runMcpTool("TaskCreate", taskInput, cwd)
   expect(first.isError).toBeUndefined()
+  expect(first.structuredContent?.taskMutation?.changed).toBe(true)
   const tasks = await readTaskStore(projectStoreKey(cwd))
   expect(tasks).toHaveLength(1)
   const task = tasks[0]!
   expect(task.deadlineId).toBeDefined()
-  expect((await runMcpTool("TaskCreate", taskInput, cwd)).isError).toBeUndefined()
+  const retry = await runMcpTool("TaskCreate", taskInput, cwd)
+  expect(retry.isError).toBeUndefined()
+  expect(retry.structuredContent?.taskMutation?.changed).toBe(false)
+  expect(retry.structuredContent?.summary).toContain(`Recovered #${task.id}`)
+  expect(retry.structuredContent?.summary).toContain("(no change)")
   expect(await readTaskStore(projectStoreKey(cwd))).toHaveLength(1)
   const updated = await runMcpTool(
     "TaskUpdate",
