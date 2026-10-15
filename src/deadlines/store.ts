@@ -112,7 +112,8 @@ export class DeadlineStore {
     cwd: string,
     now = Date.now(),
     kind: Deadline["kind"] = "delivery",
-    operation?: TaskDeadlineOperation
+    operation?: TaskDeadlineOperation,
+    beforeMutation?: () => void
   ): Deadline {
     input = deadlineInputSchema.parse(input)
     const scope = deadlineSessionKey(cwd, input.sessionId, input.agentId)
@@ -132,6 +133,8 @@ export class DeadlineStore {
           return this.get(previous.id)
         }
         validateActionFields(input)
+        // Validate dependent writes only for new requests; retries recover their receipt first.
+        beforeMutation?.()
         const deadline =
           input.action === "set"
             ? this.create(input, scope, now, kind)

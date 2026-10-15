@@ -120,13 +120,7 @@ export async function createTaskInProcess(opts: CreateTaskOptions): Promise<Task
   const retry = retriedDeadlineTask(tasks, opts.deadlineId)
   if (retry) return retry
 
-  const incomplete = tasks.filter((t) => isIncompleteTaskStatus(t.status))
-  const collision = findCollidingTask(subject, incomplete)
-  if (collision) {
-    throw new Error(
-      `Duplicate task: "${subject}" collides with existing #${collision.id} ("${collision.subject}")`
-    )
-  }
+  validateTaskCollision(subject, tasks)
 
   const prefix = sessionPrefix(taskStoreId(storeKey))
   const maxFileSeq = tasks.reduce((m, t) => Math.max(m, sequenceFor(t.id, prefix)), 0)
@@ -167,6 +161,17 @@ export async function createTaskInProcess(opts: CreateTaskOptions): Promise<Task
 
 function retriedDeadlineTask(tasks: Task[], deadlineId?: string): Task | undefined {
   return deadlineId ? tasks.find((task) => task.deadlineId === deadlineId) : undefined
+}
+
+export function validateTaskCollision(subject: string, tasks: readonly Task[]): void {
+  const collision = findCollidingTask(
+    subject,
+    tasks.filter((task) => isIncompleteTaskStatus(task.status))
+  )
+  if (collision)
+    throw new Error(
+      `Duplicate task: "${subject}" collides with existing #${collision.id} ("${collision.subject}")`
+    )
 }
 
 export function validateTaskSubject(subject: string, skipCompoundValidation = false): void {
