@@ -18,6 +18,7 @@ import {
   type Session,
 } from "../transcript-utils.ts"
 import type { Command } from "../types.ts"
+import { applyValueOption, parsePositiveInt, type ValueOption } from "./value-options.ts"
 
 const DEFAULT_TIMEOUT_MS = 90_000
 const DEFAULT_MISTAKE_COUNT = 5
@@ -48,14 +49,6 @@ export interface ReflectArgs {
   provider?: AiProviderId
 }
 
-function parsePositiveInt(value: string, flag: string): number {
-  const parsed = Number.parseInt(value, 10)
-  if (!Number.isFinite(parsed) || parsed <= 0) {
-    throw new Error(`${flag} must be a positive integer, got: ${value}`)
-  }
-  return parsed
-}
-
 interface ReflectArgState {
   count: number
   targetDir: string
@@ -68,19 +61,13 @@ interface ReflectArgState {
   provider?: AiProviderId
 }
 
-type ReflectValueOption = {
-  names: string[]
-  missingMessage: string
-  apply: (state: ReflectArgState, value: string, flag: string) => void
-}
-
 function applyPositionalCount(state: ReflectArgState, rawCount: string): void {
   if (state.countSpecified) throw new Error("Count already specified")
   state.count = parsePositiveInt(rawCount, "count")
   state.countSpecified = true
 }
 
-const VALUE_OPTIONS: ReflectValueOption[] = [
+const VALUE_OPTIONS: ValueOption<ReflectArgState>[] = [
   {
     names: ["--dir", "-d"],
     missingMessage: "Missing value for --dir",
@@ -127,14 +114,6 @@ const VALUE_OPTIONS: ReflectValueOption[] = [
   },
 ]
 
-function applyValueOption(arg: string, next: string | undefined, state: ReflectArgState): boolean {
-  const option = VALUE_OPTIONS.find((entry) => entry.names.includes(arg))
-  if (!option) return false
-  if (!next) throw new Error(option.missingMessage)
-  option.apply(state, next, arg)
-  return true
-}
-
 export function parseReflectArgs(args: string[]): ReflectArgs {
   const state: ReflectArgState = {
     count: DEFAULT_MISTAKE_COUNT,
@@ -153,7 +132,7 @@ export function parseReflectArgs(args: string[]): ReflectArgs {
     if (!arg) continue
     const next = args[i + 1]
 
-    if (applyValueOption(arg, next, state)) {
+    if (applyValueOption(VALUE_OPTIONS, arg, next, state)) {
       i++
       continue
     }
@@ -421,7 +400,7 @@ export const reflectCommand: Command<ReflectCommandOptions> = {
     {
       flags: "--provider <name>",
       description:
-        'AI provider override: "gemini", "claude", "openrouter", or "codex" (default: auto-select)',
+        'AI provider override: "gemini", "claude", "openrouter", "codex", or "agy" (default: auto-select)',
     },
   ],
   async run(args: string[], dependencies = {}) {
@@ -446,7 +425,7 @@ export const reflectCommand: Command<ReflectCommandOptions> = {
 
     if (!(dependencies.hasAiProvider ?? hasAiProvider)()) {
       throw new Error(
-        "No AI provider available. Set GEMINI_API_KEY, OPENROUTER_API_KEY, or install the claude or codex CLI."
+        "No AI provider available. Set GEMINI_API_KEY, OPENROUTER_API_KEY, or install the claude, codex, or agy CLI."
       )
     }
 

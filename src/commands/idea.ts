@@ -6,6 +6,7 @@ import { detectFrameworks, detectProjectStack } from "../detect-frameworks.ts"
 import { getGitClient } from "../git/client.ts"
 import { createStreamBufferReporter } from "../stream-buffer-reporter.ts"
 import type { Command } from "../types.ts"
+import { applyValueOption, parsePositiveInt, type ValueOption } from "./value-options.ts"
 
 const DEFAULT_TIMEOUT_MS = 15_000
 const README_CHAR_LIMIT = 8_000
@@ -56,21 +57,7 @@ interface IdeaParseState {
   provider?: AiProviderId
 }
 
-function parsePositiveInt(value: string, flag: string): number {
-  const parsed = Number.parseInt(value, 10)
-  if (!Number.isFinite(parsed) || parsed <= 0) {
-    throw new Error(`${flag} must be a positive integer, got: ${value}`)
-  }
-  return parsed
-}
-
-type IdeaValueOption = {
-  names: string[]
-  missingMessage: string
-  apply: (state: IdeaParseState, value: string) => void
-}
-
-const VALUE_OPTIONS: IdeaValueOption[] = [
+const VALUE_OPTIONS: ValueOption<IdeaParseState>[] = [
   {
     names: ["--dir", "-d"],
     missingMessage: "Missing value for --dir",
@@ -101,14 +88,6 @@ const VALUE_OPTIONS: IdeaValueOption[] = [
   },
 ]
 
-function applyValueOption(arg: string, next: string | undefined, state: IdeaParseState): boolean {
-  const option = VALUE_OPTIONS.find((entry) => entry.names.includes(arg))
-  if (!option) return false
-  if (!next) throw new Error(option.missingMessage)
-  option.apply(state, next)
-  return true
-}
-
 export function parseIdeaArgs(args: string[]): IdeaArgs {
   const state: IdeaParseState = {
     targetDir: process.cwd(),
@@ -121,7 +100,7 @@ export function parseIdeaArgs(args: string[]): IdeaArgs {
     const arg = args[i]
     if (!arg) continue
 
-    if (applyValueOption(arg, args[i + 1], state)) {
+    if (applyValueOption(VALUE_OPTIONS, arg, args[i + 1], state)) {
       i++
       continue
     }
@@ -297,7 +276,7 @@ export const ideaCommand: Command = {
     {
       flags: "--provider, -p <name>",
       description:
-        'AI provider override: "gemini", "claude", "openrouter", or "codex" (default: auto-select)',
+        'AI provider override: "gemini", "claude", "openrouter", "codex", or "agy" (default: auto-select)',
     },
   ],
   async run(args: string[]) {
@@ -326,7 +305,7 @@ export const ideaCommand: Command = {
 
     if (!hasAiProvider()) {
       throw new Error(
-        "No AI provider available. Set GEMINI_API_KEY, OPENROUTER_API_KEY, or install the claude or codex CLI."
+        "No AI provider available. Set GEMINI_API_KEY, OPENROUTER_API_KEY, or install the claude, codex, or agy CLI."
       )
     }
 
