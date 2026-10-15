@@ -44,6 +44,29 @@ const create = {
   durationMinutes: 20,
 }
 
+test("Deadline get requires attachment in the caller's session, agent and worktree", async () => {
+  const original = await runMcpTool("Deadline", create, cwd)
+  const deadlineId = original.structuredContent!.deadlines![0]!.id
+  for (const [sessionId, agentId, callerCwd] of [
+    ["another-session", undefined, cwd],
+    ["agent", "child", cwd],
+    ["agent", undefined, canonicalClaimPath(await tmp.create())],
+  ] as const) {
+    const get = { action: "get", sessionId, agentId, deadlineId }
+    const denied = await runMcpTool("Deadline", get, callerCwd)
+    expect(denied.isError).toBe(true)
+    expect(denied.structuredContent?.deadlineHistory).toBeUndefined()
+    expect(
+      (await runMcpTool("Deadline", { ...get, action: "attach", requestId: "attach" }, callerCwd))
+        .isError
+    ).toBeUndefined()
+    const allowed = await runMcpTool("Deadline", get, callerCwd)
+    expect(allowed.isError).toBeUndefined()
+    expect(allowed.structuredContent?.deadlines?.[0]?.id).toBe(deadlineId)
+    expect(allowed.structuredContent?.deadlineHistory).toHaveLength(1)
+  }
+})
+
 test("advertises and executes Deadline over MCP and the daemon route with identical retry semantics", async () => {
   const server = new McpServer({ name: "test", version: "0" })
   const client = new Client({ name: "test", version: "0" })
