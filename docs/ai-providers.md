@@ -58,6 +58,12 @@ Each prompt runs the resolved PATH executable in read-only mode with approval po
 
 The provider documents Node.js >=22; Swiz runs its adapter under Bun and tests the actual subprocess protocol with a fake executable, including text, streaming, structured output, errors and cancellation. Authentication and model availability still depend on the installed Codex CLI and account.
 
+### Claude Code provider
+
+Uses [`ai-sdk-provider-claude-code`](https://github.com/ben-vargas/ai-sdk-provider-claude-code) 4.3.3 through the Claude Agent SDK, compatible with AI SDK v7. Claude is available as a fallback after Codex and OpenRouter, or explicitly via `--provider claude` / `AI_PROVIDER=claude`. The default model is `sonnet`.
+
+Text, streaming, and structured generation use the shared provider layer. Structured requests pass the Zod schema as native JSON Schema to Claude and validate the returned object; schema-less JSON mode is not supported by this provider. The adapter runs with Bun, noninteractive permissions, and the existing authenticated Claude installation.
+
 ### Gemini key bootstrap
 
 Gemini supports two auth paths:

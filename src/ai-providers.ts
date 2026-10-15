@@ -260,7 +260,7 @@ const PROVIDER_REGISTRY: Record<AiProviderId, ProviderCapabilities> = {
     streamText: (prompt, options) =>
       getClaudeModel(options?.model).then((m) => runStreamText(m, prompt, options)),
     object: (prompt, schema, options) =>
-      getClaudeModel(options?.model).then((m) => runObject(m, prompt, schema, options)),
+      getClaudeModel(options?.model).then((m) => runObject(m, prompt, schema, options, true)),
   },
   openrouter: {
     model: getOpenRouterChatModel,
