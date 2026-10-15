@@ -310,9 +310,19 @@ describe("get-test-scope parent-bundle lookup", () => {
 })
 
 describe("get-test-scope argument passing", () => {
-  test("direct importers override skip policy when source file passed as argument", () => {
+  const tmp = useTempDir("swiz-scope-arguments-")
+
+  test("direct importers override skip policy when source file passed as argument", async () => {
+    const cwd = await tmp.create()
+    await Bun.write(join(cwd, "scripts/get-test-scope.ts"), "export const value = 1")
+    await Bun.write(
+      join(cwd, "scripts/get-test-scope-deletions.test.ts"),
+      'await import("./get-test-scope.ts")'
+    )
+    await Bun.write(join(cwd, "scripts/get-test-scope.test.ts"), "// no direct import")
     const proc = spawnSync("bun", ["run", SCOPE_SCRIPT, "scripts/get-test-scope.ts"], {
-      cwd: PROJECT_ROOT,
+      cwd,
+      env: { ...process.env, HOME: cwd, CI_BASE: "", AI_TEST_NO_BACKEND: "1" },
       encoding: "utf8",
     })
     expect(proc.status).toBe(0)

@@ -1,33 +1,33 @@
-import { afterEach, expect, mock, spyOn, test } from "bun:test"
-import * as childProcess from "node:child_process"
-import * as fs from "node:fs"
+import { expect, test } from "bun:test"
+import { join } from "node:path"
+import { useTempDir } from "../src/utils/test-utils.ts"
 
-const originalArgv = process.argv
-
-afterEach(() => {
-  process.argv = originalArgv
-  mock.restore()
-})
+const tmp = useTempDir("swiz-scope-deletions-")
+const scopeScript = join(import.meta.dir, "get-test-scope.ts")
 
 test("omits deleted tests while retaining existing changed tests", async () => {
-  const git = spyOn(childProcess, "spawnSync").mockReturnValue({
-    pid: 0,
-    output: [],
-    stdout: Buffer.alloc(0),
-    stderr: Buffer.alloc(0),
-    status: 1,
-    signal: null,
-  })
-  spyOn(fs, "existsSync").mockImplementation((path) => path === "src/live.test.ts")
-  const output: string[] = []
-  spyOn(process.stdout, "write").mockImplementation((chunk) => {
-    output.push(String(chunk))
-    return true
-  })
-  process.argv = [process.execPath, "get-test-scope.ts", "src/removed.test.ts", "src/live.test.ts"]
+  const cwd = await tmp.create()
+  await Bun.write(join(cwd, "src/live.test.ts"), "// existing test\n")
 
-  await import("./get-test-scope.ts")
+  // Execute the CLI afresh: importing it here caches its top-level execution
+  // and requires mocks of globals shared with the rest of the suite.
+  const proc = Bun.spawn(
+    [process.execPath, scopeScript, "src/removed.test.ts", "src/live.test.ts"],
+    {
+      cwd,
+      env: { ...process.env, HOME: cwd, CI_BASE: "", AI_TEST_NO_BACKEND: "1" },
+      stdout: "pipe",
+      stderr: "pipe",
+      timeout: 5_000,
+    }
+  )
+  const [stdout, stderr] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+  ])
+  await proc.exited
 
-  expect(output.join("")).toBe("src/live.test.ts")
-  expect(git).toHaveBeenCalled()
+  expect(proc.exitCode).toBe(0)
+  expect(stderr).toBe("")
+  expect(stdout).toBe("src/live.test.ts")
 })

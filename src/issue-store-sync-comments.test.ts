@@ -17,6 +17,8 @@ afterEach(() => {
 
 async function fixture(count = 2) {
   const cwd = await temp.create()
+  // Comment freshness tests must not spawn Git to discover a fixture branch.
+  await Bun.write(join(cwd, ".swiz/config.json"), JSON.stringify({ defaultBranch: "main" }))
   const store = new IssueStore(join(cwd, "issues.db"))
   stores.push(store)
   const calls: number[] = []
