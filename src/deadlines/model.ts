@@ -70,7 +70,7 @@ export const taskDeadlineSchema = z.strictObject({
 export type TaskDeadlineInput = z.infer<typeof taskDeadlineSchema>
 export interface TaskDeadlineOperation {
   input: TaskDeadlineInput
-  task: string | { subject: string; description: string }
+  task: string | { subject: string; description: string; activeForm?: string }
 }
 
 export interface DeadlineTaskRef {

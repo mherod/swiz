@@ -107,6 +107,7 @@ test("task deadlines survive retries, description/status updates and completion 
   const taskInput = {
     subject: "Prepare release patch",
     description: "Provide an integration-ready patch",
+    activeForm: "Preparing release patch",
     deadline: {
       sessionId: "agent",
       requestId: "task-create",
@@ -126,6 +127,13 @@ test("task deadlines survive retries, description/status updates and completion 
   expect(retry.structuredContent?.taskMutation?.changed).toBe(false)
   expect(retry.structuredContent?.summary).toContain(`Recovered #${task.id}`)
   expect(retry.structuredContent?.summary).toContain("(no change)")
+  const mismatched = await runMcpTool(
+    "TaskCreate",
+    { ...taskInput, activeForm: "Preparing another patch" },
+    cwd
+  )
+  expect(mismatched.isError).toBe(true)
+  expect(mismatched.content[0]?.text).toContain("different arguments")
   expect(await readTaskStore(projectStoreKey(cwd))).toHaveLength(1)
   const updated = await runMcpTool(
     "TaskUpdate",
