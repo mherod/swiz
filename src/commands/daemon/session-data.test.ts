@@ -21,6 +21,29 @@ async function createSession(name: string, timestamp: string) {
 }
 
 describe("sessionDataCache", () => {
+  test("session summaries expose prompt titles without additional reads", async () => {
+    await mkdir(TEST_DIR, { recursive: true })
+    const path = join(TEST_DIR, "title-session.jsonl")
+    try {
+      await Bun.write(
+        path,
+        `${JSON.stringify({
+          type: "user",
+          timestamp: "2026-10-15T10:00:00.000Z",
+          message: { content: "Improve session discovery" },
+        })}\n`
+      )
+      const session = { path, format: "jsonl" as const }
+      const first = await sessionDataCache.summarize(session, TEST_DIR)
+      const before = sessionDataCache.getReadStats().bodyBytesRead
+      expect(first?.title).toBe("Improve session discovery")
+      expect((await sessionDataCache.summarize(session, TEST_DIR))?.title).toBe(first?.title)
+      expect(sessionDataCache.getReadStats().bodyBytesRead).toBe(before)
+    } finally {
+      sessionDataCache.invalidateAll()
+      await rm(TEST_DIR, { recursive: true, force: true })
+    }
+  })
   test("coalesces concurrent reads of the same transcript", async () => {
     await mkdir(TEST_DIR, { recursive: true })
     try {
@@ -176,6 +199,39 @@ async function createProjectSession(
 }
 
 describe("getProjectTasks", () => {
+  test("includes MCP project tasks without transcript metadata and isolates other projects", async () => {
+    const base = await tmp.create()
+    const tasksDir = join(base, "tasks")
+    const cwd = join(base, "project")
+    const projectKey = projectKeyFromCwd(cwd)
+    await Bun.write(
+      join(tasksDir, projectKey, "1.json"),
+      JSON.stringify(makeTask("1", "in_progress", "Shared project work"))
+    )
+    await Bun.write(
+      join(tasksDir, projectKeyFromCwd(join(base, "other")), "2.json"),
+      JSON.stringify(makeTask("2", "pending", "Other project"))
+    )
+    await createProjectSession(tasksDir, "session-one", cwd, [
+      makeTask("1", "pending", "Session work"),
+    ])
+    const cache = new TaskStateCache({ maxEntries: 20 })
+    try {
+      for (const taskCache of [undefined, cache]) {
+        const result = await getProjectTasks(cwd, 100, taskCache, tasksDir, base)
+        expect(result.summary.open).toBe(2)
+        expect(result.tasks.map((task) => task.subject).sort()).toEqual([
+          "Session work",
+          "Shared project work",
+        ])
+        expect(result.tasks.find((task) => task.subject === "Shared project work")?.sessionId).toBe(
+          projectKey
+        )
+      }
+    } finally {
+      cache.close()
+    }
+  })
   test("returns correct tasks without a cache (backward-compatible)", async () => {
     const base = await tmp.create()
     const tasksDir = join(base, "tasks")

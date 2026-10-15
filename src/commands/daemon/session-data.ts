@@ -1,9 +1,11 @@
+import { stat } from "node:fs/promises"
 import { join } from "node:path"
 import { LRUCache } from "lru-cache"
 import { findTaskStoreForSession } from "../../task-roots.ts"
 import { readTasks } from "../../tasks/task-repository.ts"
 import { getSessions } from "../../tasks/task-resolver.ts"
 import type { TaskStateCache } from "../../tasks/task-state-cache.ts"
+import { projectStoreKey } from "../../tasks/task-store-path.ts"
 import {
   parseTranscriptEntries,
   projectKeyFromCwd,
@@ -22,6 +24,7 @@ import {
   readTokenStats,
   type SessionTokenStats,
 } from "./session-records.ts"
+import { sessionTitleFromMessages } from "./session-title.ts"
 
 export type { SessionTokenStats } from "./session-records.ts"
 
@@ -46,6 +49,7 @@ import {
 } from "./utils.ts"
 
 interface SessionScanResult {
+  title?: string
   hasMessages: boolean
   startedAt: number
   lastMessageAt: number
@@ -55,6 +59,7 @@ interface SessionScanResult {
 const MAX_SESSION_MESSAGES = 300
 
 interface CachedSessionData {
+  title?: string
   format?: Session["format"]
   metadata?: JsonlAppendMetadata
   jsonl?: HistoricalJsonlState
@@ -82,6 +87,7 @@ interface CachedSessionData {
 
 export interface SessionPreview {
   id: string
+  title?: string
   provider?: Session["provider"]
   format?: Session["format"]
   mtime: number
@@ -196,7 +202,7 @@ export class SessionDataCache {
     summaryMisses: 0,
   }
   /**
-   * List previews need three scalars, not a retained message view (#985). Keeping them here, keyed
+   * List previews need a title and timestamps, not a retained message view (#985). Keeping them here, keyed
    * by file fingerprint, stops a multi-project preview scan from evicting the full views the
    * selected session depends on: real views retain 0.5–2.7 MB each, so 20 candidates per project
    * across two projects overran `MAX_SESSION_CACHE_BYTES` and turned every poll into a cold scan.
@@ -243,6 +249,7 @@ export class SessionDataCache {
 
     return {
       mtimeMs: fileMtimeMs,
+      title: prev?.title ?? extraction.title,
       size: 0,
       startedAt,
       lastMessageAt,
@@ -356,9 +363,11 @@ export class SessionDataCache {
       ))
     }
 
+    const title = sessionTitleFromMessages(messages)
     SessionDataCache.trimExtractedMessages(messages, pendingFallback)
 
     return {
+      title,
       messages,
       toolCounts,
       pendingFallback,
@@ -449,6 +458,7 @@ export class SessionDataCache {
       return null
     }
     const scan = {
+      title: view.title,
       hasMessages: view.messages.length > 0,
       startedAt: view.startedAt,
       lastMessageAt: view.lastMessageAt,
@@ -667,6 +677,7 @@ function estimateRetainedBytes(data: CachedSessionData, sourceChars: number): nu
     data.lastMessageFingerprint,
     data.contentRevision,
     data.projectIdentity,
+    data.title,
   ]
   let chars =
     (data.jsonl ? 0 : sourceChars) + strings.reduce((sum, value) => sum + (value?.length ?? 0), 0)
@@ -756,6 +767,7 @@ export async function listProjectSessions(
     sessionCount: all.length,
     sessions: visible.map(({ session, scan }) => ({
       id: session.id,
+      title: scan.title,
       provider: session.provider,
       format: session.format,
       mtime: session.mtime,
@@ -852,6 +864,11 @@ export async function getProjectTasks(
   projectsDir?: string
 ): Promise<{ tasks: ProjectTaskPreview[]; summary: SessionTaskSummary }> {
   const sessions = await getSessions(cwd, tasksDir, projectsDir)
+  // MCP tasks are keyed by project, without a transcript for getSessions() to discover.
+  const projectKey = projectStoreKey(cwd).key
+  const projectRoot = tasksDir ?? findTaskStoreForSession(projectKey).tasksDir
+  const projectDir = await stat(join(projectRoot, projectKey)).catch(() => null)
+  if (projectDir?.isDirectory() && !sessions.includes(projectKey)) sessions.unshift(projectKey)
 
   // Read tasks in bounded-concurrency batches, preserving session order.
   const allTasks: ProjectTaskPreview[] = []
@@ -869,7 +886,7 @@ export async function getProjectTasks(
           taskStateCache.watchSession(sid, sessionDir)
           tasks = await taskStateCache.getTasks(sid, sessionDir)
         } else {
-          tasks = await readTasks(sid, tasksDir)
+          tasks = await readTasks(sid, tasksDir ?? findTaskStoreForSession(sid).tasksDir)
         }
         return { sid, tasks }
       })
