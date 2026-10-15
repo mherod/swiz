@@ -1,15 +1,8 @@
 import { existsSync } from "node:fs"
 import { basename, join, resolve } from "node:path"
 import { z } from "zod"
-import {
-  type AiProviderId,
-  hasAiProvider,
-  parseAiProvider,
-  promptObject,
-  promptStreamText,
-} from "../ai-providers.ts"
+import { type AiProviderId, hasAiProvider, parseAiProvider, promptObject } from "../ai-providers.ts"
 import { detectFrameworks, detectProjectStack } from "../detect-frameworks.ts"
-import { extractJsonCandidate } from "../extract-json-candidate.ts"
 import { getGitClient } from "../git/client.ts"
 import { createStreamBufferReporter } from "../stream-buffer-reporter.ts"
 import type { Command } from "../types.ts"
@@ -40,7 +33,7 @@ const IssueIdeaSchema = z.object({
     area: z.string().min(2),
     priority: z.string().min(2),
   }),
-  risksAndDependencies: z.array(z.string().min(6)).max(8).optional().default([]),
+  risksAndDependencies: z.array(z.string().min(6)).max(8),
 })
 
 type IssueIdea = z.infer<typeof IssueIdeaSchema>
@@ -218,6 +211,8 @@ function buildPrompt(context: {
     "Be decisive and concrete. Avoid vague guidance.",
     "Provide concrete implementation tasks and acceptance criteria, not just strategy.",
     "Use label suggestions that match common GitHub conventions (type/area/priority).",
+    "Return only a JSON object matching this schema, without Markdown or code fences:",
+    JSON.stringify(z.toJSONSchema(IssueIdeaSchema)),
     "",
     `Project name: ${context.projectName}`,
     `Project directory: ${context.targetDir}`,
@@ -280,12 +275,6 @@ function renderIssueDescription(idea: IssueIdea): string {
     .join("\n")
 }
 
-function parseIdeaFromJsonText(text: string): IssueIdea {
-  const candidate = extractJsonCandidate(text)
-  const parsed = JSON.parse(candidate) as unknown
-  return IssueIdeaSchema.parse(parsed)
-}
-
 export const ideaCommand: Command = {
   name: "idea",
   description: "Use AI to propose a creative next idea for the current project",
@@ -343,33 +332,15 @@ export const ideaCommand: Command = {
     const bufferReporter = createStreamBufferReporter({ enabled: !json })
     try {
       bufferReporter.startSubmitting()
-      const streamed = await promptStreamText(prompt, {
-        model,
-        timeout: timeoutMs,
-        provider,
-        onTextPart: (textPart: string) => {
-          if (json) {
-            process.stdout.write(textPart)
-            return
-          }
-          bufferReporter.onChunk(textPart)
-        },
-      })
+      idea = IssueIdeaSchema.parse(
+        await promptObject(prompt, IssueIdeaSchema, {
+          model,
+          timeout: timeoutMs,
+          provider,
+        })
+      )
+    } finally {
       bufferReporter.finish()
-      idea = parseIdeaFromJsonText(streamed)
-      if (json) {
-        if (process.stdout.isTTY) process.stdout.write("\n")
-        return
-      }
-    } catch (error) {
-      bufferReporter.finish()
-      if (json) throw error
-
-      idea = await promptObject(prompt, IssueIdeaSchema, {
-        model,
-        timeout: timeoutMs,
-        provider,
-      })
     }
 
     if (json) {

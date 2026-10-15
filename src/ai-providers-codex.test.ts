@@ -24,6 +24,10 @@ if (process.env.CODEX_STUB_MODE === "fail") {
   console.error("fixture authentication failed")
   process.exit(1)
 }
+if (process.env.CODEX_STUB_MODE === "stream-error") {
+  console.log(JSON.stringify({type: "turn.failed", error: {message: "fixture stream failed"}}))
+  process.exit(0)
+}
 const text = process.env.CODEX_STUB_RESPONSE ?? "  compatible  "
 console.log(JSON.stringify({type: "thread.started", thread_id: "fixture-thread"}))
 console.log(JSON.stringify({type: "item.completed", item: {id: "answer", type: "agent_message", text}}))
@@ -232,4 +236,104 @@ test("missing Codex fails clearly without package-manager fallback", async () =>
   )
   expect(result.error).toContain("codex CLI is not installed or not in PATH")
   expect(await Bun.file(f.capture).exists()).toBe(false)
+})
+
+test.each([
+  "fail",
+  "stream-error",
+])("Codex streaming surfaces %s instead of empty success", async (mode) => {
+  const f = await fixture()
+  const result = await run(
+    f,
+    `try { await promptStreamText("hello", {provider: "codex"}); console.log(JSON.stringify({rejected:false})); } catch (error) { console.log(JSON.stringify({rejected:true, error:String(error)})); }`,
+    { CODEX_STUB_MODE: mode }
+  )
+  expect(result.rejected).toBe(true)
+  expect(result.error).toContain(mode === "fail" ? "exited with code 1" : "fixture stream failed")
+})
+
+test("Codex streaming rejects empty replies", async () => {
+  const f = await fixture()
+  const result = await run(
+    f,
+    `try { await promptStreamText("hello", {provider: "codex"}); console.log(JSON.stringify({rejected:false})); } catch (error) { console.log(JSON.stringify({error:String(error)})); }`,
+    { CODEX_STUB_RESPONSE: " " }
+  )
+  expect(result.error).toContain("returned no text")
+})
+
+test("auto-reply generates through Codex without scheduling", async () => {
+  const f = await fixture()
+  const result = await run(
+    f,
+    `const {streamAutoReply} = await import(${JSON.stringify(join(import.meta.dir, "commands/transcript.ts"))});
+    console.log(JSON.stringify(await streamAutoReply([{role:"user",entry:{message:{role:"user",content:"Fix the test"}}}], {sessionId:"preview",flipRoles:false,cwd:${JSON.stringify(f.cwd)},passNumber:1})));`,
+    { OPENROUTER_API_KEY: "test-key" }
+  )
+  expect(result).toHaveLength(1)
+  expect(result[0].entry.message.content).toBe("compatible")
+  expect((await Bun.file(f.capture).json()).prompt).toContain("Fix the test")
+})
+
+test("auto-reply propagates provider errors", async () => {
+  const f = await fixture()
+  const result = await run(
+    f,
+    `const {streamAutoReply} = await import(${JSON.stringify(join(import.meta.dir, "commands/transcript.ts"))});
+    try { await streamAutoReply([], {sessionId:"preview",flipRoles:false,cwd:${JSON.stringify(f.cwd)},passNumber:1,provider:"codex"}); console.log(JSON.stringify({rejected:false})); } catch(error) { console.log(JSON.stringify({error:String(error)})); }`,
+    { CODEX_STUB_MODE: "stream-error" }
+  )
+  expect(result.error).toContain("fixture stream failed")
+})
+
+test("steering uses Codex ahead of OpenRouter with a fresh cache", async () => {
+  const f = await fixture()
+  expect(
+    await run(
+      f,
+      `const {humaniseAutoSteerMessage} = await import(${JSON.stringify(join(import.meta.dir, "utils/auto-steer-helpers.ts"))});
+    console.log(JSON.stringify(await humaniseAutoSteerMessage("Run the regression tests.")));`,
+      {
+        OPENROUTER_API_KEY: "test-key",
+        SWIZ_PROMPT_CACHE_DIR: join(f.cwd, "cache"),
+        CODEX_STUB_RESPONSE: "Please run the regression tests, thanks.",
+      }
+    )
+  ).toBe("Please run the regression tests, thanks.")
+  expect((await Bun.file(f.capture).json()).prompt).toContain("Run the regression tests.")
+  expect((await Bun.file(f.capture).json()).args).toContain("model_reasoning_effort=low")
+})
+
+test("auto-reply falls back to OpenRouter with messages and read/search tools", async () => {
+  const f = await fixture()
+  const result = await run(
+    f,
+    `const {streamAutoReply} = await import(${JSON.stringify(join(import.meta.dir, "commands/transcript.ts"))});
+    let request; globalThis.fetch = async (_, init) => { request=JSON.parse(init.body); const chunk={id:"fallback",model:"openrouter/auto",created:0,choices:[{index:0,delta:{role:"assistant",content:"Please verify the tests."},finish_reason:"stop"}]}; return new Response("data: "+JSON.stringify(chunk)+"\\n\\ndata: [DONE]\\n\\n",{headers:{"content-type":"text/event-stream"}}); };
+    const replies = await streamAutoReply([], {sessionId:"preview",flipRoles:false,cwd:${JSON.stringify(f.cwd)},passNumber:1});
+    console.log(JSON.stringify({replies,request}));`,
+    { CODEX_STUB_MODE: "stream-error", OPENROUTER_API_KEY: "test-key" }
+  )
+  expect(result.replies[0].entry.message.content).toBe("Please verify the tests.")
+  expect(result.request.messages.at(-1).content).toContain("Continue")
+  expect(result.request.tools.map((t: { function: { name: string } }) => t.function.name)).toEqual([
+    "Read",
+    "Grep",
+  ])
+})
+
+test("auto-reply print mode generates both passes without entering scheduling mode", async () => {
+  const f = await fixture()
+  const result = await run(
+    f,
+    `const {createCodexSession} = await import(${JSON.stringify(join(import.meta.dir, "test-fixtures.ts"))});
+    const {transcriptCommand} = await import(${JSON.stringify(join(import.meta.dir, "commands/transcript.ts"))});
+    const {runCommandInProcess} = await import(${JSON.stringify(join(import.meta.dir, "utils/test-utils.ts"))});
+    await createCodexSession(${JSON.stringify(f.cwd)},${JSON.stringify(f.cwd)},"019cbc01-7777-7888-8999-444444444444",{assistantMessage:"Verify the test results."});
+    const result = await runCommandInProcess(transcriptCommand,["--codex","--auto-reply","--print","--dir",${JSON.stringify(f.cwd)}],{commandOptions:{runAutoReplyMode:async()=>{throw new Error("scheduling mode reached")}}});
+    console.log(JSON.stringify(result));`
+  )
+  expect(result.exitCode).toBe(0)
+  expect(result.stdout.trim().split("\n")).toEqual(["compatible", "compatible"])
+  expect(result.stderr).toBe("")
 })

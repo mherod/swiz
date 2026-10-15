@@ -8,6 +8,7 @@ import { mkdir, readdir, rm, stat } from "node:fs/promises"
 import { join } from "node:path"
 import { LRUCache } from "lru-cache"
 import { promptText } from "../ai-providers.ts"
+import { resolveSignal } from "../ai-signal.ts"
 import { getHomeDirWithFallback } from "../home.ts"
 import { extractTextFromUnknownContent } from "../transcript-extract.ts"
 import { containsConcurrentWorkGuidance } from "./concurrent-work-guidance.ts"
@@ -123,7 +124,7 @@ export const PROMPT_PART_MANNERS =
   "MANDATORY: You MUST use good manners. ALWAYS include 'please' when making requests, and ALWAYS close your paragraph with 'thanks' or 'thank you'. Praise what has been done well (or dryly acknowledge it) before raising what still needs attention."
 
 export const PROMPT_PART_MANNERS_DEFAULT =
-  "MANDATORY: You MUST use good manners in every response. ALWAYS include 'please' when making requests, and ALWAYS close your paragraph with 'thanks' or 'thank you'. Praise what has been done well (or dryly acknowledge it) before raising what still needs attention."
+  "MANDATORY: You MUST use good manners in every response. ALWAYS include 'please' when making requests, and ALWAYS close your paragraph with 'thanks' or 'thank you'. Acknowledge completed work only if the input explicitly states it is complete; otherwise omit praise and completion claims."
 
 export const PROMPT_PART_COLLABORATION =
   "MANDATORY: Prefer collaborative 'we' and 'let's' framing over commanding 'you' instructions (e.g., 'we need to look at...', 'let's update...'). Speak as an equal coworker sharing the workspace."
@@ -183,6 +184,7 @@ export const PROMPT_PART_GROUNDING_PARADIGMS_DEFAULT = [
 
 export const PROMPT_PART_FORMATTING_RULES_DEFAULT = [
   "Do not add any new instructions, commentary, headings, bullet points, quotes, or formatting.",
+  "Preserve the scope of the input. Do not invent tasks, verification, commits, pushes, or completion claims. Context explains the instruction; it does not authorize extra actions. A bare 'Continue' means only continue.",
   "Keep numbers as digits (e.g., '41' instead of 'forty-one') unless they are low numbers below 20. Always keep issue reference numbers as digits.",
   "Return only the rewritten paragraph.",
 ].join(" ")
@@ -394,20 +396,32 @@ async function buildHumaniseContextSnippet(options?: HumaniseOptions): Promise<s
 /**
  * Rewrites a message into a humanised, single paragraph via the AI provider layer.
  */
+function humaniseCacheKey(
+  trimmed: string,
+  contextSnippet: string,
+  options?: HumaniseOptions
+): string {
+  return `${process.env.AI_PROVIDER ?? "auto"}::${options?.cacheDir ?? promptCacheDir()}::${trimmed}::${options?.systemPrompt ?? ""}::${contextSnippet}`
+}
+
 export async function humaniseText(message: string, options?: HumaniseOptions): Promise<string> {
   if (containsConcurrentWorkGuidance(message)) return message
   const trimmed = message.trim()
   if (!trimmed) return message
+  if (/^continue[.!]?$/i.test(trimmed)) return "Please continue, thanks."
 
   const contextSnippet = await buildHumaniseContextSnippet(options)
   const optsWithContext = { ...options, _contextSnippet: contextSnippet }
-  const cacheKey = `${trimmed}::${options?.systemPrompt ?? ""}::${contextSnippet}`
+  const cacheKey = humaniseCacheKey(trimmed, contextSnippet, options)
   const cached = HUMANISE_CACHE.get(cacheKey)
   if (cached) return cached
 
   const promise = humaniseTextUncached(trimmed, optsWithContext)
   HUMANISE_CACHE.set(cacheKey, promise)
-  return promise
+  const result = await promise
+  // A no-backend or timed-out rewrite must not poison a later live attempt.
+  if (result === getFallback(trimmed, options)) HUMANISE_CACHE.delete(cacheKey)
+  return result
 }
 
 function getFallback(trimmed: string, options?: HumaniseOptions): string {
@@ -422,7 +436,13 @@ async function fetchAndFormatRewrittenText(
 ): Promise<string | null> {
   const timeout = options?.timeoutMs ?? DEFAULT_HUMANISE_TIMEOUT_MS
   const stripLine = options?.stripLine
-  const rewrittenRaw = await promptText(prompt, { provider: "openrouter", timeout })
+  const { signal, cleanup } = resolveSignal({ timeout })
+  let rewrittenRaw: string
+  try {
+    rewrittenRaw = await promptText(prompt, { signal, reasoning: "low" })
+  } finally {
+    cleanup()
+  }
   const rewritten = toSingleParagraph(rewrittenRaw, stripLine)
 
   if (!rewritten || rewritten === toSingleParagraph(trimmed, stripLine)) {

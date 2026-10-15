@@ -108,6 +108,11 @@ describe("generic humanise utility", () => {
     expect(await humaniseText("   ")).toBe("   ")
   })
 
+  test("bare continue does not acquire extra actions", async () => {
+    expect(await humaniseText("Continue")).toBe("Please continue, thanks.")
+    expect(await humaniseText("continue.")).toBe("Please continue, thanks.")
+  })
+
   // All provider-dependent scenarios live in ONE test: it is the only test that
   // touches the shared AI_TEST_* env, so nothing else can race with it under
   // `bun test --concurrent`. Each scenario uses an isolated cache dir and a
@@ -133,6 +138,13 @@ describe("generic humanise utility", () => {
       process.env.AI_TEST_NO_BACKEND = "1"
       expect(await humaniseText("Take the next task", { cacheDir: fallback.dir })).toBe(
         "I noticed you haven't done this yet — please take the next task, thanks."
+      )
+
+      // A failed attempt must not mask a subsequently available backend.
+      delete process.env.AI_TEST_NO_BACKEND
+      process.env.AI_TEST_TEXT_RESPONSE = "Live provider recovered."
+      expect(await humaniseText("Take the next task", { cacheDir: fallback.dir })).toBe(
+        "Live provider recovered."
       )
 
       // 3. In-memory cache returns the first resolved value on repeat calls.

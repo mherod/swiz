@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test"
+import { parseTranscriptArgs, validateTranscriptArgs } from "../transcript-args.ts"
 import type { Turn } from "../transcript-turns.ts"
 import { buildAutoReplyMessages } from "./transcript.ts"
 
@@ -15,6 +16,15 @@ function makeTurn(index: number, role: Turn["role"]): Turn {
 }
 
 describe("buildAutoReplyMessages", () => {
+  test("preview requires auto-reply and rejects list mode", () => {
+    const parsed = parseTranscriptArgs(["--auto-reply", "--print"])
+    expect(parsed.printOnly).toBe(true)
+    expect(() => validateTranscriptArgs(parsed)).not.toThrow()
+    expect(() => validateTranscriptArgs(parseTranscriptArgs(["--print"]))).toThrow("requires")
+    expect(() =>
+      validateTranscriptArgs(parseTranscriptArgs(["--auto-reply", "--print", "--list"]))
+    ).toThrow("cannot be combined")
+  })
   test("keeps only the tail context plus the continue prompt", () => {
     const turns = Array.from({ length: 25 }, (_, index) =>
       makeTurn(index, index % 2 === 0 ? "user" : "assistant")

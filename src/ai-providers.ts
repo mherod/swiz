@@ -23,8 +23,10 @@ import { memoize } from "lodash-es"
 import type { ZodType } from "zod"
 import type { BaseAiPromptOptions } from "./ai-prompt-options.ts"
 import { resetShutdownController, resolveSignal } from "./ai-signal.ts"
+import { readAiTextStream } from "./ai-stream.ts"
 import {
   ensureGeminiApiKey,
+  getGeminiModel,
   hasGeminiApiKey,
   type PromptGeminiOptions,
   type PromptGeminiStreamOptions,
@@ -58,6 +60,8 @@ export interface PromptOptions extends BaseAiPromptOptions {
    * Throws if the requested provider is not available.
    */
   provider?: AiProviderId
+  /** Reasoning budget for SDK text generation when supported by the provider. */
+  reasoning?: "low" | "medium" | "high"
 }
 
 export interface PromptStreamOptions extends PromptOptions {
@@ -126,7 +130,14 @@ async function runText(
   const { generateText } = await import("ai")
   const { signal, cleanup } = resolveSignal(options)
   try {
-    const { text } = await generateText({ model, prompt, abortSignal: signal })
+    const { text } = await generateText({
+      model,
+      prompt,
+      abortSignal: signal,
+      reasoning: options?.reasoning,
+    })
+    signal.throwIfAborted()
+    if (!text.trim()) throw new Error("AI provider returned no text.")
     return text.trim()
   } finally {
     cleanup()
@@ -142,12 +153,7 @@ async function runStreamText(
   const { signal, cleanup } = resolveSignal(options)
   try {
     const result = streamText({ model, prompt, abortSignal: signal })
-    let text = ""
-    for await (const part of result.textStream) {
-      text += part
-      options?.onTextPart?.(part)
-    }
-    return text.trim()
+    return await readAiTextStream(result.fullStream, signal, options?.onTextPart)
   } finally {
     cleanup()
   }
@@ -218,6 +224,7 @@ async function getOpenRouterChatModel(modelId?: string): Promise<LanguageModel> 
 // ─── Provider capability registry ────────────────────────────────────────────
 
 interface ProviderCapabilities {
+  model: (modelId?: string) => Promise<LanguageModel>
   text: (prompt: string, options?: PromptOptions) => Promise<string>
   streamText: (prompt: string, options?: PromptStreamOptions) => Promise<string>
   // ZodType<unknown> is intentional: generic T is erased at registry level; callers cast via promptObject<T>
@@ -230,6 +237,7 @@ interface ProviderCapabilities {
  */
 const PROVIDER_REGISTRY: Record<AiProviderId, ProviderCapabilities> = {
   codex: {
+    model: getCodexModel,
     text: (prompt, options) =>
       getCodexModel(options?.model).then((m) => runText(m, prompt, options)),
     streamText: (prompt, options) =>
@@ -238,6 +246,7 @@ const PROVIDER_REGISTRY: Record<AiProviderId, ProviderCapabilities> = {
       getCodexModel(options?.model).then((m) => runObject(m, prompt, schema, options, true)),
   },
   gemini: {
+    model: getGeminiModel,
     text: (prompt, options) => promptGemini(prompt, options as PromptGeminiOptions),
     streamText: (prompt, options) =>
       promptGeminiStreamText(prompt, options as PromptGeminiStreamOptions),
@@ -245,6 +254,7 @@ const PROVIDER_REGISTRY: Record<AiProviderId, ProviderCapabilities> = {
       promptGeminiObject(prompt, schema, options as PromptGeminiOptions),
   },
   claude: {
+    model: getClaudeModel,
     text: (prompt, options) =>
       getClaudeModel(options?.model).then((m) => runText(m, prompt, options)),
     streamText: (prompt, options) =>
@@ -253,6 +263,7 @@ const PROVIDER_REGISTRY: Record<AiProviderId, ProviderCapabilities> = {
       getClaudeModel(options?.model).then((m) => runObject(m, prompt, schema, options)),
   },
   openrouter: {
+    model: getOpenRouterChatModel,
     text: (prompt, options) =>
       getOpenRouterChatModel(options?.model).then((m) => runText(m, prompt, options)),
     streamText: (prompt, options) =>
@@ -381,6 +392,40 @@ function availableProviders(override?: AiProviderId): AiProviderId[] {
 
 // ─── Unified generation API ───────────────────────────────────────────────────
 
+function rethrowNonRetryableError(error: unknown, options?: PromptOptions, emitted = false): void {
+  options?.signal?.throwIfAborted()
+  if (emitted || (error instanceof Error && error.name === "AbortError")) throw error
+}
+
+/** Run a message/tool operation with the same provider priority as simple prompts. */
+export async function withProviderModel<T>(
+  operation: (model: LanguageModel, provider: AiProviderId, signal: AbortSignal) => Promise<T>,
+  options?: PromptOptions
+): Promise<T> {
+  const providers = availableProviders(options?.provider)
+  if (providers.length === 0) throw new Error("No AI provider available.")
+  const { signal, cleanup } = resolveSignal(options)
+  try {
+    let lastError: unknown
+    for (const provider of providers) {
+      signal.throwIfAborted()
+      try {
+        if (provider === "gemini") validateGeminiModelName(options?.model, "options.model")
+        const model = await PROVIDER_REGISTRY[provider].model(options?.model)
+        const result = await operation(model, provider, signal)
+        signal.throwIfAborted()
+        return result
+      } catch (error) {
+        signal.throwIfAborted()
+        lastError = error
+      }
+    }
+    throw lastError
+  } finally {
+    cleanup()
+  }
+}
+
 /**
  * Send a single-turn prompt and return the trimmed text response.
  * Dispatches to available provider based on priority (Codex → OpenRouter → Claude → Gemini).
@@ -406,6 +451,7 @@ export async function promptText(prompt: string, options?: PromptOptions): Promi
     try {
       return await PROVIDER_REGISTRY[provider].text(prompt, options)
     } catch (err) {
+      rethrowNonRetryableError(err, options)
       lastError = err
     }
   }
@@ -487,9 +533,17 @@ export async function promptStreamText(
 
   let lastError: unknown
   for (const provider of providers) {
+    let emitted = false
     try {
-      return await PROVIDER_REGISTRY[provider].streamText(prompt, options)
+      return await PROVIDER_REGISTRY[provider].streamText(prompt, {
+        ...options,
+        onTextPart: (part) => {
+          emitted = true
+          options?.onTextPart?.(part)
+        },
+      })
     } catch (err) {
+      rethrowNonRetryableError(err, options, emitted)
       lastError = err
     }
   }

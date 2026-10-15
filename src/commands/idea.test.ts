@@ -106,6 +106,57 @@ describe("parseIdeaArgs", () => {
 })
 
 describe("ideaCommand", () => {
+  const idea = {
+    title: "Preview the next action",
+    summary: "Show users the next action before continuing a session.",
+    userProblem: "Users cannot inspect the planned action before execution.",
+    roadmapDirection: "Now",
+    roadmapRationale: "Make the existing continuation workflow easier to inspect.",
+    userFacingGap: "There is no clear preview of the proposed next action.",
+    directInstructions: {
+      analysis: "Review the existing continuation command.",
+      technicalInvestigation: "Inspect the session selection logic.",
+      categorizationAndPriority: "Prioritize this as a user-facing improvement.",
+      clarificationAndUnblocking: "Use the currently selected session as input.",
+      cleanupAndDeprecation: "Keep existing command flags compatible.",
+      resolutionCheck: "Verify previews do not execute actions.",
+    },
+    implementationTasks: [
+      "Add preview output",
+      "Validate session input",
+      "Cover preview behavior",
+      "Document the preview",
+    ],
+    acceptanceCriteria: [
+      "Preview shows an action",
+      "Preview executes no action",
+      "Errors remain visible",
+    ],
+    labels: { type: "feature", area: "cli", priority: "high" },
+    risksAndDependencies: [],
+  }
+
+  it("prints exactly one validated JSON object", async () => {
+    const dir = await makeTempDir()
+    const result = await runIdea(["--dir", dir, "--json"], {
+      AI_TEST_RESPONSE: JSON.stringify(idea),
+      AI_TEST_TEXT_RESPONSE: "# Invalid streamed Markdown must not be printed",
+      AI_TEST_NO_BACKEND: "",
+    })
+    expect(result.exitCode).toBe(0)
+    expect(JSON.parse(result.stdout)).toEqual(idea)
+  })
+
+  it("prints no partial JSON when validation fails", async () => {
+    const dir = await makeTempDir()
+    const result = await runIdea(["--dir", dir, "--json"], {
+      AI_TEST_RESPONSE: JSON.stringify({ title: "Incomplete" }),
+      AI_TEST_NO_BACKEND: "",
+    })
+    expect(result.exitCode).not.toBe(0)
+    expect(result.stdout).toBe("")
+  })
+
   it("uses README plus last 8 commit messages in the generated prompt", async () => {
     const dir = await makeTempDir()
     await writeFile(
@@ -133,6 +184,11 @@ describe("ideaCommand", () => {
     expect(prompt).toContain("immediately actionable GitHub issue")
     expect(prompt).toContain("Write as direct instructions in imperative voice.")
     expect(prompt).toContain("Provide concrete implementation tasks and acceptance criteria")
+    expect(prompt).toContain("Return only a JSON object matching this schema")
+    expect(prompt).toContain('"risksAndDependencies"')
+    const schema = JSON.parse(prompt.split("\n").find((line) => line.startsWith('{"$schema"'))!)
+    expect(schema.required).toContain("risksAndDependencies")
+    expect(schema.properties.risksAndDependencies).not.toHaveProperty("default")
     expect(prompt).toMatch(/\n1\. feat: step 10\n/)
     expect(prompt).toMatch(/\n8\. feat: step 3\n/)
     expect(prompt).not.toMatch(/\n\d+\. feat: step 2\n/)

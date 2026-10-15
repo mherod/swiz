@@ -215,11 +215,10 @@ function fallbackHumaniseAutoSteerMessage(
 /**
  * Rewrite a steering message into a humanised, single paragraph via the AI provider layer.
  *
- * Always uses the OpenRouter provider: its fast hosted models keep the rewrite
- * well under {@link HUMANISE_TIMEOUT_MS}, unlike the local Claude CLI which can
- * block the calling hook for 6-13s and ignore the timeout.
+ * Uses the shared Codex-first provider selection, including AI_PROVIDER overrides.
+ * The complete fallback chain shares the {@link HUMANISE_TIMEOUT_MS} budget.
  *
- * If OpenRouter is unavailable, errors, echoes the raw note, or exceeds the
+ * If providers are unavailable, error, echo the raw note, or exceed the
  * timeout, a deterministic local rewrite is used so raw mechanical dumps are
  * not delivered when humanisation is enabled.
  */

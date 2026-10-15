@@ -8,11 +8,14 @@
  *      instructions / file paths / commands?
  *
  * Run: bun scripts/debug-humanise-autosteer.ts
- * Provider is auto-selected (OpenRouter → Claude CLI → Gemini). Set AI_PROVIDER to force.
+ * Provider is auto-selected (Codex → OpenRouter → Claude → Gemini). Set AI_PROVIDER to force.
  */
 
-import { hasAiProvider, promptText } from "../src/ai-providers.ts"
-import { humaniseAutoSteerMessage } from "../src/utils/auto-steer-helpers.ts"
+import { activeProvider, hasAiProvider, promptText } from "../src/ai-providers.ts"
+import {
+  clearAutoSteerHumanisationCache,
+  humaniseAutoSteerMessage,
+} from "../src/utils/auto-steer-helpers.ts"
 
 // Representative raw steer messages, mirroring the hook producers that call scheduleAutoSteer.
 const SAMPLES: Array<{ label: string; text: string }> = [
@@ -33,6 +36,7 @@ const SAMPLES: Array<{ label: string; text: string }> = [
 console.log("=== humaniseAutoSteerMessage latency + quality probe ===")
 console.log("hasAiProvider():", hasAiProvider())
 console.log("AI_PROVIDER env:", process.env.AI_PROVIDER ?? "(auto)")
+console.log("Selected provider:", activeProvider())
 console.log("")
 
 // Baseline: forced no-backend path (what every fail-open call costs).
@@ -43,11 +47,12 @@ console.log("")
   const out = await humaniseAutoSteerMessage(SAMPLES[0]!.text)
   const ms = performance.now() - t0
   console.log(`--- baseline (no backend, fail-open) ---`)
-  console.log(`elapsed ms: ${ms.toFixed(1)}  (expected ~0, returns raw)`)
+  console.log(`elapsed ms: ${ms.toFixed(1)}  (local fallback; no model request)`)
   console.log(`returned === input:`, out === SAMPLES[0]!.text)
   console.log("")
   if (prev === undefined) delete process.env.AI_TEST_NO_BACKEND
   else process.env.AI_TEST_NO_BACKEND = prev
+  clearAutoSteerHumanisationCache()
 }
 
 if (!hasAiProvider()) {
@@ -67,13 +72,13 @@ for (const sample of SAMPLES) {
   console.log("")
 }
 
-// Surface the real error when forcing the OpenRouter provider (humanise swallows it).
+// Surface the real error from the selected provider (humanise uses a local fallback).
 {
-  console.log("--- forced OpenRouter error probe ---")
+  console.log("--- selected provider error probe ---")
   const t0 = performance.now()
   try {
     const out = await promptText(`Rewrite in one short sentence: ${SAMPLES[0]!.text}`, {
-      provider: "openrouter",
+      provider: activeProvider() ?? undefined,
       timeout: 8000,
     })
     console.log(`elapsed ms: ${(performance.now() - t0).toFixed(1)}`)

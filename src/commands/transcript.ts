@@ -1,7 +1,8 @@
-import { createOpenRouter } from "@openrouter/ai-sdk-provider"
 import { type ModelMessage, stepCountIs, streamText } from "ai"
 import { format } from "date-fns"
 import { monitor } from "../../scripts/transcript/monitor-state.ts"
+import { type PromptOptions, withProviderModel } from "../ai-providers.ts"
+import { readAiTextStream } from "../ai-stream.ts"
 import { DIM, RESET } from "../ansi.ts"
 import { detectCurrentAgent } from "../detect.ts"
 import { grepTool, readTool } from "../tools.ts"
@@ -62,7 +63,11 @@ async function runDisplayMode(
   }
 }
 
-async function generateAutoReplies(turns: Turn[], sessionId: string, cwd: string): Promise<Turn[]> {
+export async function generateAutoReplies(
+  turns: Turn[],
+  sessionId: string,
+  cwd: string
+): Promise<Turn[]> {
   const allReplies: Turn[] = []
   for (let passNumber = 1; passNumber <= AUTO_REPLY_MAX_PASSES; passNumber++) {
     const flipRoles = passNumber % 2 === 0
@@ -198,92 +203,70 @@ const AUTO_REPLY_SYSTEM = [
   "You are providing a follow-up directive to ensure the assistant (You) can continue making confident progress.",
   "Your follow-up should be written as a direct instruction in the second person tense (You Must, You Should, You May), or if referring to us both, the first person tense (We, Our, Us).",
   "Correct any self-direction or assistant direction which has finalisation intent. The session is far from over!",
-].join()
+  "Return only the proposed follow-up message. Do not perform the work, run tests, modify files, or send or schedule messages.",
+  "Use only the supplied conversation and read/search results as evidence. Do not invent completed checks, failures, blockers, or new requirements.",
+].join("\n")
 
 async function consumeAutoReplyStream(
   fullStream: ReturnType<typeof streamText>["fullStream"],
-  passNumber: number
-): Promise<number> {
+  passNumber: number,
+  signal: AbortSignal
+): Promise<string> {
   let tokenCount = 0
-  const reader = fullStream.getReader()
-  try {
-    while (true) {
-      const { value, done } = await reader.read()
-      if (done) break
-      if ("text" in value) {
-        tokenCount++
-        const state = monitor.getState()
-        monitor.updateStats({
-          tokensReceived: tokenCount,
-          totalTokens: state.totalTokens + 1,
-          streamingText: state.streamingText + value.text,
-        })
-      }
-    }
-  } finally {
-    reader.releaseLock()
-  }
+  const text = await readAiTextStream(fullStream, signal, (part) => {
+    tokenCount++
+    const state = monitor.getState()
+    monitor.updateStats({
+      tokensReceived: tokenCount,
+      totalTokens: state.totalTokens + 1,
+      streamingText: state.streamingText + part,
+    })
+  })
   monitor.pushEvent(`Pass ${passNumber} complete (${tokenCount} tokens)`)
   monitor.updateStats({ streamingText: "" })
-  return tokenCount
+  return text
 }
 
-function extractTextFromResponseMessages(
-  messages: Awaited<ReturnType<typeof streamText>["response"]>["messages"]
-): string[] {
-  const result: string[] = []
-  for (const msg of messages) {
-    if (!("content" in msg)) continue
-    const parts = Array.isArray(msg.content) ? msg.content : [msg.content]
-    for (const part of parts) {
-      if (
-        typeof part === "object" &&
-        part !== null &&
-        "type" in part &&
-        part.type === "text" &&
-        "text" in part
-      ) {
-        result.push(String(part.text))
-      }
-    }
-  }
-  return result
-}
-
-async function streamAutoReply(
+/** Generate one reply without scheduling or delivering it. */
+export async function streamAutoReply(
   turns: Turn[],
-  opts: { sessionId: string; flipRoles: boolean; cwd: string; passNumber: number }
+  opts: { sessionId: string; flipRoles: boolean; cwd: string; passNumber: number } & PromptOptions
 ): Promise<Turn[]> {
   const messages = buildAutoReplyMessages(turns, opts.flipRoles)
 
-  const provider = createOpenRouter()
-  const { response, fullStream } = streamText({
-    model: provider.languageModel("openrouter/free"),
-    messages,
-    system: AUTO_REPLY_SYSTEM,
-    // Allow multi-step: model can call Read/Grep, get results,
-    // then produce the final text reply
-    stopWhen: stepCountIs(5),
-    tools: {
-      Read: readTool,
-      Grep: grepTool,
+  const text = await withProviderModel(
+    async (model, provider, signal) => {
+      monitor.updateStats({ streamingText: "" })
+      monitor.pushEvent(`Generating auto-reply with ${provider}`)
+      const { fullStream } = streamText({
+        model,
+        messages,
+        system: AUTO_REPLY_SYSTEM,
+        abortSignal: signal,
+        // Codex exec uses its native read-only tools, not AI SDK function tools.
+        ...(provider === "codex"
+          ? {}
+          : {
+              stopWhen: stepCountIs(5),
+              tools: { Read: readTool, Grep: grepTool },
+            }),
+      })
+      return consumeAutoReplyStream(fullStream, opts.passNumber, signal)
     },
-  })
+    { ...opts, timeout: opts.timeout ?? 90_000 }
+  )
 
-  await consumeAutoReplyStream(fullStream, opts.passNumber)
-
-  const awaitedResponse = await response
-  const newTurns = extractTextFromResponseMessages(awaitedResponse.messages)
-
-  return newTurns.map((t) => ({
-    role: "user" as const,
-    entry: {
-      cwd: opts.cwd,
-      type: "text" as const,
-      timestamp: Date.now().toString(),
-      message: { role: "user" as const, content: t },
+  return [
+    {
+      role: "user" as const,
+      entry: {
+        cwd: opts.cwd,
+        type: "text" as const,
+        timestamp: Date.now().toString(),
+        message: { role: "user" as const, content: text },
+      },
     },
-  }))
+  ]
 }
 
 // ─── Command ────────────────────────────────────────────────────────────────
@@ -341,6 +324,11 @@ async function executeTranscriptRun(
     hasTimeFilter,
     (id) => console.log(`\n${DIM}Debug log not found for session: ${id}${RESET}`)
   )
+  if (parsed.autoReply && parsed.printOnly) {
+    const replies = await generateAutoReplies(turns, session.id, parsed.targetDir)
+    for (const reply of replies) console.log(extractText(reply.entry.message?.content))
+    return
+  }
   const mode = parsed.autoReply ? modes.autoReply : modes.display
   await mode(turns, session.id, debugEvents)
 }
@@ -349,7 +337,7 @@ export const transcriptCommand: Command<TranscriptCommandOptions> = {
   name: "transcript",
   description: "Display Agent-User chat history for the current project",
   usage:
-    "swiz transcript [--session <id>] [--dir <path>] [--list] [--head N] [--tail N] [--hours N] [--since DATE] [--until DATE] [--auto-reply] [--include-debug] [--user-only] [--all|--claude|--cursor|--gemini|--codex]",
+    "swiz transcript [--session <id>] [--dir <path>] [--list] [--head N] [--tail N] [--hours N] [--since DATE] [--until DATE] [--auto-reply [--print]] [--include-debug] [--user-only] [--all|--claude|--cursor|--gemini|--codex]",
   options: [
     { flags: "--session, -s <id>", description: "Show a specific session (prefix match)" },
     { flags: "--dir, -d <path>", description: "Target project directory (default: cwd)" },
@@ -369,6 +357,7 @@ export const transcriptCommand: Command<TranscriptCommandOptions> = {
       description: "Show only sessions and turns before this date (e.g. 2026-03-13)",
     },
     { flags: "--auto-reply", description: "Generate an AI-suggested follow-up message" },
+    { flags: "--print", description: "With --auto-reply, print replies without scheduling them" },
     {
       flags: "--user-only",
       description: "Show only user prompts/messages for the selected session",

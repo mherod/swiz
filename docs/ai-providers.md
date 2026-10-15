@@ -1,6 +1,6 @@
 # AI Providers
 
-How `idea`, `reflect`, and `continue` resolve and call AI backends.
+How `idea`, `reflect`, `continue`, auto-reply, and steering resolve and call AI backends.
 
 ---
 
@@ -13,6 +13,7 @@ All AI-powered commands import from `src/ai-providers.ts` instead of calling pro
 | `promptText(prompt, options?)` | Single-turn prompt → trimmed string |
 | `promptStreamText(prompt, options?)` | Streamed prompt → trimmed string (calls `onTextPart` for each delta) |
 | `promptObject<T>(prompt, schema, options?)` | Structured generation → Zod-validated object |
+| `withProviderModel(operation, options?)` | Message/tool operations with the same provider priority and fallbacks |
 
 All three share the same provider resolution logic. They throw if no provider is available.
 
@@ -115,7 +116,7 @@ Proposes a creative GitHub issue for the current project.
 
 **AI call:** `promptObject(prompt, IssueIdeaSchema, { provider, model, timeout })` — structured generation returning a validated `IssueIdea` object.
 
-**Output:** formatted Markdown with title, summary, implementation tasks, acceptance criteria, and labels printed to stdout.
+**Output:** formatted Markdown with title, summary, implementation tasks, acceptance criteria, and labels printed to stdout. `--json` prints exactly one validated JSON object; failed generation or validation prints no partial JSON. Both modes request structured output directly.
 
 **Fallback:** throws `"No AI provider available"` when `hasAiProvider()` is false after startup.
 
@@ -150,6 +151,14 @@ Resumes the most recent session with an AI-generated next-step suggestion.
 **Unique fallback:** when no AI SDK provider is configured (`!hasAiProvider()` and no explicit `--provider`), `continue` falls back to `promptAgent()` from `src/agent.ts`, which spawns the Cursor agent CLI or the `claude` CLI. This fallback is not available in `idea` or `reflect`.
 
 **Output:** the AI-generated next step is passed as the `--continue` argument to a new `claude` session (or printed when `--print-only` is set).
+
+### Auto-reply and steering previews
+
+`swiz transcript --auto-reply` generates follow-up messages using Codex first, then the usual available fallbacks. `AI_PROVIDER` selects one provider explicitly. Codex uses its native read-only tools; other providers retain the AI SDK Read/Grep tools. Stream errors, cancellations, and empty responses fail visibly instead of producing an empty reply list.
+
+Use `swiz transcript --auto-reply --print` to print generated replies without scheduling or sending them. Transcript selection flags such as `--codex` select the source transcript, not the generation provider.
+
+Steering humanisation also uses the shared provider priority and respects `AI_PROVIDER`. Its complete fallback chain has an 8-second budget before using a deterministic local rewrite. A bare `Continue` stays `Please continue, thanks.` without a model request. Rewrites must preserve the input scope, not invent extra tasks, checks, commits, or pushes. `bun scripts/debug-humanise-autosteer.ts` previews rewrites without scheduling them.
 
 ---
 

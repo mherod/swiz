@@ -6,9 +6,11 @@
 // promptGeminiStreamText(prompt, ...)     — streamed text generation via streamText().
 // hasGeminiApiKey()                       — synchronous check (env var only) for early-exit gates.
 
+import type { LanguageModel } from "ai"
 import type { ZodType } from "zod"
 import type { BaseAiPromptOptions } from "./ai-prompt-options.ts"
 import { resolveSignal } from "./ai-signal.ts"
+import { readAiTextStream } from "./ai-stream.ts"
 
 const DEFAULT_MODEL = "gemini-flash-latest"
 
@@ -69,6 +71,11 @@ async function createProvider() {
 }
 
 // resolveSignal from ai-signal.ts (shared with ai-providers; avoids circular import)
+
+export async function getGeminiModel(modelId?: string): Promise<LanguageModel> {
+  const provider = await createProvider()
+  return provider(modelId ?? DEFAULT_MODEL)
+}
 
 function getGeminiTestResponseForText(): string | undefined {
   return (
@@ -142,12 +149,7 @@ export async function promptGeminiStreamText(
       abortSignal: signal,
     })
 
-    let text = ""
-    for await (const textPart of result.textStream) {
-      text += textPart
-      options?.onTextPart?.(textPart)
-    }
-    return text.trim()
+    return await readAiTextStream(result.fullStream, signal, options?.onTextPart)
   } finally {
     cleanup()
   }

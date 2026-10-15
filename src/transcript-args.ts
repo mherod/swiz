@@ -19,6 +19,7 @@ export interface TranscriptArgs {
   since: number | undefined
   until: number | undefined
   autoReply: boolean
+  printOnly?: boolean
   includeDebug: boolean
   userOnly: boolean
   allAgents: boolean
@@ -48,6 +49,7 @@ const TRANSCRIPT_BOOLEAN_FLAGS: Record<string, string> = {
   "--list": "listOnly",
   "-l": "listOnly",
   "--auto-reply": "autoReply",
+  "--print": "printOnly",
   "--include-debug": "includeDebug",
   "--user-only": "userOnly",
   "--all": "allAgents",
@@ -139,6 +141,7 @@ export function parseTranscriptArgs(args: string[]): TranscriptArgs {
     since,
     until,
     autoReply: flags.autoReply ?? false,
+    printOnly: flags.printOnly,
     includeDebug: flags.includeDebug ?? false,
     userOnly: flags.userOnly ?? false,
     allAgents: flags.allAgents ?? false,
@@ -146,7 +149,14 @@ export function parseTranscriptArgs(args: string[]): TranscriptArgs {
   }
 }
 
+function validateTranscriptPreview(parsed: TranscriptArgs): void {
+  if (parsed.printOnly && (!parsed.autoReply || parsed.listOnly)) {
+    throw new Error("`--print` requires `--auto-reply` and cannot be combined with `--list`.")
+  }
+}
+
 export function validateTranscriptArgs(parsed: TranscriptArgs): void {
+  validateTranscriptPreview(parsed)
   if (parsed.allAgents && parsed.explicitAgents.length > 0) {
     throw new Error("`--all` cannot be combined with an explicit agent flag.")
   }
