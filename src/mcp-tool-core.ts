@@ -67,6 +67,7 @@ import {
   completeTaskWithAutoTransition,
   createTaskInProcess,
   updateStatus,
+  validateTaskCollision,
   validateTaskSubject,
   writeTaskUpdate,
 } from "./tasks/task-service.ts"
@@ -249,14 +250,17 @@ async function runTaskCreateTool(input: McpToolInput, cwd: string): Promise<McpT
   try {
     validateTaskSubject(input.subject)
     const projectKey = projectKeyFromCwd(cwd)
+    const existingTasks = await readTaskStore(projectStoreKey(cwd))
     const deadline =
       input.deadline === undefined
         ? undefined
         : (
-            await setTaskDeadline(taskDeadlineSchema.parse(input.deadline), cwd, {
-              subject: input.subject,
-              description: input.description,
-            })
+            await setTaskDeadline(
+              taskDeadlineSchema.parse(input.deadline),
+              cwd,
+              { subject: input.subject, description: input.description },
+              () => validateTaskCollision(input.subject as string, existingTasks)
+            )
           ).deadline
     const task = await createTaskInProcess({
       sessionId: projectKey,

@@ -12,7 +12,8 @@ import { DeadlineStore } from "./store.ts"
 export async function setTaskDeadline(
   raw: TaskDeadlineInput,
   cwd: string,
-  task: Pick<Task, "subject" | "description" | "deadlineId"> & { id?: string }
+  task: Pick<Task, "subject" | "description" | "deadlineId"> & { id?: string },
+  beforeMutation?: () => void
 ): Promise<{ deadline: Deadline; changed: boolean }> {
   const input = taskDeadlineSchema.parse(raw)
   const store = (await DeadlineStore.open(undefined, true))!
@@ -29,7 +30,8 @@ export async function setTaskDeadline(
       cwd,
       Date.now(),
       "task",
-      { input, task: task.id ?? { subject: task.subject, description: task.description } }
+      { input, task: task.id ?? { subject: task.subject, description: task.description } },
+      beforeMutation
     )
     await ensureBoundTaskExists(deadline)
     return { deadline, changed: deadline.revision !== previousRevision }

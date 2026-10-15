@@ -178,6 +178,28 @@ test("TaskUpdate can introduce a deadline and safely retry a partial binding", a
   expect((await readTaskStore(projectStoreKey(cwd)))[0]?.status).toBe("pending")
 })
 
+test("duplicate TaskCreate rejects before persisting a clock or retry receipt", async () => {
+  const input = {
+    subject: "Prepare collision patch",
+    description: "file: collision.patch",
+    deadline: { sessionId: "agent", requestId: "duplicate", durationMinutes: 5 },
+  }
+  await runMcpTool("TaskCreate", { subject: input.subject, description: input.description }, cwd)
+  const rejected = await runMcpTool("TaskCreate", input, cwd)
+  expect(rejected.isError).toBe(true)
+  expect(rejected.content[0]?.text).toContain("Duplicate task")
+  expect(
+    (await runMcpTool("Deadline", { action: "list", sessionId: "agent" }, cwd)).structuredContent
+      ?.deadlines
+  ).toEqual([])
+  const existing = (await readTaskStore(projectStoreKey(cwd)))[0]!
+  await runMcpTool("TaskUpdate", { taskId: existing.id, status: "cancelled" }, cwd)
+  expect((await runMcpTool("TaskCreate", input, cwd)).isError).toBeUndefined()
+  const list = await runMcpTool("Deadline", { action: "list", sessionId: "agent" }, cwd)
+  expect(list.structuredContent?.deadlines).toHaveLength(1)
+  expect(list.structuredContent?.deadlines?.[0]?.task?.taskId).not.toBe(existing.id)
+})
+
 test("invalid task subjects do not create clocks and retries do not recreate pruned tasks", async () => {
   const input = {
     subject: "Prepare release",
