@@ -126,12 +126,12 @@ test("explicit Codex selection streams text and overrides the environment model"
   expect(args[args.indexOf("-m") + 1]).toBe("custom-model")
 })
 
-test("Codex passes the object schema to the CLI and validates the response", async () => {
+test.each(["native", "prompt"] as const)("Codex passes the schema in %s mode", async (mode) => {
   const f = await fixture()
   expect(
     await run(
       f,
-      `console.log(JSON.stringify(await promptObject("answer", z.object({answer: z.string()}))));`,
+      `console.log(JSON.stringify(await promptObject("answer", z.object({answer: z.string()}), {structuredOutput:${JSON.stringify(mode)}, reasoning:"low"})));`,
       {
         AI_PROVIDER: "codex",
         CODEX_MODEL: "environment-model",
@@ -139,21 +139,28 @@ test("Codex passes the object schema to the CLI and validates the response", asy
       }
     )
   ).toEqual({ answer: "compatible" })
-  const { args, schema } = await Bun.file(f.capture).json()
+  const { args, schema, prompt } = await Bun.file(f.capture).json()
   expect(args[args.indexOf("-m") + 1]).toBe("environment-model")
-  expect(schema).toMatchObject({
-    type: "object",
-    properties: { answer: { type: "string" } },
-    required: ["answer"],
-    additionalProperties: false,
-  })
+  expect(args).toContain("model_reasoning_effort=low")
+  if (mode === "native") {
+    expect(schema).toMatchObject({
+      type: "object",
+      properties: { answer: { type: "string" } },
+      required: ["answer"],
+      additionalProperties: false,
+    })
+  } else {
+    expect(schema).toBeNull()
+    expect(args).not.toContain("--output-schema")
+    expect(prompt).toContain('"required":["answer"]')
+  }
 })
 
-test("Codex rejects an invalid structured response", async () => {
+test.each(["native", "prompt"] as const)("Codex rejects an invalid %s response", async (mode) => {
   const f = await fixture()
   const result = await run(
     f,
-    `try { await promptObject("answer", z.object({answer: z.string()})); console.log(JSON.stringify({rejected: false})); } catch { console.log(JSON.stringify({rejected: true})); }`,
+    `try { await promptObject("answer", z.object({answer: z.string()}), {structuredOutput:${JSON.stringify(mode)}}); console.log(JSON.stringify({rejected: false})); } catch { console.log(JSON.stringify({rejected: true})); }`,
     {
       AI_PROVIDER: "codex",
       CODEX_STUB_RESPONSE: '{"answer":123}',

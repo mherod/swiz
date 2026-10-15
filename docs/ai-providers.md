@@ -121,12 +121,12 @@ Default timeout for all AI commands: **90 000 ms** (90 seconds).
 Proposes a creative GitHub issue for the current project.
 
 **Inputs:**
-- `README.md` (up to 24 000 chars) from `--dir` or `process.cwd()`
+- `README.md` (up to 8 000 chars) from `--dir` or `process.cwd()`
 - Last 8 commit messages from `git log --oneline -8`
 
-**AI call:** `promptObject(prompt, IssueIdeaSchema, { provider, model, timeout })` — structured generation returning a validated `IssueIdea` object.
+**AI call:** `promptObject(prompt, IssueIdeaSchema, { provider, model, timeout, reasoning: "low", structuredOutput: "prompt" })`. The shared SDK runner includes the schema in the prompt and requests JSON in one text response, avoiding Claude's additional native structured-output loop. It parses JSON and validates every required field with Zod before returning. Native schema mode remains the default for other callers; Gemini retains its existing native object runner. The prompt asks for a compact brief with four implementation tasks and three acceptance criteria.
 
-**Output:** formatted Markdown with title, summary, implementation tasks, acceptance criteria, and labels printed to stdout. `--json` prints exactly one validated JSON object; failed generation or validation prints no partial JSON. Both modes request structured output directly.
+**Output:** formatted Markdown with title, summary, implementation tasks, acceptance criteria, and labels printed to stdout. `--json` prints exactly one validated JSON object; failed generation or validation prints no partial JSON. Both modes use the same validated generation result. Prompt JSON mode trades provider-side schema enforcement for lower latency; malformed output fails visibly rather than being repaired or fabricated locally.
 
 **Fallback:** throws `"No AI provider available"` when `hasAiProvider()` is false after startup.
 
@@ -183,6 +183,16 @@ One sequential sample per operation/provider, fresh prompt caches, explicit prov
 | Steering rewrite requesting deduplication tests | 2.717s; added “real quick” | 3.845s; preserved scope with clean wording |
 
 Both steering outputs were found in the fresh model-response cache, confirming model generation rather than the deterministic local fallback. Both providers returned `UNAVAILABLE` when asked to read an unpredictable nonce from a temporary file; Codex also returned `UNAVAILABLE` when asked to execute a shell command. These probes supplement configuration regression tests, not a comprehensive sandbox audit. Neither provider produced a valid idea within the deadline. Claude's 2.8-second cancellation cleanup means this is not a hard 15-second wall-clock guarantee.
+
+After the idea latency fix (same day, same models and 15-second deadlines):
+
+| Operation | Claude | Codex |
+|---|---|---|
+| Idea | 12.348s, validated JSON | 11.936s, validated JSON |
+| Auto-reply | 4.138s | 4.180s |
+| Steering | 2.757s, model response | 3.879s, model response |
+
+All six finished successfully, including process startup/shutdown. A second fresh idea sample also passed: Claude 11.926s, Codex 13.591s. This is a small live sample, not a latency guarantee. Codex's idea proposed visible provider fallback attribution; Claude proposed hook health diagnostics. The shorter README excerpt limits project coverage, so proposals still need review against existing features.
 
 ---
 

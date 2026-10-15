@@ -21,7 +21,7 @@
 import { dirname, join } from "node:path"
 import type { LanguageModel } from "ai"
 import { memoize } from "lodash-es"
-import type { ZodType } from "zod"
+import { type ZodType, z } from "zod"
 import type { BaseAiPromptOptions } from "./ai-prompt-options.ts"
 import { resetShutdownController, resolveSignal } from "./ai-signal.ts"
 import { readAiTextStream } from "./ai-stream.ts"
@@ -63,6 +63,8 @@ export interface PromptOptions extends BaseAiPromptOptions {
   provider?: AiProviderId
   /** Reasoning budget for SDK text generation when supported by the provider. */
   reasoning?: "low" | "medium" | "high"
+  /** Generate JSON directly instead of a provider's structured-output agent loop; still validate. */
+  structuredOutput?: "native" | "prompt"
 }
 
 export interface PromptStreamOptions extends PromptOptions {
@@ -172,10 +174,20 @@ async function runObject<T>(
   try {
     const { text } = await generateText({
       model,
-      output: nativeSchema ? Output.object({ schema }) : Output.json(),
-      prompt,
+      output:
+        options?.structuredOutput === "prompt"
+          ? undefined
+          : nativeSchema
+            ? Output.object({ schema })
+            : Output.json(),
+      prompt:
+        options?.structuredOutput === "prompt"
+          ? `${prompt}\nReturn only a JSON object matching this schema, without Markdown or code fences:\n${JSON.stringify(z.toJSONSchema(schema))}`
+          : prompt,
       abortSignal: signal,
+      reasoning: options?.reasoning,
     })
+    signal.throwIfAborted()
     const parsed = JSON.parse(text)
     return schema.parse(parsed) as T
   } finally {

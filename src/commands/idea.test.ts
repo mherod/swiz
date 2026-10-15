@@ -213,4 +213,15 @@ describe("ideaCommand", () => {
     expect(result.exitCode).not.toBe(0)
     expect(result.stderr).toContain("No AI provider available")
   })
+
+  it("bounds README context while retaining the structured brief", async () => {
+    const dir = await makeTempDir()
+    await Bun.write(join(dir, "README.md"), `${"x".repeat(8000)}UNBOUNDED_TAIL`)
+    const result = await runIdea(["--dir", dir, "--print-prompt"], { AI_TEST_NO_BACKEND: "1" })
+    expect(result.exitCode).toBe(0)
+    expect(result.stdout).toContain("README truncated to 8000 characters")
+    expect(result.stdout).not.toContain("UNBOUNDED_TAIL")
+    expect(result.stdout).toContain("at most 220 words")
+    expect(result.stdout).toContain('"acceptanceCriteria"')
+  })
 })

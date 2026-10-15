@@ -8,7 +8,7 @@ import { createStreamBufferReporter } from "../stream-buffer-reporter.ts"
 import type { Command } from "../types.ts"
 
 const DEFAULT_TIMEOUT_MS = 90_000
-const README_CHAR_LIMIT = 24_000
+const README_CHAR_LIMIT = 8_000
 const COMMIT_COUNT = 8
 
 const IssueIdeaSchema = z.object({
@@ -209,10 +209,10 @@ function buildPrompt(context: {
     "Write as direct instructions in imperative voice.",
     "Adopt the workflow essence of issue refinement: analysis, technical investigation, categorization and priority, clarification and unblocking, cleanup and deprecation, and resolution checks.",
     "Be decisive and concrete. Avoid vague guidance.",
+    "Produce a compact brief: at most 220 words across all values. Use one short sentence per field, exactly 4 implementation tasks, exactly 3 acceptance criteria, and at most 1 risk.",
+    "Use only the supplied context. Choose one initiative immediately; do not investigate files or enumerate alternatives.",
     "Provide concrete implementation tasks and acceptance criteria, not just strategy.",
     "Use label suggestions that match common GitHub conventions (type/area/priority).",
-    "Return only a JSON object matching this schema, without Markdown or code fences:",
-    JSON.stringify(z.toJSONSchema(IssueIdeaSchema)),
     "",
     `Project name: ${context.projectName}`,
     `Project directory: ${context.targetDir}`,
@@ -318,7 +318,9 @@ export const ideaCommand: Command = {
     })
 
     if (printPrompt) {
-      console.log(prompt)
+      console.log(
+        `${prompt}\nReturn only a JSON object matching this schema, without Markdown or code fences:\n${JSON.stringify(z.toJSONSchema(IssueIdeaSchema))}`
+      )
       return
     }
 
@@ -337,6 +339,8 @@ export const ideaCommand: Command = {
           model,
           timeout: timeoutMs,
           provider,
+          reasoning: "low",
+          structuredOutput: "prompt",
         })
       )
     } finally {
