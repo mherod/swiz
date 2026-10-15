@@ -949,7 +949,7 @@ export function registerDeadlineTool(server: McpToolServer, cwd: ToolCwd): void 
       inputSchema: deadlineInputFields,
       annotations: {
         readOnlyHint: false,
-        destructiveHint: false,
+        destructiveHint: true,
         idempotentHint: true,
         openWorldHint: false,
       },

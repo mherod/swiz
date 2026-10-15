@@ -76,6 +76,7 @@ test("advertises and executes Deadline over MCP and the daemon route with identi
   await client.connect(clientTransport)
   try {
     expect((await client.listTools()).tools[0]?.name).toBe("Deadline")
+    expect((await client.listTools()).tools[0]?.annotations?.destructiveHint).toBe(true)
     const result = await client.callTool({ name: "Deadline", arguments: create })
     expect(result.isError).toBeUndefined()
     const route = await handleMcpToolRoute(
