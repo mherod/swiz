@@ -116,23 +116,40 @@ function validateConfiguredModelAtStartup(): void {
 
 validateConfiguredModelAtStartup()
 
-function hasClaudeCode(): boolean {
-  if (process.env.AI_TEST_NO_BACKEND === "1") return false
-  return Boolean(Bun.which("claude"))
+/** One priority order for selection and fallback; checks stay live as PATH/env change. */
+const PROVIDER_PRIORITY: readonly AiProviderId[] = [
+  "codex",
+  "openrouter",
+  "claude",
+  "gemini",
+  "agy",
+]
+
+const PROVIDER_AVAILABILITY: Record<AiProviderId, { check: () => boolean; reason: string }> = {
+  codex: {
+    check: () => Boolean(Bun.which("codex")),
+    reason: "the codex CLI is not installed or not in PATH. Install Codex and run `codex login`.",
+  },
+  openrouter: {
+    check: () => Boolean(process.env.OPENROUTER_API_KEY),
+    reason: "OPENROUTER_API_KEY is not set.",
+  },
+  claude: {
+    check: () => Boolean(Bun.which("claude")),
+    reason: "the claude CLI is not installed or not in PATH.",
+  },
+  gemini: {
+    check: hasGeminiApiKey,
+    reason: "Gemini is not available. Set GEMINI_API_KEY or authenticate via `gemini` CLI.",
+  },
+  agy: {
+    check: () => Boolean(Bun.which("agy")),
+    reason: "the agy CLI is not installed or not in PATH.",
+  },
 }
 
-function hasOpenRouterApiKey(): boolean {
-  if (process.env.AI_TEST_NO_BACKEND === "1") return false
-  return Boolean(process.env.OPENROUTER_API_KEY)
-}
-
-function hasCodexCli(): boolean {
-  if (process.env.AI_TEST_NO_BACKEND === "1") return false
-  return Boolean(Bun.which("codex"))
-}
-
-function hasAgyCli(): boolean {
-  return process.env.AI_TEST_NO_BACKEND !== "1" && Boolean(Bun.which("agy"))
+function isProviderAvailable(provider: AiProviderId): boolean {
+  return PROVIDER_AVAILABILITY[provider].check()
 }
 
 // resolveSignal moved to ai-signal.ts
@@ -292,26 +309,27 @@ interface ProviderCapabilities {
 }
 
 /**
- * Maps each provider ID to its generation capability functions.
- * Adding a new provider only requires adding an entry here.
+ * Wire an SDK model factory to the shared runners without caching request models.
+ * Example: createSdkCapabilities(getCodexModel, true) enables native JSON schemas.
  */
+function createSdkCapabilities(
+  createModel: (modelId?: string) => LanguageModel | Promise<LanguageModel>,
+  nativeSchema = false
+): ProviderCapabilities {
+  return {
+    model: async (modelId) => createModel(modelId),
+    text: async (prompt, options) => runText(await createModel(options?.model), prompt, options),
+    streamText: async (prompt, options) =>
+      runStreamText(await createModel(options?.model), prompt, options),
+    object: async (prompt, schema, options) =>
+      runObject(await createModel(options?.model), prompt, schema, options, nativeSchema),
+  }
+}
+
+/** SDK providers share wiring; Gemini retains its API-key/CLI-specific generation path. */
 const PROVIDER_REGISTRY: Record<AiProviderId, ProviderCapabilities> = {
-  agy: {
-    model: async (modelId) => createAgyModel(modelId),
-    text: (prompt, options) => runText(createAgyModel(options?.model), prompt, options),
-    streamText: (prompt, options) => runStreamText(createAgyModel(options?.model), prompt, options),
-    object: (prompt, schema, options) =>
-      runObject(createAgyModel(options?.model), prompt, schema, options, true),
-  },
-  codex: {
-    model: getCodexModel,
-    text: (prompt, options) =>
-      getCodexModel(options?.model).then((m) => runText(m, prompt, options)),
-    streamText: (prompt, options) =>
-      getCodexModel(options?.model).then((m) => runStreamText(m, prompt, options)),
-    object: (prompt, schema, options) =>
-      getCodexModel(options?.model).then((m) => runObject(m, prompt, schema, options, true)),
-  },
+  agy: createSdkCapabilities(createAgyModel, true),
+  codex: createSdkCapabilities(getCodexModel, true),
   gemini: {
     model: getGeminiModel,
     text: (prompt, options) => promptGemini(prompt, options as PromptGeminiOptions),
@@ -320,24 +338,8 @@ const PROVIDER_REGISTRY: Record<AiProviderId, ProviderCapabilities> = {
     object: (prompt, schema, options) =>
       promptGeminiObject(prompt, schema, options as PromptGeminiOptions),
   },
-  claude: {
-    model: getClaudeModel,
-    text: (prompt, options) =>
-      getClaudeModel(options?.model).then((m) => runText(m, prompt, options)),
-    streamText: (prompt, options) =>
-      getClaudeModel(options?.model).then((m) => runStreamText(m, prompt, options)),
-    object: (prompt, schema, options) =>
-      getClaudeModel(options?.model).then((m) => runObject(m, prompt, schema, options, true)),
-  },
-  openrouter: {
-    model: getOpenRouterChatModel,
-    text: (prompt, options) =>
-      getOpenRouterChatModel(options?.model).then((m) => runText(m, prompt, options)),
-    streamText: (prompt, options) =>
-      getOpenRouterChatModel(options?.model).then((m) => runStreamText(m, prompt, options)),
-    object: (prompt, schema, options) =>
-      getOpenRouterChatModel(options?.model).then((m) => runObject(m, prompt, schema, options)),
-  },
+  claude: createSdkCapabilities(getClaudeModel, true),
+  openrouter: createSdkCapabilities(getOpenRouterChatModel),
 }
 
 // ─── Provider selection ───────────────────────────────────────────────────────
@@ -360,9 +362,7 @@ export function hasAiProvider(): boolean {
   ) {
     return true
   }
-  return [hasGeminiApiKey, hasClaudeCode, hasOpenRouterApiKey, hasCodexCli, hasAgyCli].some(
-    (check) => check()
-  )
+  return PROVIDER_PRIORITY.some(isProviderAvailable)
 }
 
 /**
@@ -379,25 +379,12 @@ function handleExplicitlyRequestedProvider(
   requested: AiProviderId | undefined
 ): AiProviderId | null {
   if (requested === undefined) return null
-  const availability: Record<AiProviderId, [() => boolean, string]> = {
-    agy: [hasAgyCli, "the agy CLI is not installed or not in PATH."],
-    claude: [hasClaudeCode, "the claude CLI is not installed or not in PATH."],
-    codex: [
-      hasCodexCli,
-      "the codex CLI is not installed or not in PATH. Install Codex and run `codex login`.",
-    ],
-    gemini: [
-      hasGeminiApiKey,
-      "Gemini is not available. Set GEMINI_API_KEY or authenticate via `gemini` CLI.",
-    ],
-    openrouter: [hasOpenRouterApiKey, "OPENROUTER_API_KEY is not set."],
-  }
-  if (!Object.hasOwn(availability, requested)) {
+  if (!Object.hasOwn(PROVIDER_AVAILABILITY, requested)) {
     throw new Error(
       `Unknown AI provider "${requested}". Valid values: gemini, claude, openrouter, codex, agy.`
     )
   }
-  const [check, reason] = availability[requested]
+  const { check, reason } = PROVIDER_AVAILABILITY[requested]
   if (!check()) throw new Error(`AI_PROVIDER=${requested} requested but ${reason}`)
   return requested
 }
@@ -412,13 +399,7 @@ export function activeProvider(override?: AiProviderId): AiProviderId | null {
     return explicitProvider
   }
 
-  // Auto-select
-  if (hasCodexCli()) return "codex"
-  if (hasOpenRouterApiKey()) return "openrouter"
-  if (hasClaudeCode()) return "claude"
-  if (hasGeminiApiKey()) return "gemini"
-  if (hasAgyCli()) return "agy"
-  return null
+  return PROVIDER_PRIORITY.find(isProviderAvailable) ?? null
 }
 
 // ─── Provider fallback ────────────────────────────────────────────────────────
@@ -437,13 +418,20 @@ function availableProviders(override?: AiProviderId): AiProviderId[] {
     return primary ? [primary] : []
   }
 
-  // Auto-select: return all available providers in priority order
-  const providers: AiProviderId[] = []
-  if (hasCodexCli()) providers.push("codex")
-  if (hasOpenRouterApiKey()) providers.push("openrouter")
-  if (hasClaudeCode()) providers.push("claude")
-  if (hasGeminiApiKey()) providers.push("gemini")
-  if (hasAgyCli()) providers.push("agy")
+  return PROVIDER_PRIORITY.filter(isProviderAvailable)
+}
+
+/** Shared prompt preflight; keep the calling API in model-validation diagnostics. */
+function providersForPrompt(source: string, options?: PromptOptions): AiProviderId[] {
+  const providers = availableProviders(options?.provider)
+  if (providers.length === 0) {
+    throw new Error(
+      "No AI provider available. Set GEMINI_API_KEY or OPENROUTER_API_KEY, or install the claude or codex CLI."
+    )
+  }
+  if (providers.length === 1 && providers[0] === "gemini") {
+    validateGeminiModelName(options?.model, `${source}(options.model)`)
+  }
   return providers
 }
 
@@ -493,15 +481,7 @@ export async function promptText(prompt: string, options?: PromptOptions): Promi
   if (testFixture !== undefined) {
     return testFixture
   }
-  const providers = availableProviders(options?.provider)
-  if (providers.length === 0) {
-    throw new Error(
-      "No AI provider available. Set GEMINI_API_KEY or OPENROUTER_API_KEY, or install the claude or codex CLI."
-    )
-  }
-  if (providers.length === 1 && providers[0] === "gemini") {
-    validateGeminiModelName(options?.model, "promptText(options.model)")
-  }
+  const providers = providersForPrompt("promptText", options)
 
   let lastError: unknown
   for (const provider of providers) {
@@ -578,15 +558,7 @@ export async function promptStreamText(
     return testFixture
   }
 
-  const providers = availableProviders(options?.provider)
-  if (providers.length === 0) {
-    throw new Error(
-      "No AI provider available. Set GEMINI_API_KEY or OPENROUTER_API_KEY, or install the claude or codex CLI."
-    )
-  }
-  if (providers.length === 1 && providers[0] === "gemini") {
-    validateGeminiModelName(options?.model, "promptStreamText(options.model)")
-  }
+  const providers = providersForPrompt("promptStreamText", options)
 
   let lastError: unknown
   for (const provider of providers) {
@@ -642,15 +614,7 @@ export async function promptObject<T>(
     return testFixture
   }
 
-  const providers = availableProviders(options?.provider)
-  if (providers.length === 0) {
-    throw new Error(
-      "No AI provider available. Set GEMINI_API_KEY or OPENROUTER_API_KEY, or install the claude or codex CLI."
-    )
-  }
-  if (providers.length === 1 && providers[0] === "gemini") {
-    validateGeminiModelName(options?.model, "promptObject(options.model)")
-  }
+  const providers = providersForPrompt("promptObject", options)
 
   let lastError: unknown
   for (const provider of providers) {
