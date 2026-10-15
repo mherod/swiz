@@ -18,6 +18,7 @@
 // Gemini-specific helpers (ensureGeminiApiKey, hasGeminiApiKey, promptGemini*, etc.)
 // remain in gemini.ts for backward compatibility and direct use when needed.
 
+import { dirname, join } from "node:path"
 import type { LanguageModel } from "ai"
 import { memoize } from "lodash-es"
 import type { ZodType } from "zod"
@@ -190,6 +191,9 @@ async function getClaudeModel(modelId?: string): Promise<LanguageModel> {
     defaultSettings: {
       executable: "bun",
       permissionMode: "dontAsk",
+      tools: [],
+      settingSources: [],
+      strictMcpConfig: true,
       mcpServers: {},
     },
   }).languageModel(modelId ?? CLAUDE_DEFAULT_MODEL)
@@ -201,12 +205,42 @@ async function getCodexModel(modelId?: string): Promise<LanguageModel> {
   if (!codexPath) throw new Error("The codex CLI is not installed or not in PATH.")
   return createCodexExec({
     defaultSettings: {
-      codexPath,
+      codexPath: join(import.meta.dir, "utils/codex-generation-cli.ts"),
+      env: {
+        ...process.env,
+        PATH: `${dirname(process.execPath)}:${process.env.PATH ?? ""}`,
+        SWIZ_CODEX_EXECUTABLE: codexPath,
+      },
       allowNpx: false,
       approvalMode: "never",
       sandboxMode: "read-only",
       skipGitRepoCheck: true,
       logger: false,
+      configOverrides: {
+        "features.shell_tool": false,
+        "features.multi_agent": false,
+        "features.multi_agent_v2": false,
+        "features.apps": false,
+        "features.plugins": false,
+        "features.remote_plugin": false,
+        "features.browser_use": false,
+        "features.computer_use": false,
+        "features.code_mode_host": false,
+        "features.code_mode": false,
+        "features.view_image": false,
+        "features.workspace_dependencies": false,
+        "features.tool_suggest": false,
+        "features.hooks": false,
+        "features.memories": false,
+        "features.goals": false,
+        "features.image_generation": false,
+        "features.skill_search": false,
+        "features.skip_host_skill_discovery": true,
+        "features.sleep_tool": false,
+        "tools.view_image": false,
+        web_search: "disabled",
+        project_doc_max_bytes: 0,
+      },
     },
   }).languageModel(modelId ?? process.env.CODEX_MODEL ?? CODEX_DEFAULT_MODEL)
 }

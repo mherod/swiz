@@ -16,9 +16,9 @@ test("Claude receives a native object schema through the real AI SDK runner", as
       `import { mock, spyOn } from "bun:test";
        import { z } from ${JSON.stringify(zodPath)};
        spyOn(Bun, "which").mockImplementation(name => name === "claude" ? "/fixture/claude" : null);
-       let captured;
+       let captured, settings;
        mock.module(${JSON.stringify(adapterPath)}, () => ({
-         createClaudeCode: () => ({ languageModel: modelId => ({
+         createClaudeCode: options => { settings = options.defaultSettings; return { languageModel: modelId => ({
            specificationVersion: "v4", provider: "claude-code", modelId,
            supportedUrls: {},
            async doGenerate(options) {
@@ -31,11 +31,11 @@ test("Claude receives a native object schema through the real AI SDK runner", as
                warnings: []
              };
            }
-         }) })
+         }) }; }
        }));
        const { promptObject } = await import(${JSON.stringify(providerPath)});
        const result = await promptObject("Return status ok", z.object({ status: z.literal("ok") }), { provider: "claude" });
-       console.log(JSON.stringify({ result, format: captured }));`,
+       console.log(JSON.stringify({ result, format: captured, settings }));`,
     ],
     {
       cwd,
@@ -52,7 +52,14 @@ test("Claude receives a native object schema through the real AI SDK runner", as
   await proc.exited
   expect(stderr).toBe("")
   expect(proc.exitCode).toBe(0)
-  const { result, format } = JSON.parse(stdout)
+  const { result, format, settings } = JSON.parse(stdout)
+  expect(settings).toMatchObject({
+    tools: [],
+    mcpServers: {},
+    strictMcpConfig: true,
+    settingSources: [],
+    permissionMode: "dontAsk",
+  })
   expect(result).toEqual({ status: "ok" })
   expect(format.type).toBe("json")
   expect(format.schema.required).toEqual(["status"])

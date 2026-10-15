@@ -1,11 +1,10 @@
-import { type ModelMessage, stepCountIs, streamText } from "ai"
+import { type ModelMessage, streamText } from "ai"
 import { format } from "date-fns"
 import { monitor } from "../../scripts/transcript/monitor-state.ts"
 import { type PromptOptions, withProviderModel } from "../ai-providers.ts"
 import { readAiTextStream } from "../ai-stream.ts"
 import { DIM, RESET } from "../ansi.ts"
 import { detectCurrentAgent } from "../detect.ts"
-import { grepTool, readTool } from "../tools.ts"
 import {
   buildTimeRange,
   filterSessionsByTime,
@@ -204,7 +203,7 @@ const AUTO_REPLY_SYSTEM = [
   "Your follow-up should be written as a direct instruction in the second person tense (You Must, You Should, You May), or if referring to us both, the first person tense (We, Our, Us).",
   "Correct any self-direction or assistant direction which has finalisation intent. The session is far from over!",
   "Return only the proposed follow-up message. Do not perform the work, run tests, modify files, or send or schedule messages.",
-  "Use only the supplied conversation and read/search results as evidence. Do not invent completed checks, failures, blockers, or new requirements.",
+  "Use only the supplied conversation as evidence. Do not invent completed checks, failures, blockers, or new requirements.",
 ].join("\n")
 
 async function consumeAutoReplyStream(
@@ -243,13 +242,7 @@ export async function streamAutoReply(
         messages,
         system: AUTO_REPLY_SYSTEM,
         abortSignal: signal,
-        // Codex exec uses its native read-only tools, not AI SDK function tools.
-        ...(provider === "codex"
-          ? {}
-          : {
-              stopWhen: stepCountIs(5),
-              tools: { Read: readTool, Grep: grepTool },
-            }),
+        // CLI adapters disable native tools; API fallbacks receive no function tools.
       })
       return consumeAutoReplyStream(fullStream, opts.passNumber, signal)
     },

@@ -18,7 +18,7 @@ const args = process.argv.slice(2)
 const schemaIndex = args.indexOf("--output-schema")
 const schema = schemaIndex >= 0 ? await Bun.file(args[schemaIndex + 1]).json() : null
 const prompt = await Bun.stdin.text()
-await Bun.write(process.env.CODEX_CAPTURE, JSON.stringify({args, schema, prompt}))
+await Bun.write(process.env.CODEX_CAPTURE, JSON.stringify({args, schema, prompt, cwd:process.cwd(), pid:process.pid}))
 if (process.env.CODEX_STUB_MODE === "hang") await new Promise(() => setInterval(() => {}, 1000))
 if (process.env.CODEX_STUB_MODE === "fail") {
   console.error("fixture authentication failed")
@@ -99,6 +99,14 @@ test("Codex auto-selection generates text through the installed SDK adapter", as
   expect(capture.args).toContain("gpt-6-sol")
   expect(capture.args).toContain("sandbox_mode=read-only")
   expect(capture.args).toContain("approval_policy=never")
+  expect(capture.args).toContain("--ignore-user-config")
+  expect(capture.args).toContain("--ephemeral")
+  expect(capture.cwd).not.toBe(f.cwd)
+  expect(capture.args).toContain("features.shell_tool=false")
+  expect(capture.args).toContain("features.plugins=false")
+  expect(capture.args).toContain("features.apps=false")
+  expect(capture.args).toContain("features.multi_agent=false")
+  expect(capture.args).toContain("web_search=disabled")
   expect(capture.args).not.toContain("--dangerously-bypass-approvals-and-sandbox")
 })
 
@@ -211,6 +219,18 @@ test("Codex generation honors the timeout signal", async () => {
   )
   expect(result).toEqual({ aborted: true })
   expect(await Bun.file(f.capture).exists()).toBe(true)
+  const { pid } = await Bun.file(f.capture).json()
+  let running = true
+  const deadline = Date.now() + 2000
+  while (running && Date.now() < deadline) {
+    try {
+      process.kill(pid, 0)
+      await Bun.sleep(20)
+    } catch {
+      running = false
+    }
+  }
+  expect(running).toBe(false)
 })
 
 test("Codex is suppressed by the no-backend guard", async () => {
@@ -304,7 +324,7 @@ test("steering uses Codex ahead of OpenRouter with a fresh cache", async () => {
   expect((await Bun.file(f.capture).json()).args).toContain("model_reasoning_effort=low")
 })
 
-test("auto-reply falls back to OpenRouter with messages and read/search tools", async () => {
+test("auto-reply preserves no-tool generation when falling back to OpenRouter", async () => {
   const f = await fixture()
   const result = await run(
     f,
@@ -316,10 +336,7 @@ test("auto-reply falls back to OpenRouter with messages and read/search tools", 
   )
   expect(result.replies[0].entry.message.content).toBe("Please verify the tests.")
   expect(result.request.messages.at(-1).content).toContain("Continue")
-  expect(result.request.tools.map((t: { function: { name: string } }) => t.function.name)).toEqual([
-    "Read",
-    "Grep",
-  ])
+  expect(result.request.tools ?? []).toEqual([])
 })
 
 test("auto-reply print mode generates both passes without entering scheduling mode", async () => {

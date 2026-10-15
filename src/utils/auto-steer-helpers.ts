@@ -222,11 +222,14 @@ function fallbackHumaniseAutoSteerMessage(
  * timeout, a deterministic local rewrite is used so raw mechanical dumps are
  * not delivered when humanisation is enabled.
  */
-export async function humaniseAutoSteerMessage(message: string): Promise<string> {
+export async function humaniseAutoSteerMessage(
+  message: string,
+  options?: { timeoutMs?: number }
+): Promise<string> {
   const humanise = await loadHumaniseModule()
   return humanise.humaniseText(message, {
     systemPrompt: humanise.DEFAULT_HUMANISE_SYSTEM_PROMPT,
-    timeoutMs: HUMANISE_TIMEOUT_MS,
+    timeoutMs: options?.timeoutMs ?? HUMANISE_TIMEOUT_MS,
     fallback: (text) => fallbackHumaniseAutoSteerMessage(text, humanise.fallbackHumaniseText),
     stripLine: stripMechanicalAutoSteerLine,
   })

@@ -54,7 +54,9 @@ AI_PROVIDER=codex swiz continue --print
 
 Per-call `model` / supported `--model` flags take precedence over `CODEX_MODEL`, then `gpt-6-sol`. Codex is the default when installed. If unavailable or generation fails, automatic selection falls back to OpenRouter, Claude Code, then Gemini, skipping unavailable providers. An explicit selection does not fall back to another provider.
 
-Each prompt runs the resolved PATH executable in read-only mode with approval policy `never`. Package-manager fallback is disabled. The adapter uses the existing timeout/abort handling and supplies native JSON Schema for `promptObject`, followed by Zod validation. Exec-mode streaming delivers completed messages rather than incremental tokens. `continue --provider codex` selects the suggestion backend; it does not change the command's Claude session-resumption behavior.
+Each prompt runs the resolved PATH executable in read-only mode with approval policy `never`. Generation disables shell execution, agents, apps, plugins, browser/computer/image tools, web search, hooks, memories, and skill discovery. A Bun launcher runs in a temporary directory with `--ignore-user-config --ephemeral`, preventing inherited project/user MCP configuration while retaining CLI authentication. These flags require a current CLI (verified with 0.162.1); unsupported flags fail rather than silently dropping the controls. Package-manager fallback is disabled. The launcher forwards cancellation to the child and removes its temporary directory afterward.
+
+The adapter uses the existing timeout/abort handling and supplies native JSON Schema for `promptObject`, followed by Zod validation. Exec-mode streaming delivers completed messages rather than incremental tokens. `continue --provider codex` selects the suggestion backend; it does not change the command's Claude session-resumption behavior.
 
 The provider documents Node.js >=22; Swiz runs its adapter under Bun and tests the actual subprocess protocol with a fake executable, including text, streaming, structured output, errors and cancellation. Authentication and model availability still depend on the installed Codex CLI and account.
 
@@ -63,6 +65,8 @@ The provider documents Node.js >=22; Swiz runs its adapter under Bun and tests t
 Uses [`ai-sdk-provider-claude-code`](https://github.com/ben-vargas/ai-sdk-provider-claude-code) 4.3.3 through the Claude Agent SDK, compatible with AI SDK v7. Claude is available as a fallback after Codex and OpenRouter, or explicitly via `--provider claude` / `AI_PROVIDER=claude`. The default model is `sonnet`.
 
 Text, streaming, and structured generation use the shared provider layer. Structured requests pass the Zod schema as native JSON Schema to Claude and validate the returned object; schema-less JSON mode is not supported by this provider. The adapter runs with Bun, noninteractive permissions, and the existing authenticated Claude installation.
+
+Generation sets native `tools: []`, `settingSources: []`, `strictMcpConfig: true`, and an empty MCP server map. This removes built-in tools and inherited MCP servers. AI SDK `toolChoice` and step limits alone do not constrain either CLI provider's internal agent loop.
 
 ### Gemini key bootstrap
 
@@ -160,11 +164,25 @@ Resumes the most recent session with an AI-generated next-step suggestion.
 
 ### Auto-reply and steering previews
 
-`swiz transcript --auto-reply` generates follow-up messages using Codex first, then the usual available fallbacks. `AI_PROVIDER` selects one provider explicitly. Codex uses its native read-only tools; other providers retain the AI SDK Read/Grep tools. Stream errors, cancellations, and empty responses fail visibly instead of producing an empty reply list.
+`swiz transcript --auto-reply` generates follow-up messages using Codex first, then the usual available fallbacks. `AI_PROVIDER` selects one provider explicitly. Both CLI providers use the generation controls above; API fallbacks receive no function tools. Replies use the supplied conversation as evidence. Stream errors, cancellations, and empty responses fail visibly instead of producing an empty reply list.
 
 Use `swiz transcript --auto-reply --print` to print generated replies without scheduling or sending them. Transcript selection flags such as `--codex` select the source transcript, not the generation provider.
 
 Steering humanisation also uses the shared provider priority and respects `AI_PROVIDER`. Its complete fallback chain has a 30-second budget to allow Codex CLI startup and generation before using a deterministic local rewrite. A bare `Continue` stays `Please continue, thanks.` without a model request. Rewrites must preserve the input scope, not invent extra tasks, checks, commits, or pushes. `bun scripts/debug-humanise-autosteer.ts` previews rewrites without scheduling them.
+
+For bounded previews, `humaniseAutoSteerMessage(text, { timeoutMs: 15_000 })` overrides that budget; `streamAutoReply` accepts `timeout: 15_000`, and `idea` accepts `--timeout 15000`. Abort cleanup can add process shutdown time after the generation deadline.
+
+#### Live comparison (2026-10-15)
+
+One sequential sample per operation/provider, fresh prompt caches, explicit provider selection, default models (`sonnet` and `gpt-6-sol`), and a 15-second generation deadline. These are preview calls: no replies or steering messages were scheduled. Times below include process startup/shutdown and are not latency percentiles.
+
+| Operation | Claude | Codex |
+|---|---|---|
+| Idea from Swiz README/recent commits | Timed out; 17.789s including abort cleanup | Timed out; 15.263s including abort cleanup |
+| Auto-reply for unfinished deduplication tests | 4.882s; verbose directive, added full-suite/edge-case scope | 5.861s; concise directive to add and run the requested tests |
+| Steering rewrite requesting deduplication tests | 2.717s; added “real quick” | 3.845s; preserved scope with clean wording |
+
+Both steering outputs were found in the fresh model-response cache, confirming model generation rather than the deterministic local fallback. Both providers returned `UNAVAILABLE` when asked to read an unpredictable nonce from a temporary file; Codex also returned `UNAVAILABLE` when asked to execute a shell command. These probes supplement configuration regression tests, not a comprehensive sandbox audit. Neither provider produced a valid idea within the deadline. Claude's 2.8-second cancellation cleanup means this is not a hard 15-second wall-clock guarantee.
 
 ---
 
