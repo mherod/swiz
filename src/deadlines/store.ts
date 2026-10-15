@@ -161,7 +161,8 @@ export class DeadlineStore {
         "Use revise with deadlineId and expectedRevision to change an existing deadline"
       )
     const timing = resolveDeadlineTime(input, now)
-    if (input.parentDeadlineId) this.get(input.parentDeadlineId)
+    if (input.parentDeadlineId && this.get(input.parentDeadlineId).kind !== "delivery")
+      throw new Error("parentDeadlineId must reference a delivery deadline")
     const at = new Date(now).toISOString()
     const deadline: Deadline = {
       id: randomUUID(),
