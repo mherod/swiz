@@ -16,6 +16,23 @@ const input = {
 }
 
 describe("deadline clock", () => {
+  test("requires a delivery parent before persisting a child or attachment", async () => {
+    const cwd = await tmp.create()
+    const store = (await DeadlineStore.open(join(cwd, "deadlines.db"), true))!
+    try {
+      const task = store.mutate(input, cwd, now, "task")
+      const child = { ...input, sessionId: "peer", requestId: "child", parentDeadlineId: task.id }
+      expect(() => store.mutate(child, cwd, now, "task")).toThrow("delivery deadline")
+      expect(store.list(deadlineSessionKey(cwd, "peer"))).toEqual([])
+      const parent = store.mutate({ ...input, requestId: "delivery" }, cwd, now)
+      const accepted = store.mutate({ ...child, parentDeadlineId: parent.id }, cwd, now, "task")
+      expect(accepted.parentDeadlineId).toBe(parent.id)
+      expect(store.list(deadlineSessionKey(cwd, "peer"))).toHaveLength(2)
+    } finally {
+      store.close()
+    }
+  })
+
   test("requires an unambiguous instant, including during a DST fold", () => {
     for (const dueAt of ["4:55", "2026-10-15T16:55:00", "2026-02-30T16:55:00Z"]) {
       expect(
