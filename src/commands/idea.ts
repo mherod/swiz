@@ -7,7 +7,7 @@ import { getGitClient } from "../git/client.ts"
 import { createStreamBufferReporter } from "../stream-buffer-reporter.ts"
 import type { Command } from "../types.ts"
 
-const DEFAULT_TIMEOUT_MS = 90_000
+const DEFAULT_TIMEOUT_MS = 15_000
 const README_CHAR_LIMIT = 8_000
 const COMMIT_COUNT = 8
 

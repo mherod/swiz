@@ -246,7 +246,7 @@ export async function streamAutoReply(
       })
       return consumeAutoReplyStream(fullStream, opts.passNumber, signal)
     },
-    { ...opts, timeout: opts.timeout ?? 90_000 }
+    { ...opts, timeout: opts.timeout ?? 15_000 }
   )
 
   return [

@@ -96,7 +96,7 @@ Built on `ai-sdk-provider-gemini-cli` from the AI SDK ecosystem.
 
 Every prompt function accepts `options.timeout` (milliseconds) or `options.signal` (AbortSignal). When `timeout` is set, an internal `AbortController` is created and the timer is cleared in the `finally` block. `signal` takes precedence over `timeout` when both are provided.
 
-Default timeout for all AI commands: **90 000 ms** (90 seconds).
+`idea`, each auto-reply generation pass, and the complete steering humanisation fallback chain default to **15 000 ms** (15 seconds). Other AI callers retain their existing defaults. Explicit timeout overrides remain supported. Provider cancellation cleanup may add shutdown time beyond the generation deadline.
 
 ---
 
@@ -108,7 +108,7 @@ Default timeout for all AI commands: **90 000 ms** (90 seconds).
 |------|-------|-------------|
 | `--provider <id>` | `-p` for `idea`/`continue` | Force a specific provider (`gemini`, `claude`, `openrouter`, `codex`) |
 | `--model <id>` | | Override the model identifier for the selected provider |
-| `--timeout <ms>` | | Override the 90 000 ms default |
+| `--timeout <ms>` | | Override the default (15 000 ms for `idea`, 90 000 ms for `reflect`) |
 
 `--provider` is validated at parse time by the shared `parseAiProvider()` helper. `mergetool` also accepts `--provider`. `reflect -p` remains its print-prompt flag; use `reflect --provider codex` for provider selection. `--model` and `--timeout` apply to `idea` and `reflect`; `continue` accepts `--provider` only.
 
@@ -168,9 +168,9 @@ Resumes the most recent session with an AI-generated next-step suggestion.
 
 Use `swiz transcript --auto-reply --print` to print generated replies without scheduling or sending them. Transcript selection flags such as `--codex` select the source transcript, not the generation provider.
 
-Steering humanisation also uses the shared provider priority and respects `AI_PROVIDER`. Its complete fallback chain has a 30-second budget to allow Codex CLI startup and generation before using a deterministic local rewrite. A bare `Continue` stays `Please continue, thanks.` without a model request. Rewrites must preserve the input scope, not invent extra tasks, checks, commits, or pushes. `bun scripts/debug-humanise-autosteer.ts` previews rewrites without scheduling them.
+Steering humanisation also uses the shared provider priority and respects `AI_PROVIDER`. Its complete fallback chain has a 15-second budget before using a deterministic local rewrite. A bare `Continue` stays `Please continue, thanks.` without a model request. Rewrites must preserve the input scope, not invent extra tasks, checks, commits, or pushes. `bun scripts/debug-humanise-autosteer.ts` previews rewrites without scheduling them.
 
-For bounded previews, `humaniseAutoSteerMessage(text, { timeoutMs: 15_000 })` overrides that budget; `streamAutoReply` accepts `timeout: 15_000`, and `idea` accepts `--timeout 15000`. Abort cleanup can add process shutdown time after the generation deadline.
+The defaults can be overridden with `humaniseAutoSteerMessage(text, { timeoutMs })`, `streamAutoReply(..., { timeout })`, or `idea --timeout <ms>`. Abort cleanup can add process shutdown time after the generation deadline.
 
 #### Live comparison (2026-10-15)
 
