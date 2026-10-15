@@ -52,7 +52,8 @@ test("three large compact previews stay hot for twenty cycles and append indepen
   )
   const { cache, reads } = measuredCache()
   const warm = await Promise.all(sessions.map((session) => cache.get(session)))
-  expect(reads).toHaveLength(3)
+  expect(reads).toHaveLength(6) // One recent window and one bounded title window per session.
+  expect(reads.filter(([start, end]) => start === 0 && end === 256 * 1024)).toHaveLength(3)
   expect(reads.every(([start, end]) => end - start <= MAX_SESSION_PREVIEW_BYTES + 1)).toBe(true)
   expect(cache.getMemoryStats().entries).toBe(3)
   expect(cache.getMemoryStats().estimatedBytes).toBeLessThan(64 * 1024)

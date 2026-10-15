@@ -7,7 +7,7 @@ export function sessionTitleFromMessages(messages: readonly SessionMessage[]): s
     const text = message.text.trim()
     if (!text || /^#\s*AGENTS\.md\b/i.test(text)) continue
     if (
-      /^<(?:environment_context|instructions|user_instructions|system-reminder|permissions)\b/i.test(
+      /^<(?:environment_context|instructions|user_instructions|system-reminder|permissions|external_codex_apps_\w+|recommended_plugins|skills_instructions)\b/i.test(
         text
       )
     )

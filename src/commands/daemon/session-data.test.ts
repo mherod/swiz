@@ -21,6 +21,34 @@ async function createSession(name: string, timestamp: string) {
 }
 
 describe("sessionDataCache", () => {
+  test("long sessions keep their opening title after recent messages evict the prompt", async () => {
+    await mkdir(TEST_DIR, { recursive: true })
+    const path = join(TEST_DIR, "long-title-session.jsonl")
+    const prompt = JSON.stringify({
+      type: "user",
+      message: { content: "Build SwizBuzz for macOS" },
+    })
+    const reply = JSON.stringify({ type: "assistant", message: { content: "Working on it" } })
+    try {
+      await Bun.write(path, `${prompt}\n${`${reply}\n`.repeat(2100)}`)
+      const session = { path, format: "jsonl" as const }
+      expect((await sessionDataCache.get(session, TEST_DIR))?.title).toBe(
+        "Build SwizBuzz for macOS"
+      )
+      await Bun.write(path, `${prompt}\n${`${reply}\n`.repeat(3100)}`)
+      expect((await sessionDataCache.summarize(session, TEST_DIR))?.title).toBe(
+        "Build SwizBuzz for macOS"
+      )
+      sessionDataCache.invalidateAll()
+      expect((await sessionDataCache.summarize(session, TEST_DIR))?.title).toBe(
+        "Build SwizBuzz for macOS"
+      )
+    } finally {
+      sessionDataCache.invalidateAll()
+      await rm(TEST_DIR, { recursive: true, force: true })
+    }
+  })
+
   test("session summaries expose prompt titles without additional reads", async () => {
     await mkdir(TEST_DIR, { recursive: true })
     const path = join(TEST_DIR, "title-session.jsonl")

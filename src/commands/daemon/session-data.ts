@@ -551,7 +551,30 @@ export class SessionDataCache {
     )
     next.tokenStats = view.tokenStats
     next.jsonl = jsonl
+    await this.restoreOpeningTitle(next, file, metadata.size, kind)
     return next
+  }
+
+  /** The recent message window can evict the prompt; read a small opening window on cold loads. */
+  private async restoreOpeningTitle(
+    next: CachedSessionData,
+    file: Bun.BunFile,
+    size: number,
+    kind: "hit" | "append" | "cold"
+  ): Promise<void> {
+    if (kind !== "cold" || !next.jsonl) return
+    if (
+      size <= MAX_SESSION_PREVIEW_BYTES &&
+      next.jsonl.view(size).entries.length < MAX_TRANSCRIPT_ENTRIES
+    )
+      return
+    const text = await file.slice(0, 256 * 1024).text()
+    this.readStats.bodyBytesRead += Buffer.byteLength(text)
+    const opening = parseTranscriptEntries(text, next.jsonl.format).map(prepareSessionEntry)
+    next.title =
+      sessionTitleFromMessages(
+        opening.flatMap((entry) => (entry.message ? [entry.message] : []))
+      ) ?? next.title
   }
 
   private async loadFallback(

@@ -6,6 +6,12 @@ test("titles skip injected context and use the first readable user prompt", () =
   const messages: SessionMessage[] = [
     { role: "user", timestamp: null, text: "# AGENTS.md instructions for /project\nRules" },
     { role: "user", timestamp: null, text: "<environment_context>cwd</environment_context>" },
+    {
+      role: "user",
+      timestamp: null,
+      text: '<external_codex_apps_open_page>{"page_id":null}</external_codex_apps_open_page>',
+    },
+    { role: "user", timestamp: null, text: "<recommended_plugins>Plugins</recommended_plugins>" },
     { role: "assistant", timestamp: null, text: "I will investigate" },
     {
       role: "user",
