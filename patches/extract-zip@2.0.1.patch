@@ -1,0 +1,43 @@
+diff --git a/index.js b/index.js
+index 23384ea16bb848616886f356d8d69f94325535bf..b95be7ec98278026486964a191b064258044fe77 100644
+--- a/index.js
++++ b/index.js
+@@ -1,7 +1,6 @@
+ const debug = require('debug')('extract-zip')
+ // eslint-disable-next-line node/no-unsupported-features/node-builtins
+-const { createWriteStream, promises: fs } = require('fs')
+-const getStream = require('get-stream')
++const { createWriteStream, constants, promises: fs } = require('fs')
+ const path = require('path')
+ const { promisify } = require('util')
+ const stream = require('stream')
+@@ -94,6 +93,9 @@ class Extractor {
+     const IFDIR = 16384
+     const IFLNK = 40960
+     const symlink = (mode & IFMT) === IFLNK
++    // Ripgrep archives do not need symlinks. Reject them before creating an
++    // entry that a later duplicate name could follow outside the destination.
++    if (symlink) throw new Error(`Symlink entry is not allowed: ${entry.fileName}`)
+     let isDir = (mode & IFMT) === IFDIR
+ 
+     // Failsafe, borrowed from jsZip
+@@ -124,13 +126,12 @@ class Extractor {
+     debug('opening read stream', dest)
+     const readStream = await promisify(this.zipfile.openReadStream.bind(this.zipfile))(entry)
+ 
+-    if (symlink) {
+-      const link = await getStream(readStream)
+-      debug('creating symlink', link, dest)
+-      await fs.symlink(link, dest)
+-    } else {
+-      await pipeline(readStream, createWriteStream(dest, { mode: procMode }))
+-    }
++    // Exclusive creation also rejects pre-existing symlinks and hard links,
++    // including dangling links, without a check/open race on the final name.
++    await pipeline(readStream, createWriteStream(dest, {
++      mode: procMode,
++      flags: constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL
++    }))
+   }
+ 
+   getExtractedMode (entryMode, isDir) {

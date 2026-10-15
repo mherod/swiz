@@ -1,4 +1,47 @@
-# Dependency security
+# Transitive dependency remediation
+
+The October 2026 update replaces vulnerable locked versions and refreshes existing
+security overrides. OpenTelemetry packages are pinned as a matching 2.12.0 / 0.223.0
+family because Gemini CLI core 0.22.4 otherwise requires the vulnerable 2025 family.
+The Gemini core Bun patch adapts its log processor to the new options constructor,
+adds file-log flushing, and updates metric reader options and timeout bounds.
+The compatibility test initializes that actual integration, emits a log, flushes it
+to a local file, and shuts it down without an external service.
+
+`lint-staged` 17 removes `micromatch` and its unpatched `braces` dependency. The
+repository uses JSON configuration, already has `yaml`, and runs tooling with Bun.
+`uuid` stays on the patched CommonJS-compatible 11.1.1 line for older Google clients.
+`simple-git` 4.0.2 and `diff` 8.0.3 fix advisories in Gemini's dependency tree.
+
+## Locally patched archive extraction
+
+`ai-sdk-provider-gemini-cli` → `@google/gemini-cli-core` →
+`@joshua.litt/get-ripgrep` → `extract-zip` has no published fixed release for:
+
+- [GHSA-jmr9-qjv8-65gv](https://github.com/advisories/GHSA-jmr9-qjv8-65gv)
+- [GHSA-7pqw-9j4j-h8q3](https://github.com/advisories/GHSA-7pqw-9j4j-h8q3)
+
+The committed Bun patch rejects symlink archive entries and uses exclusive file
+creation. This prevents an archive from planting a link and writing through it
+with a duplicate filename, or following a destination link that already exists.
+Ordinary ripgrep archives retain executable permissions. Extraction intentionally
+fails on existing output files and archives containing symlinks; callers must use
+a fresh destination. The extraction directory must remain under the caller's
+control while extraction runs.
+
+`bun install --frozen-lockfile` applies both patches. Regression tests exercise
+absolute and relative symlink targets, duplicate-name attacks, existing and dangling
+destination links, and ordinary executable extraction. Do not remove these patches
+until upstream releases eliminate the affected paths and these tests still pass.
+
+`bun audit` is version-based and still reports the two `extract-zip@2.0.1` advisories;
+it does not account for Bun patches. These findings are not suppressed or dismissed.
+All other advisories from the starting audit are removed by the resolved versions.
+
+## Historical context (September 2026)
+
+The following records describe the earlier graph and remediation state.
+
 
 Swiz runs and installs with Bun. `package.json#packageManager` and `bun.lock`
 define the installed dependency graph. The obsolete root `pnpm-lock.yaml` has
