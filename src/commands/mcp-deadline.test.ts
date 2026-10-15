@@ -228,6 +228,88 @@ test("duplicate TaskCreate rejects before persisting a clock or retry receipt", 
   expect(list.structuredContent?.deadlines?.[0]?.task?.taskId).not.toBe(existing.id)
 })
 
+test.each([
+  "cancelled",
+  "completed",
+] as const)("replaces a %s task clock without reopening its history", async (closedStatus) => {
+  const delivery = await runMcpTool("Deadline", create, cwd)
+  const parentDeadlineId = delivery.structuredContent!.deadlines![0]!.id
+  await runMcpTool(
+    "TaskCreate",
+    {
+      subject: "Validate replacement clock",
+      description: "file: replacement.patch",
+    },
+    cwd
+  )
+  const task = (await readTaskStore(projectStoreKey(cwd)))[0]!
+  const initial = {
+    taskId: task.id,
+    deadline: { sessionId: "agent", requestId: "initial", durationMinutes: 5, parentDeadlineId },
+  }
+  expect((await runMcpTool("TaskUpdate", initial, cwd)).isError).toBeUndefined()
+  const oldId = (await readTaskStore(projectStoreKey(cwd)))[0]!.deadlineId!
+  if (closedStatus === "cancelled") {
+    expect(
+      (
+        await runMcpTool(
+          "Deadline",
+          {
+            action: "cancel",
+            sessionId: "agent",
+            requestId: "cancel",
+            deadlineId: oldId,
+            expectedRevision: 1,
+            reason: "Reschedule",
+          },
+          cwd
+        )
+      ).isError
+    ).toBeUndefined()
+  } else {
+    expect(
+      (
+        await runMcpTool(
+          "TaskUpdate",
+          { taskId: task.id, status: "completed", description: "file: replacement.patch" },
+          cwd
+        )
+      ).isError
+    ).toBeUndefined()
+    expect(
+      (await runMcpTool("TaskUpdate", { taskId: task.id, status: "in_progress" }, cwd)).isError
+    ).toBeUndefined()
+  }
+  const replacement = {
+    taskId: task.id,
+    deadline: { sessionId: "agent", requestId: "replacement", durationMinutes: 8 },
+  }
+  expect(
+    (await runMcpTool("TaskUpdate", replacement, cwd)).structuredContent?.taskMutation?.changed
+  ).toBe(true)
+  const newId = (await readTaskStore(projectStoreKey(cwd)))[0]!.deadlineId!
+  expect(newId).not.toBe(oldId)
+  expect(
+    (await runMcpTool("TaskUpdate", replacement, cwd)).structuredContent?.taskMutation?.changed
+  ).toBe(false)
+  expect((await runMcpTool("TaskUpdate", initial, cwd)).isError).toBe(true)
+  expect((await readTaskStore(projectStoreKey(cwd)))[0]!.deadlineId).toBe(newId)
+  const store = (await DeadlineStore.open())!
+  try {
+    expect(store.get(oldId).status).toBe(closedStatus)
+    expect(store.history(oldId)).toHaveLength(2)
+    expect(store.get(newId)).toMatchObject({
+      status: "active",
+      revision: 1,
+      parentDeadlineId,
+      task: { taskId: task.id },
+    })
+    expect(store.get(parentDeadlineId).status).toBe("active")
+  } finally {
+    store.close()
+  }
+})
+
 test("invalid task subjects do not create clocks and retries do not recreate pruned tasks", async () => {
   const input = {
     subject: "Prepare release",

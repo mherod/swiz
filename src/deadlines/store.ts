@@ -112,14 +112,13 @@ export class DeadlineStore {
     cwd: string,
     now = Date.now(),
     kind: Deadline["kind"] = "delivery",
-    operation?: TaskDeadlineOperation,
-    beforeMutation?: () => void
+    options: { operation?: TaskDeadlineOperation; beforeMutation?: () => void } = {}
   ): Deadline {
     input = deadlineInputSchema.parse(input)
     const scope = deadlineSessionKey(cwd, input.sessionId, input.agentId)
     if (!input.requestId)
       throw new Error("requestId is required for mutations; reuse it on retries")
-    const key = fingerprint({ input: operation ?? input, kind })
+    const key = fingerprint({ input: options.operation ?? input, kind })
     return this.db
       .transaction(() => {
         const previous = this.db
@@ -134,7 +133,7 @@ export class DeadlineStore {
         }
         validateActionFields(input)
         // Validate dependent writes only for new requests; retries recover their receipt first.
-        beforeMutation?.()
+        options.beforeMutation?.()
         const deadline =
           input.action === "set"
             ? this.create(input, scope, now, kind)
