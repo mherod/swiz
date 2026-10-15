@@ -3,38 +3,60 @@ import { createDefaultTaskStore } from "../task-roots.ts"
 import { readTaskStore, type Task, type TaskStoreKey } from "../tasks/task-repository.ts"
 import {
   type Deadline,
+  type DeadlineInput,
   renderDeadline,
   type TaskDeadlineInput,
   taskDeadlineSchema,
 } from "./model.ts"
 import { DeadlineStore } from "./store.ts"
 
+type TaskDeadlineTarget = Pick<Task, "subject" | "description" | "deadlineId"> & { id?: string }
+
+function taskDeadlineMutation(
+  input: TaskDeadlineInput,
+  task: TaskDeadlineTarget,
+  previous?: Deadline
+): DeadlineInput {
+  if (previous?.status === "active") return { ...input, action: "revise", deadlineId: previous.id }
+  return {
+    ...input,
+    action: "set",
+    label: task.subject,
+    completionCriteria: task.description || task.subject,
+    parentDeadlineId: input.parentDeadlineId ?? previous?.parentDeadlineId,
+  }
+}
+
 export async function setTaskDeadline(
   raw: TaskDeadlineInput,
   cwd: string,
-  task: Pick<Task, "subject" | "description" | "deadlineId"> & { id?: string },
+  task: TaskDeadlineTarget,
   beforeMutation?: () => void
 ): Promise<{ deadline: Deadline; changed: boolean }> {
   const input = taskDeadlineSchema.parse(raw)
   const store = (await DeadlineStore.open(undefined, true))!
   try {
-    const previousRevision = task.deadlineId ? store.get(task.deadlineId).revision : 0
+    const previous = task.deadlineId ? store.get(task.deadlineId) : undefined
     const deadline = store.mutate(
-      {
-        ...input,
-        action: task.deadlineId ? "revise" : "set",
-        ...(task.deadlineId
-          ? { deadlineId: task.deadlineId }
-          : { label: task.subject, completionCriteria: task.description || task.subject }),
-      },
+      taskDeadlineMutation(input, task, previous),
       cwd,
       Date.now(),
       "task",
-      { input, task: task.id ?? { subject: task.subject, description: task.description } },
-      beforeMutation
+      {
+        operation: {
+          input,
+          task: task.id ?? { subject: task.subject, description: task.description },
+        },
+        beforeMutation,
+      }
     )
     await ensureBoundTaskExists(deadline)
-    return { deadline, changed: deadline.revision !== previousRevision }
+    if (previous && deadline.id !== previous.id && deadline.status !== "active")
+      throw new Error("This request refers to a closed, replaced deadline; use a new requestId")
+    return {
+      deadline,
+      changed: deadline.id !== previous?.id || deadline.revision !== previous.revision,
+    }
   } finally {
     store.close()
   }
