@@ -58,6 +58,7 @@ describe("parseIdeaArgs", () => {
     expect(parseIdeaArgs(["--provider", "gemini"]).provider).toBe("gemini")
     expect(parseIdeaArgs(["--provider", "openrouter"]).provider).toBe("openrouter")
     expect(parseIdeaArgs(["--provider", "codex"]).provider).toBe("codex")
+    expect(parseIdeaArgs(["--provider", "agy"]).provider).toBe("agy")
     expect(parseIdeaArgs(["-p", "gemini"]).provider).toBe("gemini")
   })
 
@@ -67,7 +68,7 @@ describe("parseIdeaArgs", () => {
 
   it("throws on invalid --provider value", () => {
     expect(() => parseIdeaArgs(["--provider", "openai"])).toThrow(
-      'must be "gemini", "claude", "openrouter", or "codex"'
+      'must be "gemini", "claude", "openrouter", "codex", or "agy"'
     )
   })
 

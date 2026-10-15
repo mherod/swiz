@@ -25,8 +25,8 @@ Resolution runs in priority order on every call:
 
 ```
 1. options.provider (explicit per-call override)
-2. AI_PROVIDER env var ("gemini" | "claude" | "openrouter" | "codex")
-3. Auto-select: Codex CLI → OpenRouter → Claude Code → Gemini
+2. AI_PROVIDER env var ("gemini" | "claude" | "openrouter" | "codex" | "agy")
+3. Auto-select: Codex CLI → OpenRouter → Claude Code → Gemini → agy
 ```
 
 `activeProvider(override?)` in `src/ai-providers.ts` implements this. It throws an error (with a descriptive message) if an explicit override requests a provider that is not currently available.
@@ -39,6 +39,7 @@ Resolution runs in priority order on every call:
 | `codex` | `codex` CLI in PATH | `CODEX_MODEL` or `gpt-6-sol` |
 | `claude` | `claude` CLI in PATH | `sonnet` |
 | `openrouter` | `OPENROUTER_API_KEY` env var | `openrouter/auto` |
+| `agy` | `agy` CLI in PATH | `AGY_MODEL` or `gemini-3.8-flash-low` |
 
 `hasAiProvider()` returns true if any one of these is available.
 
@@ -52,7 +53,7 @@ swiz reflect --provider codex
 AI_PROVIDER=codex swiz continue --print
 ```
 
-Per-call `model` / supported `--model` flags take precedence over `CODEX_MODEL`, then `gpt-6-sol`. Codex is the default when installed. If unavailable or generation fails, automatic selection falls back to OpenRouter, Claude Code, then Gemini, skipping unavailable providers. An explicit selection does not fall back to another provider.
+Per-call `model` / supported `--model` flags take precedence over `CODEX_MODEL`, then `gpt-6-sol`. Codex is the default when installed. If unavailable or generation fails, automatic selection falls back to OpenRouter, Claude Code, Gemini, then agy, skipping unavailable providers. An explicit selection does not fall back to another provider.
 
 Each prompt runs the resolved PATH executable in read-only mode with approval policy `never`. Generation disables shell execution, agents, apps, plugins, browser/computer/image tools, web search, hooks, memories, and skill discovery. A Bun launcher runs in a temporary directory with `--ignore-user-config --ephemeral`, preventing inherited project/user MCP configuration while retaining CLI authentication. These flags require a current CLI (verified with 0.162.1); unsupported flags fail rather than silently dropping the controls. Package-manager fallback is disabled. The launcher forwards cancellation to the child and removes its temporary directory afterward.
 
@@ -67,6 +68,16 @@ Uses [`ai-sdk-provider-claude-code`](https://github.com/ben-vargas/ai-sdk-provid
 Text, streaming, and structured generation use the shared provider layer. Structured requests pass the Zod schema as native JSON Schema to Claude and validate the returned object; schema-less JSON mode is not supported by this provider. The adapter runs with Bun, noninteractive permissions, and the existing authenticated Claude installation.
 
 Generation sets native `tools: []`, `settingSources: []`, `strictMcpConfig: true`, and an empty MCP server map. This removes built-in tools and inherited MCP servers. AI SDK `toolChoice` and step limits alone do not constrain either CLI provider's internal agent loop.
+
+### Antigravity CLI (`agy`) provider
+
+`src/agy-provider.ts` implements the AI SDK v4 language-model contract used by AI SDK v7. It invokes the authenticated `agy` executable directly with `--print` and validates its JSON completion envelope. Select it with `swiz idea --provider agy` or `AI_PROVIDER=agy`; `--model` / per-call `model` overrides `AGY_MODEL`, then `gemini-3.8-flash-low`.
+
+Each request uses a temporary working directory and a custom primary agent whose native allowlist contains only `finish`, with command execution off and no declared MCP servers, skills, or plugins. Slash-command expansion is disabled and terminal sandboxing is enabled. Authentication remains with the installed CLI. The shared abort signal sends SIGINT, escalates to SIGKILL after 250ms, awaits process exit, and removes the temporary directory. No separate CLI timeout overrides the caller's budget.
+
+Text and structured generation use the same SDK path; JSON schemas are included in the prompt and returned objects are validated locally with Zod. Streaming is buffered: one delta is emitted only after successful completion. Non-text messages and SDK tool declarations are rejected.
+
+Native controls follow the [custom-agent documentation](https://www.antigravity.google/docs/subagents/); response parsing follows the [headless protocol](https://www.antigravity.google/docs/cli/headless/). Live nonce-read probes returned `UNAVAILABLE`, including without a no-tools instruction in the agent prompt. The CLI's init event still lists its broad tool inventory, so that inventory is not evidence of the effective allowlist. These probes are limited verification, not a full sandbox audit or a claim that global lifecycle hooks cannot run.
 
 ### Gemini key bootstrap
 
@@ -106,7 +117,7 @@ Every prompt function accepts `options.timeout` (milliseconds) or `options.signa
 
 | Flag | Short | Description |
 |------|-------|-------------|
-| `--provider <id>` | `-p` for `idea`/`continue` | Force a specific provider (`gemini`, `claude`, `openrouter`, `codex`) |
+| `--provider <id>` | `-p` for `idea`/`continue` | Force a specific provider (`gemini`, `claude`, `openrouter`, `codex`, `agy`) |
 | `--model <id>` | | Override the model identifier for the selected provider |
 | `--timeout <ms>` | | Override the default (15 000 ms for `idea`, 90 000 ms for `reflect`) |
 
@@ -203,6 +214,18 @@ After the defaults shipped in `17d80edb`, a fresh comparison omitted all CLI/API
 | Steering | 2.688s, model response | 4.212s, model response |
 
 All six succeeded with empty stderr. Fresh steering cache entries confirmed model generation. No messages were scheduled or sent. Codex idea had only 0.329s of wall-clock margin; these results verify the defaults on this sample without establishing a latency guarantee.
+
+#### Three-provider comparison (2026-10-16)
+
+Sequential preview calls with matching inputs, fresh caches, explicit provider selection, and no CLI/API/outer-process timeout overrides. Models: agy `gemini-3.8-flash-low`, Claude `sonnet`, Codex `gpt-6-sol`. Times include process startup and shutdown; one sample per cell.
+
+| Operation | agy | Claude | Codex |
+|---|---|---|---|
+| Idea | 10.243s | 11.331s | 9.914s |
+| Auto-reply | 6.861s | 5.508s | 5.075s |
+| Steering | 7.842s | 3.536s | 4.405s |
+
+All nine finished within 15 seconds, with exit zero and empty stderr. All ideas passed the full schema; all steering outputs matched fresh model-response cache entries. No messages were scheduled or sent. Ideas proposed session discovery (agy/Claude) and cross-agent task resumption (Codex); these are suggestions, not verified feature gaps. agy and Codex auto-replies stayed focused on the requested tests; Claude expanded into optional edge cases. agy and Claude steering added “real quick”; Codex preserved the request most directly. This sample does not establish latency guarantees or overall model quality.
 
 ---
 

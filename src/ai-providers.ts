@@ -5,11 +5,12 @@
 //   2. OpenRouter (via OPENROUTER_API_KEY)
 //   3. Claude Code (via claude CLI in PATH)
 //   4. Gemini (via GEMINI_API_KEY or gemini CLI OAuth)
+//   5. Antigravity (via agy CLI in PATH)
 //
 // Provider override (highest to lowest precedence):
 //   1. options.provider passed to each prompt function
-//   2. AI_PROVIDER env var ("gemini" | "claude" | "openrouter" | "codex")
-//   3. Auto-select: Codex, OpenRouter, Claude Code, then Gemini
+//   2. AI_PROVIDER env var ("gemini" | "claude" | "openrouter" | "codex" | "agy")
+//   3. Auto-select: Codex, OpenRouter, Claude Code, Gemini, then agy
 //
 // Usage:
 //   import { hasAiProvider, promptText, promptStreamText, promptObject } from "./ai-providers.ts"
@@ -22,6 +23,7 @@ import { dirname, join } from "node:path"
 import type { LanguageModel } from "ai"
 import { memoize } from "lodash-es"
 import { type ZodType, z } from "zod"
+import { createAgyModel } from "./agy-provider.ts"
 import type { BaseAiPromptOptions } from "./ai-prompt-options.ts"
 import { resetShutdownController, resolveSignal } from "./ai-signal.ts"
 import { readAiTextStream } from "./ai-stream.ts"
@@ -41,14 +43,22 @@ export { resolveSignal, resetShutdownController }
 
 // ─── Provider types ───────────────────────────────────────────────────────────
 
-export type AiProviderId = "gemini" | "claude" | "openrouter" | "codex"
+export type AiProviderId = "gemini" | "claude" | "openrouter" | "codex" | "agy"
 
 /** Shared by commands so CLI flags and runtime selection accept the same IDs. */
 export function parseAiProvider(value: string): AiProviderId {
-  if (value === "gemini" || value === "claude" || value === "openrouter" || value === "codex") {
+  if (
+    value === "gemini" ||
+    value === "claude" ||
+    value === "openrouter" ||
+    value === "codex" ||
+    value === "agy"
+  ) {
     return value
   }
-  throw new Error(`--provider must be "gemini", "claude", "openrouter", or "codex", got: ${value}`)
+  throw new Error(
+    `--provider must be "gemini", "claude", "openrouter", "codex", or "agy", got: ${value}`
+  )
 }
 
 // Shutdown signal handling moved to ai-signal.ts (breaking circular dependency)
@@ -119,6 +129,10 @@ function hasOpenRouterApiKey(): boolean {
 function hasCodexCli(): boolean {
   if (process.env.AI_TEST_NO_BACKEND === "1") return false
   return Boolean(Bun.which("codex"))
+}
+
+function hasAgyCli(): boolean {
+  return process.env.AI_TEST_NO_BACKEND !== "1" && Boolean(Bun.which("agy"))
 }
 
 // resolveSignal moved to ai-signal.ts
@@ -282,6 +296,13 @@ interface ProviderCapabilities {
  * Adding a new provider only requires adding an entry here.
  */
 const PROVIDER_REGISTRY: Record<AiProviderId, ProviderCapabilities> = {
+  agy: {
+    model: async (modelId) => createAgyModel(modelId),
+    text: (prompt, options) => runText(createAgyModel(options?.model), prompt, options),
+    streamText: (prompt, options) => runStreamText(createAgyModel(options?.model), prompt, options),
+    object: (prompt, schema, options) =>
+      runObject(createAgyModel(options?.model), prompt, schema, options, true),
+  },
   codex: {
     model: getCodexModel,
     text: (prompt, options) =>
@@ -339,7 +360,9 @@ export function hasAiProvider(): boolean {
   ) {
     return true
   }
-  return hasGeminiApiKey() || hasClaudeCode() || hasOpenRouterApiKey() || hasCodexCli()
+  return [hasGeminiApiKey, hasClaudeCode, hasOpenRouterApiKey, hasCodexCli, hasAgyCli].some(
+    (check) => check()
+  )
 }
 
 /**
@@ -347,50 +370,36 @@ export function hasAiProvider(): boolean {
  *
  * Resolution order (highest to lowest precedence):
  *   1. `override` argument (from options.provider or CLI --provider flag)
- *   2. AI_PROVIDER env var ("gemini" | "claude" | "openrouter" | "codex")
- *   3. Auto-select: Codex, OpenRouter, Claude Code, then Gemini
+ *   2. AI_PROVIDER env var ("gemini" | "claude" | "openrouter" | "codex" | "agy")
+ *   3. Auto-select: Codex, OpenRouter, Claude Code, Gemini, then agy
  *
  * Throws if an explicit override requests a provider that is not available.
  */
 function handleExplicitlyRequestedProvider(
   requested: AiProviderId | undefined
 ): AiProviderId | null {
-  if (requested === "codex") {
-    if (!hasCodexCli()) {
-      throw new Error(
-        "AI_PROVIDER=codex requested but the codex CLI is not installed or not in PATH. Install Codex and run `codex login`."
-      )
-    }
-    return "codex"
+  if (requested === undefined) return null
+  const availability: Record<AiProviderId, [() => boolean, string]> = {
+    agy: [hasAgyCli, "the agy CLI is not installed or not in PATH."],
+    claude: [hasClaudeCode, "the claude CLI is not installed or not in PATH."],
+    codex: [
+      hasCodexCli,
+      "the codex CLI is not installed or not in PATH. Install Codex and run `codex login`.",
+    ],
+    gemini: [
+      hasGeminiApiKey,
+      "Gemini is not available. Set GEMINI_API_KEY or authenticate via `gemini` CLI.",
+    ],
+    openrouter: [hasOpenRouterApiKey, "OPENROUTER_API_KEY is not set."],
   }
-  if (requested === "gemini") {
-    if (!hasGeminiApiKey()) {
-      throw new Error(
-        "AI_PROVIDER=gemini requested but Gemini is not available. Set GEMINI_API_KEY or authenticate via `gemini` CLI."
-      )
-    }
-    return "gemini"
-  }
-  if (requested === "claude") {
-    if (!hasClaudeCode()) {
-      throw new Error(
-        "AI_PROVIDER=claude requested but the claude CLI is not installed or not in PATH."
-      )
-    }
-    return "claude"
-  }
-  if (requested === "openrouter") {
-    if (!hasOpenRouterApiKey()) {
-      throw new Error("AI_PROVIDER=openrouter requested but OPENROUTER_API_KEY is not set.")
-    }
-    return "openrouter"
-  }
-  if (requested !== undefined) {
+  if (!Object.hasOwn(availability, requested)) {
     throw new Error(
-      `Unknown AI provider "${requested}". Valid values: gemini, claude, openrouter, codex.`
+      `Unknown AI provider "${requested}". Valid values: gemini, claude, openrouter, codex, agy.`
     )
   }
-  return null
+  const [check, reason] = availability[requested]
+  if (!check()) throw new Error(`AI_PROVIDER=${requested} requested but ${reason}`)
+  return requested
 }
 
 export function activeProvider(override?: AiProviderId): AiProviderId | null {
@@ -408,13 +417,14 @@ export function activeProvider(override?: AiProviderId): AiProviderId | null {
   if (hasOpenRouterApiKey()) return "openrouter"
   if (hasClaudeCode()) return "claude"
   if (hasGeminiApiKey()) return "gemini"
+  if (hasAgyCli()) return "agy"
   return null
 }
 
 // ─── Provider fallback ────────────────────────────────────────────────────────
 
 /**
- * Returns available provider IDs in priority order (Codex → OpenRouter → Claude Code → Gemini).
+ * Returns available provider IDs in priority order (Codex → OpenRouter → Claude Code → Gemini → agy).
  * When an explicit override is set (options.provider or AI_PROVIDER env), returns only that provider.
  */
 function availableProviders(override?: AiProviderId): AiProviderId[] {
@@ -433,6 +443,7 @@ function availableProviders(override?: AiProviderId): AiProviderId[] {
   if (hasOpenRouterApiKey()) providers.push("openrouter")
   if (hasClaudeCode()) providers.push("claude")
   if (hasGeminiApiKey()) providers.push("gemini")
+  if (hasAgyCli()) providers.push("agy")
   return providers
 }
 

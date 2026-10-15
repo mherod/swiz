@@ -76,7 +76,7 @@ describe("parseMergetoolArgs", () => {
 
   it("throws on invalid --provider value", () => {
     expect(() => parseMergetoolArgs(["--provider", "openai", "/a", "/b", "/c", "/d"])).toThrow(
-      'must be "gemini", "claude", "openrouter", or "codex"'
+      'must be "gemini", "claude", "openrouter", "codex", or "agy"'
     )
   })
 

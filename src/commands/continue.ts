@@ -111,7 +111,7 @@ async function resolveSession(targetDir: string, sessionQuery: string | null): P
 function ensureAiBackend(): void {
   if (!hasAiProvider() && !detectBestAgentCli()) {
     throw new Error(
-      "No AI backend found. Set GEMINI_API_KEY, OPENROUTER_API_KEY, install the claude or codex CLI, or install Cursor Agent."
+      "No AI backend found. Set GEMINI_API_KEY, OPENROUTER_API_KEY, install the claude, codex, or agy CLI, or install Cursor Agent."
     )
   }
 }
@@ -375,7 +375,7 @@ export const continueCommand: Command = {
     {
       flags: "--provider, -p <name>",
       description:
-        'AI provider override: "gemini", "claude", "openrouter", or "codex" (default: auto-select)',
+        'AI provider override: "gemini", "claude", "openrouter", "codex", or "agy" (default: auto-select)',
     },
   ],
   async run(args) {
