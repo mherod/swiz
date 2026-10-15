@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest"
+import { daemonDispatchPolicy } from "../dispatch/daemon-client.ts"
 import { filterPrMergeModeHooks, resolvePrMergeActive } from "../dispatch/index.ts"
 import { hookIdentifier, isInlineHookDef, manifest } from "../manifest.ts"
 
@@ -363,12 +364,28 @@ describe("dispatch.ts unit tests", () => {
       })
     })
 
-    it("most timeouts are reasonable (under 30s)", () => {
+    it("long timeouts are reserved for steering and special checks", () => {
+      const steeringHooks = new Set([
+        "pretooluse-task-governance.ts",
+        "pretooluse-offensive-language.ts",
+        "posttooluse-auto-steer.ts",
+        "posttooluse-task-advisor.ts",
+        "posttooluse-test-pairing.ts",
+        "posttooluse-push-autosteer-issue.ts",
+      ])
+      for (const group of manifest) {
+        for (const hook of group.hooks) {
+          if (!steeringHooks.has(hookIdentifier(hook))) continue
+          const timeout = isInlineHookDef(hook) ? hook.hook.timeout : hook.timeout
+          expect(timeout).toBeGreaterThan(30)
+          expect(daemonDispatchPolicy(group.event).timeoutMs).toBeGreaterThan(timeout! * 1000)
+        }
+      }
       const longTimeouts = manifest
         .flatMap((g) => g.hooks)
         .filter((h) => {
           const t = isInlineHookDef(h) ? h.hook.timeout : h.timeout
-          return t != null && t > 30
+          return t != null && t > 30 && !steeringHooks.has(hookIdentifier(h))
         })
 
       // Only special cases like stop-auto-continue should exceed 30s

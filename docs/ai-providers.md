@@ -158,7 +158,7 @@ Resumes the most recent session with an AI-generated next-step suggestion.
 
 Use `swiz transcript --auto-reply --print` to print generated replies without scheduling or sending them. Transcript selection flags such as `--codex` select the source transcript, not the generation provider.
 
-Steering humanisation also uses the shared provider priority and respects `AI_PROVIDER`. Its complete fallback chain has an 8-second budget before using a deterministic local rewrite. A bare `Continue` stays `Please continue, thanks.` without a model request. Rewrites must preserve the input scope, not invent extra tasks, checks, commits, or pushes. `bun scripts/debug-humanise-autosteer.ts` previews rewrites without scheduling them.
+Steering humanisation also uses the shared provider priority and respects `AI_PROVIDER`. Its complete fallback chain has a 30-second budget to allow Codex CLI startup and generation before using a deterministic local rewrite. A bare `Continue` stays `Please continue, thanks.` without a model request. Rewrites must preserve the input scope, not invent extra tasks, checks, commits, or pushes. `bun scripts/debug-humanise-autosteer.ts` previews rewrites without scheduling them.
 
 ---
 

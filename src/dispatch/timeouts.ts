@@ -7,8 +7,9 @@
  */
 export const DISPATCH_TIMEOUTS: Readonly<Record<string, number>> = {
   stop: 180,
-  preToolUse: 15,
-  postToolUse: 15,
+  // Steering can spend 30s rewriting; pre-tool feedback can first spend 15s refining.
+  preToolUse: 60,
+  postToolUse: 45,
   postToolUseFailure: 10,
   sessionStart: 20,
   preCompact: 15,

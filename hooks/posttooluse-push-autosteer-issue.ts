@@ -104,7 +104,7 @@ const posttoolusePushAutosteerIssue: SwizHook<PostToolHookInput> = {
   name: "posttooluse-push-autosteer-issue",
   event: "postToolUse",
   matcher: "Bash",
-  timeout: 10,
+  timeout: 35,
   async: true,
   requiredSettings: ["autoSteer"],
 

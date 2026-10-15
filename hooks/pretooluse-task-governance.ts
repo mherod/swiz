@@ -1512,7 +1512,7 @@ export const requireTasksHook: SwizToolHook = {
   name: "pretooluse-require-tasks",
   event: "preToolUse",
   matcher: "Edit|Write|Bash",
-  timeout: 5,
+  timeout: 35,
 
   async run(input) {
     try {
@@ -1940,7 +1940,7 @@ export async function evaluatePretooluseEnforceTaskupdate(input: unknown): Promi
 export const enforceTaskupdateHook: SwizToolHook = {
   name: "pretooluse-enforce-taskupdate",
   event: "preToolUse",
-  timeout: 5,
+  timeout: 35,
 
   run(input) {
     return evaluatePretooluseEnforceTaskupdate(input)
@@ -2324,7 +2324,7 @@ export async function shouldSuppressGovernanceTrace(input: Record<string, any>):
 const pretooluseTaskGovernance: SwizToolHook = {
   name: "pretooluse-task-governance",
   event: "preToolUse",
-  timeout: 5,
+  timeout: 35,
 
   async run(input) {
     try {

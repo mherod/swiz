@@ -76,7 +76,7 @@ export async function evaluatePosttooluseTaskAdvisor(
 const posttooluseTaskAdvisor: SwizHook<Record<string, any>> = {
   name: "posttooluse-task-advisor",
   event: "postToolUse",
-  timeout: 5,
+  timeout: 35,
   run(input) {
     return evaluatePosttooluseTaskAdvisor(input)
   },

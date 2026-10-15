@@ -148,7 +148,7 @@ export async function evaluatePretooluseOffensiveLanguage(
 const pretooluseOffensiveLanguage: SwizToolHook = {
   name: "pretooluse-offensive-language",
   event: "preToolUse",
-  timeout: 5,
+  timeout: 50,
   cooldownSeconds: 60,
 
   async run(input) {

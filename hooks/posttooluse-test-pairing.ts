@@ -84,7 +84,7 @@ const posttooluseTestPairing: SwizHook<PostToolHookInput> = {
   name: "posttooluse-test-pairing",
   event: "postToolUse",
   matcher: "Edit|Write",
-  timeout: 5,
+  timeout: 35,
 
   run(input) {
     return evaluatePosttooluseTestPairing(input)

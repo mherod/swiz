@@ -194,7 +194,7 @@ export async function evaluatePosttooluseAutoSteer(input: unknown): Promise<Swiz
 const posttooluseAutoSteer: SwizHook<Record<string, any>> = {
   name: "posttooluse-auto-steer",
   event: "postToolUse",
-  timeout: 10,
+  timeout: 35,
   async: true,
   requiredSettings: ["autoSteer"],
 

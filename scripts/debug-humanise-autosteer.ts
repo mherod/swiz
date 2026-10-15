@@ -79,7 +79,7 @@ for (const sample of SAMPLES) {
   try {
     const out = await promptText(`Rewrite in one short sentence: ${SAMPLES[0]!.text}`, {
       provider: activeProvider() ?? undefined,
-      timeout: 8000,
+      timeout: 30_000,
     })
     console.log(`elapsed ms: ${(performance.now() - t0).toFixed(1)}`)
     console.log(`SUCCESS (${out.length} chars): ${out.slice(0, 120)}`)

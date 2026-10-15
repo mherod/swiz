@@ -187,8 +187,8 @@ export interface AutoSteerRequest {
   trigger?: AutoSteerTrigger
 }
 
-/** Hard cap on how long humanisation may block a hook before using the local rewrite. */
-const HUMANISE_TIMEOUT_MS = 8_000
+/** Allow Codex CLI startup and generation before falling back to the local rewrite. */
+const HUMANISE_TIMEOUT_MS = 30_000
 
 const MECHANICAL_AUTO_STEER_LINE_RE =
   /^(?:[-*_]{3,}|action required:?.*|stop is blocked by .*|resolve them in the order shown\.?|git status|ship checklist|repository|incomplete tasks|you must act on this now\.?|do not try to stop again.*|this hook will block every stop attempt.*|if you believe this is a false positive.*|task files?:\s.*)$/i
