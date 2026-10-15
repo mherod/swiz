@@ -43,6 +43,7 @@ describe("validateDaemonArgs", () => {
 })
 
 describe("daemon startup failure", () => {
+  // PROCESS_CONTRACT_TEST: startup must exit non-zero without lingering when its port is occupied.
   it("exits non-zero instead of idling when the port is taken", async () => {
     const cwd = await temp.create()
     const blocker = Bun.serve({ port: 0, fetch: () => new Response("x") })

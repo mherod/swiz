@@ -3,6 +3,7 @@ import { readFileSync, unlinkSync, utimesSync, watch, writeFileSync } from "node
 import { dirname } from "node:path"
 import { z } from "zod"
 import { CHANNEL_DELIVERABLE_TRIGGERS } from "../auto-steer-store.ts"
+import { deadlineInputFields, taskDeadlineSchema } from "../deadlines/model.ts"
 import { fileOwnershipInputSchema, fileOwnershipResultSchema } from "../file-ownership-tool.ts"
 import {
   createMcpCwdResolver,
@@ -65,6 +66,7 @@ const BASE_INSTRUCTIONS = [
   "To send a message back through swiz (log, iMessage bridge, etc.) call the",
   '"reply" tool with { content, kind? }. No chat_id is required — swiz tags',
   "the entry with the project key automatically.",
+  "When the user gives an explicit finish-by time, record it with Deadline (or a task's deadline field). Use your actual hook sessionId and agentId, an offset-qualified dueAt or durationMinutes, and a stable requestId. Share by explicit attach; never silently extend a deadline. Countdown context is advisory and only updates at tool boundaries.",
 ]
 
 export function buildMcpInstructions(mcpChannels: boolean): string {
@@ -811,6 +813,11 @@ function registerTaskCreateTool(server: McpToolServer, cwd: ToolCwd): void {
           .string()
           .optional()
           .describe("Present continuous form for spinner display (e.g., 'Fixing login bug')"),
+        deadline: taskDeadlineSchema
+          .optional()
+          .describe(
+            "Optional finish-by time; shares the Deadline engine and survives task status changes."
+          ),
       },
     },
     (input: { subject: string; description: string; activeForm?: string }) =>
@@ -836,6 +843,11 @@ function registerTaskUpdateTool(server: McpToolServer, cwd: ToolCwd): void {
           .describe("New task status"),
         subject: z.string().optional().describe("Updated task subject"),
         description: z.string().optional().describe("Updated task description"),
+        deadline: taskDeadlineSchema
+          .optional()
+          .describe(
+            "Set or revise the task deadline in a separate call from other fields. Revisions require expectedRevision and reason. Use Deadline to cancel or complete a deadline."
+          ),
         addBlocks: z
           .array(z.string())
           .optional()
@@ -927,6 +939,25 @@ export function registerFileOwnershipTool(server: McpToolServer, cwd: ToolCwd): 
   )
 }
 
+export function registerDeadlineTool(server: McpToolServer, cwd: ToolCwd): void {
+  server.registerTool(
+    "Deadline",
+    {
+      title: "Manage finish-by deadlines",
+      description:
+        "Set, inspect, revise, attach, detach, complete or cancel a persistent deadline. set requires label, completionCriteria and exactly one of dueAt or durationMinutes. Mutations require requestId; revise/complete/cancel require expectedRevision and reason. Attach by explicit deadlineId to share across sessions or worktrees. Use your actual hook sessionId and agentId. Extending after expiry preserves the miss. Advisory context appears before and after tools; it never blocks tools or automatically completes work.",
+      inputSchema: deadlineInputFields,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+    },
+    (input: McpToolInput) => executeProjectTool("Deadline", input, cwd)
+  )
+}
+
 async function serve(): Promise<void> {
   const { McpServer } = await import("@modelcontextprotocol/sdk/server/mcp.js")
   const { StdioServerTransport } = await import("@modelcontextprotocol/sdk/server/stdio.js")
@@ -958,6 +989,7 @@ async function serve(): Promise<void> {
   registerSkillQueryTool(server, toolCwd)
 
   registerFileOwnershipTool(server, toolCwd)
+  registerDeadlineTool(server, toolCwd)
 
   // Roots are known only after the client handshake, so the channel drain loop
   // (keyed by project) starts once the directory resolves and restarts when it moves.

@@ -34,6 +34,7 @@ export interface MergeableTask {
   blockedBy?: string[]
   startedAt?: number | null
   statusChangedAt?: string | null
+  deadlineId?: string
 }
 
 /** in_progress outranks pending: the row someone actually picked up wins. */
@@ -120,6 +121,8 @@ export function mergeGroup<T extends MergeableTask>(group: readonly T[]): Duplic
 function groupOpenTasksBySubject<T extends MergeableTask>(tasks: readonly T[]): Map<string, T[]> {
   const groups = new Map<string, T[]>()
   for (const task of tasks) {
+    // Deadline ownership and history must not be lost to subject-based deduplication.
+    if (task.deadlineId) continue
     if (!isDuplicateSubjectCandidate(task)) continue
     const key = normalizeTaskSubjectForDuplicate(task.subject)
     if (!key) continue

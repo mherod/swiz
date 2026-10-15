@@ -4,6 +4,7 @@ import { resolveTranslationAgent } from "../agent-paths.ts"
 import { type AgentDef, translateMatcher } from "../agents.ts"
 import { RESET } from "../ansi.ts"
 import { verifyTaskSubject } from "../commands/tasks.ts"
+import { finishTaskDeadline } from "../deadlines/task-deadlines.ts"
 import { getGitClient } from "../git/client.ts"
 import {
   PROJECT_STATES,
@@ -97,6 +98,7 @@ export interface CreateTaskOptions {
   description: string
   /** Present continuous form for spinner display (e.g., 'Fixing login bug') */
   activeForm?: string
+  deadlineId?: string
   /** Working directory to associate with the task. Defaults to `process.cwd()`. */
   cwd?: string
   /** Skip compound-subject validation. Used by internal callers (e.g. mergeActionPlanIntoTasks). */
@@ -111,18 +113,12 @@ export async function createTaskInProcess(opts: CreateTaskOptions): Promise<Task
   const { sessionId, subject, description, cwd = process.cwd() } = opts
   const storeKey = opts.storeKey ?? (await resolveLegacyTaskStoreKey(sessionId, cwd))
 
-  // readTaskStore drops records with a falsy subject, so an empty one would be
-  // written, reported as created, and then vanish from every reader.
-  if (!subject.trim()) throw new Error("Task subject must not be empty")
-
-  if (!opts.skipSubjectValidation) {
-    const detection = detect(subject)
-    if (detection.matched) {
-      throw new Error(formatMessage(detection))
-    }
-  }
+  validateTaskSubject(subject, opts.skipSubjectValidation)
 
   const tasks = await readTaskStore(storeKey)
+  // A retry after the task write but before its deadline binding must recover the same task.
+  const retry = retriedDeadlineTask(tasks, opts.deadlineId)
+  if (retry) return retry
 
   const incomplete = tasks.filter((t) => isIncompleteTaskStatus(t.status))
   const collision = findCollidingTask(subject, incomplete)
@@ -145,6 +141,7 @@ export async function createTaskInProcess(opts: CreateTaskOptions): Promise<Task
     subject,
     description,
     activeForm: opts.activeForm,
+    ...(opts.deadlineId ? { deadlineId: opts.deadlineId } : {}),
     status: "pending",
     startedAt: null,
     completedAt: null,
@@ -162,9 +159,21 @@ export async function createTaskInProcess(opts: CreateTaskOptions): Promise<Task
     action: "create",
     newStatus: "pending",
     subject,
+    ...(opts.deadlineId ? { deadlineId: opts.deadlineId } : {}),
   })
 
   return task
+}
+
+function retriedDeadlineTask(tasks: Task[], deadlineId?: string): Task | undefined {
+  return deadlineId ? tasks.find((task) => task.deadlineId === deadlineId) : undefined
+}
+
+export function validateTaskSubject(subject: string, skipCompoundValidation = false): void {
+  if (!subject.trim()) throw new Error("Task subject must not be empty")
+  if (skipCompoundValidation) return
+  const detection = detect(subject)
+  if (detection.matched) throw new Error(formatMessage(detection))
 }
 
 // ─── Merge skill steps into tasks ───────────────────────────────────────────
@@ -555,6 +564,7 @@ async function persistTaskMutation(
 ): Promise<TaskMutationResult> {
   const { task, oldStatus, action, evidence } = result
   await writeTask(storeKey, task, filterCwd ?? process.cwd(), tasksDir)
+  await finishTaskDeadline(task)
   await writeAudit(
     storeKey,
     {
@@ -565,6 +575,7 @@ async function persistTaskMutation(
       newStatus: task.status,
       evidence,
       subject: task.subject,
+      ...(task.deadlineId ? { deadlineId: task.deadlineId } : {}),
     },
     tasksDir
   )

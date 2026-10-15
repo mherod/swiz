@@ -6,6 +6,7 @@
 
 import { merge } from "lodash-es"
 import type { HookGroup } from "../manifest.ts"
+import { injectDeadlinePayloadContext } from "./deadline-context.ts"
 import {
   coerceDispatchAgentEnvelopeInPlace,
   parseValidatedAgentDispatchWireJson,
@@ -143,6 +144,12 @@ export async function runStrategyPipeline(
     const finalResponse = await opts.processResults(results, executions)
     injectProjectStateProvenance(finalResponse, ctx.canonicalEvent, ctx.enrichedPayloadStr)
     await injectDispatchSessionAgeContext(finalResponse, ctx.canonicalEvent, ctx.enrichedPayloadStr)
+    await injectDeadlinePayloadContext(
+      finalResponse,
+      ctx.canonicalEvent,
+      ctx.hookEventName,
+      ctx.enrichedPayloadStr
+    )
 
     logSlowHookSummary(executions)
     if (executions.length > 0) merge(finalResponse, { hookExecutions: executions })

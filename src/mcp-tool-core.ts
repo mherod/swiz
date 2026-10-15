@@ -17,6 +17,13 @@ import { appendFile, mkdir } from "node:fs/promises"
 import { dirname } from "node:path"
 import { isDeepStrictEqual } from "node:util"
 import { z } from "zod"
+import { type Deadline, type TaskDeadlineInput, taskDeadlineSchema } from "./deadlines/model.ts"
+import {
+  bindTaskDeadline,
+  renderTaskDeadlines,
+  setTaskDeadline,
+} from "./deadlines/task-deadlines.ts"
+import { runDeadlineTool } from "./deadlines/tool.ts"
 import {
   type FileOwnershipResult,
   fileOwnershipResultSchema,
@@ -60,6 +67,7 @@ import {
   completeTaskWithAutoTransition,
   createTaskInProcess,
   updateStatus,
+  validateTaskSubject,
   writeTaskUpdate,
 } from "./tasks/task-service.ts"
 import { readTaskStorePath } from "./tasks/task-store-layout.ts"
@@ -81,6 +89,8 @@ export interface McpToolResult {
     taskMutation?: { changed: boolean }
     skillQuery?: SkillQueryResult
     fileOwnership?: FileOwnershipResult
+    deadlines?: Deadline[]
+    deadlineHistory?: Array<{ deadline: Deadline; reason: string }>
   }
 }
 
@@ -91,6 +101,7 @@ export const MCP_TOOL_NAMES = [
   "TaskList",
   "SkillQuery",
   "FileOwnership",
+  "Deadline",
 ] as const
 export const mcpToolNameSchema = z.enum(MCP_TOOL_NAMES)
 export type McpToolName = z.infer<typeof mcpToolNameSchema>
@@ -236,19 +247,36 @@ async function runTaskCreateTool(input: McpToolInput, cwd: string): Promise<McpT
     return errorResult(`${name} failed: subject and description must be strings`)
   }
   try {
+    validateTaskSubject(input.subject)
     const projectKey = projectKeyFromCwd(cwd)
+    const deadline =
+      input.deadline === undefined
+        ? undefined
+        : (
+            await setTaskDeadline(taskDeadlineSchema.parse(input.deadline), cwd, {
+              subject: input.subject,
+              description: input.description,
+            })
+          ).deadline
     const task = await createTaskInProcess({
       sessionId: projectKey,
       storeKey: projectStoreKey(cwd),
       subject: input.subject,
       description: input.description,
       ...(typeof input.activeForm === "string" ? { activeForm: input.activeForm } : {}),
+      ...(deadline ? { deadlineId: deadline.id } : {}),
       cwd,
     })
+    if (deadline) await bindTaskDeadline(deadline.id, task.id, projectStoreKey(cwd))
     const tasks = projectQueueTasks(await readProjectQueueWithPrune(projectKey))
     const headline = `Created #${task.id} — ${truncateForLine(task.subject)}`
     const advice = await discoverRelatedTaskAdvice(cwd, task)
-    return taskMutationResult(renderTaskToolResult(headline, tasks, task.id) + advice, true)
+    return taskMutationResult(
+      renderTaskToolResult(headline, tasks, task.id) +
+        advice +
+        (await renderTaskDeadlines(tasks, task.id)),
+      true
+    )
   } catch (error) {
     return errorResult(`${name} failed: ${messageFromUnknownError(error)}`)
   }
@@ -265,6 +293,7 @@ export type TaskUpdateToolInput = {
   removeBlocks?: string[]
   addBlockedBy?: string[]
   removeBlockedBy?: string[]
+  deadline?: TaskDeadlineInput
 }
 
 /**
@@ -455,6 +484,7 @@ async function runTaskUpdateTool(rawInput: McpToolInput, cwd: string): Promise<M
     taskId: rawInput.taskId.replace(/^#/, ""),
   }
   try {
+    validateDeadlineTaskUpdate(input)
     const projectKey = projectKeyFromCwd(cwd)
     const records = await readProjectQueueWithPrune(projectKey)
     const tasksBefore = projectQueueTasks(records)
@@ -474,6 +504,7 @@ async function runTaskUpdateTool(rawInput: McpToolInput, cwd: string): Promise<M
       blockedBy: [...candidate.blockedBy],
     }))
     const fieldChanges = applyTaskFieldUpdates(task, input)
+    const deadlineChanged = await applyTaskDeadlineUpdate(task, input, cwd, storeKey, fieldChanges)
     await persistTaskUpdate(
       storeKey,
       cwd,
@@ -494,12 +525,44 @@ async function runTaskUpdateTool(rawInput: McpToolInput, cwd: string): Promise<M
     const unblocked = renderUnblockedLine(findNewlyUnblockedTasks(snapshotBefore, tasksAfter))
     const fullHeadline = unblocked ? `${headline}\n${unblocked}` : headline
     return taskMutationResult(
-      renderTaskToolResult(fullHeadline, tasksAfter, input.taskId),
-      finalTask !== undefined && !isDeepStrictEqual(movementBefore, taskMovementFields(finalTask))
+      renderTaskToolResult(fullHeadline, tasksAfter, input.taskId) +
+        (await renderTaskDeadlines(tasksAfter, input.taskId)),
+      deadlineChanged || taskHasMoved(movementBefore, finalTask)
     )
   } catch (error) {
     return errorResult(`${taskUpdateName} failed: ${messageFromUnknownError(error)}`)
   }
+}
+
+function taskHasMoved(before: object, after?: Task): boolean {
+  return after !== undefined && !isDeepStrictEqual(before, taskMovementFields(after))
+}
+
+function validateDeadlineTaskUpdate(input: TaskUpdateToolInput): void {
+  if (
+    input.deadline !== undefined &&
+    Object.keys(input).some((key) => key !== "taskId" && key !== "deadline")
+  )
+    throw new Error(
+      "Update the deadline separately from status or other task fields so revision conflicts cannot leave a partial task update."
+    )
+}
+
+async function applyTaskDeadlineUpdate(
+  task: Task,
+  input: TaskUpdateToolInput,
+  cwd: string,
+  storeKey: TaskStoreKey,
+  fieldChanges: string[]
+): Promise<boolean> {
+  if (input.deadline === undefined) return false
+  const { deadline, changed } = await setTaskDeadline(input.deadline, cwd, task)
+  if (task.deadlineId !== deadline.id) {
+    task.deadlineId = deadline.id
+    fieldChanges.push("deadline")
+  } else if (changed) fieldChanges.push(`deadline r${deadline.revision}`)
+  await bindTaskDeadline(deadline.id, task.id, storeKey)
+  return changed
 }
 
 /** Compare persisted task content, excluding timestamps and edge ordering. */
@@ -508,6 +571,7 @@ function taskMovementFields(task: Task): object {
     status: task.status,
     subject: task.subject,
     description: task.description,
+    deadlineId: task.deadlineId,
     blocks: [...new Set(task.blocks)].sort(),
     blockedBy: [...new Set(task.blockedBy)].sort(),
   }
@@ -520,7 +584,9 @@ async function runTaskListTool(cwd: string): Promise<McpToolResult> {
     const allTasks = projectQueueTasks(await readProjectQueueWithPrune(projectKeyFromCwd(cwd)))
     const headline =
       allTasks.length === 0 ? "No tasks in this project yet." : "Task queue for this project."
-    return textResult(renderTaskToolResult(headline, allTasks))
+    return textResult(
+      renderTaskToolResult(headline, allTasks) + (await renderTaskDeadlines(allTasks))
+    )
   } catch (error) {
     return errorResult(`TaskList failed: ${messageFromUnknownError(error)}`)
   }
@@ -570,5 +636,11 @@ export async function runMcpTool(
       return runSkillQueryTool(input, cwd)
     case "FileOwnership":
       return runFileOwnershipTool(input, cwd)
+    case "Deadline":
+      try {
+        return await runDeadlineTool(input, cwd)
+      } catch (error) {
+        return errorResult(`Deadline failed: ${messageFromUnknownError(error)}`)
+      }
   }
 }
