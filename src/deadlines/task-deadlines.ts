@@ -10,7 +10,9 @@ import {
 } from "./model.ts"
 import { DeadlineStore } from "./store.ts"
 
-type TaskDeadlineTarget = Pick<Task, "subject" | "description" | "deadlineId"> & { id?: string }
+type TaskDeadlineTarget = Pick<Task, "subject" | "description" | "activeForm" | "deadlineId"> & {
+  id?: string
+}
 
 function taskDeadlineMutation(
   input: TaskDeadlineInput,
@@ -45,7 +47,11 @@ export async function setTaskDeadline(
       {
         operation: {
           input,
-          task: task.id ?? { subject: task.subject, description: task.description },
+          task: task.id ?? {
+            subject: task.subject,
+            description: task.description,
+            activeForm: task.activeForm,
+          },
         },
         beforeMutation,
       }

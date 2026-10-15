@@ -258,7 +258,11 @@ async function runTaskCreateTool(input: McpToolInput, cwd: string): Promise<McpT
             await setTaskDeadline(
               taskDeadlineSchema.parse(input.deadline),
               cwd,
-              { subject: input.subject, description: input.description },
+              {
+                subject: input.subject,
+                description: input.description,
+                ...(typeof input.activeForm === "string" ? { activeForm: input.activeForm } : {}),
+              },
               () => validateTaskCollision(input.subject as string, existingTasks)
             )
           ).deadline
