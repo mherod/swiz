@@ -11,6 +11,7 @@
 import { appendFile } from "node:fs/promises"
 import {
   daemonClientTimeoutMs,
+  daemonDispatchPolicy,
   enrichDispatchPayload,
   tryDaemonDispatch,
 } from "../dispatch/daemon-client.ts"
@@ -270,7 +271,10 @@ export async function runThinDispatch(
       )
       return
     }
-    if (result.kind === "timeout") {
+    if (
+      result.kind === "timeout" &&
+      daemonDispatchPolicy(canonicalEvent).timeoutFallback === "allow"
+    ) {
       process.stderr.write(
         `swiz daemon did not answer ${canonicalEvent} within ${daemonClientTimeoutMs(canonicalEvent)}ms; allowing without local re-run\n`
       )
