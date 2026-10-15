@@ -23,8 +23,8 @@ function taskDeadlineMutation(
   return {
     ...input,
     action: "set",
-    label: task.subject,
-    completionCriteria: task.description || task.subject,
+    label: task.subject.trim().slice(0, 160),
+    completionCriteria: (task.description.trim() || task.subject.trim()).slice(0, 1000),
     parentDeadlineId: input.parentDeadlineId ?? previous?.parentDeadlineId,
   }
 }
