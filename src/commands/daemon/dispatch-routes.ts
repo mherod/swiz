@@ -1,7 +1,4 @@
-/**
- * Dispatch route handlers for the daemon web server.
- * Extracted from web-server.ts (issue #685) to keep routing code focused.
- */
+/** HTTP adapter for dispatch; execution and session policy live in dedicated modules. */
 import { ZodError } from "zod"
 import { debugLog } from "../../debug.ts"
 import { ensureDispatchId } from "../../dispatch/dispatch-id.ts"
@@ -9,12 +6,7 @@ import {
   DispatchPayloadValidationError,
   parseValidatedAgentDispatchWireJson,
 } from "../../dispatch/dispatch-zod-surfaces.ts"
-import { isBlock } from "../../dispatch/engine.ts"
-import {
-  type DispatchLifecycleUpdate,
-  type DispatchResult,
-  executeDispatch,
-} from "../../dispatch/execute.ts"
+import { type DispatchResult, executeDispatch } from "../../dispatch/execute.ts"
 import {
   scheduleIncomingDispatchCapture,
   schedulePayloadJsonlAppend,
@@ -22,61 +14,35 @@ import {
   shouldCaptureIncomingPayloads,
 } from "../../dispatch/incoming-capture.ts"
 import { DISPATCH_ROUTES } from "../../dispatch/index.ts"
-import { isSubagentUsageKey, sessionUsageKey } from "../../dispatch/session-usage-key.ts"
-import {
-  DEFAULT_STOP_DISPATCH_ALLOW_CONTEXT,
-  isStopLikeDispatchEvent,
-} from "../../dispatch/stop-response.ts"
+import { DISPATCH_TIMEOUTS } from "../../dispatch/timeouts.ts"
 import type { DispatchStageDurations } from "../../dispatch/timing.ts"
-import { DISPATCH_TIMEOUTS } from "../../manifest.ts"
-import { mcpCallerCwdRegistry } from "../../mcp-caller-cwd.ts"
-import { taskCompletedHookInputSchema, taskCreatedHookInputSchema } from "../../schemas.ts"
 import { createTaskStoreForHookPayload } from "../../task-roots.ts"
 import { sessionDirPath, sessionStoreKey } from "../../tasks/task-store-path.ts"
-import { isAnyProviderTaskCreateTool, isAnyProviderTaskUpdateTool } from "../../tool-matchers.ts"
-import type { CurrentSessionToolUsage } from "../../transcript-summary.ts"
+import { type DispatchRequestScope, withDispatchRequestScope } from "./dispatch-request-scope.ts"
 import {
-  CONCURRENT_WORK_BOUNDARY,
-  CONCURRENT_WORK_REASSURANCE,
-} from "../../utils/concurrent-work-guidance.ts"
-import type { WarmStatusLineSnapshot } from "../status-line.ts"
-import type { CappedMap } from "./cache/capped-map.ts"
-import {
-  classifyDivergenceWeight,
-  divergenceEvidence,
-  recordDivergenceToolCall,
-  recoverSessionDivergence,
-  type SessionDivergenceState,
-  taskMutationOutcome,
-} from "./divergence.ts"
-import {
-  ACTIVE_LIFECYCLE_TASKS_PAYLOAD_KEY,
-  formatLifecycleTaskAdvisory,
-  type LifecycleTaskPayload,
-  type LifecycleTaskRegistry,
-} from "./lifecycle-task-registry.ts"
-import { registerProjectAndTouch } from "./route-helpers.ts"
+  createDispatchLifecycleHandler,
+  type DispatchSessionContext,
+  getCurrentSessionToolUsageFromDaemon,
+  type LifecycleTaskDispatchPreparation,
+  maybeSuppressDuplicateAllowMessage,
+  mergeLifecycleStopAdvisory,
+  prepareLifecycleTaskDispatch,
+  updateParsedPayloadMetrics,
+} from "./dispatch-session.ts"
 import {
   type DaemonMetrics,
   type DispatchOutcome,
-  type LastUserMessageCache,
   type ManifestCache,
   type RepositoryCapabilityCache,
   recordDispatch,
-  type TranscriptIndexCache,
 } from "./runtime-cache.ts"
-import { sessionToolCallPersistenceQueue } from "./session-tool-call-persistence.ts"
 import type { ActiveHookDispatch } from "./types.ts"
-import type { UpstreamSyncRegistry } from "./upstream-sync.ts"
-import type { CapturedToolCall, SessionToolUsageState } from "./utils.ts"
-import {
-  captureSessionToolCall,
-  captureSessionToolUsage,
-  readPersistedSessionToolCalls,
-  seedSessionToolUsage,
-} from "./utils.ts"
 import type { DaemonWebServerContext } from "./web-server-context.ts"
-import type { DaemonWorkerRuntime } from "./worker-runtime.ts"
+
+export {
+  maybeSuppressDuplicateAllowMessage,
+  prepareLifecycleTaskDispatch,
+} from "./dispatch-session.ts"
 
 /** Hard request-level timeout for daemon dispatch (ms).
  *  Uses DISPATCH_TIMEOUTS + 10s grace. Fallback: 60s for unknown events. */
@@ -90,30 +56,12 @@ const STALE_DISPATCH_MAX_AGE_MS = 300_000 // 5 minutes
 /**
  * Narrow context for dispatch route handlers — only the capabilities those handlers need.
  */
-export interface DispatchRoutesContext {
+export interface DispatchRoutesContext extends DispatchSessionContext {
   projectMetrics: Map<string, DaemonMetrics>
-  getProjectMetrics: (cwd: string) => DaemonMetrics
   globalMetrics: DaemonMetrics
-  sessionActivity: Map<string, { lastSeen: number; dispatches: number }>
-  sessionToolCalls: Map<string, CapturedToolCall[]>
-  sessionToolUsage: Map<string, SessionToolUsageState>
-  sessionDivergence: Map<string, SessionDivergenceState>
-  activeHookDispatches: Map<string, ActiveHookDispatch>
-  workerRuntime: DaemonWorkerRuntime
-  touchProject: (cwd: string) => void
-  registerProjectWatchers: (cwd: string) => void
   manifestCache: ManifestCache
   repositoryCapabilityCache: RepositoryCapabilityCache
-  resolveSnapshot: (
-    cwd: string,
-    sessionId: string | null | undefined
-  ) => Promise<WarmStatusLineSnapshot>
-  upstreamSyncRegistry: UpstreamSyncRegistry
-  transcriptIndex: TranscriptIndexCache
-  lastUserMessageCache: LastUserMessageCache
   taskStateCache: import("../../tasks/task-state-cache.ts").TaskStateCache
-  lifecycleTaskRegistry: LifecycleTaskRegistry
-  recentHookAllowMessages: CappedMap<string, string>
 }
 
 export function buildDispatchRoutesContext(ctx: DaemonWebServerContext): DispatchRoutesContext {
@@ -131,8 +79,6 @@ export function buildDispatchRoutesContext(ctx: DaemonWebServerContext): Dispatc
     registerProjectWatchers: ctx.registerProjectWatchers,
     manifestCache: ctx.manifestCache,
     repositoryCapabilityCache: ctx.repositoryCapabilityCache,
-    resolveSnapshot: ctx.resolveSnapshot,
-    upstreamSyncRegistry: ctx.upstreamSyncRegistry,
     transcriptIndex: ctx.transcriptIndex,
     lastUserMessageCache: ctx.lastUserMessageCache,
     taskStateCache: ctx.taskStateCache,
@@ -163,328 +109,6 @@ export function reapStaleDispatches(activeHookDispatches: Map<string, ActiveHook
   }
 }
 
-function trimHookText(value: unknown): string | null {
-  if (typeof value !== "string") return null
-  const trimmed = value.trim()
-  return trimmed.length > 0 ? trimmed : null
-}
-
-function objectRecord(value: unknown): Record<string, unknown> | undefined {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : undefined
-}
-
-function extractHookAllowMessage(response: Record<string, any>): string | null {
-  const output = objectRecord(response.hookSpecificOutput)
-  const message = {
-    additionalContext: trimHookText(output?.additionalContext),
-    systemMessage: trimHookText(response.systemMessage),
-    reason: trimHookText(response.reason),
-    stopReason: trimHookText(response.stopReason),
-    permissionDecisionReason: trimHookText(output?.permissionDecisionReason),
-  }
-  return Object.values(message).every((value) => value === null) ? null : JSON.stringify(message)
-}
-
-function stripDuplicateAllowMessage(response: Record<string, any>): void {
-  delete response.systemMessage
-  delete response.reason
-  delete response.stopReason
-
-  const hookSpecificOutput = response.hookSpecificOutput
-  if (
-    hookSpecificOutput &&
-    typeof hookSpecificOutput === "object" &&
-    !Array.isArray(hookSpecificOutput)
-  ) {
-    const output = hookSpecificOutput as Record<string, unknown>
-    delete output.additionalContext
-    delete output.permissionDecisionReason
-    // A bare allow tells Claude Code to skip the permission prompt (#963); keep an allow only
-    // when it carries rewritten input, which needs the decision to apply.
-    const rewritesInput = output.updatedInput !== undefined || output.modifiedInput !== undefined
-    if (output.permissionDecision === "allow" && !rewritesInput) delete output.permissionDecision
-    if (Object.keys(output).every((key) => key === "hookEventName")) {
-      delete response.hookSpecificOutput
-    }
-  }
-}
-
-/** Strip only known standing advice; changing file lists and specific remedies stay intact. */
-function suppressStandingAdvice(
-  cache: Map<string, string>,
-  scope: string,
-  response: Record<string, any>
-): void {
-  const fields = [
-    [response, "systemMessage"],
-    [response.hookSpecificOutput, "additionalContext"],
-  ] as const
-  for (const guidance of [CONCURRENT_WORK_REASSURANCE, CONCURRENT_WORK_BOUNDARY]) {
-    const key = `${scope}|guidance|${guidance}`
-    const seen = cache.get(key) !== undefined
-    let found = false
-    for (const [output, field] of fields) {
-      const text = output?.[field]
-      if (typeof text !== "string" || !text.includes(guidance)) continue
-      found = true
-      if (!seen) continue
-      const remaining = text
-        .replaceAll(guidance, "")
-        .replace(/\n{3,}/g, "\n\n")
-        .trim()
-      if (remaining) output[field] = remaining
-      else delete output[field]
-    }
-    if (found) cache.set(key, guidance)
-  }
-}
-
-function mustPreserveHookMessage(canonicalEvent: string, response: Record<string, any>): boolean {
-  const permission = response.hookSpecificOutput?.permissionDecision
-  return (
-    isStopLikeDispatchEvent(canonicalEvent) ||
-    isBlock(response) ||
-    permission === "deny" ||
-    permission === "ask" ||
-    Boolean(response.error) ||
-    response.ok === false ||
-    response.isError === true
-  )
-}
-
-function hookGuidanceScope(payload: Record<string, unknown> | null): string | null {
-  const sessionId = nonBlankString(payload?.session_id ?? payload?.sessionId)
-  const cwd = nonBlankString(payload?.cwd)
-  // Unknown identities must never share an advisory cache entry.
-  return sessionId && cwd ? JSON.stringify([cwd, sessionId]) : null
-}
-
-function resetSessionGuidance(cache: Map<string, string>, scope: string): void {
-  for (const key of cache.keys()) {
-    if (key.startsWith(`${scope}|`)) cache.delete(key)
-  }
-}
-
-export function maybeSuppressDuplicateAllowMessage(
-  ctx: Pick<DispatchRoutesContext, "recentHookAllowMessages">,
-  payload: Record<string, unknown> | null,
-  canonicalEvent: string,
-  hookEventName: string,
-  response: Record<string, any>
-): void {
-  if (mustPreserveHookMessage(canonicalEvent, response)) return
-  const scope = hookGuidanceScope(payload)
-  if (!scope) return
-  if (canonicalEvent === "sessionStart" || canonicalEvent === "sessionEnd") {
-    resetSessionGuidance(ctx.recentHookAllowMessages, scope)
-  }
-
-  const message = extractHookAllowMessage(response)
-  if (message === null) return
-
-  const key = `${scope}|message|${canonicalEvent}|${hookEventName}`
-  const last = ctx.recentHookAllowMessages.get(key)
-  if (last === message) {
-    stripDuplicateAllowMessage(response)
-    return
-  }
-
-  ctx.recentHookAllowMessages.set(key, message)
-  suppressStandingAdvice(ctx.recentHookAllowMessages, scope, response)
-}
-
-function createDispatchLifecycleHandler(
-  ctx: DispatchRoutesContext
-): (update: DispatchLifecycleUpdate) => void {
-  return (update) => {
-    if (update.phase === "start") {
-      ctx.activeHookDispatches.set(update.requestId, {
-        requestId: update.requestId,
-        canonicalEvent: update.canonicalEvent,
-        hookEventName: update.hookEventName,
-        cwd: update.cwd,
-        sessionId: update.sessionId,
-        hooks: update.hooks,
-        startedAt: update.startedAt,
-        toolName: update.toolName,
-        toolInputSummary: update.toolInputSummary,
-      })
-      return
-    }
-    ctx.activeHookDispatches.delete(update.requestId)
-  }
-}
-
-async function updateParsedPayloadMetrics(
-  ctx: DispatchRoutesContext,
-  payloadStr: string,
-  canonicalEvent: string
-): Promise<DaemonMetrics | null> {
-  const parsed = await ctx.workerRuntime.parseDispatchPayload(payloadStr)
-  if (!parsed) return null
-
-  const nowMs = Date.now()
-  const projectMetrics = await metricsForParsedProject(ctx, parsed.cwd)
-  if (!parsed.sessionId) return projectMetrics
-  recordParsedSessionActivity(ctx, parsed.sessionId, canonicalEvent, nowMs)
-  await captureParsedToolUse(ctx, parsed, canonicalEvent, nowMs, payloadStr)
-  return projectMetrics
-}
-
-async function metricsForParsedProject(
-  ctx: DispatchRoutesContext,
-  cwd: string | null | undefined
-): Promise<DaemonMetrics | null> {
-  if (!cwd) return null
-  const projectCwd = await registerProjectAndTouch(ctx, cwd)
-  return projectCwd ? ctx.getProjectMetrics(projectCwd) : null
-}
-
-function recordParsedSessionActivity(
-  ctx: DispatchRoutesContext,
-  sessionId: string,
-  canonicalEvent: string,
-  nowMs: number
-): void {
-  const previous = ctx.sessionActivity.get(sessionId)
-  ctx.sessionActivity.set(sessionId, {
-    lastSeen: nowMs,
-    dispatches: (previous?.dispatches ?? 0) + 1,
-  })
-  if (canonicalEvent === "userPromptSubmit") {
-    ctx.lastUserMessageCache.recordFromHook(sessionId, nowMs)
-  }
-}
-
-type ParsedDispatchPayload = NonNullable<
-  Awaited<ReturnType<DaemonWorkerRuntime["parseDispatchPayload"]>>
->
-
-async function captureParsedToolUse(
-  ctx: DispatchRoutesContext,
-  parsed: ParsedDispatchPayload,
-  canonicalEvent: string,
-  nowMs: number,
-  payloadStr: string
-): Promise<void> {
-  const { sessionId, toolName } = parsed
-  if (!sessionId || !toolName) return
-  await hydrateDivergence(ctx, parsed.cwd, sessionId)
-  const taskMutation =
-    isAnyProviderTaskCreateTool(toolName) || isAnyProviderTaskUpdateTool(toolName)
-  if (canonicalEvent === "postToolUse" && taskMutation) {
-    captureTaskOutcome(ctx, { ...parsed, sessionId, toolName }, nowMs, payloadStr)
-    return
-  }
-  if (canonicalEvent !== "preToolUse") return
-  // A rootless `swiz mcp` forwards this call from cwd "/"; the hook carries the real cwd.
-  mcpCallerCwdRegistry.record(toolName, parsed.toolInput, parsed.cwd, nowMs)
-  const state = recordDivergenceToolCall(ctx.sessionDivergence, {
-    sessionId,
-    toolName,
-    toolInput: parsed.toolInput,
-    nowMs,
-    movement: null,
-    taskMutation: taskMutation ? "started" : undefined,
-  })
-  captureSessionToolCall(ctx.sessionToolCalls, sessionId, toolName, parsed.toolInput, nowMs)
-  if (parsed.cwd) {
-    sessionToolCallPersistenceQueue.enqueue({
-      cwd: parsed.cwd,
-      sessionId,
-      toolName,
-      toolInput: parsed.toolInput,
-      nowMs,
-      divergence: divergenceEvidence(
-        state,
-        "call",
-        "unknown",
-        classifyDivergenceWeight(toolName, parsed.toolInput)
-      ),
-    })
-  }
-  captureSessionToolUsage(
-    ctx.sessionToolUsage,
-    sessionUsageKey(sessionId, parsed.agentId),
-    toolName,
-    parsed.toolInput,
-    nowMs
-  )
-}
-
-async function hydrateDivergence(
-  ctx: DispatchRoutesContext,
-  cwd: string | null | undefined,
-  sessionId: string
-): Promise<void> {
-  if (!cwd || ctx.sessionDivergence.has(sessionId)) return
-  const calls = await readPersistedSessionToolCalls(cwd, sessionId, undefined, undefined, true)
-  if (calls.length > 0 && !ctx.sessionDivergence.has(sessionId)) {
-    ctx.sessionDivergence.set(sessionId, recoverSessionDivergence(calls, Date.now()))
-  }
-}
-
-function captureTaskOutcome(
-  ctx: DispatchRoutesContext,
-  parsed: ParsedDispatchPayload & { sessionId: string; toolName: string },
-  nowMs: number,
-  payloadStr: string
-): void {
-  const { sessionId, toolName } = parsed
-  const payload = JSON.parse(payloadStr)
-  const outcome = taskMutationOutcome(payload.tool_response ?? payload.toolResponse)
-  const kind = isAnyProviderTaskCreateTool(toolName) ? "task-create" : "task-update"
-  const state = recordDivergenceToolCall(ctx.sessionDivergence, {
-    sessionId,
-    toolName,
-    nowMs,
-    countCall: false,
-    movement: outcome === "changed" ? kind : null,
-    incomplete: outcome === "unknown",
-    taskMutation: "resolved",
-  })
-  if (parsed.cwd)
-    sessionToolCallPersistenceQueue.enqueue({
-      cwd: parsed.cwd,
-      sessionId,
-      toolName,
-      toolInput: undefined,
-      nowMs,
-      divergence: divergenceEvidence(state, "outcome", outcome, 0),
-    })
-}
-
-async function getCurrentSessionToolUsageFromDaemon(
-  ctx: DispatchRoutesContext,
-  sessionId: string,
-  transcriptPath?: string
-): Promise<CurrentSessionToolUsage | null> {
-  const cached = ctx.sessionToolUsage.get(sessionId)
-  if (cached) {
-    cached.lastSeen = Date.now()
-    return {
-      toolNames: [...cached.toolNames],
-      skillInvocations: [...cached.skillInvocations],
-      events: cached.events ? [...cached.events] : undefined,
-    }
-  }
-
-  // The parent transcript does not hold a subagent's calls; seeding from it would hand the
-  // subagent the parent's streak (#962). An unseen subagent starts with an empty stream.
-  if (isSubagentUsageKey(sessionId)) return { toolNames: [], skillInvocations: [], events: [] }
-  if (!transcriptPath) return null
-  const index = await ctx.transcriptIndex.get(transcriptPath)
-  if (!index) return null
-  const seeded = seedSessionToolUsage(ctx.sessionToolUsage, sessionId, index.summary, Date.now())
-  return {
-    toolNames: [...seeded.toolNames],
-    skillInvocations: [...seeded.skillInvocations],
-    events: seeded.events ? [...seeded.events] : undefined,
-  }
-}
-
 /** Maps dispatch validation failures to HTTP — always includes Zod `issues` when available. */
 function daemonDispatchSchemaFailureResponse(e: unknown): Response | null {
   if (e instanceof DispatchPayloadValidationError) {
@@ -498,153 +122,6 @@ function daemonDispatchSchemaFailureResponse(e: unknown): Response | null {
     )
   }
   return null
-}
-
-interface LifecycleTaskFields {
-  hook_event_name?: unknown
-  session_id?: unknown
-  cwd?: unknown
-  task_id?: unknown
-  task_subject?: unknown
-  task_description?: unknown
-  teammate_name?: unknown
-  team_name?: unknown
-}
-
-interface ParsedLifecycleTaskDispatch {
-  sessionId: string
-  cwd: string
-  task: LifecycleTaskPayload
-}
-
-interface LifecycleTaskDispatchPreparation {
-  failOpen: boolean
-  payloadChanged: boolean
-  advisory?: string
-}
-
-function nonBlankString(value: unknown): string | null {
-  return typeof value === "string" && value.trim() ? value : null
-}
-
-function lifecycleTaskFromFields(
-  fields: LifecycleTaskFields,
-  expectedEvent: "TaskCreated" | "TaskCompleted"
-): ParsedLifecycleTaskDispatch | null {
-  if (fields.hook_event_name !== expectedEvent) return null
-  const sessionId = nonBlankString(fields.session_id)
-  if (!sessionId) return null
-  const cwd = nonBlankString(fields.cwd)
-  if (!cwd) return null
-  const taskId = nonBlankString(fields.task_id)
-  if (!taskId) return null
-  const subject = nonBlankString(fields.task_subject)
-  if (!subject) return null
-
-  const task: LifecycleTaskPayload = { taskId, subject }
-  if (typeof fields.task_description === "string") task.description = fields.task_description
-  if (typeof fields.teammate_name === "string") task.teammateName = fields.teammate_name
-  if (typeof fields.team_name === "string") task.teamName = fields.team_name
-  return { sessionId, cwd, task }
-}
-
-function lifecycleTaskPayload(
-  canonicalEvent: string,
-  payload: Record<string, unknown>
-): ParsedLifecycleTaskDispatch | null {
-  if (canonicalEvent === "taskCreated") {
-    const parsed = taskCreatedHookInputSchema.safeParse(payload)
-    return parsed.success ? lifecycleTaskFromFields(parsed.data, "TaskCreated") : null
-  }
-  if (canonicalEvent === "taskCompleted") {
-    const parsed = taskCompletedHookInputSchema.safeParse(payload)
-    return parsed.success ? lifecycleTaskFromFields(parsed.data, "TaskCompleted") : null
-  }
-  return null
-}
-
-function isTaskLifecycleEvent(canonicalEvent: string): boolean {
-  return canonicalEvent === "taskCreated" || canonicalEvent === "taskCompleted"
-}
-
-async function prepareTaskLifecycleDispatch(
-  ctx: DispatchRoutesContext,
-  canonicalEvent: string,
-  payload: Record<string, unknown> | null
-): Promise<LifecycleTaskDispatchPreparation> {
-  if (!payload) return { failOpen: true, payloadChanged: false }
-  const lifecycle = lifecycleTaskPayload(canonicalEvent, payload)
-  if (!lifecycle) return { failOpen: true, payloadChanged: false }
-  const projectCwd = await registerProjectAndTouch(ctx, lifecycle.cwd)
-  if (!projectCwd) return { failOpen: true, payloadChanged: false }
-
-  if (canonicalEvent === "taskCreated") {
-    ctx.lifecycleTaskRegistry.recordCreated(projectCwd, lifecycle.sessionId, lifecycle.task)
-  } else {
-    ctx.lifecycleTaskRegistry.recordCompleted(
-      projectCwd,
-      lifecycle.sessionId,
-      lifecycle.task.taskId
-    )
-  }
-  return { failOpen: false, payloadChanged: false }
-}
-
-async function prepareSessionLifecycleDispatch(
-  ctx: DispatchRoutesContext,
-  canonicalEvent: string,
-  payload: Record<string, unknown> | null
-): Promise<LifecycleTaskDispatchPreparation> {
-  if (!payload) return { failOpen: false, payloadChanged: false }
-  const sessionId = nonBlankString(payload.session_id)
-  const cwd = nonBlankString(payload.cwd)
-  if (!sessionId || !cwd) return { failOpen: false, payloadChanged: false }
-  const projectCwd = await registerProjectAndTouch(ctx, cwd)
-  if (!projectCwd) return { failOpen: false, payloadChanged: false }
-
-  if (canonicalEvent === "sessionEnd") {
-    ctx.lifecycleTaskRegistry.clearProjectSession(projectCwd, sessionId)
-    return { failOpen: false, payloadChanged: false }
-  }
-  if (canonicalEvent !== "stop") return { failOpen: false, payloadChanged: false }
-
-  const activeTasks = ctx.lifecycleTaskRegistry.listActive(projectCwd, sessionId)
-  if (activeTasks.length === 0) return { failOpen: false, payloadChanged: false }
-  payload[ACTIVE_LIFECYCLE_TASKS_PAYLOAD_KEY] = activeTasks
-  const advisory = formatLifecycleTaskAdvisory(activeTasks)
-  return {
-    failOpen: false,
-    payloadChanged: true,
-    ...(advisory ? { advisory } : {}),
-  }
-}
-
-export async function prepareLifecycleTaskDispatch(
-  ctx: DispatchRoutesContext,
-  canonicalEvent: string,
-  payload: Record<string, unknown> | null
-): Promise<LifecycleTaskDispatchPreparation> {
-  return isTaskLifecycleEvent(canonicalEvent)
-    ? prepareTaskLifecycleDispatch(ctx, canonicalEvent, payload)
-    : prepareSessionLifecycleDispatch(ctx, canonicalEvent, payload)
-}
-
-function mergeLifecycleStopAdvisory(
-  response: Record<string, any>,
-  advisory: string | undefined
-): void {
-  if (!advisory) return
-  const existingSystemMessage =
-    typeof response.systemMessage === "string" ? response.systemMessage.trim() : ""
-  if (!existingSystemMessage.includes(advisory)) {
-    response.systemMessage = existingSystemMessage
-      ? `${existingSystemMessage}\n\n${advisory}`
-      : advisory
-  }
-  if (response.reason === DEFAULT_STOP_DISPATCH_ALLOW_CONTEXT) {
-    response.reason = advisory
-    response.stopReason = advisory
-  }
 }
 
 function clientBootstrapDurationMs(payload: Record<string, unknown> | null): number | undefined {
@@ -675,7 +152,10 @@ function createDispatchMetricRecorder(options: {
     capture: captureMs,
     ...(cliBootstrapMs === undefined ? {} : { cliBootstrap: cliBootstrapMs }),
   }
+  let recorded = false
   return (result, projectMetrics, outcome, persistenceMs) => {
+    if (recorded) return
+    recorded = true
     const stages: DispatchStageDurations = {
       ...baseStages,
       ...(result?.timing.stages ?? {}),
@@ -745,7 +225,8 @@ function parseDaemonPayload(
 async function seedTaskStateAndCapturePayload(
   ctx: DispatchRoutesContext,
   hookEventName: string,
-  parsedPayload: Record<string, unknown>
+  parsedPayload: Record<string, unknown>,
+  signal: AbortSignal
 ): Promise<void> {
   try {
     const sessionId = typeof parsedPayload.session_id === "string" ? parsedPayload.session_id : null
@@ -756,8 +237,10 @@ async function seedTaskStateAndCapturePayload(
       const sessionTasksDir = sessionDirPath(sessionStoreKey(sessionId), tasksDir)
       ctx.taskStateCache.watchSession(sessionId, sessionTasksDir)
       const { seedSessionFromDisk } = await import("../../tasks/task-event-state.ts")
+      signal.throwIfAborted()
       await seedSessionFromDisk(sessionId, sessionTasksDir)
     }
+    signal.throwIfAborted()
     if (shouldCaptureIncomingPayloads()) {
       schedulePayloadJsonlAppend(hookEventName, parsedPayload as Record<string, any>)
     }
@@ -770,20 +253,24 @@ async function prepareDaemonDispatchPayload(
   req: Request,
   hookEventName: string,
   canonicalEvent: string,
-  ctx: DispatchRoutesContext
+  ctx: DispatchRoutesContext,
+  signal: AbortSignal
 ): Promise<PreparedDaemonDispatchPayload> {
   const payloadStr = await req.text()
+  signal.throwIfAborted()
   const { parsedPayload, dispatchIdAdded } = parseDaemonPayload(
     payloadStr,
     canonicalEvent,
     hookEventName
   )
-  if (parsedPayload) await seedTaskStateAndCapturePayload(ctx, hookEventName, parsedPayload)
+  if (parsedPayload) await seedTaskStateAndCapturePayload(ctx, hookEventName, parsedPayload, signal)
+  signal.throwIfAborted()
 
   const lifecyclePreparation = await prepareLifecycleTaskDispatch(
     ctx,
     canonicalEvent,
-    parsedPayload
+    parsedPayload,
+    signal
   )
   return {
     dispatchPayloadStr:
@@ -795,47 +282,35 @@ async function prepareDaemonDispatchPayload(
   }
 }
 
-const DISPATCH_TIMEOUT_SENTINEL = Symbol("dispatch-timeout")
-
 async function executeDaemonDispatch(options: {
   canonicalEvent: string
   ctx: DispatchRoutesContext
   dispatchPayloadStr: string
   hookEventName: string
-  requestTimeoutMs: number
-}): Promise<DispatchResult | typeof DISPATCH_TIMEOUT_SENTINEL> {
-  const { canonicalEvent, ctx, dispatchPayloadStr, hookEventName, requestTimeoutMs } = options
-  const requestAbort = new AbortController()
-  let timeoutId: ReturnType<typeof setTimeout> | undefined
-  const timeout = new Promise<typeof DISPATCH_TIMEOUT_SENTINEL>((resolve) => {
-    timeoutId = setTimeout(() => {
-      requestAbort.abort()
-      resolve(DISPATCH_TIMEOUT_SENTINEL)
-    }, requestTimeoutMs)
-  })
+  scope: DispatchRequestScope
+}): Promise<DispatchResult> {
+  const { canonicalEvent, ctx, dispatchPayloadStr, hookEventName, scope } = options
+  scope.signal.throwIfAborted()
+  const lifecycle = createDispatchLifecycleHandler(ctx, scope.signal)
   try {
-    return await Promise.race([
-      executeDispatch({
-        canonicalEvent,
-        hookEventName,
-        payloadStr: dispatchPayloadStr,
-        daemonContext: true,
-        signal: requestAbort.signal,
-        transcriptSummaryProvider: (transcriptPath) =>
-          ctx.transcriptIndex.getSummary(transcriptPath),
-        currentSessionToolUsageProvider: async (sessionId, transcriptPath) =>
-          getCurrentSessionToolUsageFromDaemon(ctx, sessionId, transcriptPath),
-        lastUserMessageAtProvider: (sessionId) =>
-          ctx.lastUserMessageCache.peek(sessionId)?.at ?? null,
-        disableTranscriptSummaryFallback: true,
-        manifestProvider: async (cwd) => ctx.manifestCache.get(cwd),
-        repositoryCapabilityProvider: async (cwd) => ctx.repositoryCapabilityCache.get(cwd),
-        onDispatchLifecycle: createDispatchLifecycleHandler(ctx),
-      }),
-      timeout,
-    ])
+    return await executeDispatch({
+      canonicalEvent,
+      hookEventName,
+      payloadStr: dispatchPayloadStr,
+      daemonContext: true,
+      signal: scope.signal,
+      transcriptSummaryProvider: (transcriptPath) => ctx.transcriptIndex.getSummary(transcriptPath),
+      currentSessionToolUsageProvider: async (sessionId, transcriptPath) =>
+        getCurrentSessionToolUsageFromDaemon(ctx, sessionId, transcriptPath, scope.signal),
+      lastUserMessageAtProvider: (sessionId) =>
+        ctx.lastUserMessageCache.peek(sessionId)?.at ?? null,
+      disableTranscriptSummaryFallback: true,
+      manifestProvider: async (cwd) => ctx.manifestCache.get(cwd),
+      repositoryCapabilityProvider: async (cwd) => ctx.repositoryCapabilityCache.get(cwd),
+      onDispatchLifecycle: lifecycle.onLifecycle,
+    })
   } finally {
-    if (timeoutId) clearTimeout(timeoutId)
+    lifecycle.dispose()
   }
 }
 
@@ -864,6 +339,7 @@ async function completeDaemonDispatch(options: {
   raceResult: DispatchResult
   recordCompletedDispatch: ReturnType<typeof createDispatchMetricRecorder>
   dispatchPayloadStr: string
+  scope: DispatchRequestScope
 }): Promise<Response> {
   const {
     canonicalEvent,
@@ -874,9 +350,17 @@ async function completeDaemonDispatch(options: {
     parsedPayload,
     raceResult,
     recordCompletedDispatch,
+    scope,
   } = options
   const persistenceStartedAt = performance.now()
-  const projectMetrics = await updateParsedPayloadMetrics(ctx, dispatchPayloadStr, canonicalEvent)
+  scope.signal.throwIfAborted()
+  const projectMetrics = await updateParsedPayloadMetrics(
+    ctx,
+    dispatchPayloadStr,
+    canonicalEvent,
+    scope
+  )
+  scope.signal.throwIfAborted()
 
   try {
     const response = parseValidatedAgentDispatchWireJson(
@@ -917,52 +401,63 @@ export async function handleDispatchRoute(
     return Response.json({ error: "Missing required query param: event" }, { status: 400 })
   }
   const fallbackRoute = DISPATCH_ROUTES[canonicalEvent] ?? "blocking"
-  const { dispatchPayloadStr, parsedPayload, lifecyclePreparation } =
-    await prepareDaemonDispatchPayload(req, hookEventName, canonicalEvent, ctx)
-  const recordCompletedDispatch = createDispatchMetricRecorder({
+  const requestTimeoutMs = daemonDispatchRequestTimeoutMs(canonicalEvent)
+  let recordCompletedDispatch = createDispatchMetricRecorder({
     ctx,
     canonicalEvent,
     fallbackRoute,
     requestStartedAt,
-    captureMs: performance.now() - requestStartedAt,
-    cliBootstrapMs: clientBootstrapDurationMs(parsedPayload),
+    captureMs: 0,
+    cliBootstrapMs: undefined,
   })
-
-  if (lifecyclePreparation.failOpen) {
-    const response = Response.json({})
-    recordCompletedDispatch(null, null, "success")
-    return response
-  }
-  const requestTimeoutMs = daemonDispatchRequestTimeoutMs(canonicalEvent)
-  let raceResult: DispatchResult | typeof DISPATCH_TIMEOUT_SENTINEL
   try {
-    raceResult = await executeDaemonDispatch({
-      canonicalEvent,
-      ctx,
-      dispatchPayloadStr,
-      hookEventName,
-      requestTimeoutMs,
+    const result = await withDispatchRequestScope(req.signal, requestTimeoutMs, async (scope) => {
+      const { dispatchPayloadStr, parsedPayload, lifecyclePreparation } =
+        await prepareDaemonDispatchPayload(req, hookEventName, canonicalEvent, ctx, scope.signal)
+      scope.signal.throwIfAborted()
+      recordCompletedDispatch = createDispatchMetricRecorder({
+        ctx,
+        canonicalEvent,
+        fallbackRoute,
+        requestStartedAt,
+        captureMs: performance.now() - requestStartedAt,
+        cliBootstrapMs: clientBootstrapDurationMs(parsedPayload),
+      })
+      if (lifecyclePreparation.failOpen) {
+        recordCompletedDispatch(null, null, "success")
+        return Response.json({})
+      }
+      const raceResult = await executeDaemonDispatch({
+        canonicalEvent,
+        ctx,
+        dispatchPayloadStr,
+        hookEventName,
+        scope,
+      })
+      return completeDaemonDispatch({
+        canonicalEvent,
+        ctx,
+        dispatchPayloadStr,
+        hookEventName,
+        lifecyclePreparation,
+        parsedPayload,
+        raceResult,
+        recordCompletedDispatch,
+        scope,
+      })
     })
-  } catch (error) {
-    const schemaResp = daemonDispatchSchemaFailureResponse(error)
+    if (result.kind === "completed") return result.value
+    if (result.kind === "timeout") {
+      return dispatchTimeoutResponse(canonicalEvent, requestTimeoutMs, recordCompletedDispatch)
+    }
     recordCompletedDispatch(null, null, "error")
+    return Response.json({ error: "Dispatch request cancelled" }, { status: 499 })
+  } catch (error) {
+    recordCompletedDispatch(null, null, "error")
+    const schemaResp = daemonDispatchSchemaFailureResponse(error)
     if (schemaResp) return schemaResp
     throw error
   }
-
-  if (raceResult === DISPATCH_TIMEOUT_SENTINEL) {
-    return dispatchTimeoutResponse(canonicalEvent, requestTimeoutMs, recordCompletedDispatch)
-  }
-  return completeDaemonDispatch({
-    canonicalEvent,
-    ctx,
-    dispatchPayloadStr,
-    hookEventName,
-    lifecyclePreparation,
-    parsedPayload,
-    raceResult,
-    recordCompletedDispatch,
-  })
 }
 
 export function handleDispatchActive(url: URL, ctx: DispatchRoutesContext): Response {

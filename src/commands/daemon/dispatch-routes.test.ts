@@ -45,8 +45,6 @@ const DISPATCH_CONTEXT_KEYS = [
   "registerProjectWatchers",
   "manifestCache",
   "repositoryCapabilityCache",
-  "resolveSnapshot",
-  "upstreamSyncRegistry",
   "transcriptIndex",
   "lastUserMessageCache",
   "taskStateCache",
@@ -104,10 +102,6 @@ function createDispatchContext(manifest: HookGroup[] = []): DispatchRoutesContex
         resolvedAt: Date.now(),
       }),
     } as unknown as DispatchRoutesContext["repositoryCapabilityCache"],
-    resolveSnapshot: async () => {
-      throw new Error("snapshot resolution is not expected in dispatch route tests")
-    },
-    upstreamSyncRegistry: {} as DispatchRoutesContext["upstreamSyncRegistry"],
     transcriptIndex: {
       get: async () => null,
     } as unknown as DispatchRoutesContext["transcriptIndex"],
@@ -181,6 +175,97 @@ describe("handleDispatchActive", () => {
 })
 
 describe("handleDispatchRoute", () => {
+  test("cancels response bookkeeping without recording late session activity", async () => {
+    const ctx = createDispatchContext()
+    let started!: () => void
+    const parsing = new Promise<void>((resolve) => {
+      started = resolve
+    })
+    let lateReply!: (value: {
+      sessionId: string
+      cwd: null
+      transcriptPath: null
+      toolName: null
+    }) => void
+    ctx.workerRuntime = new DaemonWorkerRuntime({
+      enabled: true,
+      transportFactory: () => ({
+        request: () => {
+          started()
+          return new Promise((resolve) => {
+            lateReply = resolve
+          })
+        },
+        close() {},
+      }),
+    })
+    const caller = new AbortController()
+    const url = new URL("http://daemon/dispatch?event=postCompact&hookEventName=PostCompact")
+    try {
+      const pending = handleDispatchRoute(
+        new Request(url, {
+          method: "POST",
+          body: JSON.stringify({ cwd: tmpdir(), session_id: "cancelled-completion" }),
+          signal: caller.signal,
+        }),
+        url,
+        ctx
+      )
+      await parsing
+      caller.abort()
+      expect((await pending).status).toBe(499)
+      lateReply({
+        sessionId: "cancelled-completion",
+        cwd: null,
+        transcriptPath: null,
+        toolName: null,
+      })
+      await Promise.resolve()
+      expect(ctx.sessionActivity.size).toBe(0)
+      expect(ctx.activeHookDispatches.size).toBe(0)
+      expect(serializeMetrics(ctx.globalMetrics).byEvent.postCompact).toMatchObject({
+        count: 1,
+        errorCount: 1,
+      })
+    } finally {
+      ctx.workerRuntime.close()
+    }
+  })
+
+  test("cancels a pending body before registering projects or executing hooks", async () => {
+    const ctx = createDispatchContext()
+    let registrations = 0
+    ctx.registerProjectWatchers = () => {
+      registrations++
+    }
+    const caller = new AbortController()
+    let body!: ReadableStreamDefaultController<Uint8Array>
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        body = controller
+      },
+    })
+    const url = new URL("http://daemon/dispatch?event=postCompact&hookEventName=PostCompact")
+    const pending = handleDispatchRoute(
+      new Request(url, {
+        method: "POST",
+        body: stream,
+        signal: caller.signal,
+      }),
+      url,
+      ctx
+    )
+    caller.abort()
+    expect((await pending).status).toBe(499)
+    body.enqueue(
+      new TextEncoder().encode(JSON.stringify({ cwd: tmpdir(), session_id: "late-body" }))
+    )
+    body.close()
+    await Promise.resolve()
+    expect(registrations).toBe(0)
+    expect(ctx.sessionActivity.size).toBe(0)
+  })
+
   test("confirmed no-op outcomes preserve complete divergence after a pending attempt", async () => {
     const ctx = createDispatchContext()
     const sessionId = `divergence-noop-${crypto.randomUUID()}`

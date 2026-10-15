@@ -1,84 +1,39 @@
-import { normalizeAgentHookPayload } from "../../dispatch/payload-normalize.ts"
+import {
+  PendingRequestRegistry,
+  RpcFailure,
+  type RpcScheduler,
+  validateRpcLimit,
+} from "./cache/worker-rpc.ts"
+import {
+  type DispatchPayloadWorkerRequest,
+  type DispatchPayloadWorkerResponse,
+  type NormalizedDispatchPayload,
+  parseDispatchPayload,
+} from "./dispatch-payload.ts"
 
-export interface NormalizedDispatchPayload {
-  cwd: string | null
-  sessionId: string | null
-  transcriptPath: string | null
-  toolName: string | null
-  toolInput?: Record<string, any>
-  /** Claude Code subagent id; present only when the hook fired inside a subagent (#962). */
-  agentId?: string | null
+export {
+  type DispatchPayloadWorkerRequest,
+  type DispatchPayloadWorkerResponse,
+  type NormalizedDispatchPayload,
+  normalizeParsedDispatchPayload,
+} from "./dispatch-payload.ts"
+
+export interface DispatchPayloadRequestOptions {
+  signal?: AbortSignal
+  /** Remaining caller budget; bounded by the runtime's own parse deadline. */
+  timeoutMs?: number
 }
-
-export interface DispatchPayloadWorkerRequest {
-  id: string
-  kind: "parse-dispatch-payload"
-  payloadStr: string
-}
-
-export type DispatchPayloadWorkerResponse =
-  | {
-      id: string
-      ok: true
-      payload: NormalizedDispatchPayload | null
-    }
-  | {
-      id: string
-      ok: false
-      error: string
-    }
 
 interface WorkerTransport {
-  request(payloadStr: string): Promise<NormalizedDispatchPayload | null>
+  request(payloadStr: string, signal?: AbortSignal): Promise<NormalizedDispatchPayload | null>
   close(): void
-}
-
-function stringField(parsed: Record<string, any>, snake: string, camel?: string): string | null {
-  const primary = parsed[snake]
-  if (typeof primary === "string") return primary
-  const fallback = camel ? parsed[camel] : undefined
-  return typeof fallback === "string" ? fallback : null
-}
-
-function objectField(
-  parsed: Record<string, any>,
-  snake: string,
-  camel: string
-): Record<string, any> | undefined {
-  const primary = parsed[snake]
-  if (primary && typeof primary === "object") return primary as Record<string, any>
-  const fallback = parsed[camel]
-  return fallback && typeof fallback === "object" ? (fallback as Record<string, any>) : undefined
-}
-
-function parseDispatchPayloadInThread(payloadStr: string): NormalizedDispatchPayload | null {
-  let parsed: Record<string, any>
-  try {
-    parsed = JSON.parse(payloadStr) as Record<string, any>
-  } catch {
-    return null
-  }
-  return normalizeParsedDispatchPayload(parsed)
-}
-
-/** Shared by the in-thread path and the hot-path worker so both read the same fields. */
-export function normalizeParsedDispatchPayload(
-  parsed: Record<string, any>
-): NormalizedDispatchPayload {
-  normalizeAgentHookPayload(parsed)
-  return {
-    cwd: stringField(parsed, "cwd"),
-    sessionId: stringField(parsed, "session_id"),
-    transcriptPath: stringField(parsed, "transcript_path"),
-    toolName: stringField(parsed, "tool_name", "toolName"),
-    toolInput: objectField(parsed, "tool_input", "toolInput"),
-    agentId: stringField(parsed, "agent_id"),
-  }
 }
 
 class BunWorkerTransport implements WorkerTransport {
   private worker: Worker
   private requestId = 0
+  private closed = false
+  /** Wire correlation only; the runtime registry owns capacity and deadlines. */
   private pending = new Map<
     string,
     {
@@ -93,17 +48,15 @@ class BunWorkerTransport implements WorkerTransport {
       const msg = event.data
       const pending = this.pending.get(msg.id)
       if (!pending) return
-      this.pending.delete(msg.id)
       if (msg.ok) pending.resolve(msg.payload)
-      else pending.reject(new Error(msg.error))
+      else pending.reject(new RpcFailure("REMOTE", msg.error))
     }
-    this.worker.onerror = (event) => {
-      const err = event.error ?? new Error(event.message)
-      this.failAll(err)
-    }
+    this.worker.onerror = () => this.failAll(new RpcFailure("WORKER_EXIT"))
   }
 
-  request(payloadStr: string): Promise<NormalizedDispatchPayload | null> {
+  request(payloadStr: string, signal?: AbortSignal): Promise<NormalizedDispatchPayload | null> {
+    if (this.closed) return Promise.reject(new RpcFailure("CLOSED"))
+    if (signal?.aborted) return Promise.reject(new RpcFailure("ABORTED"))
     const id = String(++this.requestId)
     const req: DispatchPayloadWorkerRequest = {
       id,
@@ -111,94 +64,163 @@ class BunWorkerTransport implements WorkerTransport {
       payloadStr,
     }
     return new Promise((resolve, reject) => {
-      this.pending.set(id, { resolve, reject })
+      const cleanup = () => {
+        this.pending.delete(id)
+        signal?.removeEventListener("abort", abort)
+      }
+      const abort = () => {
+        cleanup()
+        reject(new RpcFailure("ABORTED"))
+      }
+      this.pending.set(id, {
+        resolve: (value) => {
+          cleanup()
+          resolve(value)
+        },
+        reject: (error) => {
+          cleanup()
+          reject(error)
+        },
+      })
+      signal?.addEventListener("abort", abort, { once: true })
       try {
         this.worker.postMessage(req)
       } catch (error) {
-        this.pending.delete(id)
-        reject(error)
+        this.pending.get(id)?.reject(error)
       }
     })
   }
 
   close(): void {
-    this.failAll(new Error("worker closed"))
+    if (this.closed) return
+    this.closed = true
+    this.failAll(new RpcFailure("CLOSED"))
     this.worker.terminate()
   }
 
   private failAll(error: unknown): void {
     for (const { reject } of this.pending.values()) reject(error)
-    this.pending.clear()
   }
+}
+
+interface TransportGeneration {
+  transport: WorkerTransport
+  requests: PendingRequestRegistry
 }
 
 function hotPathWorkersEnabled(): boolean {
   return process.env.SWIZ_DAEMON_WORKER_HOTPATH !== "0"
 }
 
-/**
- * Worker-backed helper for daemon hot-path compute work.
- *
- * Bun Worker termination is still marked experimental, so this runtime keeps
- * a fallback path in-process and always degrades safely if worker startup or
- * messaging fails.
- */
+/** Worker-backed payload parsing with bounded waits and local recovery. */
 export class DaemonWorkerRuntime {
-  private transport: WorkerTransport | null = null
+  private generation: TransportGeneration | null = null
+  private closed = false
   private readonly enabled: boolean
   private readonly transportFactory: () => WorkerTransport
+  private readonly defaultTimeoutMs: number
+  private readonly maxPending: number
+  private readonly schedule?: RpcScheduler
 
   constructor(
     opts: {
       enabled?: boolean
       transportFactory?: () => WorkerTransport
+      defaultTimeoutMs?: number
+      maxPending?: number
+      schedule?: RpcScheduler
     } = {}
   ) {
     this.enabled = opts.enabled ?? hotPathWorkersEnabled()
+    this.defaultTimeoutMs = validateRpcLimit(opts.defaultTimeoutMs ?? 1_000)
+    this.maxPending = validateRpcLimit(opts.maxPending ?? 128)
+    this.schedule = opts.schedule
     this.transportFactory =
       opts.transportFactory ??
       (() => new BunWorkerTransport(new URL("./hotpath-worker.ts", import.meta.url)))
   }
 
-  async parseDispatchPayload(payloadStr: string): Promise<NormalizedDispatchPayload | null> {
-    if (!this.enabled) return this.tryParseInThread(payloadStr)
+  async parseDispatchPayload(
+    payloadStr: string,
+    options: DispatchPayloadRequestOptions = {}
+  ): Promise<NormalizedDispatchPayload | null> {
+    const timeoutMs = this.resolveRequestBudget(options)
+    if (timeoutMs === null) return null
+    if (!this.enabled) return parseDispatchPayload(payloadStr)
 
-    const transport = this.ensureTransport()
-    if (!transport) return this.tryParseInThread(payloadStr)
-
+    const generation = this.ensureTransport()
+    if (!generation) return parseDispatchPayload(payloadStr)
+    const { transport, requests } = generation
+    const transportAbort = new AbortController()
     try {
-      return await transport.request(payloadStr)
-    } catch {
-      this.closeTransport()
-      return this.tryParseInThread(payloadStr)
+      return await requests.request<NormalizedDispatchPayload | null>(
+        (id) => {
+          void transport.request(payloadStr, transportAbort.signal).then(
+            (payload) => requests.resolve(id, payload),
+            () => requests.reject(id, new RpcFailure("REMOTE"))
+          )
+        },
+        { signal: options.signal, timeoutMs, label: "parse-dispatch-payload" }
+      )
+    } catch (error) {
+      return this.recoverPayload(error, generation, payloadStr, options.signal)
+    } finally {
+      transportAbort.abort()
     }
+  }
+
+  private resolveRequestBudget(options: DispatchPayloadRequestOptions): number | null {
+    if (this.closed || options.signal?.aborted || (options.timeoutMs ?? 1) <= 0) return null
+    return Math.max(
+      1,
+      Math.floor(Math.min(this.defaultTimeoutMs, options.timeoutMs ?? this.defaultTimeoutMs))
+    )
+  }
+
+  private recoverPayload(
+    error: unknown,
+    generation: TransportGeneration,
+    payloadStr: string,
+    signal?: AbortSignal
+  ): NormalizedDispatchPayload | null {
+    if (this.closed || signal?.aborted) return null
+    if (!(error instanceof RpcFailure) || !["CAPACITY", "CLOSED"].includes(error.code)) {
+      this.closeTransport(generation)
+    }
+    return parseDispatchPayload(payloadStr)
   }
 
   close(): void {
-    this.closeTransport()
+    this.closed = true
+    if (this.generation) this.closeTransport(this.generation)
   }
 
-  private ensureTransport(): WorkerTransport | null {
-    if (this.transport) return this.transport
+  private ensureTransport(): TransportGeneration | null {
+    if (this.generation) return this.generation
     try {
-      this.transport = this.transportFactory()
-      return this.transport
+      this.generation = {
+        transport: this.transportFactory(),
+        requests: new PendingRequestRegistry({
+          defaultTimeoutMs: this.defaultTimeoutMs,
+          maxPending: this.maxPending,
+          schedule: this.schedule,
+        }),
+      }
+      return this.generation
     } catch {
-      this.transport = null
       return null
     }
   }
 
-  private closeTransport(): void {
-    this.transport?.close()
-    this.transport = null
-  }
-
-  private tryParseInThread(payloadStr: string): NormalizedDispatchPayload | null {
+  private closeTransport(generation: TransportGeneration): void {
+    if (this.generation !== generation) return
+    // Detach before settling requests: recovery can create a new generation.
+    this.generation = null
+    generation.requests.close()
     try {
-      return parseDispatchPayloadInThread(payloadStr)
+      generation.transport.close()
     } catch {
-      return null
+      // A broken transport must not prevent settlement or local recovery.
     }
   }
 }

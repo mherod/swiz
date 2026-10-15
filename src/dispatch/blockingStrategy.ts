@@ -5,7 +5,7 @@ import { readStopActions, type StopFinding, selectStopAction } from "../stop-act
 import { mergeHookSpecificOutputClone } from "../utils/hook-specific-output.ts"
 import { orderHookContexts } from "./context-order.ts"
 import { coerceDispatchAgentEnvelopeInPlace } from "./dispatch-zod-surfaces.ts"
-import { extractContext, type HookExecution, isBlock, log, writeResponse } from "./engine.ts"
+import { extractContext, type HookExecution, isBlock, log } from "./engine.ts"
 import type { EnrichedDispatchPayload } from "./execute.ts"
 import { normalizeStopDispatchResponseInPlace } from "./stop-response.ts"
 import {
@@ -369,7 +369,6 @@ async function checkPostToolUseSkillSkip(
         ctx.hookEventName,
         ctx.agentId
       )
-      writeResponse(response)
       return { shortCircuit: response }
     }
     return { updatedCtx: { ...ctx, filteredGroups: sideEffectGroups } }
@@ -387,7 +386,6 @@ async function checkOnSessionStopShortCircuit(
   const response: Record<string, any> = {}
   normalizeStopDispatchResponseInPlace(response, ctx.hookEventName)
   coerceDispatchAgentEnvelopeInPlace(response, ctx.canonicalEvent, ctx.hookEventName, ctx.agentId)
-  writeResponse(response)
   return response
 }
 

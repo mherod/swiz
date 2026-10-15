@@ -122,6 +122,145 @@ describe("UpstreamSyncRegistry fork entries", () => {
 })
 
 describe("UpstreamSyncRegistry lifecycle", () => {
+  test("unregister cancels an unfinished slug lookup and permits immediate reactivation", async () => {
+    const started = deferred()
+    const release = deferred()
+    let lookups = 0
+    const registry = new UpstreamSyncRegistry({
+      intervalMs: 60_000,
+      resolveSlug: async () => {
+        if (++lookups === 1) {
+          started.resolve()
+          await release.promise
+          return "owner/old"
+        }
+        return "owner/new"
+      },
+      resolveFork: async () => null,
+    })
+    try {
+      const oldRegistration = registry.register("/virtual/repo")
+      await started.promise
+      expect(registry.unregister("/virtual/repo")).toBe(true)
+      expect(await oldRegistration).toEqual({ deduped: false, registered: false })
+      expect(await registry.register("/virtual/repo")).toEqual({ deduped: false, registered: true })
+      release.resolve()
+      await Bun.sleep(0)
+      expect(registry.listActive().map((entry) => entry.repo)).toEqual(["owner/new"])
+    } finally {
+      release.resolve()
+      registry.close()
+    }
+  })
+
+  test.each([
+    "unregister",
+    "close",
+  ] as const)("%s prevents a held fork lookup from recreating an upstream entry", async (operation) => {
+    const started = deferred()
+    const release = deferred()
+    const registry = new UpstreamSyncRegistry({
+      intervalMs: 60_000,
+      resolveSlug: async () => "owner/fork",
+      resolveFork: async () => {
+        started.resolve()
+        await release.promise
+        return { upstreamSlug: "org/upstream" }
+      },
+    })
+    try {
+      const registration = registry.register("/virtual/fork")
+      await started.promise
+      expect(registry.listActive()).toHaveLength(1)
+      if (operation === "close") registry.close()
+      else expect(registry.unregister("/virtual/fork")).toBe(true)
+      expect(await registration).toEqual({ deduped: false, registered: false })
+      release.resolve()
+      await Bun.sleep(0)
+      expect(registry.listActive()).toEqual([])
+    } finally {
+      release.resolve()
+      registry.close()
+    }
+  })
+
+  test("close settles a held slug lookup and makes later registration inert", async () => {
+    const started = deferred()
+    const release = deferred()
+    let lookups = 0
+    const registry = new UpstreamSyncRegistry({
+      resolveSlug: async () => {
+        lookups++
+        started.resolve()
+        await release.promise
+        return "owner/repo"
+      },
+      resolveFork: async () => null,
+    })
+    try {
+      const registration = registry.register("/virtual/repo")
+      await started.promise
+      registry.close()
+      expect((await registration).registered).toBe(false)
+      expect((await registry.register("/virtual/repo")).registered).toBe(false)
+      release.resolve()
+      await Bun.sleep(0)
+      expect(lookups).toBe(1)
+      expect(registry.listActive()).toEqual([])
+    } finally {
+      release.resolve()
+      registry.close()
+    }
+  })
+
+  test.each([
+    "unregister",
+    "close",
+  ] as const)("%s cancels registration before asynchronous identity resolution completes", async (operation) => {
+    let lookups = 0
+    const registry = new UpstreamSyncRegistry({
+      resolveSlug: async () => {
+        lookups++
+        return "owner/repo"
+      },
+      resolveFork: async () => null,
+    })
+    try {
+      const registration = registry.register("/virtual/repo")
+      if (operation === "close") registry.close()
+      else expect(registry.unregister("/virtual/repo")).toBe(true)
+      expect((await registration).registered).toBe(false)
+      expect(lookups).toBe(0)
+      expect(registry.listActive()).toEqual([])
+    } finally {
+      registry.close()
+    }
+  })
+
+  test("an owner abort cancels an unfinished fork registration", async () => {
+    const started = deferred()
+    const release = deferred()
+    const owner = new AbortController()
+    const registry = new UpstreamSyncRegistry({
+      resolveSlug: async () => "owner/fork",
+      resolveFork: async () => {
+        started.resolve()
+        await release.promise
+        return { upstreamSlug: "org/upstream" }
+      },
+    })
+    try {
+      const registration = registry.register("/virtual/fork", owner.signal)
+      await started.promise
+      owner.abort()
+      expect((await registration).registered).toBe(false)
+      expect(registry.listActive()).toEqual([])
+    } finally {
+      release.resolve()
+      registry.close()
+    }
+  })
+
   test("aborts timed-out sync, resets syncing, and permits next interval without overlap", async () => {
     let syncCalls = 0
     let activeSyncs = 0
@@ -534,6 +673,35 @@ function createRegistry(store: IssueStore): UpstreamSyncRegistry {
 }
 
 describe("UpstreamSyncRegistry project identity", () => {
+  test("an alias cancels a pending registration without cancelling a sibling project", async () => {
+    const fixture = await createProjectFixture()
+    const started = deferred()
+    const release = deferred()
+    const registry = new UpstreamSyncRegistry({
+      intervalMs: 60_000,
+      resolveSlug: async () => {
+        started.resolve()
+        await release.promise
+        return "owner/repo"
+      },
+      resolveFork: async () => null,
+    })
+    try {
+      const registration = registry.register(fixture.nested)
+      await started.promise
+      expect(registry.unregister(fixture.sibling)).toBe(false)
+      expect(registry.unregister(fixture.alias)).toBe(true)
+      expect((await registration).registered).toBe(false)
+      release.resolve()
+      await Bun.sleep(0)
+      expect(registry.listActive()).toEqual([])
+    } finally {
+      release.resolve()
+      registry.close()
+      await fixture.cleanup()
+    }
+  })
+
   test("collapses trailing-slash, subdirectory, and symlink cwds onto one entry", async () => {
     const fixture = await createProjectFixture()
     const store = new IssueStore(":memory:")

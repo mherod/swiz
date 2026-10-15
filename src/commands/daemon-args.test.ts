@@ -1,6 +1,11 @@
 import { describe, expect, it } from "bun:test"
 import { join } from "node:path"
+import { useTempDir } from "../utils/test-utils.ts"
 import { normalizeDaemonArgs, validateDaemonArgs } from "./daemon.ts"
+
+// PROCESS_CONTRACT_TEST: a daemon started on an occupied port exits non-zero with a startup diagnostic.
+const temp = useTempDir("swiz-daemon-startup-")
+const indexPath = join(process.cwd(), "index.ts")
 
 describe("validateDaemonArgs", () => {
   it("accepts every documented flag", () => {
@@ -39,16 +44,15 @@ describe("validateDaemonArgs", () => {
 
 describe("daemon startup failure", () => {
   it("exits non-zero instead of idling when the port is taken", async () => {
+    const cwd = await temp.create()
     const blocker = Bun.serve({ port: 0, fetch: () => new Response("x") })
     try {
-      const proc = Bun.spawn(
-        ["bun", join(process.cwd(), "index.ts"), "daemon", "--port", String(blocker.port)],
-        {
-          env: { ...process.env, SWIZ_DIRECT: "1", AI_TEST_NO_BACKEND: "1" },
-          stdout: "pipe",
-          stderr: "pipe",
-        }
-      )
+      const proc = Bun.spawn(["bun", indexPath, "daemon", "--port", String(blocker.port)], {
+        cwd,
+        env: { ...process.env, HOME: cwd, SWIZ_DIRECT: "1", AI_TEST_NO_BACKEND: "1" },
+        stdout: "pipe",
+        stderr: "pipe",
+      })
       const timer = setTimeout(() => proc.kill(), 30_000)
       const [, stderr] = await Promise.all([
         new Response(proc.stdout).text(),
