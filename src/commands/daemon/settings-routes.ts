@@ -10,6 +10,7 @@ import {
 } from "../../settings.ts"
 import { registerProjectAndTouch } from "./route-helpers.ts"
 import type { ManifestCache, ProjectSettingsCache } from "./runtime-cache.ts"
+import { handleScopedSettingsRoutes } from "./scoped-settings-routes.ts"
 
 export interface SettingsRoutesContext {
   touchProject: (cwd: string) => void
@@ -190,6 +191,8 @@ export async function handleSettingsRoutes(
   url: URL,
   ctx: SettingsRoutesContext
 ): Promise<Response | null> {
+  const scopedResponse = await handleScopedSettingsRoutes(req, url, ctx)
+  if (scopedResponse) return scopedResponse
   if (url.pathname === "/settings/global" && req.method === "GET") {
     return Response.json({ settings: await readSwizSettings() })
   }
