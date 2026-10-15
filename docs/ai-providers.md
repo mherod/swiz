@@ -25,7 +25,7 @@ Resolution runs in priority order on every call:
 ```
 1. options.provider (explicit per-call override)
 2. AI_PROVIDER env var ("gemini" | "claude" | "openrouter" | "codex")
-3. Auto-select: OpenRouter → Claude Code → Gemini → Codex CLI
+3. Auto-select: Codex CLI → OpenRouter → Claude Code → Gemini
 ```
 
 `activeProvider(override?)` in `src/ai-providers.ts` implements this. It throws an error (with a descriptive message) if an explicit override requests a provider that is not currently available.
@@ -51,7 +51,7 @@ swiz reflect --provider codex
 AI_PROVIDER=codex swiz continue --print
 ```
 
-Per-call `model` / supported `--model` flags take precedence over `CODEX_MODEL`, then `gpt-6-sol`. Codex is the final automatic fallback, preserving the existing provider priority; an explicit selection does not fall back to another provider.
+Per-call `model` / supported `--model` flags take precedence over `CODEX_MODEL`, then `gpt-6-sol`. Codex is the default when installed. If unavailable or generation fails, automatic selection falls back to OpenRouter, Claude Code, then Gemini, skipping unavailable providers. An explicit selection does not fall back to another provider.
 
 Each prompt runs the resolved PATH executable in read-only mode with approval policy `never`. Package-manager fallback is disabled. The adapter uses the existing timeout/abort handling and supplies native JSON Schema for `promptObject`, followed by Zod validation. Exec-mode streaming delivers completed messages rather than incremental tokens. `continue --provider codex` selects the suggestion backend; it does not change the command's Claude session-resumption behavior.
 

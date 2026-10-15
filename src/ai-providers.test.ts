@@ -68,8 +68,11 @@ describe("activeProvider", () => {
     delete process.env.AI_TEST_NO_BACKEND
     delete process.env.OPENROUTER_API_KEY
     process.env.GEMINI_API_KEY = "test-key"
-    // OpenRouter > Claude > Gemini in auto-select priority
-    if (!Bun.which("claude")) {
+    delete process.env.AI_PROVIDER
+    // Codex > OpenRouter > Claude > Gemini in auto-select priority
+    if (Bun.which("codex")) {
+      expect(activeProvider()).toBe("codex")
+    } else if (!Bun.which("claude")) {
       expect(activeProvider()).toBe("gemini")
     } else {
       expect(activeProvider()).toBe("claude")

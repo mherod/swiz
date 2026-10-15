@@ -1,15 +1,15 @@
 // Unified AI provider layer built on AI SDK v7.
 //
 // Dispatches text/stream/object generation to whichever provider is available:
-//   1. OpenRouter (via OPENROUTER_API_KEY)
-//   2. Claude Code (via claude CLI in PATH)
-//   3. Gemini (via GEMINI_API_KEY or gemini CLI OAuth)
-//   4. Codex (via codex CLI in PATH)
+//   1. Codex (via codex CLI in PATH)
+//   2. OpenRouter (via OPENROUTER_API_KEY)
+//   3. Claude Code (via claude CLI in PATH)
+//   4. Gemini (via GEMINI_API_KEY or gemini CLI OAuth)
 //
 // Provider override (highest to lowest precedence):
 //   1. options.provider passed to each prompt function
 //   2. AI_PROVIDER env var ("gemini" | "claude" | "openrouter" | "codex")
-//   3. Auto-select: OpenRouter, Claude Code, Gemini, then Codex
+//   3. Auto-select: Codex, OpenRouter, Claude Code, then Gemini
 //
 // Usage:
 //   import { hasAiProvider, promptText, promptStreamText, promptObject } from "./ai-providers.ts"
@@ -291,7 +291,7 @@ export function hasAiProvider(): boolean {
  * Resolution order (highest to lowest precedence):
  *   1. `override` argument (from options.provider or CLI --provider flag)
  *   2. AI_PROVIDER env var ("gemini" | "claude" | "openrouter" | "codex")
- *   3. Auto-select: OpenRouter, Claude Code, Gemini, then Codex
+ *   3. Auto-select: Codex, OpenRouter, Claude Code, then Gemini
  *
  * Throws if an explicit override requests a provider that is not available.
  */
@@ -347,17 +347,17 @@ export function activeProvider(override?: AiProviderId): AiProviderId | null {
   }
 
   // Auto-select
+  if (hasCodexCli()) return "codex"
   if (hasOpenRouterApiKey()) return "openrouter"
   if (hasClaudeCode()) return "claude"
   if (hasGeminiApiKey()) return "gemini"
-  if (hasCodexCli()) return "codex"
   return null
 }
 
 // ─── Provider fallback ────────────────────────────────────────────────────────
 
 /**
- * Returns available provider IDs in priority order (OpenRouter → Claude Code → Gemini → Codex).
+ * Returns available provider IDs in priority order (Codex → OpenRouter → Claude Code → Gemini).
  * When an explicit override is set (options.provider or AI_PROVIDER env), returns only that provider.
  */
 function availableProviders(override?: AiProviderId): AiProviderId[] {
@@ -372,10 +372,10 @@ function availableProviders(override?: AiProviderId): AiProviderId[] {
 
   // Auto-select: return all available providers in priority order
   const providers: AiProviderId[] = []
+  if (hasCodexCli()) providers.push("codex")
   if (hasOpenRouterApiKey()) providers.push("openrouter")
   if (hasClaudeCode()) providers.push("claude")
   if (hasGeminiApiKey()) providers.push("gemini")
-  if (hasCodexCli()) providers.push("codex")
   return providers
 }
 
@@ -383,7 +383,7 @@ function availableProviders(override?: AiProviderId): AiProviderId[] {
 
 /**
  * Send a single-turn prompt and return the trimmed text response.
- * Dispatches to available provider based on priority (OpenRouter → Claude → Gemini → Codex).
+ * Dispatches to available provider based on priority (Codex → OpenRouter → Claude → Gemini).
  * Throws if no provider is available or the request fails.
  */
 export async function promptText(prompt: string, options?: PromptOptions): Promise<string> {
@@ -464,7 +464,7 @@ async function handleTestFixturesStreamText(
 /**
  * Send a single-turn prompt and stream text deltas through `onTextPart`.
  * Returns the complete trimmed text when the stream ends.
- * Dispatches to available provider based on priority (OpenRouter → Claude → Gemini → Codex).
+ * Dispatches to available provider based on priority (Codex → OpenRouter → Claude → Gemini).
  */
 export async function promptStreamText(
   prompt: string,
@@ -518,7 +518,7 @@ async function handleTestFixturesObject<T>(
 
 /**
  * Send a single-turn prompt and return a structured object validated against the Zod schema.
- * Dispatches to available provider based on priority (OpenRouter → Claude → Gemini → Codex).
+ * Dispatches to available provider based on priority (Codex → OpenRouter → Claude → Gemini).
  * Throws if no provider is available, the request fails, or validation fails.
  */
 export async function promptObject<T>(

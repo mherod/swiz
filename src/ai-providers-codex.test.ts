@@ -165,7 +165,7 @@ test("Codex reports CLI failures without selecting another explicit provider", a
   expect(result.requests).toBe(0)
 })
 
-test("automatic selection preserves OpenRouter priority and falls back to Codex", async () => {
+test("automatic selection prefers Codex even when OpenRouter is configured", async () => {
   const f = await fixture()
   expect(
     await run(
@@ -175,7 +175,25 @@ test("automatic selection preserves OpenRouter priority and falls back to Codex"
         OPENROUTER_API_KEY: "test-key",
       }
     )
-  ).toEqual({ provider: "openrouter", text: "compatible", requests: 1 })
+  ).toEqual({ provider: "codex", text: "compatible", requests: 0 })
+})
+
+test.each([
+  "failed",
+  "missing",
+])("automatic selection falls back to OpenRouter when Codex is %s", async (mode) => {
+  const f = await fixture()
+  expect(
+    await run(
+      f,
+      `let requests = 0; globalThis.fetch = async () => { requests++; return Response.json({id: "fallback", model: "openrouter/auto", created: 0, choices: [{index: 0, finish_reason: "stop", message: {role: "assistant", content: "fallback"}}], usage: {prompt_tokens: 3, completion_tokens: 2, total_tokens: 5}}); }; const provider = activeProvider(); const text = await promptText("hello"); console.log(JSON.stringify({provider, text, requests}));`,
+      {
+        OPENROUTER_API_KEY: "test-key",
+        ...(mode === "failed" ? { CODEX_STUB_MODE: "fail" } : { PATH: f.cwd }),
+      }
+    )
+  ).toEqual({ provider: mode === "failed" ? "codex" : "openrouter", text: "fallback", requests: 1 })
+  expect(await Bun.file(f.capture).exists()).toBe(mode === "failed")
 })
 
 test("Codex generation honors the timeout signal", async () => {
