@@ -194,6 +194,16 @@ After the idea latency fix (same day, same models and 15-second deadlines):
 
 All six finished successfully, including process startup/shutdown. A second fresh idea sample also passed: Claude 11.926s, Codex 13.591s. This is a small live sample, not a latency guarantee. Codex's idea proposed visible provider fallback attribution; Claude proposed hook health diagnostics. The shorter README excerpt limits project coverage, so proposals still need review against existing features.
 
+After the defaults shipped in `17d80edb`, a fresh comparison omitted all CLI/API timeout overrides and the outer subprocess timeout:
+
+| Operation | Claude | Codex |
+|---|---|---|
+| Idea | 12.757s, validated JSON | 14.671s, validated JSON |
+| Auto-reply | 4.953s | 4.123s |
+| Steering | 2.688s, model response | 4.212s, model response |
+
+All six succeeded with empty stderr. Fresh steering cache entries confirmed model generation. No messages were scheduled or sent. Codex idea had only 0.329s of wall-clock margin; these results verify the defaults on this sample without establishing a latency guarantee.
+
 ---
 
 ## Test Seams
