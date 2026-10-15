@@ -250,6 +250,7 @@ async function runTaskCreateTool(input: McpToolInput, cwd: string): Promise<McpT
   try {
     validateTaskSubject(input.subject)
     const projectKey = projectKeyFromCwd(cwd)
+    const activeForm = typeof input.activeForm === "string" ? input.activeForm : undefined
     const existingTasks = await readTaskStore(projectStoreKey(cwd))
     const deadline =
       input.deadline === undefined
@@ -261,7 +262,7 @@ async function runTaskCreateTool(input: McpToolInput, cwd: string): Promise<McpT
               {
                 subject: input.subject,
                 description: input.description,
-                ...(typeof input.activeForm === "string" ? { activeForm: input.activeForm } : {}),
+                activeForm,
               },
               () => validateTaskCollision(input.subject as string, existingTasks)
             )
@@ -271,7 +272,7 @@ async function runTaskCreateTool(input: McpToolInput, cwd: string): Promise<McpT
       storeKey: projectStoreKey(cwd),
       subject: input.subject,
       description: input.description,
-      ...(typeof input.activeForm === "string" ? { activeForm: input.activeForm } : {}),
+      activeForm,
       ...(deadline ? { deadlineId: deadline.id } : {}),
       cwd,
     })
