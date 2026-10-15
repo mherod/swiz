@@ -61,6 +61,8 @@ export interface Task {
   subject: string
   description: string
   activeForm?: string
+  /** Stable reference to the shared deadline store; task timing never resets it. */
+  deadlineId?: string
   status: TaskStatus
   blocks: string[]
   blockedBy: string[]
@@ -103,6 +105,7 @@ export interface AuditEntry {
   subject?: string
   /** Stable operation key used to make a retried batch's audit append idempotent. */
   operationId?: string
+  deadlineId?: string
 }
 
 export const STATUS_STYLE: Record<TaskStatus, { emoji: string; color: string }> = {
@@ -163,6 +166,7 @@ async function recoverTaskFromAuditLog(dir: string, taskId: string): Promise<Tas
 
     let lastStatus: Task["status"] = "pending"
     let lastSubject = ""
+    let deadlineId: string | undefined
     let found = false
 
     for (const line of lines) {
@@ -172,6 +176,7 @@ async function recoverTaskFromAuditLog(dir: string, taskId: string): Promise<Tas
         found = true
         if (entry.newStatus) lastStatus = entry.newStatus
         if (entry.subject) lastSubject = entry.subject
+        if (entry.deadlineId) deadlineId = entry.deadlineId
       } catch {
         // skip malformed audit lines
       }
@@ -183,6 +188,7 @@ async function recoverTaskFromAuditLog(dir: string, taskId: string): Promise<Tas
       id: taskId,
       subject: lastSubject || `Recovered task ${taskId}`,
       description: `Recovered from audit log — original task file was unreadable.`,
+      deadlineId,
       status: lastStatus,
       blocks: [],
       blockedBy: [],

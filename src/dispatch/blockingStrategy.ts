@@ -4,6 +4,7 @@ import type { HookOutput } from "../schemas.ts"
 import { readStopActions, type StopFinding, selectStopAction } from "../stop-actions.ts"
 import { mergeHookSpecificOutputClone } from "../utils/hook-specific-output.ts"
 import { orderHookContexts } from "./context-order.ts"
+import { injectDeadlinePayloadContext } from "./deadline-context.ts"
 import { coerceDispatchAgentEnvelopeInPlace } from "./dispatch-zod-surfaces.ts"
 import { extractContext, type HookExecution, isBlock, log } from "./engine.ts"
 import type { EnrichedDispatchPayload } from "./execute.ts"
@@ -363,6 +364,12 @@ async function checkPostToolUseSkillSkip(
     )
     if (sideEffectGroups.length === 0) {
       const response: Record<string, any> = {}
+      await injectDeadlinePayloadContext(
+        response,
+        ctx.canonicalEvent,
+        ctx.hookEventName,
+        ctx.enrichedPayloadStr
+      )
       coerceDispatchAgentEnvelopeInPlace(
         response,
         ctx.canonicalEvent,

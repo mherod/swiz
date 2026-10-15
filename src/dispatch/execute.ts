@@ -37,6 +37,7 @@ import {
   releaseDispatchSessionLines,
   type TranscriptSummary,
 } from "../transcript-summary.ts"
+import { injectDeadlineContext } from "./deadline-context.ts"
 import { dispatchToolUseId, ensureDispatchId } from "./dispatch-id.ts"
 import {
   assertDispatchInboundNotParseError,
@@ -946,6 +947,21 @@ function buildFilteredSkipResponse(ctx: DispatchContext): Record<string, any> {
   return response
 }
 
+async function decorateSkippedDeadline(
+  response: Record<string, any>,
+  ctx: DispatchContext
+): Promise<void> {
+  const injected = await injectDeadlineContext(
+    response,
+    ctx.canonicalEvent,
+    ctx.hookEventName,
+    ctx.payload
+  )
+  if (!injected && !response.systemMessage) return
+  if (!["preToolUse", "postToolUse", "postToolUseFailure"].includes(ctx.canonicalEvent)) return
+  coerceDispatchAgentEnvelopeInPlace(response, ctx.canonicalEvent, ctx.hookEventName, ctx.agentId)
+}
+
 async function performDispatch(req: DispatchRequest): Promise<DispatchResult> {
   const signal = req.signal ?? new AbortController().signal
   const notifyLifecycle = req.onDispatchLifecycle ?? (() => {})
@@ -969,6 +985,7 @@ async function performDispatch(req: DispatchRequest): Promise<DispatchResult> {
   const earlySkip = await checkEarlyDispatchSkips(ctx)
   signal.throwIfAborted()
   if (earlySkip) {
+    await decorateSkippedDeadline(earlySkip, ctx)
     assertDispatchResponseMatchesWire(earlySkip, ctx.canonicalEvent, ctx.hookEventName, ctx.agentId)
     return result(earlySkip)
   }
@@ -982,6 +999,7 @@ async function performDispatch(req: DispatchRequest): Promise<DispatchResult> {
   signal.throwIfAborted()
   if (!filteredGroups) {
     const response = buildFilteredSkipResponse(ctx)
+    await decorateSkippedDeadline(response, ctx)
     assertDispatchResponseMatchesWire(response, ctx.canonicalEvent, ctx.hookEventName, ctx.agentId)
     return result(response)
   }

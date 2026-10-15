@@ -176,7 +176,9 @@ describe("pretooluse-protect-sandbox (shell commands)", () => {
 
   test("still blocks non-Codex shell commands that write within ~/.codex", async () => {
     const result = await runPinnedHomeBashHook(
-      `bun -e "await Bun.write('${join(TEST_HOME, ".codex", "config.toml")}', '')"`
+      `bun -e "await Bun.write('${join(TEST_HOME, ".codex", "config.toml")}', '')"`,
+      // A checkout under ~/.codex legitimately inherits that session access boundary.
+      { cwd: TEST_HOME }
     )
     expect(result.decision).toBe("deny")
   })

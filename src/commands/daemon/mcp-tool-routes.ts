@@ -29,6 +29,7 @@ const PROJECT_TOOLS: ReadonlySet<McpToolName> = new Set([
   "TaskUpdate",
   "TaskList",
   "FileOwnership",
+  "Deadline",
 ])
 
 /**

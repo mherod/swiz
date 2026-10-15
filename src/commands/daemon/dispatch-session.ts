@@ -1,4 +1,5 @@
 /** Session bookkeeping and advice policy for daemon dispatch, independent of HTTP. */
+import { hasDeadlineContext } from "../../dispatch/deadline-context.ts"
 import { isBlock } from "../../dispatch/engine.ts"
 import type { DispatchLifecycleUpdate } from "../../dispatch/execute.ts"
 import { isSubagentUsageKey, sessionUsageKey } from "../../dispatch/session-usage-key.ts"
@@ -141,6 +142,7 @@ function suppressStandingAdvice(
 function mustPreserveHookMessage(canonicalEvent: string, response: Record<string, any>): boolean {
   const permission = response.hookSpecificOutput?.permissionDecision
   return (
+    hasDeadlineContext(response) ||
     isStopLikeDispatchEvent(canonicalEvent) ||
     isBlock(response) ||
     permission === "deny" ||
