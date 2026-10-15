@@ -237,6 +237,29 @@ test("duplicate TaskCreate rejects before persisting a clock or retry receipt", 
   expect(list.structuredContent?.deadlines?.[0]?.task?.taskId).not.toBe(existing.id)
 })
 
+test("deadline metadata accommodates long task text without truncating the task", async () => {
+  const subject = `Inspect ${"release ".repeat(30)}`.trim()
+  const description = "Detailed evidence ".repeat(100)
+  const input = {
+    subject,
+    description,
+    deadline: { sessionId: "agent", requestId: "long-task", durationMinutes: 5 },
+  }
+  expect((await runMcpTool("TaskCreate", input, cwd)).isError).toBeUndefined()
+  const task = (await readTaskStore(projectStoreKey(cwd)))[0]!
+  expect(task).toMatchObject({ subject, description })
+  const store = (await DeadlineStore.open())!
+  try {
+    expect(store.get(task.deadlineId!).label).toBe(subject.slice(0, 160).trim())
+    expect(store.get(task.deadlineId!).completionCriteria).toBe(description.slice(0, 1000).trim())
+  } finally {
+    store.close()
+  }
+  expect(
+    (await runMcpTool("TaskCreate", input, cwd)).structuredContent?.taskMutation?.changed
+  ).toBe(false)
+})
+
 test.each([
   "cancelled",
   "completed",
