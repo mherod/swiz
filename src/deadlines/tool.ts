@@ -56,7 +56,11 @@ function selectDeadlines(
   if (input.action === "get") {
     if (!input.deadlineId) throw new Error("get requires deadlineId")
     if (!store) throw new Error("Deadline not found")
-    return [store.get(input.deadlineId)]
+    const attached = store
+      .list(deadlineSessionKey(cwd, input.sessionId, input.agentId))
+      .find((deadline) => deadline.id === input.deadlineId)
+    if (!attached) throw new Error("Attach this deadline to your session before reading it")
+    return [attached]
   }
   return [store!.mutate(input, cwd, now)]
 }
