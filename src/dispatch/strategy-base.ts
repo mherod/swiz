@@ -19,7 +19,6 @@ import {
   launchAsyncHooks,
   logSlowHookSummary,
   runEntry,
-  writeResponse,
 } from "./engine.ts"
 import { injectDispatchSessionAgeContext } from "./session-age-context.ts"
 import { injectProjectStateProvenance } from "./state-provenance.ts"
@@ -62,7 +61,7 @@ export function stopCollectionTimeoutMs(groups: HookGroup[], minimumMs: number):
 /**
  * Shared scaffolding for all three strategies: sets up an AbortController,
  * fans out sync hooks concurrently with fire-and-forget async hooks, cleans up
- * the abort listener, attaches hookExecutions to the response, and writes stdout.
+ * the abort listener, and returns the response with internal hookExecutions.
  *
  * Hooks with `async: true` and `asyncMode: "block-until-complete"` are included
  * in the sync fan-out (via `flatSyncHooks`) and are fully awaited like non-async hooks.
@@ -91,15 +90,20 @@ export async function runStrategyPipeline(
   const { filteredGroups, enrichedPayloadStr, daemonContext, cwd } = ctx
   const entries = flatSyncHooks(filteredGroups)
   const controller = new AbortController()
+  const asyncController = new AbortController()
+  const parentSignal = ctx.signal ?? new AbortController().signal
   const { signal } = controller
 
   // Parse spawn context ONCE for all hooks in this dispatch — avoids
   // O(hooks) JSON.parse + env-merge allocations in runHook/runEntry.
   const spawnCtx = buildSpawnContext(enrichedPayloadStr)
 
-  const onDispatchAbort = () => controller.abort()
-  ctx.signal?.addEventListener("abort", onDispatchAbort, { once: true })
-  if (ctx.signal?.aborted) controller.abort()
+  const onDispatchAbort = () => {
+    controller.abort()
+    asyncController.abort()
+  }
+  parentSignal.addEventListener("abort", onDispatchAbort, { once: true })
+  if (parentSignal.aborted) onDispatchAbort()
 
   // When a collection timeout is set, abort remaining hooks after the window
   // expires rather than relying solely on per-hook onResult abort.
@@ -112,57 +116,60 @@ export async function runStrategyPipeline(
     collectionTimer = setTimeout(() => controller.abort(), timeoutMs)
   }
 
-  const syncStartedAt = performance.now()
-  const syncHooks = Promise.all(
-    entries.map(async (e) => {
-      const result = await runEntry(e, enrichedPayloadStr, cwd, signal, spawnCtx)
-      opts.onResult?.(result, () => controller.abort())
-      return result
+  try {
+    const syncStartedAt = performance.now()
+    const syncHooks = Promise.all(
+      entries.map(async (e) => {
+        const result = await runEntry(e, enrichedPayloadStr, cwd, signal, spawnCtx)
+        opts.onResult?.(result, () => controller.abort())
+        return result
+      })
+    ).finally(() => {
+      ctx.recordStageDuration?.("syncHooks", performance.now() - syncStartedAt)
     })
-  ).finally(() => {
-    ctx.recordStageDuration?.("syncHooks", performance.now() - syncStartedAt)
-  })
-  const asyncStartedAt = performance.now()
-  const asyncHooks = launchAsyncHooks(
-    filteredGroups,
-    enrichedPayloadStr,
-    daemonContext,
-    ctx.signal,
-    { spawnCtx }
-  ).finally(() => {
-    ctx.recordStageDuration?.("asyncHooks", performance.now() - asyncStartedAt)
-  })
-  const [results] = await Promise.all([syncHooks, asyncHooks])
+    const asyncStartedAt = performance.now()
+    const asyncHooks = launchAsyncHooks(
+      filteredGroups,
+      enrichedPayloadStr,
+      daemonContext,
+      asyncController.signal,
+      { spawnCtx }
+    ).finally(() => {
+      ctx.recordStageDuration?.("asyncHooks", performance.now() - asyncStartedAt)
+    })
+    const [results] = await Promise.all([syncHooks, asyncHooks])
 
-  if (collectionTimer) clearTimeout(collectionTimer)
+    const executions: HookExecution[] = []
+    const finalResponse = await opts.processResults(results, executions)
+    injectProjectStateProvenance(finalResponse, ctx.canonicalEvent, ctx.enrichedPayloadStr)
+    await injectDispatchSessionAgeContext(finalResponse, ctx.canonicalEvent, ctx.enrichedPayloadStr)
 
-  ctx.signal?.removeEventListener("abort", onDispatchAbort)
+    logSlowHookSummary(executions)
+    if (executions.length > 0) merge(finalResponse, { hookExecutions: executions })
+    if (isStopLikeDispatchEvent(ctx.canonicalEvent)) {
+      normalizeStopDispatchResponseInPlace(finalResponse, ctx.hookEventName)
+    }
 
-  const executions: HookExecution[] = []
-  const finalResponse = await opts.processResults(results, executions)
-  injectProjectStateProvenance(finalResponse, ctx.canonicalEvent, ctx.enrichedPayloadStr)
-  await injectDispatchSessionAgeContext(finalResponse, ctx.canonicalEvent, ctx.enrichedPayloadStr)
+    coerceDispatchAgentEnvelopeInPlace(
+      finalResponse,
+      ctx.canonicalEvent,
+      ctx.hookEventName,
+      ctx.agentId
+    )
 
-  logSlowHookSummary(executions)
-  if (executions.length > 0) merge(finalResponse, { hookExecutions: executions })
-  if (isStopLikeDispatchEvent(ctx.canonicalEvent)) {
-    normalizeStopDispatchResponseInPlace(finalResponse, ctx.hookEventName)
-  }
-
-  coerceDispatchAgentEnvelopeInPlace(
-    finalResponse,
-    ctx.canonicalEvent,
-    ctx.hookEventName,
-    ctx.agentId
-  )
-
-  writeResponse(
     parseValidatedAgentDispatchWireJson(
       finalResponse,
       ctx.canonicalEvent,
       ctx.hookEventName,
       ctx.agentId
     )
-  )
-  return finalResponse
+    return finalResponse
+  } catch (error) {
+    controller.abort()
+    asyncController.abort()
+    throw error
+  } finally {
+    if (collectionTimer) clearTimeout(collectionTimer)
+    parentSignal.removeEventListener("abort", onDispatchAbort)
+  }
 }

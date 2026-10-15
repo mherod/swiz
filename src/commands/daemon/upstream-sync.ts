@@ -42,6 +42,33 @@ type RepositoryCapabilityResolver = (cwd: string) => Promise<RepositoryCapabilit
 type ForkTopologyResolver = (cwd: string) => Promise<{ upstreamSlug: string } | null>
 type SyncRunner = typeof syncUpstreamState
 type RegistrationResult = { deduped: boolean; registered: boolean }
+interface Registration {
+  controller: AbortController
+  promise: Promise<RegistrationResult>
+}
+
+const CANCELLED_REGISTRATION: RegistrationResult = { deduped: false, registered: false }
+
+/** Stop waiting immediately even when a resolver cannot itself be cancelled. */
+async function resolveWhileActive<T>(
+  work: Promise<T>,
+  signal: AbortSignal
+): Promise<T | undefined> {
+  if (signal.aborted) {
+    void work.catch(() => {})
+    return undefined
+  }
+  let abort = () => {}
+  const cancelled = new Promise<undefined>((resolve) => {
+    abort = () => resolve(undefined)
+    signal.addEventListener("abort", abort, { once: true })
+  })
+  try {
+    return await Promise.race([work, cancelled])
+  } finally {
+    signal.removeEventListener("abort", abort)
+  }
+}
 
 function toSyncStatus(entry: SyncEntry): UpstreamSyncStatus {
   return {
@@ -57,7 +84,9 @@ export class UpstreamSyncRegistry {
   private entries = new Map<string, SyncEntry>()
   // Registration coalescing: concurrent register() calls for cwd variants that
   // resolve to one root share a single computation. See register().
-  private inFlightRegistrations = new Map<string, Promise<RegistrationResult>>()
+  private inFlightRegistrations = new Map<string, Registration>()
+  private resolvingIdentities = new Set<{ cwd: string; controller: AbortController }>()
+  private closed = false
   private readonly intervalMs: number
   private readonly timeoutMs: number
   private readonly resolveSlug: RepoSlugResolver
@@ -92,16 +121,37 @@ export class UpstreamSyncRegistry {
   /** Register a project for periodic upstream sync. Idempotent.
    *  For fork workflows, also registers the upstream (parent) repo so
    *  its issues, labels, and milestones are synced alongside the fork's PRs/CI. */
-  async register(cwd: string): Promise<RegistrationResult> {
+  async register(cwd: string, signal?: AbortSignal): Promise<RegistrationResult> {
     // Placeholder/relative cwds (e.g. "." from DaemonBackedIssueStore) must not
     // become sync entries — they resolve against the daemon's own cwd and spawn
     // a duplicate loop (#716).
-    if (!isRegisterableProjectCwd(cwd)) return { deduped: false, registered: false }
+    if (this.closed || signal?.aborted || !isRegisterableProjectCwd(cwd)) {
+      return CANCELLED_REGISTRATION
+    }
 
+    const controller = new AbortController()
+    const abort = () => controller.abort()
+    signal?.addEventListener("abort", abort, { once: true })
+    const identity = { cwd: canonicalizePath(cwd), controller }
+    this.resolvingIdentities.add(identity)
+    try {
+      const canonicalRoot = await resolveWhileActive(resolveProjectRoot(cwd), controller.signal)
+      this.resolvingIdentities.delete(identity)
+      if (!canonicalRoot || this.closed || controller.signal.aborted) return CANCELLED_REGISTRATION
+      return await this.registerCanonicalRoot(canonicalRoot, controller)
+    } finally {
+      this.resolvingIdentities.delete(identity)
+      signal?.removeEventListener("abort", abort)
+    }
+  }
+
+  private async registerCanonicalRoot(
+    canonicalRoot: string,
+    controller: AbortController
+  ): Promise<RegistrationResult> {
     // Key on the repository root, not the cwd we happened to be handed. `/path`,
     // `/path/`, a symlink alias, and `/path/subdir` all name one project; keying
     // raw gave each its own independent 2-minute sync loop (#717).
-    const canonicalRoot = await resolveProjectRoot(cwd)
     if (this.entries.has(canonicalRoot)) return { deduped: true, registered: true }
 
     // Concurrent register() calls with cwd variants collapsing to the same root
@@ -109,25 +159,36 @@ export class UpstreamSyncRegistry {
     // registration per root so the loser dedupes instead of spawning a rival loop.
     const inflight = this.inFlightRegistrations.get(canonicalRoot)
     if (inflight) {
-      await inflight
+      const result = await resolveWhileActive(inflight.promise, controller.signal)
+      const registered = result?.registered === true && this.entries.has(canonicalRoot)
       return {
-        deduped: this.entries.has(canonicalRoot),
-        registered: this.entries.has(canonicalRoot),
+        deduped: registered,
+        registered,
       }
     }
 
-    const registration = this.performRegister(canonicalRoot)
+    const registration: Registration = {
+      controller,
+      promise: Promise.resolve(CANCELLED_REGISTRATION),
+    }
     this.inFlightRegistrations.set(canonicalRoot, registration)
+    registration.promise = this.performRegister(canonicalRoot, controller.signal)
     try {
-      return await registration
+      return await registration.promise
     } finally {
-      this.inFlightRegistrations.delete(canonicalRoot)
+      if (this.inFlightRegistrations.get(canonicalRoot) === registration) {
+        if (controller.signal.aborted) this.unregister(canonicalRoot)
+        else this.inFlightRegistrations.delete(canonicalRoot)
+      }
     }
   }
 
-  private async performRegister(canonicalRoot: string): Promise<RegistrationResult> {
-    const repo = await this.resolveSlug(canonicalRoot)
-    if (!repo) return { deduped: false, registered: false }
+  private async performRegister(
+    canonicalRoot: string,
+    signal: AbortSignal
+  ): Promise<RegistrationResult> {
+    const repo = await resolveWhileActive(this.resolveSlug(canonicalRoot), signal)
+    if (!repo || signal.aborted) return CANCELLED_REGISTRATION
 
     const entry: SyncEntry = {
       repo,
@@ -141,7 +202,8 @@ export class UpstreamSyncRegistry {
     this.scheduleSync(canonicalRoot)
 
     // Fork workflow: also register the upstream repo for issue/label/milestone sync
-    const fork = await this.resolveFork(canonicalRoot)
+    const fork = await resolveWhileActive(this.resolveFork(canonicalRoot), signal)
+    if (signal.aborted) return CANCELLED_REGISTRATION
     if (fork && fork.upstreamSlug !== repo) {
       const upstreamKey = `${canonicalRoot}::upstream`
       if (!this.entries.has(upstreamKey)) {
@@ -202,13 +264,21 @@ export class UpstreamSyncRegistry {
 
   /** Stop periodic sync timers and remove a project plus its fork-upstream entry. */
   unregister(cwd: string): boolean {
-    const canonicalRoot = this.findEntryRoot(cwd)
-    if (!canonicalRoot) return false
-    let removed = false
+    const canonical = canonicalizePath(cwd)
+    let removed = this.cancelResolvingIdentities(canonical)
+    const canonicalRoot = this.findEntryRoot(cwd) ?? this.findRegistrationRoot(canonical)
+    if (!canonicalRoot) return removed
+    const registration = this.inFlightRegistrations.get(canonicalRoot)
+    if (registration) {
+      registration.controller.abort()
+      this.inFlightRegistrations.delete(canonicalRoot)
+      removed = true
+    }
     for (const entryKey of [canonicalRoot, `${canonicalRoot}::upstream`]) {
       const inflight = this.inFlightSyncs.get(entryKey)
       if (inflight) {
         inflight.controller.abort(new Error("unregistered"))
+        this.inFlightSyncs.delete(entryKey)
       }
       const entry = this.entries.get(entryKey)
       if (!entry) continue
@@ -220,10 +290,28 @@ export class UpstreamSyncRegistry {
     return removed
   }
 
+  private cancelResolvingIdentities(canonical: string): boolean {
+    let cancelled = false
+    for (const identity of this.resolvingIdentities) {
+      if (isPathWithinRoot(identity.cwd, canonical) || isPathWithinRoot(canonical, identity.cwd)) {
+        identity.controller.abort()
+        this.resolvingIdentities.delete(identity)
+        cancelled = true
+      }
+    }
+    return cancelled
+  }
+
   close(): void {
+    this.closed = true
+    for (const identity of this.resolvingIdentities) identity.controller.abort()
+    this.resolvingIdentities.clear()
+    for (const registration of this.inFlightRegistrations.values()) registration.controller.abort()
+    this.inFlightRegistrations.clear()
     for (const inflight of this.inFlightSyncs.values()) {
       inflight.controller.abort(new Error("registry closed"))
     }
+    this.inFlightSyncs.clear()
     for (const entry of this.entries.values()) {
       if (entry.timer) clearTimeout(entry.timer)
       entry.timer = null
@@ -231,11 +319,20 @@ export class UpstreamSyncRegistry {
     this.entries.clear()
   }
 
+  private findRegistrationRoot(canonical: string): string | null {
+    for (const root of this.inFlightRegistrations.keys()) {
+      if (isPathWithinRoot(canonical, root)) return root
+    }
+    return null
+  }
+
   private scheduleSync(entryKey: string): void {
     const entry = this.entries.get(entryKey)
-    if (!entry) return
+    if (!entry || this.closed) return
     entry.timer = setTimeout(() => {
-      void this.doSync(entryKey, entry).then(() => this.scheduleSync(entryKey))
+      void this.doSync(entryKey, entry).then(() => {
+        if (this.entries.get(entryKey) === entry) this.scheduleSync(entryKey)
+      })
     }, this.intervalMs)
   }
 

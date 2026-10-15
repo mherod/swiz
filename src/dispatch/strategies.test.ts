@@ -8,9 +8,10 @@ import {
   processBlockingResults,
   shouldSkipPostToolUseHooks,
 } from "./blockingStrategy.ts"
+import { writeResponse } from "./cli-output.ts"
 import { orderHookContexts } from "./context-order.ts"
+import { stripInternalDispatchFields } from "./dispatch-wire.ts"
 import type { HookExecution } from "./engine.ts"
-import { writeResponse } from "./engine.ts"
 import {
   applyPreToolHumanisedContext,
   collectPreToolResults,
@@ -375,7 +376,7 @@ describe("BlockingStrategy postToolUse skill-recency dispatch", () => {
 
     expect(runs).toBe(0)
     expect(response).toEqual({})
-    expect(output).toBe("{}\n")
+    expect(output).toBe("")
   })
 
   it("runs the advisory inline hook when no skill is recently active", async () => {
@@ -402,13 +403,13 @@ describe("BlockingStrategy postToolUse skill-recency dispatch", () => {
       file: "posttooluse-sentinel.ts",
       status: "no-output",
     })
-    expect(output).toBe("{}\n")
+    expect(output).toBe("")
   })
 })
 
 // #963: advisory hook output was merged as `permissionDecision: "allow"`, which Claude Code
 // reads as "skip the permission prompt" — every advised call silently bypassed the user's mode.
-// The pipeline renders the envelope for `agentId` before writing, so `wire` is what that agent sees.
+// The pipeline returns the envelope for `agentId`; the transport strips internal execution records.
 describe("PreToolUseStrategy advisory output", () => {
   function makeContext(outputs: Record<string, any>[], agentId: string) {
     return {
@@ -434,10 +435,11 @@ describe("PreToolUseStrategy advisory output", () => {
   }
 
   async function dispatch(outputs: Record<string, any>[], agentId = "claude") {
-    const { output } = await captureStdout(() =>
+    const { output, value } = await captureStdout(() =>
       new PreToolUseStrategy().execute(makeContext(outputs, agentId))
     )
-    return { wire: JSON.parse(output) as Record<string, any> }
+    expect(output).toBe("")
+    return { wire: stripInternalDispatchFields(value) }
   }
 
   const allowWithReason = (reason: string) => ({

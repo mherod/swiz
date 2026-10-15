@@ -9,10 +9,11 @@
 import { appendFile } from "node:fs/promises"
 import {
   agentHasTaskListToolForHookPayload,
+  detectCurrentAgentFromHookPayload,
   shouldEnforceIncompleteTasksForHookPayload,
   taskToolNameForHookPayload,
 } from "../agent-paths.ts"
-import { debugLog, stderrLog } from "../debug.ts"
+import { stderrLog } from "../debug.ts"
 import {
   applyHookSettingFilters,
   assertDispatchInboundNotParseError,
@@ -27,6 +28,7 @@ import {
   markDispatchResponseWritten,
   normalizeAgentHookPayload,
   parsePayload,
+  parseValidatedAgentDispatchWireJson,
   replayBlocking,
   replayContext,
   replayPreToolUse,
@@ -34,6 +36,13 @@ import {
   shouldCaptureIncomingPayloads,
   withLogBuffer,
 } from "../dispatch"
+import { writeResponse } from "../dispatch/cli-output.ts"
+import {
+  daemonClientTimeoutMs,
+  daemonDispatchPolicy,
+  enrichDispatchPayload,
+  tryDaemonDispatch,
+} from "../dispatch/daemon-client.ts"
 import { dispatchToolUseId, ensureDispatchId } from "../dispatch/dispatch-id.ts"
 import {
   flushIncomingDispatchCaptures,
@@ -41,7 +50,7 @@ import {
 } from "../dispatch/incoming-capture.ts"
 import { getHomeDirOrNull } from "../home.ts"
 import { appendHookLog, type HookLogEntry } from "../hook-log.ts"
-import { DISPATCH_TIMEOUTS, manifest } from "../manifest.ts"
+import { manifest } from "../manifest.ts"
 import { swizDispatchLogPath } from "../temp-paths.ts"
 import { isSkillMdOnlyFileEditPayload } from "../tool-matchers.ts"
 import type { Command } from "../types.ts"
@@ -50,159 +59,8 @@ import { messageFromUnknownError } from "../utils/hook-json-helpers.ts"
 import { sanitizeHookOutputForCurrentAgent } from "../utils/hook-output-agent-compat.ts"
 import { supportsHookSpecificOutput } from "../utils/hook-specific-output.ts"
 import { checkIncompleteTasks } from "../utils/stop-incomplete-tasks-core.ts"
-import { detectTerminal } from "../utils/terminal-detection.ts"
-import { getDaemonPort } from "./daemon/daemon-admin.ts"
 
-const DAEMON_PORT = getDaemonPort()
-// Fallback for events not listed in DISPATCH_TIMEOUTS.
-// Must be long enough for the daemon to complete unknown-event processing
-// (daemon server-side fallback is 60s) but short enough for CLI responsiveness.
-const DEFAULT_DAEMON_TIMEOUT_MS = 30_000
-
-/**
- * Build a filtered environment for hook subprocesses.
- * Only includes essential variables needed for hook execution:
- * - PATH (command resolution)
- * - HOME (user-specific config)
- * - TERM, COLORTERM (terminal detection)
- * - SWIZ_* (internal configuration)
- * - ANTHROPIC_*, CURSOR_*, GEMINI_* (agent-specific auth/config)
- *
- * This reduces per-dispatch memory allocation by 50-80% compared to
- * cloning the entire process.env (~50-200KB per dispatch in LaunchAgent).
- */
-function buildAllowlistedEnv(): Record<string, string> {
-  const result: Record<string, string> = {}
-  const allowlistPatterns = [
-    /^PATH$/,
-    /^HOME$/,
-    /^(TERM|COLORTERM)$/,
-    /^SWIZ_/,
-    /^ANTHROPIC_/,
-    /^CURSOR_/,
-    /^CODEX_/,
-    /^GEMINI_/,
-    // Agent-identifying env vars — required so in-process hooks running inside
-    // the daemon can resolve `detectCurrentAgent()` via payload._env instead of
-    // the daemon's own process.env (which is launchd's environment).
-    /^CLAUDECODE$/,
-    /^CLAUDE_PROJECT_DIR$/,
-  ]
-
-  for (const [key, value] of Object.entries(process.env)) {
-    if (value === undefined) continue
-    if (allowlistPatterns.some((pattern) => pattern.test(key))) {
-      result[key] = value
-    }
-  }
-
-  return result
-}
-
-async function fetchWithTimeout(
-  url: string,
-  init: RequestInit,
-  timeoutMs: number
-): Promise<Response> {
-  const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), timeoutMs)
-
-  try {
-    return await fetch(url, { ...init, signal: controller.signal })
-  } finally {
-    clearTimeout(timer)
-  }
-}
-
-/**
- * Try to forward the dispatch request to the daemon.
- * Returns the parsed response on success, or null if the daemon is
- * unavailable, times out, or returns an invalid response.
- *
- * Skips a separate health check — the dispatch request itself serves as
- * the liveness probe. A separate /health round-trip adds ~350ms overhead
- * on every call when the daemon is unreachable.
- */
-function daemonTimeoutForEvent(canonicalEvent: string): number {
-  const budgetSec = DISPATCH_TIMEOUTS[canonicalEvent]
-  if (budgetSec) return budgetSec * 1000
-  return DEFAULT_DAEMON_TIMEOUT_MS
-}
-
-// ── Daemon failure backoff ────────────────────────────────────────────────
-// After a transport failure (timeout, connection refused, non-200), skip the
-// daemon for BACKOFF_MS to avoid burning the full timeout budget on every
-// dispatch when the daemon is down. State is per-process — each CLI
-// invocation starts fresh, which is fine because dispatch.ts exits after
-// one dispatch cycle. The backoff matters for the daemon's own in-process
-// re-dispatch (e.g. sessionStart triggering preToolUse internally).
-
-const BACKOFF_MS = 30_000
-let lastDaemonFailureAt = 0
-
-function isDaemonBackedOff(): boolean {
-  return lastDaemonFailureAt > 0 && Date.now() - lastDaemonFailureAt < BACKOFF_MS
-}
-
-function recordDaemonFailure(): void {
-  lastDaemonFailureAt = Date.now()
-}
-
-/** Exported for testing — reset backoff state between test cases. */
-export function resetDaemonBackoff(): void {
-  lastDaemonFailureAt = 0
-}
-
-async function tryDaemonDispatch(
-  canonicalEvent: string,
-  hookEventName: string,
-  payloadStr: string
-): Promise<Record<string, any> | null> {
-  if (process.env.SWIZ_NO_DAEMON === "1") {
-    debugLog("daemon dispatch: skipped (SWIZ_NO_DAEMON=1)")
-    return null
-  }
-
-  if (isDaemonBackedOff()) {
-    debugLog("daemon dispatch: skipped (backoff active after recent failure)")
-    return null
-  }
-
-  const url = `http://127.0.0.1:${DAEMON_PORT}/dispatch?event=${encodeURIComponent(canonicalEvent)}&hookEventName=${encodeURIComponent(hookEventName)}`
-
-  try {
-    const resp = await fetchWithTimeout(
-      url,
-      {
-        method: "POST",
-        body: payloadStr,
-        headers: { "Content-Type": "application/json" },
-      },
-      daemonTimeoutForEvent(canonicalEvent)
-    )
-
-    if (!resp.ok) {
-      recordDaemonFailure()
-      debugLog(
-        `daemon dispatch: failed (status ${resp.status}), falling back to local (backoff ${BACKOFF_MS}ms)`
-      )
-      return null
-    }
-
-    const raw: unknown = await resp.json()
-    const json =
-      raw !== null && typeof raw === "object" && !Array.isArray(raw)
-        ? (raw as Record<string, any>)
-        : {}
-    debugLog(`daemon dispatch: forwarded ${canonicalEvent} to daemon (${resp.status})`)
-    return json
-  } catch (err) {
-    recordDaemonFailure()
-    const msg = messageFromUnknownError(err)
-    debugLog(`daemon dispatch: error (${msg}), falling back to local (backoff ${BACKOFF_MS}ms)`)
-    return null
-  }
-}
+export { resetDaemonBackoff } from "../dispatch/daemon-client.ts"
 
 const STDIN_PAYLOAD_TIMEOUT_MS = 2_000
 
@@ -462,18 +320,8 @@ function captureParsedPayload(
   })
 }
 
-function enrichDispatchPayload(payload: Record<string, any>, agentId: string | undefined): void {
-  if (!payload._terminal) {
-    const terminal = detectTerminal()
-    payload._terminal = { app: terminal.app, name: terminal.name }
-  }
-  if (!payload._env) payload._env = buildAllowlistedEnv()
-  if (agentId && !payload._agent) payload._agent = agentId
-}
-
 interface PreparedDispatch {
   payload: Record<string, any>
-  payloadStr: string
   timing: DispatchTiming
 }
 
@@ -511,9 +359,6 @@ async function prepareDispatch(
   const tEnrich = performance.now()
   enrichDispatchPayload(payload, agentId)
   log(`   ⏱ cli:enrich: ${Math.round(performance.now() - tEnrich)}ms`)
-  const tSerialize = performance.now()
-  const payloadStr = JSON.stringify(payload)
-  log(`   ⏱ cli:serialize: ${Math.round(performance.now() - tSerialize)}ms`)
   const prepareMs = Math.round(performance.now() - tPrepare)
   log(`   ⏱ cli:prepare: ${prepareMs}ms`)
   const timing: DispatchTiming = {
@@ -528,7 +373,7 @@ async function prepareDispatch(
     stdinMs,
     prepareMs,
   }
-  return { payload, payloadStr, timing }
+  return { payload, timing }
 }
 
 async function handleFastDispatchPaths(
@@ -552,7 +397,7 @@ async function executeLocalDispatch(
   const { executeDispatch } = await import("../dispatch/execute.ts")
   log(`   ⏱ cli:local-import: ${Math.round(performance.now() - tLocal)}ms`)
   const tExecute = performance.now()
-  const { response } = await executeDispatch({
+  const { response, timing: executionTiming } = await executeDispatch({
     canonicalEvent: timing.canonicalEvent,
     hookEventName: timing.hookEventName,
     payloadStr,
@@ -563,12 +408,22 @@ async function executeLocalDispatch(
   log(`   ⏱ cli:local-execute: ${Math.round(performance.now() - tExecute)}ms`)
   log(`   ⏱ cli:total: ${totalMs}ms`)
   void appendCliTimingLog({ ...timing, totalMs, daemonMs, localMs, route: "local" })
-  void response
+  if (executionTiming.hookCount > 0 || Object.keys(response).length > 0) {
+    writeResponse(
+      parseValidatedAgentDispatchWireJson(
+        response,
+        timing.canonicalEvent,
+        timing.hookEventName,
+        detectCurrentAgentFromHookPayload(payload)?.id
+      )
+    )
+  }
   process.exit(0)
 }
 
 async function dispatchPreparedRequest(prepared: PreparedDispatch): Promise<void> {
-  const { timing, payload, payloadStr } = prepared
+  const { timing, payload } = prepared
+  const payloadStr = JSON.stringify(payload)
   const tDaemon = performance.now()
   const daemonResponse = await tryDaemonDispatch(
     timing.canonicalEvent,
@@ -576,14 +431,24 @@ async function dispatchPreparedRequest(prepared: PreparedDispatch): Promise<void
     payloadStr
   )
   const daemonMs = Math.round(performance.now() - tDaemon)
-  log(
-    `   ⏱ cli:daemon-attempt: ${daemonMs}ms (${daemonResponse === null ? "fallback" : "forwarded"})`
-  )
-  if (daemonResponse === null) {
+  log(`   ⏱ cli:daemon-attempt: ${daemonMs}ms (${daemonResponse.kind})`)
+  if (
+    daemonResponse.kind === "unavailable" ||
+    (daemonResponse.kind === "timeout" &&
+      daemonDispatchPolicy(timing.canonicalEvent).timeoutFallback === "local")
+  ) {
     await executeLocalDispatch(timing, payload, payloadStr, daemonMs)
     return
   }
-  const agentResponse = sanitizeHookOutputForCurrentAgent(daemonResponse)
+  if (daemonResponse.kind === "timeout") {
+    process.stderr.write(
+      `swiz daemon did not answer ${timing.canonicalEvent} within ${daemonClientTimeoutMs(timing.canonicalEvent)}ms; allowing without local re-run\n`
+    )
+    writeResponse({})
+    return
+  }
+  if (daemonResponse.kind !== "response") return
+  const agentResponse = sanitizeHookOutputForCurrentAgent(daemonResponse.response)
   markDispatchResponseWritten()
   process.stdout.write(`${JSON.stringify(agentResponse)}\n`)
   const totalMs = Math.round(performance.now() - timing.t0)

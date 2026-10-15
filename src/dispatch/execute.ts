@@ -46,7 +46,7 @@ import {
   parseDispatchPayloadString,
   parseValidatedAgentDispatchWireJson,
 } from "./dispatch-zod-surfaces.ts"
-import { applyDispatchEnv, type HookExecution, writeResponse } from "./engine.ts"
+import { applyDispatchEnv, type HookExecution } from "./engine.ts"
 import {
   applyHookSettingFilters,
   countHooks,
@@ -226,6 +226,7 @@ async function loadCombinedManifest(cwd: string): Promise<CombinedManifestResult
 
 interface EnrichPayloadOptions {
   payload: Record<string, any>
+  signal: AbortSignal
   summaryProvider?: (path: string) => Promise<TranscriptSummary | null>
   currentSessionToolUsageProvider?: (
     sessionId: string,
@@ -295,11 +296,13 @@ function applyTranscriptSummaryEnrichment(
 async function enrichPayloadForHooks(opts: EnrichPayloadOptions): Promise<EnrichedPayloadResult> {
   const {
     payload,
+    signal,
     summaryProvider,
     currentSessionToolUsageProvider,
     lastUserMessageAtProvider,
     disableTranscriptSummaryFallback,
   } = opts
+  signal.throwIfAborted()
 
   // payload is a per-dispatch working copy — mutate directly instead of
   // deep-cloning via merge({}, enriched, ...) which copies the entire object
@@ -319,6 +322,7 @@ async function enrichPayloadForHooks(opts: EnrichPayloadOptions): Promise<Enrich
   )
 
   const [usage, summary] = await Promise.all([usagePromise, summaryPromise])
+  signal.throwIfAborted()
   applyUsageAndGuardianEnrichment(payload, usage, summary)
   applyLastUserMessageAt(payload, lastUserMessageAtProvider, sessionId)
   const transcriptSessionLinesKey = applyTranscriptSummaryEnrichment(
@@ -328,6 +332,7 @@ async function enrichPayloadForHooks(opts: EnrichPayloadOptions): Promise<Enrich
   )
 
   try {
+    signal.throwIfAborted()
     await syncCodexUpdatePlanForHooks(payload, summary)
     return {
       payloadStr: JSON.stringify(assertEnrichedDispatchPayloadRecord(payload)),
@@ -454,9 +459,7 @@ function logPayloadDiagnostics(
  * `/dispatch` endpoint. It parses the payload, loads the manifest, matches
  * hook groups, and runs the appropriate strategy.
  *
- * Note: the engine strategy functions still write to process.stdout (for CLI
- * backward compatibility). When called from the daemon, stdout is not
- * connected to the agent — only the returned response matters.
+ * Execution returns data. CLI and HTTP adapters own response emission.
  */
 interface DispatchContext {
   canonicalEvent: string
@@ -599,11 +602,15 @@ export function executeDispatch(req: DispatchRequest): Promise<DispatchResult> {
 }
 
 /** Create an AbortController merged with an optional incoming abort signal. */
-function buildDispatchAbortController(signal: AbortSignal | undefined): AbortController {
+function buildDispatchAbortController(signal: AbortSignal | undefined): {
+  controller: AbortController
+  dispose: () => void
+} {
   const controller = new AbortController()
+  const onAbort = () => controller.abort()
   if (signal?.aborted) controller.abort()
-  else signal?.addEventListener("abort", () => controller.abort(), { once: true })
-  return controller
+  else signal?.addEventListener("abort", onAbort, { once: true })
+  return { controller, dispose: () => signal?.removeEventListener("abort", onAbort) }
 }
 
 /** Execute strategy with optional timeout budget and return response. */
@@ -821,41 +828,37 @@ function preToolUseBlockerSkipLabel(ctx: DispatchContext): string | null {
   return null
 }
 
-function buildSkipResponse(ctx: DispatchContext, daemonContext?: boolean): Record<string, any> {
+function buildSkipResponse(ctx: DispatchContext): Record<string, any> {
   const response: Record<string, any> = {}
   if (isStopLikeDispatchEvent(ctx.canonicalEvent)) {
     normalizeStopDispatchResponseInPlace(response, ctx.hookEventName)
     coerceDispatchAgentEnvelopeInPlace(response, ctx.canonicalEvent, ctx.hookEventName, ctx.agentId)
-    if (!daemonContext) writeResponse(response)
   }
   return response
 }
 
-async function checkEarlyDispatchSkips(
-  ctx: DispatchContext,
-  daemonContext?: boolean
-): Promise<Record<string, any> | null> {
+async function checkEarlyDispatchSkips(ctx: DispatchContext): Promise<Record<string, any> | null> {
   if (!ctx.repositoryCapability.isRepo) {
     log(`   ⏭ no .git in cwd, skipping dispatch`)
-    return buildSkipResponse(ctx, daemonContext)
+    return buildSkipResponse(ctx)
   }
 
   if (await shouldSkipMcpToolDispatch(ctx)) {
     log(`   ⏭ ignoreMcpTools enabled, skipping dispatch for ${ctx.toolName}`)
-    return buildSkipResponse(ctx, daemonContext)
+    return buildSkipResponse(ctx)
   }
 
   if (await shouldSkipSubagentDispatch(ctx)) {
     log(
       `   ⏭ subagent session (agent_type=${ctx.payload.agent_type ?? ctx.payload.agent_id}), relaxing hooks`
     )
-    return buildSkipResponse(ctx, daemonContext)
+    return buildSkipResponse(ctx)
   }
 
   const preToolUseSkipLabel = preToolUseBlockerSkipLabel(ctx)
   if (preToolUseSkipLabel) {
     log(`   ⏭ ${preToolUseSkipLabel}, skipping preToolUse blockers`)
-    return buildSkipResponse(ctx, daemonContext)
+    return buildSkipResponse(ctx)
   }
 
   return null
@@ -895,22 +898,26 @@ async function executeDispatchStrategy(
   const budgetMs = budgetSec ? budgetSec * 1000 + DISPATCH_TIMEOUT_GRACE_MS : 0
   const dispatchAbort = buildDispatchAbortController(opts.signal)
 
-  return executeStrategyWithTimeout(
-    strategy,
-    {
-      filteredGroups,
-      enrichedPayloadStr,
-      canonicalEvent: ctx.canonicalEvent,
-      hookEventName: ctx.hookEventName,
-      daemonContext: opts.daemonContext,
-      cwd: ctx.cwd,
-      agentId: ctx.agentId,
-      signal: dispatchAbort.signal,
-      recordStageDuration: (stage, durationMs) =>
-        addDispatchStageDuration(stageDurations, stage, durationMs),
-    },
-    { ms: budgetMs, sec: budgetSec, abort: dispatchAbort, event: ctx.canonicalEvent }
-  )
+  try {
+    return await executeStrategyWithTimeout(
+      strategy,
+      {
+        filteredGroups,
+        enrichedPayloadStr,
+        canonicalEvent: ctx.canonicalEvent,
+        hookEventName: ctx.hookEventName,
+        daemonContext: opts.daemonContext,
+        cwd: ctx.cwd,
+        agentId: ctx.agentId,
+        signal: dispatchAbort.controller.signal,
+        recordStageDuration: (stage, durationMs) =>
+          addDispatchStageDuration(stageDurations, stage, durationMs),
+      },
+      { ms: budgetMs, sec: budgetSec, abort: dispatchAbort.controller, event: ctx.canonicalEvent }
+    )
+  } finally {
+    dispatchAbort.dispose()
+  }
 }
 
 async function prepareAndFilterDispatchGroups(
@@ -933,20 +940,20 @@ async function prepareAndFilterDispatchGroups(
   return retained.length > 0 ? retained : null
 }
 
-function buildFilteredSkipResponse(
-  ctx: DispatchContext,
-  daemonContext?: boolean
-): Record<string, any> {
-  const response = buildSkipResponse(ctx, daemonContext)
+function buildFilteredSkipResponse(ctx: DispatchContext): Record<string, any> {
+  const response = buildSkipResponse(ctx)
   injectProjectStateProvenance(response, ctx.canonicalEvent, JSON.stringify(ctx.payload))
-  if (response.systemMessage && !daemonContext) writeResponse(response)
   return response
 }
 
 async function performDispatch(req: DispatchRequest): Promise<DispatchResult> {
+  const signal = req.signal ?? new AbortController().signal
+  const notifyLifecycle = req.onDispatchLifecycle ?? (() => {})
+  signal.throwIfAborted()
   const t0 = performance.now()
   const stageDurations: DispatchStageDurations = {}
   const ctx = await buildDispatchContext(req, stageDurations)
+  signal.throwIfAborted()
   const repositoryCapability = ctx.repositoryCapability
   const route = DISPATCH_ROUTES[ctx.canonicalEvent] ?? "blocking"
   const result = (response: Record<string, any>, hookCount = 0): DispatchResult => ({
@@ -959,7 +966,8 @@ async function performDispatch(req: DispatchRequest): Promise<DispatchResult> {
   const enrichedPayload = ctx.payload as EnrichedDispatchPayload
   enrichedPayload._repositoryCapability = repositoryCapability
 
-  const earlySkip = await checkEarlyDispatchSkips(ctx, req.daemonContext)
+  const earlySkip = await checkEarlyDispatchSkips(ctx)
+  signal.throwIfAborted()
   if (earlySkip) {
     assertDispatchResponseMatchesWire(earlySkip, ctx.canonicalEvent, ctx.hookEventName, ctx.agentId)
     return result(earlySkip)
@@ -971,8 +979,9 @@ async function performDispatch(req: DispatchRequest): Promise<DispatchResult> {
     stageDurations,
     req
   )
+  signal.throwIfAborted()
   if (!filteredGroups) {
-    const response = buildFilteredSkipResponse(ctx, req.daemonContext)
+    const response = buildFilteredSkipResponse(ctx)
     assertDispatchResponseMatchesWire(response, ctx.canonicalEvent, ctx.hookEventName, ctx.agentId)
     return result(response)
   }
@@ -980,35 +989,39 @@ async function performDispatch(req: DispatchRequest): Promise<DispatchResult> {
   const lifecycleRequestId = resolveLifecycleRequestId(ctx.payload)
   const lifecycleStartedAt = Date.now()
 
-  req.onDispatchLifecycle?.(
-    buildLifecycleEvent("start", ctx, filteredGroups, lifecycleRequestId, lifecycleStartedAt)
-  )
-
-  const tEnrich = performance.now()
-  const enrichment = await enrichPayloadForHooks({
-    payload: ctx.payload,
-    summaryProvider: req.transcriptSummaryProvider,
-    currentSessionToolUsageProvider: req.currentSessionToolUsageProvider,
-    lastUserMessageAtProvider: req.lastUserMessageAtProvider,
-    disableTranscriptSummaryFallback: req.disableTranscriptSummaryFallback,
-  })
-  const enrichedPayloadStr = enrichment.payloadStr
-  const enrichmentMs = performance.now() - tEnrich
-  addDispatchStageDuration(stageDurations, "enrichment", enrichmentMs)
-  log(`   ⏱ enrich: ${Math.round(enrichmentMs)}ms`)
-
-  // Apply the caller's environment to process.env for in-process hooks.
-  // The daemon's own launchd environment lacks agent-identifying vars
-  // (CLAUDECODE, etc.), so without this, detectCurrentAgent() and
-  // createDefaultTaskStore() resolve incorrectly in the daemon process.
-  //
-  // In daemon mode, skip the global mutation: overlapping /dispatch requests
-  // from different agents would race on shared process.env. Inline hooks must
-  // use detectCurrentAgentFromHookPayload(input) / payload._env instead.
-  const restoreEnv = req.daemonContext ? () => {} : applyDispatchEnv(enrichedPayloadStr)
-  const dispatchStart = performance.now()
-
+  let enrichment: EnrichedPayloadResult | undefined
+  let restoreEnv = () => {}
   try {
+    notifyLifecycle(
+      buildLifecycleEvent("start", ctx, filteredGroups, lifecycleRequestId, lifecycleStartedAt)
+    )
+
+    const tEnrich = performance.now()
+    enrichment = await enrichPayloadForHooks({
+      payload: ctx.payload,
+      signal,
+      summaryProvider: req.transcriptSummaryProvider,
+      currentSessionToolUsageProvider: req.currentSessionToolUsageProvider,
+      lastUserMessageAtProvider: req.lastUserMessageAtProvider,
+      disableTranscriptSummaryFallback: req.disableTranscriptSummaryFallback,
+    })
+    signal.throwIfAborted()
+    const enrichedPayloadStr = enrichment.payloadStr
+    const enrichmentMs = performance.now() - tEnrich
+    addDispatchStageDuration(stageDurations, "enrichment", enrichmentMs)
+    log(`   ⏱ enrich: ${Math.round(enrichmentMs)}ms`)
+
+    // Apply the caller's environment to process.env for in-process hooks.
+    // The daemon's own launchd environment lacks agent-identifying vars
+    // (CLAUDECODE, etc.), so without this, detectCurrentAgent() and
+    // createDefaultTaskStore() resolve incorrectly in the daemon process.
+    //
+    // In daemon mode, skip the global mutation: overlapping /dispatch requests
+    // from different agents would race on shared process.env. Inline hooks must
+    // use detectCurrentAgentFromHookPayload(input) / payload._env instead.
+    restoreEnv = req.daemonContext ? () => {} : applyDispatchEnv(enrichedPayloadStr)
+    const dispatchStart = performance.now()
+
     const response = await executeDispatchStrategy(
       ctx,
       filteredGroups,
@@ -1029,10 +1042,10 @@ async function performDispatch(req: DispatchRequest): Promise<DispatchResult> {
     return result(response, countHooks(filteredGroups))
   } finally {
     restoreEnv()
-    if (enrichment.transcriptSessionLinesKey) {
+    if (enrichment?.transcriptSessionLinesKey) {
       releaseDispatchSessionLines(enrichment.transcriptSessionLinesKey)
     }
-    req.onDispatchLifecycle?.(
+    notifyLifecycle(
       buildLifecycleEvent("end", ctx, filteredGroups, lifecycleRequestId, lifecycleStartedAt)
     )
   }

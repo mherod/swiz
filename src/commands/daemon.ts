@@ -1,4 +1,3 @@
-import { dirname, join } from "node:path"
 import { LRUCache } from "lru-cache"
 import { CONFIGURABLE_AGENTS } from "../agents.ts"
 import { stderrLog } from "../debug.ts"
@@ -7,14 +6,8 @@ import { startHookLogMaintenance } from "../hook-log.ts"
 import { pruneTempLogs } from "../log-rotation.ts"
 import { validateDispatchRoutes } from "../manifest.ts"
 import { resolveProjectRoot } from "../project-identity.ts"
-import {
-  getProjectSettingsPath,
-  getSwizSettingsPath,
-  invalidateSettingsCache,
-} from "../settings.ts"
 import { setGlobalTaskStateCache } from "../tasks/task-recovery.ts"
 import { TaskStateCache } from "../tasks/task-state-cache.ts"
-import { invalidateTurnsCache } from "../transcript-turns.ts"
 import { findAllProviderSessions, type Session } from "../transcript-utils.ts"
 import type { Command } from "../types.ts"
 import { clearFileCache, getFileCacheMemoryStats } from "../utils/file-cache.ts"
@@ -31,6 +24,8 @@ import type { SessionDivergenceState } from "./daemon/divergence.ts"
 import { LifecycleTaskRegistry } from "./daemon/lifecycle-task-registry.ts"
 import { memoryPressureConfig, readOsRss, startMemoryMonitoring } from "./daemon/memory-pressure.ts"
 import { applyDaemonMemoryPressure } from "./daemon/memory-relief.ts"
+import { evictIdleProjects, setupWatchers, snapshotCacheKey } from "./daemon/project-lifecycle.ts"
+
 import {
   CappedMap,
   CooldownRegistry,
@@ -46,7 +41,7 @@ import {
   RepositoryCapabilityCache,
   TranscriptIndexCache,
 } from "./daemon/runtime-cache.ts"
-import { providerSessionIndex, sessionDataCache } from "./daemon/session-data.ts"
+import { sessionDataCache } from "./daemon/session-data.ts"
 import { sessionToolCallPersistenceQueue } from "./daemon/session-tool-call-persistence.ts"
 import {
   buildSnapshotFingerprint,
@@ -67,7 +62,6 @@ import {
   readPersistedSessionToolCalls,
   restartDaemon,
   type SessionToolUsageState,
-  transcriptWatchPathsForProject,
 } from "./daemon/utils.ts"
 import { startDaemonWebServer } from "./daemon/web-server.ts"
 import { DaemonWorkerRuntime } from "./daemon/worker-runtime.ts"
@@ -75,26 +69,18 @@ import { installDaemonLaunchAgent, uninstallDaemonLaunchAgent } from "./install.
 import { ensureShimInstallation } from "./shim.ts"
 import { computeWarmStatusLineSnapshot, type WarmStatusLineSnapshot } from "./status-line.ts"
 
+export {
+  deleteProjectSnapshots,
+  evictIdleProjects,
+  MAX_WATCHED_PROJECTS,
+  PROJECT_IDLE_EVICTION_MS,
+  type ProjectWatcherManager,
+  setupWatchers,
+  snapshotCacheKey,
+} from "./daemon/project-lifecycle.ts"
+
 export const TRANSCRIPT_MEMORY_RETENTION_MS = 30 * 60 * 1000 // 30 mins
 export const TRANSCRIPT_MEMORY_PRUNE_INTERVAL_MS = 60 * 1000 // 1 min
-export const PROJECT_IDLE_EVICTION_MS = 3 * 60 * 1000 // 3 mins
-export const MAX_WATCHED_PROJECTS = 2
-const SNAPSHOT_KEY_SEPARATOR = "\x00"
-
-export function snapshotCacheKey(cwd: string, sessionId: string | null | undefined): string {
-  return `${cwd}${SNAPSHOT_KEY_SEPARATOR}${sessionId ?? ""}`
-}
-
-export function deleteProjectSnapshots(
-  snapshots: { keys(): Iterable<string>; delete(key: string): unknown },
-  cwd: string
-): void {
-  const prefix = snapshotCacheKey(cwd, null)
-  for (const key of snapshots.keys()) {
-    if (key.startsWith(prefix)) snapshots.delete(key)
-  }
-}
-
 const DAEMON_FLAGS = new Set(["--restart", "--install", "--uninstall", "status"])
 
 /** Subcommands work as bare words or flags: `swiz daemon restart` ≡ `--restart`. */
@@ -339,180 +325,6 @@ export function buildSnapshotResolver(
   }
 }
 
-export interface ProjectWatcherManager {
-  registeredProjects: Set<string>
-  registerProjectWatchers: (cwd: string) => void
-  evictProject: (cwd: string) => void
-  invalidateProject: (cwd: string) => void
-}
-
-function findOldestProjectCwd(
-  registeredProjects: Set<string>,
-  projectLastSeen: CappedMap<string, number>,
-  excludeCwd: string
-): string | null {
-  let oldestCwd: string | null = null
-  let oldestTime = Infinity
-  for (const projectCwd of registeredProjects) {
-    if (projectCwd === excludeCwd) continue
-    const lastSeen = projectLastSeen.get(projectCwd) ?? 0
-    if (lastSeen < oldestTime) {
-      oldestTime = lastSeen
-      oldestCwd = projectCwd
-    }
-  }
-  return oldestCwd
-}
-
-export function setupWatchers(
-  caches: DaemonCaches,
-  transcriptMonitor: TranscriptMonitor,
-  projectLastSeen: CappedMap<string, number>
-): ProjectWatcherManager {
-  const {
-    watchers,
-    ghCache,
-    eligibilityCache,
-    gitStateCache,
-    repositoryCapabilityCache,
-    projectSettingsCache,
-    manifestCache,
-    transcriptIndex,
-    snapshots,
-  } = caches
-
-  const flushSnapshots = () => {
-    snapshots.clear()
-    ghCache.invalidateAll()
-    eligibilityCache.invalidateAll()
-    gitStateCache.invalidateAll()
-    repositoryCapabilityCache.invalidateAll()
-    projectSettingsCache.invalidateAll()
-    manifestCache.invalidateAll()
-    // Also invalidate the in-process settings TTL cache so changes take
-    // effect immediately without waiting for the 5s TTL (issue #330).
-    const settingsPath = getSwizSettingsPath()
-    if (settingsPath) invalidateSettingsCache(settingsPath)
-  }
-
-  const projectRoot = dirname(Bun.main)
-  const settingsPath = getProjectSettingsPath(projectRoot)
-  if (settingsPath) {
-    watchers.register(settingsPath, "settings", flushSnapshots)
-    if (settingsPath) invalidateSettingsCache(settingsPath)
-  }
-
-  watchers.register(join(projectRoot, "src", "manifest.ts"), "manifest", flushSnapshots)
-  watchers.register(join(projectRoot, "hooks/"), "hooks", flushSnapshots)
-
-  const globalSettingsPath = getSwizSettingsPath()
-  if (globalSettingsPath) {
-    watchers.register(globalSettingsPath, "global-settings", flushSnapshots)
-  }
-
-  const registeredProjects = new Set<string>()
-
-  const evictProject = (cwd: string) => {
-    registeredProjects.delete(cwd)
-    ghCache.invalidateProject(cwd)
-    eligibilityCache.invalidateProject(cwd)
-    gitStateCache.invalidateProject(cwd)
-    repositoryCapabilityCache.invalidateProject(cwd)
-    projectSettingsCache.invalidateProject(cwd)
-    manifestCache.invalidateProject(cwd)
-    transcriptIndex.invalidateProject(cwd)
-    sessionDataCache.invalidateProject(cwd)
-    providerSessionIndex.invalidate(cwd)
-    invalidateTurnsCache(cwd)
-    watchers.unregisterByLabelSuffix(`:${cwd}`)
-    caches.upstreamSyncRegistry.unregister(cwd)
-    caches.cooldownRegistry.invalidateProject(cwd)
-    caches.lifecycleTaskRegistry.clearProject(cwd)
-    deleteProjectSnapshots(snapshots, cwd)
-  }
-
-  const invalidateProject = (cwd: string) => {
-    ghCache.invalidateProject(cwd)
-    eligibilityCache.invalidateProject(cwd)
-    gitStateCache.invalidateProject(cwd)
-    repositoryCapabilityCache.invalidateProject(cwd)
-    projectSettingsCache.invalidateProject(cwd)
-    manifestCache.invalidateProject(cwd)
-    transcriptIndex.invalidateProject(cwd)
-    sessionDataCache.invalidateProject(cwd)
-    providerSessionIndex.invalidate(cwd)
-    invalidateTurnsCache(cwd)
-    caches.cooldownRegistry.invalidateProject(cwd)
-    deleteProjectSnapshots(snapshots, cwd)
-  }
-
-  const registerProjectWatchers = (cwd: string) => {
-    if (registeredProjects.has(cwd)) return
-
-    // Limit the number of concurrently watched projects
-    if (registeredProjects.size >= MAX_WATCHED_PROJECTS) {
-      const oldestCwd = findOldestProjectCwd(registeredProjects, projectLastSeen, cwd)
-      if (oldestCwd) {
-        stderrLog("project eviction", `[daemon] Evicting project ${oldestCwd} to stay within limit`)
-        evictProject(oldestCwd)
-      }
-    }
-
-    registeredProjects.add(cwd)
-    const projectFlush = () => invalidateProject(cwd)
-    const projectSettings = getProjectSettingsPath(cwd)
-    if (projectSettings) watchers.register(projectSettings, `project-settings:${cwd}`, projectFlush)
-    // Deliberate: the ignore rules keep generic source watches out of `.git`, but this watcher
-    // exists precisely to catch branch, ref and index changes. Without the opt-in the registry
-    // dropped it silently and warm status snapshots stayed stale for a whole bucket (#807).
-    watchers.register(join(cwd, ".git/"), `git:${cwd}`, projectFlush, { allowIgnoredPath: true })
-    const transcriptWatchFlush = () => {
-      projectFlush()
-      void transcriptMonitor.checkProject(cwd).catch((err) => {
-        stderrLog("transcript-monitor", `Failed to check project ${cwd}: ${err}`)
-      })
-    }
-    for (const transcriptWatch of transcriptWatchPathsForProject(cwd)) {
-      // depth: 0 — only watch the parent directory for new/removed session entries.
-      // depth: 1 was creating an FSWatcher per session subdirectory, causing massive FD and
-      // memory overhead. The TranscriptMonitor
-      // handles targeted reads of specific transcript files on change detection.
-      watchers.register(transcriptWatch.path, transcriptWatch.label, transcriptWatchFlush, {
-        depth: 0,
-      })
-    }
-    // Auto-register project for periodic upstream sync and sync immediately
-    void caches.upstreamSyncRegistry
-      .register(cwd)
-      .then(() => caches.upstreamSyncRegistry.syncNow(cwd))
-      .catch(() => {})
-    watchers.start().catch(() => {})
-  }
-
-  watchers.start().then(undefined, () => {})
-
-  return { registeredProjects, registerProjectWatchers, evictProject, invalidateProject }
-}
-
-export function evictIdleProjects(
-  now: number,
-  state: DaemonState,
-  registeredProjects: Set<string>,
-  evictProject: (cwd: string) => void
-): void {
-  const projectCutoff = now - PROJECT_IDLE_EVICTION_MS
-  for (const [cwd, lastSeen] of state.projectLastSeen) {
-    if (lastSeen >= projectCutoff) continue
-    state.projectLastSeen.delete(cwd)
-    state.projectMetrics.delete(cwd)
-
-    // Manual eviction of idle projects
-    if (registeredProjects.has(cwd)) {
-      evictProject(cwd)
-    }
-  }
-}
-
 function createPruner(
   state: ReturnType<typeof createDaemonState>,
   caches: ReturnType<typeof createDaemonCaches>,
@@ -723,11 +535,8 @@ async function startDaemonProcess(_args: string[], port: number): Promise<void> 
   Object.defineProperty(state.globalMetrics, "transcriptMonitorRpc", {
     get: () => workerTranscriptMonitor.getRpcMetrics(),
   })
-  const { registeredProjects, registerProjectWatchers, evictProject } = setupWatchers(
-    caches,
-    transcriptMonitor,
-    state.projectLastSeen
-  )
+  const projectLifecycle = setupWatchers(caches, transcriptMonitor, state.projectLastSeen)
+  const { registeredProjects, registerProjectWatchers, evictProject } = projectLifecycle
 
   const memoryMonitoring = startMemoryMonitoring(
     state.globalMetrics,
@@ -782,14 +591,12 @@ async function startDaemonProcess(_args: string[], port: number): Promise<void> 
       await Promise.race([sessionToolCallPersistenceQueue.flush(), Bun.sleep(2_000)])
       process.stderr.write("Session telemetry... ")
     }
-    caches.watchers.close()
-    process.stderr.write("Watchers... ")
+    projectLifecycle.close()
+    process.stderr.write("Projects... ")
     transcriptMonitor.terminate()
     process.stderr.write("Transcript monitor... ")
     caches.ciWatchRegistry.close()
     process.stderr.write("CI registry... ")
-    caches.upstreamSyncRegistry.close()
-    process.stderr.write("Upstream sync... ")
     caches.workerRuntime.close()
     process.stderr.write("Worker runtime... ")
     stopHookLogMaintenance()
@@ -887,9 +694,6 @@ async function startDaemonProcess(_args: string[], port: number): Promise<void> 
     await cleanup("startup failure", 1)
     return
   }
-
-  // Register initial project for periodic upstream sync
-  void caches.upstreamSyncRegistry.register(projectRoot)
 
   void logPseudoHook("Transcript monitor starting")
   stopTranscriptMonitoring = startTranscriptMonitoring(

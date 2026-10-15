@@ -30,10 +30,13 @@ export async function resolveRegisterableProjectCwd(cwd: string): Promise<string
  */
 export async function registerProjectAndTouch(
   ctx: { touchProject: (cwd: string) => void; registerProjectWatchers: (cwd: string) => void },
-  cwd: string
+  cwd: string,
+  signal?: AbortSignal
 ): Promise<string | null> {
+  signal?.throwIfAborted()
   // Ignore placeholder/relative cwds so they don't pollute project bookkeeping.
   const projectCwd = await resolveRegisterableProjectCwd(cwd)
+  signal?.throwIfAborted()
   if (!projectCwd) return null
   ctx.registerProjectWatchers(projectCwd)
   ctx.touchProject(projectCwd)

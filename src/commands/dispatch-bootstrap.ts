@@ -9,6 +9,11 @@
  */
 
 import { appendFile } from "node:fs/promises"
+import {
+  daemonClientTimeoutMs,
+  enrichDispatchPayload,
+  tryDaemonDispatch,
+} from "../dispatch/daemon-client.ts"
 import { ensureDispatchId } from "../dispatch/dispatch-id.ts"
 import {
   flushIncomingDispatchCaptures,
@@ -16,18 +21,14 @@ import {
   shouldCaptureIncomingPayloads,
 } from "../dispatch/incoming-capture.ts"
 import { normalizeAgentHookPayload } from "../dispatch/payload-normalize.ts"
-import { DISPATCH_TIMEOUTS } from "../dispatch/timeouts.ts"
+
+export { daemonClientTimeoutMs } from "../dispatch/daemon-client.ts"
+
 import { swizDispatchLogPath } from "../temp-paths.ts"
 import { sanitizeHookOutputForCurrentAgent } from "../utils/hook-output-agent-compat.ts"
 import { supportsHookSpecificOutput } from "../utils/hook-specific-output.ts"
-import { detectTerminal } from "../utils/terminal-detection.ts"
 
-const DEFAULT_DAEMON_PORT = 7_943
-const DEFAULT_DAEMON_TIMEOUT_MS = 30_000
 const STDIN_PAYLOAD_TIMEOUT_MS = 2_000
-/** Headroom left for process startup, stdin, and writing the response. */
-const DAEMON_CLIENT_MARGIN_MS = 3_000
-const MIN_DAEMON_CLIENT_TIMEOUT_MS = 1_000
 
 interface ParsedDispatchArgs {
   agentId?: string
@@ -121,106 +122,45 @@ async function backfillPayload(payload: Record<string, any>): Promise<void> {
   trackInferred(payload, "cwd")
 }
 
-function buildAllowlistedEnv(): Record<string, string> {
-  const result: Record<string, string> = {}
-  const patterns = [
-    /^PATH$/,
-    /^HOME$/,
-    /^(TERM|COLORTERM)$/,
-    /^SWIZ_/,
-    /^ANTHROPIC_/,
-    /^CURSOR_/,
-    /^CODEX_/,
-    /^GEMINI_/,
-    /^CLAUDECODE$/,
-    /^CLAUDE_PROJECT_DIR$/,
-  ]
-  for (const [key, value] of Object.entries(process.env)) {
-    if (value !== undefined && patterns.some((pattern) => pattern.test(key))) result[key] = value
-  }
-  return result
-}
-
-function daemonPort(): number {
-  const parsed = Number(process.env.SWIZ_DAEMON_PORT)
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_DAEMON_PORT
-}
-
-/**
- * Client-side budget for the daemon request. `swiz install` writes the agent's
- * hook timeout from the same DISPATCH_TIMEOUTS value, so the client must give
- * up early enough to still print a response before the agent kills it.
- */
-export function daemonClientTimeoutMs(canonicalEvent: string): number {
-  const agentBudgetMs =
-    (DISPATCH_TIMEOUTS[canonicalEvent] ?? DEFAULT_DAEMON_TIMEOUT_MS / 1000) * 1000
-  return Math.max(MIN_DAEMON_CLIENT_TIMEOUT_MS, agentBudgetMs - DAEMON_CLIENT_MARGIN_MS)
-}
-
-type DaemonDispatchResult =
-  | { kind: "response"; response: Record<string, any> }
-  /** Daemon not reachable or rejected the request — local execution can help. */
-  | { kind: "unavailable" }
-  /** Daemon is busy; re-running every hook cold would only overrun the agent timeout. */
-  | { kind: "timeout" }
-
-async function tryDaemonDispatch(
-  canonicalEvent: string,
-  hookEventName: string,
-  payloadStr: string
-): Promise<DaemonDispatchResult> {
-  if (process.env.SWIZ_NO_DAEMON === "1") return { kind: "unavailable" }
-
-  const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), daemonClientTimeoutMs(canonicalEvent))
-  try {
-    const response = await fetch(
-      `http://127.0.0.1:${daemonPort()}/dispatch?event=${encodeURIComponent(canonicalEvent)}&hookEventName=${encodeURIComponent(hookEventName)}`,
-      {
-        method: "POST",
-        body: payloadStr,
-        headers: { "Content-Type": "application/json" },
-        signal: controller.signal,
-      }
-    )
-    if (!response.ok) return { kind: "unavailable" }
-    const value: unknown = await response.json()
-    return {
-      kind: "response",
-      response:
-        value !== null && typeof value === "object" && !Array.isArray(value)
-          ? (value as Record<string, any>)
-          : {},
-    }
-  } catch {
-    return controller.signal.aborted ? { kind: "timeout" } : { kind: "unavailable" }
-  } finally {
-    clearTimeout(timer)
-  }
-}
-
 async function executeLocalFallback(
   canonicalEvent: string,
   hookEventName: string,
   payload: Record<string, any>
 ): Promise<void> {
-  const [{ CONFIGURABLE_AGENTS }, { DISPATCH_ROUTES }, engine, manifestModule, executeModule] =
-    await Promise.all([
-      import("../agents.ts"),
-      import("../dispatch/index.ts"),
-      import("../dispatch/engine.ts"),
-      import("../manifest.ts"),
-      import("../dispatch/execute.ts"),
-    ])
-  manifestModule.validateDispatchRoutes(DISPATCH_ROUTES, CONFIGURABLE_AGENTS)
+  const [
+    { CONFIGURABLE_AGENTS },
+    dispatchModule,
+    engine,
+    manifestModule,
+    executeModule,
+    agentPaths,
+  ] = await Promise.all([
+    import("../agents.ts"),
+    import("../dispatch/index.ts"),
+    import("../dispatch/engine.ts"),
+    import("../manifest.ts"),
+    import("../dispatch/execute.ts"),
+    import("../agent-paths.ts"),
+  ])
+  manifestModule.validateDispatchRoutes(dispatchModule.DISPATCH_ROUTES, CONFIGURABLE_AGENTS)
   const payloadStr = JSON.stringify(payload)
   await engine.withLogBuffer(async () => {
-    await executeModule.executeDispatch({
+    const result = await executeModule.executeDispatch({
       canonicalEvent,
       hookEventName,
       payloadStr,
       preParsedPayload: payload,
     })
+    if (result.timing.hookCount > 0 || Object.keys(result.response).length > 0) {
+      engine.writeResponse(
+        dispatchModule.parseValidatedAgentDispatchWireJson(
+          result.response,
+          canonicalEvent,
+          hookEventName,
+          agentPaths.detectCurrentAgentFromHookPayload(payload)?.id
+        )
+      )
+    }
   })
 }
 
@@ -309,22 +249,6 @@ async function preparePayload(
   return payload
 }
 
-function enrichPayload(
-  payload: Record<string, any>,
-  agentId: string | undefined,
-  processStartedAt: number
-): void {
-  if (!payload._terminal) {
-    const terminal = detectTerminal()
-    payload._terminal = { app: terminal.app, name: terminal.name }
-  }
-  if (!payload._env) payload._env = buildAllowlistedEnv()
-  if (agentId && !payload._agent) payload._agent = agentId
-  payload._swizTiming = {
-    cliBootstrapMs: Math.max(0, performance.now() - processStartedAt),
-  }
-}
-
 export async function runThinDispatch(
   args: string[],
   processStartedAt: number = performance.now()
@@ -337,7 +261,7 @@ export async function runThinDispatch(
     hookEventName = parsedArgs.hookEventName
     const rawPayloadStr = await readStdinPayload()
     const payload = await preparePayload(rawPayloadStr, canonicalEvent, hookEventName)
-    enrichPayload(payload, parsedArgs.agentId, processStartedAt)
+    enrichDispatchPayload(payload, parsedArgs.agentId, processStartedAt)
 
     const result = await tryDaemonDispatch(canonicalEvent, hookEventName, JSON.stringify(payload))
     if (result.kind === "response") {

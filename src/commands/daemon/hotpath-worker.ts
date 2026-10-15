@@ -2,13 +2,8 @@ import { messageFromUnknownError } from "../../utils/hook-json-helpers.ts"
 import {
   type DispatchPayloadWorkerRequest,
   type DispatchPayloadWorkerResponse,
-  type NormalizedDispatchPayload,
-  normalizeParsedDispatchPayload,
-} from "./worker-runtime.ts"
-
-function normalizeDispatchPayload(payloadStr: string): NormalizedDispatchPayload | null {
-  return normalizeParsedDispatchPayload(JSON.parse(payloadStr) as Record<string, any>)
-}
+  parseDispatchPayload,
+} from "./dispatch-payload.ts"
 
 self.onmessage = (event: MessageEvent<DispatchPayloadWorkerRequest>) => {
   const req = event.data
@@ -19,7 +14,7 @@ self.onmessage = (event: MessageEvent<DispatchPayloadWorkerRequest>) => {
     response = {
       id: req.id,
       ok: true,
-      payload: normalizeDispatchPayload(req.payloadStr),
+      payload: parseDispatchPayload(req.payloadStr),
     }
   } catch (error) {
     response = {

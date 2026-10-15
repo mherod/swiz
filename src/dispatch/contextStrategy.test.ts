@@ -1,21 +1,17 @@
-import { afterAll, beforeEach, describe, expect, mock, spyOn, test } from "bun:test"
+import { beforeEach, describe, expect, mock, spyOn, test } from "bun:test"
 import { getAgent } from "../agents.ts"
 import type { HookDef } from "../hook-types.ts"
 import { hookOutputSchema } from "../schemas.ts"
 import { useTempDir } from "../utils/test-utils.ts"
 import { ContextStrategy } from "./contextStrategy.ts"
 import { stripInternalDispatchFields } from "./dispatch-wire.ts"
-import * as engine from "./engine.ts"
 import { DISPATCH_ROUTES } from "./index.ts"
 
 const temp = useTempDir("swiz-context-strategy-")
-const write = spyOn(engine, "writeResponse").mockImplementation(() => {})
 let cwd: string
 beforeEach(async () => {
   cwd = await temp.create()
-  write.mockClear()
 })
-afterAll(() => mock.restore())
 
 function fixture(output: Record<string, unknown>, index = 0): HookDef {
   return { hook: { name: `context-fixture-${index}`, event: "sessionStart", run: () => output } }
@@ -28,21 +24,25 @@ async function execute(
   signal?: AbortSignal
 ) {
   const hookEventName = getAgent("claude")!.eventMap[canonicalEvent]!
-  const result = await new ContextStrategy().execute({
-    canonicalEvent,
-    hookEventName,
-    agentId,
-    cwd,
-    signal,
-    daemonContext: true,
-    enrichedPayloadStr: JSON.stringify({ cwd, _effectiveSettings: { humaniseAutoSteer: false } }),
-    filteredGroups: [{ event: canonicalEvent, hooks }],
-  })
-  const wire = hookOutputSchema.parse(stripInternalDispatchFields(result))
-  expect(write).toHaveBeenCalledTimes(1)
-  expect(write).toHaveBeenCalledWith(wire)
-  expect(wire).not.toHaveProperty("hookExecutions")
-  return { result, wire }
+  const write = spyOn(process.stdout, "write").mockImplementation(() => true)
+  try {
+    const result = await new ContextStrategy().execute({
+      canonicalEvent,
+      hookEventName,
+      agentId,
+      cwd,
+      signal,
+      daemonContext: true,
+      enrichedPayloadStr: JSON.stringify({ cwd, _effectiveSettings: { humaniseAutoSteer: false } }),
+      filteredGroups: [{ event: canonicalEvent, hooks }],
+    })
+    const wire = hookOutputSchema.parse(stripInternalDispatchFields(result))
+    expect(write).not.toHaveBeenCalled()
+    expect(wire).not.toHaveProperty("hookExecutions")
+    return { result, wire }
+  } finally {
+    write.mockRestore()
+  }
 }
 
 const contextRoutes = Object.entries(DISPATCH_ROUTES).filter(
