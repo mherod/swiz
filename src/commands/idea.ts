@@ -318,6 +318,7 @@ export const ideaCommand: Command = {
           model,
           timeout: timeoutMs,
           provider,
+          preferredProvider: "agy",
           reasoning: "low",
           structuredOutput: "prompt",
         })

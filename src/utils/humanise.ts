@@ -7,7 +7,7 @@ import { createHash } from "node:crypto"
 import { mkdir, readdir, rm, stat } from "node:fs/promises"
 import { join } from "node:path"
 import { LRUCache } from "lru-cache"
-import { promptText } from "../ai-providers.ts"
+import { type AiProviderId, promptText } from "../ai-providers.ts"
 import { resolveSignal } from "../ai-signal.ts"
 import { getHomeDirWithFallback } from "../home.ts"
 import { extractTextFromUnknownContent } from "../transcript-extract.ts"
@@ -277,6 +277,7 @@ export function fallbackHumaniseText(
 }
 
 export interface HumaniseOptions {
+  preferredProvider?: AiProviderId
   systemPrompt?: string
   timeoutMs?: number
   fallback?: (text: string) => string
@@ -401,7 +402,7 @@ function humaniseCacheKey(
   contextSnippet: string,
   options?: HumaniseOptions
 ): string {
-  return `${process.env.AI_PROVIDER ?? "auto"}::${options?.cacheDir ?? promptCacheDir()}::${trimmed}::${options?.systemPrompt ?? ""}::${contextSnippet}`
+  return `${process.env.AI_PROVIDER ?? options?.preferredProvider ?? "auto"}::${options?.cacheDir ?? promptCacheDir()}::${trimmed}::${options?.systemPrompt ?? ""}::${contextSnippet}`
 }
 
 export async function humaniseText(message: string, options?: HumaniseOptions): Promise<string> {
@@ -439,7 +440,11 @@ async function fetchAndFormatRewrittenText(
   const { signal, cleanup } = resolveSignal({ timeout })
   let rewrittenRaw: string
   try {
-    rewrittenRaw = await promptText(prompt, { signal, reasoning: "low" })
+    rewrittenRaw = await promptText(prompt, {
+      signal,
+      reasoning: "low",
+      preferredProvider: options?.preferredProvider,
+    })
   } finally {
     cleanup()
   }

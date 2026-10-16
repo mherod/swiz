@@ -26,10 +26,21 @@ Resolution runs in priority order on every call:
 ```
 1. options.provider (explicit per-call override)
 2. AI_PROVIDER env var ("gemini" | "claude" | "openrouter" | "codex" | "agy")
-3. Auto-select: Codex CLI → OpenRouter → Claude Code → Gemini → agy
+3. options.preferredProvider (first automatic choice, when available)
+4. Remaining providers: Codex CLI → OpenRouter → Claude Code → Gemini → agy
 ```
 
-`activeProvider(override?)` in `src/ai-providers.ts` implements this. It throws an error (with a descriptive message) if an explicit override requests a provider that is not currently available.
+The generation APIs in `src/ai-providers.ts` apply this order. They throw an error (with a descriptive message) if an explicit override requests a provider that is not currently available.
+
+Generation calls use these command defaults, skipping unavailable providers and trying the remaining providers on failure within the shared 15-second budget:
+
+| Command | Automatic provider order |
+|---------|--------------------------|
+| Idea | agy → Codex → OpenRouter → Claude → Gemini |
+| Auto-reply | Codex → OpenRouter → Claude → Gemini → agy |
+| Steering | Claude → Codex → OpenRouter → Gemini → agy |
+
+Explicit `--provider`/`options.provider` or `AI_PROVIDER` overrides still select only one provider. Other commands retain the general Codex-first order; `activeProvider()` reports that general order without a command preference.
 
 ### Available providers
 
@@ -179,7 +190,7 @@ Resumes the most recent session with an AI-generated next-step suggestion.
 
 Use `swiz transcript --auto-reply --print` to print generated replies without scheduling or sending them. Transcript selection flags such as `--codex` select the source transcript, not the generation provider.
 
-Steering humanisation also uses the shared provider priority and respects `AI_PROVIDER`. Its complete fallback chain has a 15-second budget before using a deterministic local rewrite. A bare `Continue` stays `Please continue, thanks.` without a model request. Rewrites must preserve the input scope, not invent extra tasks, checks, commits, or pushes. `bun scripts/debug-humanise-autosteer.ts` previews rewrites without scheduling them.
+Steering humanisation prefers Claude, then uses the remaining shared provider priority, and respects `AI_PROVIDER`. Its complete fallback chain has a 15-second budget before using a deterministic local rewrite. A bare `Continue` stays `Please continue, thanks.` without a model request. Rewrites must preserve the input scope, not invent extra tasks, checks, commits, or pushes. `bun scripts/debug-humanise-autosteer.ts` previews rewrites without scheduling them.
 
 The defaults can be overridden with `humaniseAutoSteerMessage(text, { timeoutMs })`, `streamAutoReply(..., { timeout })`, or `idea --timeout <ms>`. Abort cleanup can add process shutdown time after the generation deadline.
 

@@ -6,6 +6,7 @@ import {
   promptObject,
   promptStreamText,
   promptText,
+  withProviderModel,
 } from "./ai-providers.ts"
 
 const envKeys = [
@@ -45,6 +46,48 @@ afterEach(() => {
 })
 
 describe("provider selection policy", () => {
+  test.each([
+    ["agy", ["agy", "codex", "claude"]],
+    ["claude", ["claude", "codex", "agy"]],
+    ["codex", ["codex", "claude", "agy"]],
+  ] as const)("prefers %s while retaining runtime fallbacks", async (preferredProvider, expected) => {
+    for (const name of ["codex", "claude", "agy"]) installed.add(name)
+    const attempted: string[] = []
+    await expect(
+      withProviderModel(
+        async (_model, provider) => {
+          attempted.push(provider)
+          throw new Error("provider unavailable")
+        },
+        { preferredProvider }
+      )
+    ).rejects.toThrow("provider unavailable")
+    expect(attempted).toEqual([...expected])
+  })
+
+  test("skips missing preferences and respects explicit overrides", async () => {
+    installed.add("codex")
+    installed.add("claude")
+    const selected = (_model: unknown, provider: string) => Promise.resolve(provider)
+    expect(await withProviderModel(selected, { preferredProvider: "agy" })).toBe("codex")
+    process.env.AI_PROVIDER = "claude"
+    expect(await withProviderModel(selected, { preferredProvider: "agy" })).toBe("claude")
+    expect(await withProviderModel(selected, { preferredProvider: "agy", provider: "codex" })).toBe(
+      "codex"
+    )
+    const attempted: string[] = []
+    await expect(
+      withProviderModel(
+        async (_model, provider) => {
+          attempted.push(provider)
+          throw new Error("explicit failure")
+        },
+        { preferredProvider: "agy" }
+      )
+    ).rejects.toThrow("explicit failure")
+    expect(attempted).toEqual(["claude"])
+  })
+
   test("uses live availability in priority order down to agy", () => {
     for (const name of ["codex", "claude", "gemini", "agy"]) installed.add(name)
     process.env.OPENROUTER_API_KEY = "test-key"

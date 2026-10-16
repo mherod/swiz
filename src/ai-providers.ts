@@ -71,6 +71,8 @@ export interface PromptOptions extends BaseAiPromptOptions {
    * Throws if the requested provider is not available.
    */
   provider?: AiProviderId
+  /** First automatic choice; explicit overrides win and other providers remain fallbacks. */
+  preferredProvider?: AiProviderId
   /** Reasoning budget for SDK text generation when supported by the provider. */
   reasoning?: "low" | "medium" | "high"
   /** Generate JSON directly instead of a provider's structured-output agent loop; still validate. */
@@ -415,7 +417,7 @@ export function activeProvider(override?: AiProviderId): AiProviderId | null {
  * Returns available provider IDs in priority order (Codex → OpenRouter → Claude Code → Gemini → agy).
  * When an explicit override is set (options.provider or AI_PROVIDER env), returns only that provider.
  */
-function availableProviders(override?: AiProviderId): AiProviderId[] {
+function availableProviders(override?: AiProviderId, preferred?: AiProviderId): AiProviderId[] {
   if (process.env.AI_TEST_NO_BACKEND === "1") return []
 
   const requested = override ?? (process.env.AI_PROVIDER as AiProviderId | undefined)
@@ -425,12 +427,15 @@ function availableProviders(override?: AiProviderId): AiProviderId[] {
     return primary ? [primary] : []
   }
 
-  return PROVIDER_PRIORITY.filter(isProviderAvailable)
+  const priority = preferred
+    ? [preferred, ...PROVIDER_PRIORITY.filter((provider) => provider !== preferred)]
+    : PROVIDER_PRIORITY
+  return priority.filter(isProviderAvailable)
 }
 
 /** Shared prompt preflight; keep the calling API in model-validation diagnostics. */
 function providersForPrompt(source: string, options?: PromptOptions): AiProviderId[] {
-  const providers = availableProviders(options?.provider)
+  const providers = availableProviders(options?.provider, options?.preferredProvider)
   if (providers.length === 0) {
     throw new Error(
       "No AI provider available. Set GEMINI_API_KEY or OPENROUTER_API_KEY, or install the claude or codex CLI."
@@ -454,7 +459,7 @@ export async function withProviderModel<T>(
   operation: (model: LanguageModel, provider: AiProviderId, signal: AbortSignal) => Promise<T>,
   options?: PromptOptions
 ): Promise<T> {
-  const providers = availableProviders(options?.provider)
+  const providers = availableProviders(options?.provider, options?.preferredProvider)
   if (providers.length === 0) throw new Error("No AI provider available.")
   const { signal, cleanup } = resolveSignal(options)
   try {
@@ -622,17 +627,28 @@ export async function promptObject<T>(
   }
 
   const providers = providersForPrompt("promptObject", options)
-
-  let lastError: unknown
-  for (const provider of providers) {
-    try {
-      return (await PROVIDER_REGISTRY[provider].object(prompt, schema, options)) as T
-    } catch (err) {
-      lastError = err
-      // Fall through to next provider
+  const { signal, cleanup } = resolveSignal(options)
+  try {
+    let lastError: unknown
+    for (const provider of providers) {
+      signal.throwIfAborted()
+      try {
+        const result = await PROVIDER_REGISTRY[provider].object(prompt, schema, {
+          ...options,
+          timeout: undefined,
+          signal,
+        })
+        signal.throwIfAborted()
+        return result as T
+      } catch (err) {
+        signal.throwIfAborted()
+        lastError = err
+      }
     }
+    throw lastError
+  } finally {
+    cleanup()
   }
-  throw lastError
 }
 
 // Re-export ensureGeminiApiKey so callers only need this module for startup setup.

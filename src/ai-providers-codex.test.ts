@@ -215,16 +215,18 @@ test.each([
   expect(await Bun.file(f.capture).exists()).toBe(mode === "failed")
 })
 
-test("Codex generation honors the timeout signal", async () => {
+test.each(["text", "object"])("Codex %s generation stops fallbacks on timeout", async (kind) => {
   const f = await fixture()
   const result = await run(
     f,
-    `try { await promptText("hello", {provider: "codex", timeout: 1000}); console.log(JSON.stringify({aborted: false})); } catch { console.log(JSON.stringify({aborted: true})); }`,
+    `let requests = 0; globalThis.fetch = async () => { requests++; throw new Error("unexpected fallback"); };
+     try { await ${kind === "object" ? 'promptObject("hello", z.object({answer:z.string()}), {timeout:1000})' : 'promptText("hello", {provider:"codex", timeout:1000})'}; console.log(JSON.stringify({aborted: false, requests})); } catch { console.log(JSON.stringify({aborted: true, requests})); }`,
     {
       CODEX_STUB_MODE: "hang",
+      OPENROUTER_API_KEY: "test-key",
     }
   )
-  expect(result).toEqual({ aborted: true })
+  expect(result).toEqual({ aborted: true, requests: 0 })
   expect(await Bun.file(f.capture).exists()).toBe(true)
   const { pid } = await Bun.file(f.capture).json()
   let running = true

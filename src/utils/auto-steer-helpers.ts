@@ -187,7 +187,7 @@ export interface AutoSteerRequest {
   trigger?: AutoSteerTrigger
 }
 
-/** Allow Codex CLI startup and generation before falling back to the local rewrite. */
+/** Budget for provider generation before falling back to the local rewrite. */
 const HUMANISE_TIMEOUT_MS = 15_000
 
 const MECHANICAL_AUTO_STEER_LINE_RE =
@@ -215,7 +215,7 @@ function fallbackHumaniseAutoSteerMessage(
 /**
  * Rewrite a steering message into a humanised, single paragraph via the AI provider layer.
  *
- * Uses the shared Codex-first provider selection, including AI_PROVIDER overrides.
+ * Prefers Claude with shared provider fallbacks and AI_PROVIDER overrides.
  * The complete fallback chain shares the {@link HUMANISE_TIMEOUT_MS} budget.
  *
  * If providers are unavailable, error, echo the raw note, or exceed the
@@ -228,6 +228,7 @@ export async function humaniseAutoSteerMessage(
 ): Promise<string> {
   const humanise = await loadHumaniseModule()
   return humanise.humaniseText(message, {
+    preferredProvider: "claude",
     systemPrompt: humanise.DEFAULT_HUMANISE_SYSTEM_PROMPT,
     timeoutMs: options?.timeoutMs ?? HUMANISE_TIMEOUT_MS,
     fallback: (text) => fallbackHumaniseAutoSteerMessage(text, humanise.fallbackHumaniseText),
