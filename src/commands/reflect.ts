@@ -9,15 +9,9 @@ import {
 } from "../ai-providers.ts"
 import { extractJsonCandidate } from "../extract-json-candidate.ts"
 import { createStreamBufferReporter } from "../stream-buffer-reporter.ts"
-import {
-  extractPlainTurns,
-  findAllProviderSessions,
-  formatTurnsAsContext,
-  getUnsupportedTranscriptFormatMessage,
-  isUnsupportedTranscriptFormat,
-  type Session,
-} from "../transcript-utils.ts"
+import { extractPlainTurns, formatTurnsAsContext, type Session } from "../transcript-utils.ts"
 import type { Command } from "../types.ts"
+import { readTranscriptText, resolveSession } from "./session-transcript.ts"
 import { applyValueOption, parsePositiveInt, type ValueOption } from "./value-options.ts"
 
 const DEFAULT_TIMEOUT_MS = 90_000
@@ -185,34 +179,8 @@ async function loadTranscriptContext(
   targetDir: string,
   sessionQuery: string | null
 ): Promise<{ session: Session; context: string; turnCount: number; truncated: boolean }> {
-  const sessions = await findAllProviderSessions(targetDir)
-
-  if (sessions.length === 0) {
-    throw new Error(`No transcripts found for: ${targetDir}`)
-  }
-
-  let session: Session
-  if (sessionQuery) {
-    const match = sessions.find((candidate) => candidate.id.startsWith(sessionQuery))
-    if (!match) {
-      throw new Error(`No session matching: ${sessionQuery}`)
-    }
-    session = match
-  } else {
-    session =
-      sessions.find((candidate) => !isUnsupportedTranscriptFormat(candidate.format)) ?? sessions[0]!
-  }
-
-  if (isUnsupportedTranscriptFormat(session.format)) {
-    throw new Error(getUnsupportedTranscriptFormatMessage(session))
-  }
-
-  let raw: string
-  try {
-    raw = await Bun.file(session.path).text()
-  } catch {
-    throw new Error(`Could not read transcript: ${session.path}`)
-  }
+  const session = await resolveSession(targetDir, sessionQuery)
+  const raw = await readTranscriptText(session)
 
   const turns = extractPlainTurns(raw)
   if (turns.length === 0) {

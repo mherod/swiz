@@ -8,6 +8,7 @@ import type {
   LanguageModelV4StreamPart,
 } from "@ai-sdk/provider"
 import { z } from "zod"
+import { collectProcessOutput } from "./utils/process-utils.ts"
 
 const resultSchema = z.object({
   status: z.string(),
@@ -130,14 +131,10 @@ async function generate(
     )
     const detachAbort = attachAbort(proc, options.abortSignal)
     try {
-      const [stdout, stderr] = await Promise.all([
-        new Response(proc.stdout).text(),
-        new Response(proc.stderr).text(),
-      ])
-      await proc.exited
+      const { stdout, stderr, exitCode } = await collectProcessOutput(proc)
       options.abortSignal?.throwIfAborted()
-      if (proc.exitCode !== 0)
-        throw new Error(`agy exited ${proc.exitCode}: ${stderr.trim() || stdout.trim()}`)
+      if (exitCode !== 0)
+        throw new Error(`agy exited ${exitCode}: ${stderr.trim() || stdout.trim()}`)
       return parseResult(stdout)
     } finally {
       detachAbort()

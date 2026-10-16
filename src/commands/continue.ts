@@ -6,14 +6,12 @@ import { CYAN, DIM, GREEN, RED, RESET, YELLOW } from "../ansi.ts"
 import { stderrLog } from "../debug.ts"
 import {
   extractPlainTurns,
-  findAllProviderSessions,
   findHumanRequiredBlock,
   formatTurnsAsContext,
-  getUnsupportedTranscriptFormatMessage,
-  isUnsupportedTranscriptFormat,
   type Session,
 } from "../transcript-utils.ts"
 import type { Command } from "../types.ts"
+import { readTranscriptText, resolveSession } from "./session-transcript.ts"
 
 // ─── Next-step suggestion ─────────────────────────────────────────────────────
 
@@ -87,40 +85,11 @@ export function parseContinueArgs(args: string[]): ContinueArgs {
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-async function resolveSession(targetDir: string, sessionQuery: string | null): Promise<Session> {
-  const sessions = await findAllProviderSessions(targetDir)
-  if (sessions.length === 0) {
-    throw new Error(`No transcripts found for: ${targetDir}`)
-  }
-
-  let session: Session
-  if (sessionQuery) {
-    const match = sessions.find((s) => s.id.startsWith(sessionQuery))
-    if (!match) throw new Error(`No session matching: ${sessionQuery}`)
-    session = match
-  } else {
-    session = sessions.find((s) => !isUnsupportedTranscriptFormat(s.format)) ?? sessions[0]!
-  }
-
-  if (isUnsupportedTranscriptFormat(session.format)) {
-    throw new Error(getUnsupportedTranscriptFormatMessage(session))
-  }
-  return session
-}
-
 function ensureAiBackend(): void {
   if (!hasAiProvider() && !detectBestAgentCli()) {
     throw new Error(
       "No AI backend found. Set GEMINI_API_KEY, OPENROUTER_API_KEY, install the claude, codex, or agy CLI, or install Cursor Agent."
     )
-  }
-}
-
-async function readTranscriptText(session: Session): Promise<string> {
-  try {
-    return await Bun.file(session.path).text()
-  } catch {
-    throw new Error(`Could not read transcript: ${session.path}`)
   }
 }
 

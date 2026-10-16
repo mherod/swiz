@@ -11,6 +11,18 @@ export interface SpawnWithTimeoutResult {
   aborted?: boolean
 }
 
+/** Drain both pipes concurrently, then wait for a reliable exit code. */
+export async function collectProcessOutput(
+  proc: Subprocess<"pipe" | "ignore", "pipe", "pipe">
+): Promise<{ stdout: string; stderr: string; exitCode: number | null }> {
+  const [stdout, stderr] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+  ])
+  await proc.exited
+  return { stdout, stderr, exitCode: proc.exitCode }
+}
+
 /**
  * Spawn a subprocess with a hard timeout. On expiry, sends SIGTERM then
  * escalates to SIGKILL after the grace period. Returns stdout, stderr,
@@ -75,15 +87,9 @@ export async function spawnWithTimeout(
     if (signal?.aborted) onAbort()
 
     try {
-      const [stdout, stderr] = await Promise.all([
-        new Response(proc.stdout).text(),
-        new Response(proc.stderr).text(),
-      ])
-      await proc.exited
+      const output = await collectProcessOutput(proc)
       return {
-        stdout,
-        stderr,
-        exitCode: proc.exitCode,
+        ...output,
         timedOut,
         ...(aborted ? { aborted: true } : {}),
       }
