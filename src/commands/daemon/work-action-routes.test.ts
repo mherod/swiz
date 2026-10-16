@@ -44,6 +44,50 @@ function statusInput(cwd: string, task: Task, status: string, storeId = projectS
   }
 }
 
+test("Reminders completion starts pending tasks, reopens completed tasks and rejects stale or cancelled work", () =>
+  withSandboxHome(async () => {
+    const cwd = canonicalClaimPath(await tmp.create())
+    const task: Task = (
+      await (await request("tasks/create", { cwd, subject: "Verify reverse sync" })).json()
+    ).task
+    const input = (item: Task, completed: boolean) => {
+      const { status: _status, ...identity } = statusInput(cwd, item, "completed")
+      return { ...identity, completed }
+    }
+    const response = await request("tasks/completion", input(task, true))
+    expect(response.status).toBe(200)
+    const done: Task = (await response.json()).task
+    expect(done.status).toBe("completed")
+    expect(done.completionEvidence).toContain("Apple Reminders")
+    expect((await request("tasks/completion", input(task, true))).status).toBe(409)
+    const reopened = await request("tasks/completion", input(done, false))
+    expect(reopened.status).toBe(200)
+    const active: Task = (await reopened.json()).task
+    expect(active.status).toBe("in_progress")
+    expect(active.completionEvidence).toBeUndefined()
+    const cancelled: Task = (
+      await (await request("tasks/status", statusInput(cwd, active, "cancelled"))).json()
+    ).task
+    expect((await request("tasks/completion", input(cancelled, false))).status).toBe(409)
+    expect(
+      (await request("tasks/completion", { ...input(cancelled, false), cwd: await tmp.create() }))
+        .status
+    ).toBe(404)
+  }))
+
+test("Reminders completion cannot bypass task blockers", () =>
+  withSandboxHome(async () => {
+    const cwd = canonicalClaimPath(await tmp.create())
+    const task: Task = (
+      await (await request("tasks/create", { cwd, subject: "Verify blockers" })).json()
+    ).task
+    task.blockedBy = ["unresolved"]
+    await writeTask(projectStoreKey(cwd), task, cwd, createDefaultTaskStore().tasksDir)
+    const { status: _status, ...identity } = statusInput(cwd, task, "completed")
+    expect((await request("tasks/completion", { ...identity, completed: true })).status).toBe(409)
+    expect((await readTaskStore(projectStoreKey(cwd)))[0]?.status).toBe("pending")
+  }))
+
 test("creates project tasks and validates status, evidence, stale edits and exact stores", () =>
   withSandboxHome(async () => {
     const cwd = canonicalClaimPath(await tmp.create())
@@ -172,6 +216,50 @@ test("deadline HTTP lifecycle is project scoped with revision conflicts and stri
     }
     expect((await (await request("deadlines", cancel)).json()).deadline.status).toBe("cancelled")
     expect((await request("deadlines", { ...cancel, cwd: await tmp.create() })).status).toBe(400)
+  }))
+
+test("deadline completion endpoint reopens the same deadline with strict versioned inputs", () =>
+  withSandboxHome(async () => {
+    const cwd = await tmp.create()
+    const first = (
+      await (
+        await request("deadlines", {
+          cwd,
+          action: "set",
+          requestId: "new",
+          label: "Reminders round trip",
+          completionCriteria: "Verify checkboxes",
+          durationMinutes: 60,
+        })
+      ).json()
+    ).deadline
+    const input = {
+      cwd,
+      deadlineId: first.id,
+      expectedRevision: 1,
+      requestId: "checked",
+      completed: true,
+    }
+    const response = await request("deadlines/completion", input)
+    expect(response.status).toBe(200)
+    expect((await response.json()).deadline.status).toBe("completed")
+    expect((await request("deadlines/completion", { ...input, completed: "false" })).status).toBe(
+      400
+    )
+    const reopened = await request("deadlines/completion", {
+      ...input,
+      expectedRevision: 2,
+      requestId: "unchecked",
+      completed: false,
+    })
+    expect(reopened.status).toBe(200)
+    const active = (await reopened.json()).deadline
+    expect(active.status).toBe("active")
+    expect(active.id).toBe(first.id)
+    expect(active.dueAt).toBe(first.dueAt)
+    expect(
+      (await request("deadlines/completion", { ...input, cwd: await tmp.create() })).status
+    ).toBe(400)
   }))
 
 test("work actions reject invalid projects, JSON shapes, fields and methods", async () => {

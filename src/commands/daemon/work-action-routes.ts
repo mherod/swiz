@@ -6,7 +6,11 @@ import { DeadlineStore } from "../../deadlines/store.ts"
 import { resolveProjectRoot } from "../../project-identity.ts"
 import { createDefaultTaskStore } from "../../task-roots.ts"
 import { readTaskStore, readTaskStoreMeta, type Task } from "../../tasks/task-repository.ts"
-import { createTaskInProcess, updateStatus } from "../../tasks/task-service.ts"
+import {
+  completeTaskWithAutoTransition,
+  createTaskInProcess,
+  updateStatus,
+} from "../../tasks/task-service.ts"
 import { projectStoreKey, sessionStoreKey } from "../../tasks/task-store-path.ts"
 import { getLockPathForFile, withFileLock } from "../../utils/file-lock.ts"
 import { registerProjectAndTouch } from "./route-helpers.ts"
@@ -31,6 +35,16 @@ const statusSchema = z.strictObject({
 const deadlineSchema = deadlineInputSchema
   .omit({ sessionId: true, agentId: true, parentDeadlineId: true })
   .extend({ cwd: cwdField, action: z.enum(["set", "revise", "complete", "cancel"]) })
+const taskCompletionSchema = statusSchema
+  .omit({ status: true, evidence: true })
+  .extend({ completed: z.boolean() })
+const deadlineCompletionSchema = z.strictObject({
+  cwd: cwdField,
+  deadlineId: z.string().min(1).max(200),
+  expectedRevision: z.number().int().positive(),
+  requestId: z.string().min(1).max(200),
+  completed: z.boolean(),
+})
 
 class WorkActionError extends Error {
   constructor(
@@ -50,8 +64,17 @@ async function projectDirectory(body: unknown, ctx: SessionRoutesContext): Promi
   return root
 }
 
-async function changeTask(body: unknown, cwd: string) {
-  const input = statusSchema.parse(body)
+function taskChangeInput(body: unknown, fromReminders: boolean): z.infer<typeof statusSchema> {
+  if (!fromReminders) return statusSchema.parse(body)
+  const completion = taskCompletionSchema.parse(body)
+  return {
+    ...completion,
+    status: completion.completed ? "completed" : "in_progress",
+    evidence: "note: Marked complete in Apple Reminders by the user.",
+  }
+}
+
+async function projectTask(input: z.infer<typeof statusSchema>, cwd: string) {
   const tasksDir = createDefaultTaskStore().tasksDir
   const project = projectStoreKey(cwd)
   const storeKey = input.storeId === project.key ? project : sessionStoreKey(input.storeId)
@@ -63,13 +86,36 @@ async function changeTask(body: unknown, cwd: string) {
   const tasks = await readTaskStore(storeKey, tasksDir)
   const current = tasks.find((task) => task.id === input.taskId)
   if (!current) throw new WorkActionError("Task not found in this project store", 404)
+  return { current, tasks, storeKey, tasksDir }
+}
+
+async function changeTask(body: unknown, cwd: string, fromReminders = false) {
+  const input = taskChangeInput(body, fromReminders)
+  const { current, tasks, storeKey, tasksDir } = await projectTask(input, cwd)
   validateTaskChange(input, current, tasks)
-  const result = await updateStatus(storeKey, input.taskId, input.status, {
-    filterCwd: cwd,
-    tasksDir,
-    evidence: input.evidence,
-  })
+  if (fromReminders && !validateReminderTransition(input, current, tasks))
+    return { ok: true, task: current }
+  const options = { filterCwd: cwd, tasksDir, evidence: input.evidence }
+  const result =
+    fromReminders && input.status === "completed"
+      ? await completeTaskWithAutoTransition(storeKey, input.taskId, options)
+      : await updateStatus(storeKey, input.taskId, input.status, options)
   return { ok: true, task: result.task }
+}
+
+function validateReminderTransition(
+  input: z.infer<typeof statusSchema>,
+  current: Task,
+  tasks: Task[]
+): boolean {
+  if (current.status === "cancelled")
+    throw new WorkActionError(
+      "Cancelled tasks must be reopened in SwizBuzz before syncing completion",
+      409
+    )
+  if (current.status === "pending" && input.status === "completed")
+    validateTaskChange({ ...input, status: "in_progress" }, current, tasks)
+  return (current.status === "completed") !== (input.status === "completed")
 }
 
 function validateTaskChange(input: z.infer<typeof statusSchema>, current: Task, tasks: Task[]) {
@@ -94,6 +140,16 @@ function validateTaskChange(input: z.infer<typeof statusSchema>, current: Task, 
 }
 
 async function mutateWork(path: string, body: unknown, cwd: string) {
+  if (path === "/work/deadlines/completion") {
+    const { cwd: _cwd, ...input } = deadlineCompletionSchema.parse(body)
+    const store = await DeadlineStore.open(undefined, true)
+    if (!store) throw new Error("Unable to open deadline store")
+    try {
+      return { ok: true, deadline: store.syncProjectCompletion(input, cwd) }
+    } finally {
+      store.close()
+    }
+  }
   if (path === "/work/deadlines") {
     const { cwd: _cwd, ...input } = deadlineSchema.parse(body)
     const store = await DeadlineStore.open(undefined, true)
@@ -110,6 +166,7 @@ async function mutateWork(path: string, body: unknown, cwd: string) {
   )
   return withFileLock(lock, async () => {
     if (path === "/work/tasks/status") return changeTask(body, cwd)
+    if (path === "/work/tasks/completion") return changeTask(body, cwd, true)
     const input = createSchema.parse(body)
     const storeKey = projectStoreKey(cwd)
     const task = await createTaskInProcess({ ...input, cwd, storeKey, sessionId: storeKey.key })
@@ -122,7 +179,15 @@ export async function handleWorkActionRoutes(
   url: URL,
   ctx: SessionRoutesContext
 ): Promise<Response | null> {
-  if (!["/work/tasks/create", "/work/tasks/status", "/work/deadlines"].includes(url.pathname))
+  if (
+    ![
+      "/work/tasks/create",
+      "/work/tasks/status",
+      "/work/deadlines",
+      "/work/tasks/completion",
+      "/work/deadlines/completion",
+    ].includes(url.pathname)
+  )
     return null
   if (req.method !== "POST")
     return Response.json(

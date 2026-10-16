@@ -154,6 +154,62 @@ export class DeadlineStore {
     })
   }
 
+  /** A Reminders checkbox may reopen completed work without rewriting its timing or history. */
+  syncProjectCompletion(
+    input: { deadlineId: string; expectedRevision: number; requestId: string; completed: boolean },
+    cwd: string,
+    now = Date.now()
+  ): Deadline {
+    const scope = deadlineSessionKey(cwd, "project:reminders")
+    const key = fingerprint(input)
+    return this.db
+      .transaction(() => {
+        if (!this.listProject(cwd).some((item) => item.id === input.deadlineId))
+          throw new Error("Deadline does not belong to this project")
+        const previous = this.db
+          .query<{ fingerprint: string; id: string }, [string, string]>(
+            "SELECT fingerprint, id FROM deadline_requests WHERE scope = ? AND request_id = ?"
+          )
+          .get(scope, input.requestId)
+        if (previous) {
+          if (previous.fingerprint !== key)
+            throw new Error("requestId was already used with different arguments")
+          return this.get(previous.id)
+        }
+        const current = this.get(input.deadlineId)
+        if (input.expectedRevision !== current.revision)
+          throw new Error(`Revision conflict: expectedRevision must be ${current.revision}`)
+        if (current.status === "cancelled")
+          throw new Error("Cancelled deadlines cannot be reopened from Reminders")
+        const next = this.saveReminderCompletion(current, input.completed, now)
+        this.db
+          .query(
+            "INSERT INTO deadline_requests(scope, request_id, fingerprint, id) VALUES (?, ?, ?, ?)"
+          )
+          .run(scope, input.requestId, key, next.id)
+        return next
+      })
+      .immediate()
+  }
+
+  private saveReminderCompletion(current: Deadline, completed: boolean, now: number): Deadline {
+    const status = completed ? "completed" : "active"
+    if (current.status === status) return current
+    const at = new Date(now).toISOString()
+    return this.save(
+      {
+        ...current,
+        status,
+        revision: current.revision + 1,
+        updatedAt: at,
+        closedAt: completed ? at : undefined,
+        missedDueAts:
+          current.status === "active" ? recordedMisses(current, now) : current.missedDueAts,
+      },
+      completed ? "Marked complete in Apple Reminders" : "Reopened in Apple Reminders"
+    )
+  }
+
   private mutateScoped(
     input: DeadlineInput,
     cwd: string,

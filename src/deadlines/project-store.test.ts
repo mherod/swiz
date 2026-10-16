@@ -12,6 +12,58 @@ const initial = {
   durationMinutes: 30,
 }
 
+test("Reminders completion is reversible, audited, project scoped and retry safe", async () => {
+  const cwd = await tmp.create()
+  const store = (await DeadlineStore.open(join(cwd, "deadlines.db"), true))!
+  try {
+    const first = store.mutateProject(initial, cwd, 1000)
+    const complete = {
+      deadlineId: first.id,
+      expectedRevision: 1,
+      requestId: "checked",
+      completed: true,
+    }
+    expect(() => store.syncProjectCompletion(complete, join(cwd, "unrelated"))).toThrow(
+      "does not belong"
+    )
+    const closed = store.syncProjectCompletion(complete, cwd, Date.parse(first.dueAt) + 1)
+    expect(closed.status).toBe("completed")
+    expect(store.syncProjectCompletion(complete, cwd)).toEqual(closed)
+    expect(() => store.syncProjectCompletion({ ...complete, requestId: "stale" }, cwd)).toThrow(
+      "Revision conflict"
+    )
+    const reopen = { ...complete, requestId: "unchecked", expectedRevision: 2, completed: false }
+    const active = store.syncProjectCompletion(reopen, cwd)
+    expect(active.status).toBe("active")
+    expect(active.closedAt).toBeUndefined()
+    expect(active.dueAt).toBe(first.dueAt)
+    expect(active.originalDueAt).toBe(first.originalDueAt)
+    expect(active.missedDueAts).toEqual(closed.missedDueAts)
+    expect(store.listProject(cwd)[0]?.sessionKeys).toEqual(["project:swizbuzz"])
+    expect(store.history(first.id).map((item) => item.reason)).toEqual([
+      "Reopened in Apple Reminders",
+      "Marked complete in Apple Reminders",
+      "Deadline set",
+    ])
+    expect(store.syncProjectCompletion(reopen, cwd).revision).toBe(3)
+    store.mutateProject(
+      {
+        action: "cancel",
+        requestId: "cancel",
+        deadlineId: first.id,
+        expectedRevision: 3,
+        reason: "Test cleanup",
+      },
+      cwd
+    )
+    expect(() =>
+      store.syncProjectCompletion({ ...reopen, requestId: "cancelled", expectedRevision: 4 }, cwd)
+    ).toThrow("Cancelled")
+  } finally {
+    store.close()
+  }
+})
+
 test("project management preserves agent bindings and atomically enforces revisions and membership", async () => {
   const cwd = await tmp.create()
   const other = await tmp.create()
