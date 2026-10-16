@@ -12,7 +12,7 @@ import { resolveSettingSourceTier } from "../../settings/resolution.ts"
 import { SettingsStore } from "../../settings/store.ts"
 import type { ProjectSwizSettings, SettingDef } from "../../settings/types.ts"
 import { registerProjectAndTouch } from "./route-helpers.ts"
-import type { SettingsRoutesContext } from "./settings-routes.ts"
+import { invalidateProjectSettings, type SettingsRoutesContext } from "./settings-route-helpers.ts"
 
 const scopeSchema = z.object({
   scope: z.enum(["global", "project"]),
@@ -136,8 +136,7 @@ async function applyUpdate(
   }
   // undefined removes this key during JSON serialization; never persist null as an override.
   await store.setProject(scope.cwd!, update.key, update.inherit ? undefined : update.value)
-  ctx.projectSettingsCache.invalidateProject(scope.cwd!)
-  ctx.manifestCache.invalidateProject(scope.cwd!)
+  invalidateProjectSettings(ctx, scope.cwd!)
 }
 
 async function performScopedRequest(

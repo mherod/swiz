@@ -9,15 +9,10 @@ import {
   writeSwizSettings,
 } from "../../settings.ts"
 import { registerProjectAndTouch } from "./route-helpers.ts"
-import type { ManifestCache, ProjectSettingsCache } from "./runtime-cache.ts"
 import { handleScopedSettingsRoutes } from "./scoped-settings-routes.ts"
+import { invalidateProjectSettings, type SettingsRoutesContext } from "./settings-route-helpers.ts"
 
-export interface SettingsRoutesContext {
-  touchProject: (cwd: string) => void
-  registerProjectWatchers: (cwd: string) => void
-  projectSettingsCache: ProjectSettingsCache
-  manifestCache: ManifestCache
-}
+export type { SettingsRoutesContext } from "./settings-route-helpers.ts"
 
 async function handleGlobalSettingsUpdate(req: Request): Promise<Response> {
   const body = (await req.json().catch(() => null)) as { updates?: Record<string, any> } | null
@@ -61,7 +56,11 @@ async function handleProjectSettingsGet(
     return Response.json({ error: "Missing required field: cwd" }, { status: 400 })
   }
   const projectCwd = (await registerProjectAndTouch(ctx, body.cwd)) ?? body.cwd
-  const cached = await ctx.projectSettingsCache.get(projectCwd)
+  return projectSettingsResponse(ctx, projectCwd)
+}
+
+async function projectSettingsResponse(ctx: SettingsRoutesContext, cwd: string): Promise<Response> {
+  const cached = await ctx.projectSettingsCache.get(cwd)
   const globalSettings = await readSwizSettings()
   return Response.json({ ...cached, globalSettings: { prMergeMode: globalSettings.prMergeMode } })
 }
@@ -179,11 +178,8 @@ async function handleProjectSettingsUpdate(
 
   const projectCwd = (await registerProjectAndTouch(ctx, cwd)) ?? cwd
   await applyProjectSettingsUpdates(projectCwd, normalized)
-  ctx.projectSettingsCache.invalidateProject(projectCwd)
-  ctx.manifestCache.invalidateProject(projectCwd)
-  const cached = await ctx.projectSettingsCache.get(projectCwd)
-  const globalSettings = await readSwizSettings()
-  return Response.json({ ...cached, globalSettings: { prMergeMode: globalSettings.prMergeMode } })
+  invalidateProjectSettings(ctx, projectCwd)
+  return projectSettingsResponse(ctx, projectCwd)
 }
 
 export async function handleSettingsRoutes(

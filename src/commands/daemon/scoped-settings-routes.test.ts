@@ -10,6 +10,7 @@ const roots: string[] = []
 let home: string
 let cwd: string
 let invalidations: string[]
+let manifestInvalidations: string[]
 beforeEach(async () => {
   home = await mkdtemp(join(tmpdir(), "scoped-settings-"))
   roots.push(home)
@@ -18,6 +19,7 @@ beforeEach(async () => {
   await mkdir(join(cwd, ".swiz"), { recursive: true })
   cwd = await resolveProjectRoot(cwd)
   invalidations = []
+  manifestInvalidations = []
 })
 afterAll(async () => {
   await Promise.all(roots.map((root) => rm(root, { recursive: true, force: true })))
@@ -33,6 +35,9 @@ async function request(body: object, update = false) {
     registerProjectWatchers: () => {},
     projectSettingsCache,
     manifestCache: new ManifestCache(projectSettingsCache),
+  }
+  ctx.manifestCache.invalidateProject = (path) => {
+    manifestInvalidations.push(path)
   }
   const req = new Request(`http://daemon/settings/scoped${update ? "/update" : ""}`, {
     method: "POST",
@@ -95,6 +100,7 @@ describe("scoped settings", () => {
       source: "user",
     })
     expect(invalidations).toContain(cwd)
+    expect(manifestInvalidations).toEqual([cwd])
   })
 
   test("scope violations never change global settings from a project edit", async () => {
@@ -105,6 +111,8 @@ describe("scoped settings", () => {
       400
     )
     expect(await Bun.file(join(home, ".swiz/settings.json")).exists()).toBe(false)
+    expect(invalidations).toEqual([])
+    expect(manifestInvalidations).toEqual([])
   })
 
   test("validates booleans, numeric bounds, enums, and required paths before writing", async () => {
@@ -144,5 +152,7 @@ describe("scoped settings", () => {
     expect(response.status).toBe(500)
     expect((await response.json()).error).toContain("Invalid project settings")
     expect(await Bun.file(file).text()).toBe("{broken")
+    expect(invalidations).toEqual([])
+    expect(manifestInvalidations).toEqual([])
   })
 })

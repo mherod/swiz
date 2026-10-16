@@ -58,6 +58,29 @@ function post(path: string, body: Record<string, unknown>): Request {
 }
 
 describe("settings routes", () => {
+  test("refreshes both caches before returning the same project response as inspection", async () => {
+    const ctx = createContext()
+    const events: string[] = []
+    const cached = await ctx.projectSettingsCache.get("/repo")
+    ctx.projectSettingsCache.get = async (cwd) => {
+      events.push(`read:${cwd}`)
+      return cached
+    }
+    ctx.projectSettingsCache.invalidateProject = (cwd) => events.push(`settings:${cwd}`)
+    ctx.manifestCache.invalidateProject = (cwd) => events.push(`manifest:${cwd}`)
+    const update = post("/settings/project/update", {
+      cwd: "/repo",
+      updates: { autoContinue: true, prMergeMode: true },
+    })
+    const saved = await routes.handleSettingsRoutes(update, new URL(update.url), ctx)
+    expect(events).toEqual(["settings:/repo", "manifest:/repo", "read:/repo"])
+    events.length = 0
+    const inspection = post("/settings/project", { cwd: "/repo" })
+    const inspected = await routes.handleSettingsRoutes(inspection, new URL(inspection.url), ctx)
+    expect(events).toEqual(["read:/repo"])
+    expect(await saved?.json()).toEqual(await inspected?.json())
+  })
+
   test("propagates project write errors before global updates", async () => {
     const ctx = createContext()
     projectWriteError = new Error(
