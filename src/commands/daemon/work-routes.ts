@@ -4,6 +4,7 @@ import { DeadlineStore } from "../../deadlines/store.ts"
 import { manageFileOwnership } from "../../file-ownership-tool.ts"
 import { registerProjectAndTouch } from "./route-helpers.ts"
 import { annotateSessionsWithLiveness, type SessionRoutesContext } from "./session-routes.ts"
+import { handleWorkActionRoutes } from "./work-action-routes.ts"
 
 export async function readProjectDeadlines(
   cwd: string
@@ -93,6 +94,8 @@ export async function handleWorkRoutes(
   ctx: SessionRoutesContext,
   readers = defaultReaders
 ): Promise<Response | null> {
+  const action = await handleWorkActionRoutes(req, url, ctx)
+  if (action) return action
   if (url.pathname === "/work/projects" && req.method === "GET") {
     const projects = [...new Set(ctx.getKnownProjects())]
       .filter((cwd) => isAbsolute(cwd) && cwd !== "/")

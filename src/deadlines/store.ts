@@ -136,6 +136,35 @@ export class DeadlineStore {
     kind: Deadline["kind"] = "delivery",
     options: { operation?: TaskDeadlineOperation; beforeMutation?: () => void } = {}
   ): Deadline {
+    return this.mutateScoped(input, cwd, now, kind, options)
+  }
+
+  /** Human dashboard operations use project membership, never an agent's session identity. */
+  mutateProject(
+    input: Omit<DeadlineInput, "sessionId" | "agentId" | "parentDeadlineId">,
+    cwd: string,
+    now = Date.now()
+  ): Deadline {
+    if (!["set", "revise", "complete", "cancel"].includes(input.action))
+      throw new Error("Unsupported project deadline action")
+    if ("sessionId" in input || "agentId" in input || "parentDeadlineId" in input)
+      throw new Error("Project deadline actions cannot select a session or parent")
+    return this.mutateScoped({ ...input, sessionId: "project:swizbuzz" }, cwd, now, "delivery", {
+      projectScope: true,
+    })
+  }
+
+  private mutateScoped(
+    input: DeadlineInput,
+    cwd: string,
+    now: number,
+    kind: Deadline["kind"],
+    options: {
+      operation?: TaskDeadlineOperation
+      beforeMutation?: () => void
+      projectScope?: boolean
+    }
+  ): Deadline {
     input = deadlineInputSchema.parse(input)
     const scope = deadlineSessionKey(cwd, input.sessionId, input.agentId)
     if (!input.requestId)
@@ -143,6 +172,12 @@ export class DeadlineStore {
     const key = fingerprint({ input: options.operation ?? input, kind })
     return this.db
       .transaction(() => {
+        if (
+          options.projectScope &&
+          input.deadlineId &&
+          !this.listProject(cwd).some((item) => item.id === input.deadlineId)
+        )
+          throw new Error("Deadline does not belong to this project")
         const previous = this.db
           .query<{ fingerprint: string; id: string }, [string, string]>(
             "SELECT fingerprint, id FROM deadline_requests WHERE scope = ? AND request_id = ?"
@@ -159,7 +194,7 @@ export class DeadlineStore {
         const deadline =
           input.action === "set"
             ? this.create(input, scope, now, kind)
-            : this.change(input, scope, now)
+            : this.change(input, scope, now, options.projectScope)
         this.db
           .query(
             "INSERT INTO deadline_requests(scope, request_id, fingerprint, id) VALUES (?, ?, ?, ?)"
@@ -207,7 +242,7 @@ export class DeadlineStore {
     return deadline
   }
 
-  private change(input: DeadlineInput, scope: string, now: number): Deadline {
+  private change(input: DeadlineInput, scope: string, now: number, projectScope = false): Deadline {
     if (!input.deadlineId) throw new Error(`${input.action} requires deadlineId`)
     const current = this.get(input.deadlineId)
     if (input.action === "attach") {
@@ -222,9 +257,13 @@ export class DeadlineStore {
     }
     if (!["revise", "complete", "cancel"].includes(input.action))
       throw new Error("Unsupported deadline mutation")
-    if (!this.list(scope).some((item) => item.id === current.id))
+    if (!projectScope && !this.list(scope).some((item) => item.id === current.id))
       throw new Error("Attach this deadline to your session before changing it")
     validateRevision(current, input)
+    return this.reviseCurrent(current, input, now)
+  }
+
+  private reviseCurrent(current: Deadline, input: DeadlineInput, now: number): Deadline {
     const next: Deadline = {
       ...current,
       revision: current.revision + 1,
