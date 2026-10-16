@@ -163,7 +163,7 @@ describe("executeMcpTool", () => {
       else process.env.SWIZ_DAEMON_PORT = priorPort
       if (priorNoDaemon !== undefined) process.env.SWIZ_NO_DAEMON = priorNoDaemon
       resetMcpToolDaemonBackoff()
-      void server.stop(true)
+      await server.stop(true)
     }
   })
 })
@@ -187,7 +187,7 @@ describe("executeMcpTool across a daemon restart and stale fallback (#926)", () 
     // Reserve a port, release it, and bring the daemon back only after the first request fails.
     const probe = Bun.serve({ port: 0, fetch: () => new Response("") })
     const port = probe.port
-    void probe.stop(true)
+    await probe.stop(true)
     const restore = withEnv({ SWIZ_NO_DAEMON: undefined, SWIZ_DAEMON_PORT: String(port) })
     let server: ReturnType<typeof Bun.serve> | undefined
     const restart = setTimeout(() => {
@@ -206,7 +206,7 @@ describe("executeMcpTool across a daemon restart and stale fallback (#926)", () 
       setMcpFallbackOptionsForTest(null)
       resetMcpToolDaemonBackoff()
       restore()
-      void server?.stop(true)
+      await server?.stop(true)
     }
   })
 
@@ -252,7 +252,7 @@ describe("executeMcpTool forwards fields a newer daemon adds (#960)", () => {
       else process.env.SWIZ_DAEMON_PORT = priorPort
       if (priorNoDaemon !== undefined) process.env.SWIZ_NO_DAEMON = priorNoDaemon
       resetMcpToolDaemonBackoff()
-      void server.stop(true)
+      await server.stop(true)
     }
   }
 
@@ -304,7 +304,7 @@ describe("executeProjectTool", () => {
       else process.env.SWIZ_DAEMON_PORT = priorPort
       if (priorNoDaemon !== undefined) process.env.SWIZ_NO_DAEMON = priorNoDaemon
       resetMcpToolDaemonBackoff()
-      void server.stop(true)
+      await server.stop(true)
     }
   })
 
