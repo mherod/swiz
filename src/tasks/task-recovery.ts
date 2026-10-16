@@ -19,6 +19,7 @@ export { isIncompleteTaskStatus } from "./task-repository.ts"
 export interface SessionTask {
   id: string
   subject: string
+  deadlineId?: string
   status: string
   description?: string
   activeForm?: string

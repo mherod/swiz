@@ -3,6 +3,7 @@ import { isAbsolute } from "node:path"
 import { z } from "zod"
 import { deadlineInputSchema } from "../../deadlines/model.ts"
 import { DeadlineStore } from "../../deadlines/store.ts"
+import { bindTaskDeadline, setTaskDeadline } from "../../deadlines/task-deadlines.ts"
 import { resolveProjectRoot } from "../../project-identity.ts"
 import { createDefaultTaskStore } from "../../task-roots.ts"
 import { readTaskStore, readTaskStoreMeta, type Task } from "../../tasks/task-repository.ts"
@@ -10,6 +11,7 @@ import {
   completeTaskWithAutoTransition,
   createTaskInProcess,
   updateStatus,
+  writeTaskUpdate,
 } from "../../tasks/task-service.ts"
 import { projectStoreKey, sessionStoreKey } from "../../tasks/task-store-path.ts"
 import { getLockPathForFile, withFileLock } from "../../utils/file-lock.ts"
@@ -45,6 +47,33 @@ const deadlineCompletionSchema = z.strictObject({
   requestId: z.string().min(1).max(200),
   completed: z.boolean(),
 })
+const dateFields = {
+  dueAt: z.iso.datetime({ offset: true }).nullable(),
+  timeZone: z.string().min(1).max(100),
+  dueAllDay: z.boolean(),
+  requestId: z.string().min(1).max(200),
+}
+const taskIdentitySchema = statusSchema.omit({ status: true, evidence: true }).extend({
+  expectedSubject: z.string(),
+})
+const taskTitleSchema = taskIdentitySchema.extend({ subject: z.string().trim().min(1).max(300) })
+const taskDateSchema = taskIdentitySchema.extend({
+  ...dateFields,
+  expectedDeadlineId: z.string().nullable(),
+  expectedRevision: z.number().int().positive().optional(),
+})
+const deadlineFieldsSchema = deadlineCompletionSchema
+  .omit({ completed: true })
+  .extend({
+    label: z.string().trim().min(1).max(160).optional(),
+    dueAt: dateFields.dueAt.optional(),
+    timeZone: dateFields.timeZone.optional(),
+    dueAllDay: dateFields.dueAllDay.optional(),
+  })
+  .refine(
+    (input) => input.label !== undefined || input.dueAt !== undefined,
+    "Supply title or due date"
+  )
 
 class WorkActionError extends Error {
   constructor(
@@ -74,7 +103,7 @@ function taskChangeInput(body: unknown, fromReminders: boolean): z.infer<typeof 
   }
 }
 
-async function projectTask(input: z.infer<typeof statusSchema>, cwd: string) {
+async function projectTask(input: { storeId: string; taskId: string }, cwd: string) {
   const tasksDir = createDefaultTaskStore().tasksDir
   const project = projectStoreKey(cwd)
   const storeKey = input.storeId === project.key ? project : sessionStoreKey(input.storeId)
@@ -87,6 +116,79 @@ async function projectTask(input: z.infer<typeof statusSchema>, cwd: string) {
   const current = tasks.find((task) => task.id === input.taskId)
   if (!current) throw new WorkActionError("Task not found in this project store", 404)
   return { current, tasks, storeKey, tasksDir }
+}
+
+async function editTask(body: unknown, cwd: string, date: boolean) {
+  const input = date ? taskDateSchema.parse(body) : taskTitleSchema.parse(body)
+  const { current, storeKey, tasksDir } = await projectTask(input, cwd)
+  if (
+    current.subject !== input.expectedSubject ||
+    current.status !== input.expectedStatus ||
+    (current.statusChangedAt ?? null) !== (input.expectedStatusChangedAt ?? null)
+  )
+    throw new WorkActionError("Task edit conflict: refresh the latest task", 409)
+  if (current.status === "cancelled")
+    throw new WorkActionError("Cancelled tasks cannot be edited from Reminders", 409)
+  if ("subject" in input) current.subject = input.subject
+  else await editTaskDate(input, current, cwd, storeKey)
+  const result = await writeTaskUpdate(storeKey, current.id, current, undefined, {
+    filterCwd: cwd,
+    tasksDir,
+  })
+  return { ok: true, task: result.task }
+}
+
+async function editTaskDate(
+  input: z.infer<typeof taskDateSchema>,
+  task: Task,
+  cwd: string,
+  storeKey: ReturnType<typeof projectStoreKey> | ReturnType<typeof sessionStoreKey>
+) {
+  if ((task.deadlineId ?? null) !== input.expectedDeadlineId)
+    throw new WorkActionError("Task deadline conflict: refresh the latest task", 409)
+  const store = (await DeadlineStore.open(undefined, true))!
+  try {
+    if (task.deadlineId) {
+      if (!input.expectedRevision) throw new Error("expectedRevision is required")
+      const identity = {
+        deadlineId: task.deadlineId,
+        expectedRevision: input.expectedRevision,
+        requestId: input.requestId,
+      }
+      if (input.dueAt === null) {
+        const old = store.get(task.deadlineId)
+        if (old.status !== "completed")
+          store.mutateProject(
+            { ...identity, action: "cancel", reason: "Due date removed in Apple Reminders" },
+            cwd
+          )
+        else if (old.revision !== input.expectedRevision) throw new Error("Revision conflict")
+        delete task.deadlineId
+      } else
+        store.syncProjectFields(
+          { ...identity, dueAt: input.dueAt, timeZone: input.timeZone, dueAllDay: input.dueAllDay },
+          cwd
+        )
+      return
+    }
+  } finally {
+    store.close()
+  }
+  if (input.dueAt === null) return
+  const { deadline } = await setTaskDeadline(
+    {
+      sessionId: "project:reminders",
+      requestId: input.requestId,
+      dueAt: input.dueAt,
+      dueAllDay: input.dueAllDay,
+      timeZone: input.timeZone,
+      reason: "Due date added in Apple Reminders",
+    },
+    cwd,
+    task
+  )
+  await bindTaskDeadline(deadline.id, task.id, storeKey)
+  task.deadlineId = deadline.id
 }
 
 async function changeTask(body: unknown, cwd: string, fromReminders = false) {
@@ -140,6 +242,19 @@ function validateTaskChange(input: z.infer<typeof statusSchema>, current: Task, 
 }
 
 async function mutateWork(path: string, body: unknown, cwd: string) {
+  if (path === "/work/deadlines/fields") {
+    const { cwd: _cwd, ...input } = deadlineFieldsSchema.parse(body)
+    if (input.dueAt === null)
+      throw new Error(
+        "A standalone deadline needs a due date. Restore its date in Reminders or cancel it in SwizBuzz."
+      )
+    const store = (await DeadlineStore.open(undefined, true))!
+    try {
+      return { ok: true, deadline: store.syncProjectFields({ ...input, dueAt: input.dueAt }, cwd) }
+    } finally {
+      store.close()
+    }
+  }
   if (path === "/work/deadlines/completion") {
     const { cwd: _cwd, ...input } = deadlineCompletionSchema.parse(body)
     const store = await DeadlineStore.open(undefined, true)
@@ -167,6 +282,8 @@ async function mutateWork(path: string, body: unknown, cwd: string) {
   return withFileLock(lock, async () => {
     if (path === "/work/tasks/status") return changeTask(body, cwd)
     if (path === "/work/tasks/completion") return changeTask(body, cwd, true)
+    if (path === "/work/tasks/title") return editTask(body, cwd, false)
+    if (path === "/work/tasks/date") return editTask(body, cwd, true)
     const input = createSchema.parse(body)
     const storeKey = projectStoreKey(cwd)
     const task = await createTaskInProcess({ ...input, cwd, storeKey, sessionId: storeKey.key })
@@ -186,6 +303,9 @@ export async function handleWorkActionRoutes(
       "/work/deadlines",
       "/work/tasks/completion",
       "/work/deadlines/completion",
+      "/work/deadlines/fields",
+      "/work/tasks/title",
+      "/work/tasks/date",
     ].includes(url.pathname)
   )
     return null

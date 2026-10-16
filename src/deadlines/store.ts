@@ -210,6 +210,90 @@ export class DeadlineStore {
     )
   }
 
+  /** Import metadata without reopening closed work or changing its original due time. */
+  syncProjectFields(
+    input: {
+      deadlineId: string
+      expectedRevision: number
+      requestId: string
+      label?: string
+      dueAt?: string
+      timeZone?: string
+      dueAllDay?: boolean
+    },
+    cwd: string,
+    now = Date.now()
+  ): Deadline {
+    const scope = deadlineSessionKey(cwd, "project:reminder-fields")
+    const key = fingerprint(input)
+    return this.db
+      .transaction(() => {
+        if (!this.listProject(cwd).some((item) => item.id === input.deadlineId))
+          throw new Error("Deadline does not belong to this project")
+        const previous = this.db
+          .query<{ fingerprint: string; id: string }, [string, string]>(
+            "SELECT fingerprint, id FROM deadline_requests WHERE scope = ? AND request_id = ?"
+          )
+          .get(scope, input.requestId)
+        if (previous) {
+          if (previous.fingerprint !== key)
+            throw new Error("requestId was already used with different arguments")
+          return this.get(previous.id)
+        }
+        const next = this.saveReminderFields(this.get(input.deadlineId), input, now)
+        this.db
+          .query(
+            "INSERT INTO deadline_requests(scope, request_id, fingerprint, id) VALUES (?, ?, ?, ?)"
+          )
+          .run(scope, input.requestId, key, next.id)
+        return next
+      })
+      .immediate()
+  }
+
+  private saveReminderFields(
+    current: Deadline,
+    input: {
+      expectedRevision: number
+      label?: string
+      dueAt?: string
+      timeZone?: string
+      dueAllDay?: boolean
+    },
+    now: number
+  ): Deadline {
+    if (current.revision !== input.expectedRevision)
+      throw new Error(`Revision conflict: expectedRevision must be ${current.revision}`)
+    if (current.status === "cancelled")
+      throw new Error("Cancelled deadlines cannot be edited from Reminders")
+    const timing =
+      input.dueAt === undefined
+        ? {}
+        : {
+            ...resolveDeadlineTime(
+              {
+                dueAt: input.dueAt,
+                timeZone: input.timeZone ?? current.timeZone,
+                reserveMinutes: current.reserveMinutes,
+              },
+              now
+            ),
+            dueAllDay: input.dueAllDay ?? false,
+          }
+    return this.save(
+      {
+        ...current,
+        ...timing,
+        label: input.label ?? current.label,
+        revision: current.revision + 1,
+        updatedAt: new Date(now).toISOString(),
+        missedDueAts:
+          current.status === "active" ? recordedMisses(current, now) : current.missedDueAts,
+      },
+      "Title or due date edited in Apple Reminders"
+    )
+  }
+
   private mutateScoped(
     input: DeadlineInput,
     cwd: string,
@@ -327,6 +411,7 @@ export class DeadlineStore {
       missedDueAts: recordedMisses(current, now),
     }
     if (input.action === "revise") {
+      next.dueAllDay = false
       Object.assign(
         next,
         resolveDeadlineTime(
@@ -407,6 +492,7 @@ function validateActionFields(input: DeadlineInput): void {
       "completionCriteria",
       "parentDeadlineId",
       "dueAt",
+      "dueAllDay",
       "durationMinutes",
       "timeZone",
       "reserveMinutes",
@@ -417,6 +503,7 @@ function validateActionFields(input: DeadlineInput): void {
       "expectedRevision",
       "reason",
       "dueAt",
+      "dueAllDay",
       "durationMinutes",
       "timeZone",
       "reserveMinutes",

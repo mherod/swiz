@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test"
+import { DeadlineStore } from "../../deadlines/store.ts"
 import { canonicalClaimPath } from "../../session-file-claims.ts"
 import { createDefaultTaskStore } from "../../task-roots.ts"
 import { readTaskStore, type Task, writeTask } from "../../tasks/task-repository.ts"
@@ -6,6 +7,7 @@ import { createTaskInProcess } from "../../tasks/task-service.ts"
 import { projectStoreKey, sessionStoreKey } from "../../tasks/task-store-path.ts"
 import { useTempDir, withSandboxHome } from "../../utils/test-utils.ts"
 import type { SessionRoutesContext } from "./session-routes.ts"
+import { toSessionTaskPreview } from "./utils.ts"
 import { handleWorkActionRoutes } from "./work-action-routes.ts"
 
 const tmp = useTempDir("swiz-work-actions-")
@@ -276,3 +278,132 @@ test("work actions reject invalid projects, JSON shapes, fields and methods", as
   }
   expect((await request("tasks/create", null, "GET")).status).toBe(405)
 })
+
+test("Reminders task titles and dates use guarded canonical writes and retain removed deadline history", () =>
+  withSandboxHome(async () => {
+    const cwd = canonicalClaimPath(await tmp.create())
+    let task: Task = (
+      await (await request("tasks/create", { cwd, subject: "Original title" })).json()
+    ).task
+    const identity = () => {
+      const { status: _status, ...base } = statusInput(cwd, task, task.status)
+      return { ...base, expectedSubject: task.subject }
+    }
+    const title = { ...identity(), subject: "Edited in Reminders" }
+    const renamed = await request("tasks/title", title)
+    expect(renamed.status).toBe(200)
+    task = (await renamed.json()).task
+    expect(task.subject).toBe(title.subject)
+    expect((await request("tasks/title", { ...title, subject: "Stale" })).status).toBe(409)
+    expect((await request("tasks/title", { ...identity(), subject: " " })).status).toBe(400)
+    expect(
+      (
+        await request("tasks/title", {
+          ...identity(),
+          cwd: await tmp.create(),
+          subject: "Wrong project",
+        })
+      ).status
+    ).toBe(404)
+    const add = {
+      ...identity(),
+      expectedDeadlineId: null,
+      requestId: "add-date",
+      dueAt: "2026-10-25T23:59:59Z",
+      timeZone: "Europe/London",
+      dueAllDay: true,
+    }
+    const dated = await request("tasks/date", add)
+    expect(dated.status).toBe(200)
+    task = (await dated.json()).task
+    expect(task.deadlineId).toBeDefined()
+    expect(toSessionTaskPreview(task).deadlineId).toBe(task.deadlineId)
+    const store = (await DeadlineStore.open())!
+    const first = store.get(task.deadlineId!)
+    expect(first.kind).toBe("task")
+    expect(first.dueAllDay).toBe(true)
+    expect(first.task?.taskId).toBe(task.id)
+    store.close()
+    const change = {
+      ...identity(),
+      expectedDeadlineId: task.deadlineId,
+      expectedRevision: first.revision,
+      requestId: "change-date",
+      dueAt: "2026-10-26T14:00:00Z",
+      timeZone: "Europe/London",
+      dueAllDay: false,
+    }
+    expect((await request("tasks/date", change)).status).toBe(200)
+    expect((await request("tasks/date", change)).status).toBe(200)
+    expect((await request("tasks/date", { ...change, requestId: "stale-date" })).status).toBe(409)
+    const clear = await request("tasks/date", {
+      ...change,
+      requestId: "clear-date",
+      expectedRevision: first.revision + 1,
+      dueAt: null,
+    })
+    expect(clear.status).toBe(200)
+    expect((await clear.json()).task.deadlineId).toBeUndefined()
+    const history = (await DeadlineStore.open())!
+    expect(history.get(first.id).status).toBe("cancelled")
+    expect(history.get(first.id).originalDueAt).toBe(first.originalDueAt)
+    expect(history.history(first.id).length).toBe(3)
+    history.close()
+  }))
+
+test("Reminders deadline field edits are revision guarded, scoped and preserve completion", () =>
+  withSandboxHome(async () => {
+    const cwd = await tmp.create()
+    const first = (
+      await (
+        await request("deadlines", {
+          cwd,
+          action: "set",
+          requestId: "first",
+          label: "Before",
+          completionCriteria: "Verified",
+          dueAt: "2020-01-01T10:00:00Z",
+        })
+      ).json()
+    ).deadline
+    const fields = {
+      cwd,
+      deadlineId: first.id,
+      expectedRevision: 1,
+      requestId: "edit",
+      label: "After",
+      dueAt: "2030-01-01T10:00:00Z",
+      timeZone: "Europe/London",
+      dueAllDay: false,
+    }
+    const response = await request("deadlines/fields", fields)
+    expect(response.status).toBe(200)
+    const next = (await response.json()).deadline
+    expect(next.label).toBe("After")
+    expect(next.originalDueAt).toBe(first.dueAt)
+    expect(next.missedDueAts).toEqual([first.dueAt])
+    expect((await (await request("deadlines/fields", fields)).json()).deadline.revision).toBe(2)
+    expect((await request("deadlines/fields", { ...fields, requestId: "stale" })).status).toBe(409)
+    expect((await request("deadlines/fields", { ...fields, cwd: await tmp.create() })).status).toBe(
+      400
+    )
+    expect((await request("deadlines/fields", { ...fields, dueAt: null })).status).toBe(400)
+    await request("deadlines/completion", {
+      cwd,
+      deadlineId: first.id,
+      expectedRevision: 2,
+      requestId: "done",
+      completed: true,
+    })
+    const closed = await request("deadlines/fields", {
+      cwd,
+      deadlineId: first.id,
+      expectedRevision: 3,
+      requestId: "closed-title",
+      label: "Closed title",
+    })
+    const result = (await closed.json()).deadline
+    expect(result.status).toBe("completed")
+    expect(result.dueAt).toBe(next.dueAt)
+    expect(result.label).toBe("Closed title")
+  }))

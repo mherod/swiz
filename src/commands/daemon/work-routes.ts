@@ -80,7 +80,13 @@ async function projectWork(
   return Response.json({
     cwd,
     generatedAt: Date.now(),
-    tasks,
+    tasks: tasks && {
+      ...tasks,
+      tasks: tasks.tasks.map((task) => ({
+        ...task,
+        deadline: deadlines?.find((deadline) => deadline.id === task.deadlineId) ?? null,
+      })),
+    },
     sessions,
     deadlines,
     ownership,

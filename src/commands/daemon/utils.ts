@@ -109,6 +109,7 @@ export interface SessionToolUsageState extends CurrentSessionToolUsage {
  */
 export interface SessionTaskPreview {
   id: string
+  deadlineId?: string
   subject: string
   description: string | null
   status: string
@@ -803,6 +804,7 @@ function taskStatusRank(status: string): number {
 /** Minimal fields needed by buildSessionTasksView — accepts both Task and SessionTask. */
 interface TaskViewInput {
   id: string
+  deadlineId?: string
   subject: string
   description?: string | null
   status: string
@@ -819,6 +821,7 @@ interface TaskViewInput {
 export function toSessionTaskPreview(task: TaskViewInput): SessionTaskPreview {
   return {
     id: task.id,
+    ...(task.deadlineId ? { deadlineId: task.deadlineId } : {}),
     subject: task.subject,
     description: task.description ?? null,
     status: task.status,

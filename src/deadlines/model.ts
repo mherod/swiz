@@ -2,6 +2,7 @@ import { z } from "zod"
 
 const identity = z.string().trim().min(1).max(200)
 export const deadlineTimeFields = {
+  dueAllDay: z.boolean().optional(),
   dueAt: z.iso
     .datetime({ offset: true })
     .optional()
@@ -88,6 +89,8 @@ export interface Deadline {
   dueAt: string
   originalDueAt: string
   timeZone: string
+  /** Date-only Reminders finish at the end of this local day. */
+  dueAllDay?: boolean
   reserveMinutes: number
   parentDeadlineId?: string
   task?: DeadlineTaskRef
@@ -99,9 +102,12 @@ export interface Deadline {
 }
 
 export function resolveDeadlineTime(
-  input: Pick<DeadlineInput, "dueAt" | "durationMinutes" | "timeZone" | "reserveMinutes">,
+  input: Pick<
+    DeadlineInput,
+    "dueAt" | "durationMinutes" | "timeZone" | "reserveMinutes" | "dueAllDay"
+  >,
   now: number
-): { dueAt: string; timeZone: string; reserveMinutes: number } {
+): { dueAt: string; timeZone: string; reserveMinutes: number; dueAllDay?: boolean } {
   if ((input.dueAt === undefined) === (input.durationMinutes === undefined)) {
     throw new Error("Supply exactly one of dueAt (with an explicit UTC offset) or durationMinutes")
   }
@@ -111,7 +117,12 @@ export function resolveDeadlineTime(
   const dueAt = input.dueAt
     ? new Date(z.iso.datetime({ offset: true }).parse(input.dueAt)).toISOString()
     : new Date(now + input.durationMinutes! * 60_000).toISOString()
-  return { dueAt, timeZone, reserveMinutes: input.reserveMinutes ?? 5 }
+  return {
+    dueAt,
+    timeZone,
+    reserveMinutes: input.reserveMinutes ?? 5,
+    ...(input.dueAllDay === undefined ? {} : { dueAllDay: input.dueAllDay }),
+  }
 }
 
 export function deadlinePhase(deadline: Deadline, now: number): string {
