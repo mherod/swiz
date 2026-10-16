@@ -2,6 +2,7 @@ import { describe, expect, it } from "bun:test"
 import { mkdtempSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { testProviderArgs } from "../test-utils/provider-args.ts"
 import {
   buildPrompt,
   hasConflictMarkers,
@@ -58,31 +59,7 @@ describe("parseMergetoolArgs", () => {
     expect(result.merged).toBe("/d")
   })
 
-  it("parses --provider flag", () => {
-    expect(parseMergetoolArgs(["--provider", "codex", "/a", "/b", "/c", "/d"]).provider).toBe(
-      "codex"
-    )
-    expect(parseMergetoolArgs(["--provider", "gemini", "/a", "/b", "/c", "/d"]).provider).toBe(
-      "gemini"
-    )
-    expect(parseMergetoolArgs(["--provider", "openrouter", "/a", "/b", "/c", "/d"]).provider).toBe(
-      "openrouter"
-    )
-  })
-
-  it("defaults provider to undefined", () => {
-    expect(parseMergetoolArgs(["/a", "/b", "/c", "/d"]).provider).toBeUndefined()
-  })
-
-  it("throws on invalid --provider value", () => {
-    expect(() => parseMergetoolArgs(["--provider", "openai", "/a", "/b", "/c", "/d"])).toThrow(
-      'must be "gemini", "claude", "openrouter", "codex", or "agy"'
-    )
-  })
-
-  it("throws when --provider is missing a value", () => {
-    expect(() => parseMergetoolArgs(["--provider"])).toThrow("Missing value for --provider")
-  })
+  testProviderArgs(parseMergetoolArgs, { args: ["/a", "/b", "/c", "/d"] })
 })
 
 // ─── validatePaths ───────────────────────────────────────────────────────────

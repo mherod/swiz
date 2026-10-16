@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test"
+import { testProviderArgs } from "../test-utils/provider-args.ts"
 import { parseContinueArgs } from "./continue.ts"
 import { parseCleanupArgs } from "./doctor/cleanup-path.ts"
 import { parseTranscriptArgs } from "./transcript.ts"
@@ -395,29 +396,5 @@ describe("parseContinueArgs", () => {
     expect(result.printOnly).toBe(true)
   })
 
-  test("parses --provider flag", () => {
-    expect(parseContinueArgs(["--provider", "gemini"]).provider).toBe("gemini")
-    expect(parseContinueArgs(["--provider", "openrouter"]).provider).toBe("openrouter")
-    expect(parseContinueArgs(["--provider", "codex"]).provider).toBe("codex")
-    expect(parseContinueArgs(["--provider", "agy"]).provider).toBe("agy")
-    expect(parseContinueArgs(["-p", "gemini"]).provider).toBe("gemini")
-  })
-
-  test("defaults provider to undefined", () => {
-    expect(parseContinueArgs([]).provider).toBeUndefined()
-  })
-
-  test("throws on invalid --provider value", () => {
-    expect(() => parseContinueArgs(["--provider", "openai"])).toThrow(
-      'must be "gemini", "claude", "openrouter", "codex", or "agy"'
-    )
-  })
-
-  test("accepts claude as a valid --provider value", () => {
-    expect(parseContinueArgs(["--provider", "claude"]).provider).toBe("claude")
-  })
-
-  test("throws when --provider is missing a value", () => {
-    expect(() => parseContinueArgs(["--provider"])).toThrow("Missing value for --provider")
-  })
+  testProviderArgs(parseContinueArgs, { aliases: ["-p"] })
 })

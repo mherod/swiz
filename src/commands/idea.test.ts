@@ -4,6 +4,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { withGitClient } from "../git/client.ts"
 import { MockGitClient } from "../git/mock-client.ts"
+import { testProviderArgs } from "../test-utils/provider-args.ts"
 import { runCommandInProcess } from "../utils/test-utils.ts"
 import { ideaCommand, parseIdeaArgs } from "./idea.ts"
 
@@ -54,31 +55,7 @@ describe("parseIdeaArgs", () => {
     expect(parsed.timeoutMs).toBe(9000)
   })
 
-  it("parses --provider flag", () => {
-    expect(parseIdeaArgs(["--provider", "gemini"]).provider).toBe("gemini")
-    expect(parseIdeaArgs(["--provider", "openrouter"]).provider).toBe("openrouter")
-    expect(parseIdeaArgs(["--provider", "codex"]).provider).toBe("codex")
-    expect(parseIdeaArgs(["--provider", "agy"]).provider).toBe("agy")
-    expect(parseIdeaArgs(["-p", "gemini"]).provider).toBe("gemini")
-  })
-
-  it("defaults provider to undefined", () => {
-    expect(parseIdeaArgs([]).provider).toBeUndefined()
-  })
-
-  it("throws on invalid --provider value", () => {
-    expect(() => parseIdeaArgs(["--provider", "openai"])).toThrow(
-      'must be "gemini", "claude", "openrouter", "codex", or "agy"'
-    )
-  })
-
-  it("accepts claude as a valid --provider value", () => {
-    expect(parseIdeaArgs(["--provider", "claude"]).provider).toBe("claude")
-  })
-
-  it("throws when --provider is missing a value", () => {
-    expect(() => parseIdeaArgs(["--provider"])).toThrow("Missing value for --provider")
-  })
+  testProviderArgs(parseIdeaArgs, { aliases: ["-p"] })
 
   it("throws on unknown args", () => {
     expect(() => parseIdeaArgs(["--wat"])).toThrow("Unknown argument")

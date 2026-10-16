@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { createStreamBufferReporter } from "../stream-buffer-reporter.ts"
+import { testProviderArgs } from "../test-utils/provider-args.ts"
 import { projectKeyFromCwd } from "../transcript-utils.ts"
 import { runCommandInProcess } from "../utils/test-utils.ts"
 import { parseReflectArgs, type ReflectCommandOptions, reflectCommand } from "./reflect.ts"
@@ -150,30 +151,7 @@ describe("parseReflectArgs", () => {
     expect(parsed.printPrompt).toBe(true)
   })
 
-  it("parses --provider flag", () => {
-    expect(parseReflectArgs(["--provider", "gemini"]).provider).toBe("gemini")
-    expect(parseReflectArgs(["--provider", "openrouter"]).provider).toBe("openrouter")
-    expect(parseReflectArgs(["--provider", "codex"]).provider).toBe("codex")
-    expect(parseReflectArgs(["--provider", "agy"]).provider).toBe("agy")
-  })
-
-  it("defaults provider to undefined", () => {
-    expect(parseReflectArgs([]).provider).toBeUndefined()
-  })
-
-  it("throws on invalid --provider value", () => {
-    expect(() => parseReflectArgs(["--provider", "openai"])).toThrow(
-      'must be "gemini", "claude", "openrouter", "codex", or "agy"'
-    )
-  })
-
-  it("accepts claude as a valid --provider value", () => {
-    expect(parseReflectArgs(["--provider", "claude"]).provider).toBe("claude")
-  })
-
-  it("throws when --provider is missing a value", () => {
-    expect(() => parseReflectArgs(["--provider"])).toThrow("Missing value for --provider")
-  })
+  testProviderArgs(parseReflectArgs)
 })
 
 describe("reflectCommand", () => {
