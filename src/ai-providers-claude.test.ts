@@ -7,7 +7,16 @@ const providerPath = join(import.meta.dir, "ai-providers.ts")
 const adapterPath = Bun.resolveSync("ai-sdk-provider-claude-code", import.meta.dir)
 const zodPath = Bun.resolveSync("zod", import.meta.dir)
 
-test.each(["native", "prompt"] as const)("Claude receives the schema in %s mode", async (mode) => {
+test.each([
+  { mode: "native", text: '{"status":"ok"}', error: false },
+  { mode: "prompt", text: '{"status":"ok"}', error: false },
+  { mode: "prompt", text: '  ```json\n{"status":"ok"}\n```  ', error: false },
+  { mode: "prompt", text: '```\r\n{"status":"ok"}\r\n```', error: false },
+  { mode: "prompt", text: '```json\n{"status":}\n```', error: true },
+  { mode: "prompt", text: '```json\n{"status":"wrong"}\n```', error: true },
+  { mode: "prompt", text: 'Here is JSON:\n```json\n{"status":"ok"}\n```', error: true },
+  { mode: "prompt", text: '```json\n{"status":"ok"}\n```\nExtra text', error: true },
+])("Claude validates $mode response $text", async ({ mode, text, error }) => {
   const cwd = await tmp.create()
   const proc = Bun.spawn(
     [
@@ -26,7 +35,7 @@ test.each(["native", "prompt"] as const)("Claude receives the schema in %s mode"
              reasoning = options.reasoning;
              prompt = options.prompt;
              return {
-               content: [{ type: "text", text: JSON.stringify({ status: "ok" }) }],
+               content: [{ type: "text", text: ${JSON.stringify(text)} }],
                finishReason: { unified: "stop", raw: "stop" },
                usage: { inputTokens: { total: 1 }, outputTokens: { total: 1 } },
                warnings: []
@@ -35,7 +44,10 @@ test.each(["native", "prompt"] as const)("Claude receives the schema in %s mode"
          }) }; }
        }));
        const { promptObject } = await import(${JSON.stringify(providerPath)});
-       const result = await promptObject("Return status ok", z.object({ status: z.literal("ok") }), { provider: "claude", reasoning: "low", structuredOutput: ${JSON.stringify(mode)} });
+       let result;
+       try {
+         result = await promptObject("Return status ok", z.object({ status: z.literal("ok") }), { provider: "claude", reasoning: "low", structuredOutput: ${JSON.stringify(mode)} });
+       } catch (error) { result = { error: error.name }; }
        console.log(JSON.stringify({ result, format: captured, settings, reasoning, prompt }));`,
     ],
     {
@@ -62,7 +74,8 @@ test.each(["native", "prompt"] as const)("Claude receives the schema in %s mode"
     settingSources: [],
     permissionMode: "dontAsk",
   })
-  expect(result).toEqual({ status: "ok" })
+  if (error) expect(result.error).toBeDefined()
+  else expect(result).toEqual({ status: "ok" })
   if (mode === "native") {
     expect(format.type).toBe("json")
     expect(format.schema.required).toEqual(["status"])

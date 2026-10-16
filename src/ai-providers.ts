@@ -193,6 +193,12 @@ async function runStreamText(
   }
 }
 
+function parsePromptJson(text: string): unknown {
+  // Accept one complete fence, but keep prose and malformed JSON strict.
+  const fenced = /^```(?:json)?[ \t]*\r?\n([\s\S]*?)\r?\n```$/i.exec(text.trim())
+  return JSON.parse(fenced?.[1] ?? text)
+}
+
 async function runObject<T>(
   model: LanguageModel,
   prompt: string,
@@ -219,7 +225,8 @@ async function runObject<T>(
       reasoning: options?.reasoning,
     })
     signal.throwIfAborted()
-    const parsed = JSON.parse(text)
+    // Prompt-only models may wrap otherwise valid JSON despite the instruction.
+    const parsed = options?.structuredOutput === "prompt" ? parsePromptJson(text) : JSON.parse(text)
     return schema.parse(parsed) as T
   } finally {
     cleanup()
