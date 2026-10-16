@@ -115,14 +115,10 @@ jobs:
             echo "No affected tests for this change; skipping"
           elif [ "${{ steps.test-scope.outputs.scope }}" = "full" ]; then
             echo "Running full test suite"
-            bun test --parallel=4 --timeout=60000
+            bun run scripts/run-test-batches.ts --timeout=60000
           else
             echo "Running targeted tests: ${{ steps.test-scope.outputs.test_files }}"
             TEST_FILES="${{ steps.test-scope.outputs.test_files }}"
             set -- $TEST_FILES
-            if [ "$#" -eq 1 ]; then
-              bun test --timeout=60000 "$1"
-            else
-              bun test --parallel=4 --timeout=60000 "$@"
-            fi
+            bun run scripts/run-test-batches.ts --timeout=60000 "$@"
           fi

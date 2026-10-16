@@ -9,9 +9,9 @@
   },
   "scripts": {
     "start": "SWIZ_DIRECT=1 bun run index.ts",
-    "test": "PATH=\"${npm_execpath%/*}:$PATH\" \"$npm_execpath\" test --parallel=4 --timeout=5000",
+    "test": "PATH=\"${npm_execpath%/*}:$PATH\" \"$npm_execpath\" run scripts/run-test-batches.ts",
     "test:vitest": "bun --bun vitest",
-    "test:bun": "PATH=\"${npm_execpath%/*}:$PATH\" \"$npm_execpath\" test --parallel=4 --timeout=5000",
+    "test:bun": "PATH=\"${npm_execpath%/*}:$PATH\" \"$npm_execpath\" run scripts/run-test-batches.ts",
     "typecheck": "tsc --noEmit",
     "lint": "biome check . && bun run lint:eslint",
     "lint:eslint": "bun run scripts/lint-eslint.ts",

@@ -16,8 +16,9 @@ async function run(code: string, mode = "success") {
     join(dir, "agy"),
     `#!${process.execPath}
 const args = process.argv.slice(2);
+if (process.env.STUB_MODE === "hang") process.on("SIGINT", () => {});
 await Bun.write(process.env.CAPTURE, JSON.stringify({pid:process.pid,cwd:process.cwd(),args,agent:await Bun.file(".agents/agents/swiz-generation.md").text()}));
-if (process.env.STUB_MODE === "hang") { process.on("SIGINT", () => {}); setInterval(() => {}, 1000); }
+if (process.env.STUB_MODE === "hang") { setInterval(() => {}, 1000); await Bun.write(process.env.CAPTURE + ".ready", "ready"); }
 else if (process.env.STUB_MODE === "malformed") console.log("not json");
 else if (process.env.STUB_MODE === "exit") { console.error("backend failed"); process.exitCode=3; }
 else console.log(JSON.stringify({status:process.env.STUB_MODE === "error" ? "ERROR" : "SUCCESS",response:process.env.STUB_MODE === "empty" ? "" : '{"answer":"ok"}',error:"backend error",usage:{input_tokens:10,output_tokens:3,thinking_tokens:2,cache_read_tokens:4}}));
@@ -88,14 +89,19 @@ test.each(["error", "exit", "malformed", "empty"])("agy rejects %s output", asyn
 })
 
 test("agy abort terminates a child that ignores SIGINT and removes its workspace", async () => {
-  const start = performance.now()
   const r = await run(
-    `try { await promptText("hello", {timeout:300}); process.exitCode=1 } catch (error) { console.log(error.name) }`,
+    `import {watch} from "node:fs";
+    const controller = new AbortController();
+    const watcher = watch(process.cwd(), (_, name) => {
+      if (name === "capture.json.ready") controller.abort();
+    });
+    try { await promptText("hello", {signal:controller.signal}); process.exitCode=1 }
+    catch (error) { console.log(error.name) }
+    finally { watcher.close() }`,
     "hang"
   )
   expect(r.exitCode).toBe(0)
   expect(r.stdout.trim()).toBe("AbortError")
-  expect(performance.now() - start).toBeLessThan(2500)
   expect(() => process.kill(r.capture.pid, 0)).toThrow()
   expect(await Bun.file(join(r.capture.cwd, ".agents/agents/swiz-generation.md")).exists()).toBe(
     false

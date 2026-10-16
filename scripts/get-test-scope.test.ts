@@ -121,6 +121,19 @@ describe("get-test-scope import discovery", () => {
     const dir = await fixture(files)
     expect(scope(dir, "src/shared.ts")).toEqual([""])
   })
+
+  test.each([
+    "scripts/run-test-batches.ts",
+    "bunfig.toml",
+    "src/utils/test-preload.ts",
+    ".github/workflows/ci.yml",
+  ])("%s requires the full suite despite targeted test matches", async (infrastructure) => {
+    const dir = await fixture({
+      "scripts/run-test-batches.test.ts": "",
+      "src/ordinary.test.ts": "",
+    })
+    expect(scope(dir, infrastructure, "src/ordinary.test.ts")).toEqual([""])
+  })
 })
 
 function runScopeScript(env: Record<string, string> = {}): {

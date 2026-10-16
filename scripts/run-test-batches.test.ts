@@ -1,5 +1,33 @@
-import { expect, test } from "bun:test"
-import { runTestBatches } from "./run-test-batches.ts"
+import { afterAll, expect, test } from "bun:test"
+import { mkdtemp, rm } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+import { discoverTestFiles, runTestBatches, runTestSuite } from "./run-test-batches.ts"
+
+const homes: string[] = []
+afterAll(async () => {
+  await Promise.all(homes.map((home) => rm(home, { recursive: true, force: true })))
+})
+
+test("discovers the complete working tree without dependencies or hidden files", async () => {
+  const home = await mkdtemp(join(tmpdir(), "swiz-test-discovery-"))
+  homes.push(home)
+  const included = ["root.test.ts", "nested/new.spec.tsx", "nested/deep/example.test.js"]
+  const excluded = [
+    "node_modules/pkg/a.test.ts",
+    "nested/node_modules/pkg/b.spec.ts",
+    ".git/a.test.ts",
+    "source.ts",
+  ]
+  await Promise.all([...included, ...excluded].map((path) => Bun.write(join(home, path), "")))
+  expect(discoverTestFiles(home)).toEqual(included.sort().map((path) => join(home, path)))
+})
+
+test("rejects invalid runner options before starting tests", async () => {
+  await expect(runTestSuite(["--timeout=0"])).rejects.toThrow("positive integer")
+  await expect(runTestSuite(["--timeout=no"])).rejects.toThrow("positive integer")
+  await expect(runTestSuite(["--unknown"])).rejects.toThrow("Unsupported")
+})
 
 test("runs every selected file once in bounded sequential batches", async () => {
   const files = Array.from({ length: 201 }, (_, i) => `fixture-${i}.test.ts`)

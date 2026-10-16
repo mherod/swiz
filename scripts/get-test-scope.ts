@@ -203,6 +203,15 @@ if (args.includes("--excluded")) {
   process.exit(0)
 }
 
+// Runner and preload changes affect every file, even when they have a sibling unit test.
+const suiteInfrastructure = new Set([
+  "scripts/run-test-batches.ts",
+  "bunfig.toml",
+  "src/utils/test-preload.ts",
+  ".github/workflows/ci.yml",
+])
+if (changedFiles.some((file) => suiteInfrastructure.has(file))) process.exit(0)
+
 await findDirectImporters(changedSources)
 
 const filteredTests = Array.from(testFiles).filter(
