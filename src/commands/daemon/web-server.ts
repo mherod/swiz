@@ -41,6 +41,7 @@ import {
   buildSettingsRoutesContext,
   type DaemonWebServerContext,
 } from "./web-server-context.ts"
+import { handleWorkRoutes } from "./work-routes.ts"
 
 export type { DaemonWebServerContext } from "./web-server-context.ts"
 export { formatWebProjectStatusLine } from "./web-server-context.ts"
@@ -270,6 +271,7 @@ const DELEGATE_HANDLERS: Array<
   (req, url, ctx) => handleCiRoutes(req, url, buildCiRoutesContext(ctx)),
   (req, url, ctx) => handleSettingsRoutes(req, url, buildSettingsRoutesContext(ctx)),
   (req, url, ctx) => handleSessionRoutes(req, url, buildSessionRoutesContext(ctx)),
+  (req, url, ctx) => handleWorkRoutes(req, url, buildSessionRoutesContext(ctx)),
 ]
 
 async function handleFetchRoutes(

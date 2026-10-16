@@ -16,6 +16,35 @@ const input = {
 }
 
 describe("deadline clock", () => {
+  test("project dashboard deduplicates attachments and preserves subagent scope", async () => {
+    const cwd = await tmp.create()
+    const other = await tmp.create()
+    const store = (await DeadlineStore.open(join(cwd, "deadlines.db"), true))!
+    try {
+      const first = store.mutate(input, cwd, now)
+      store.mutate(
+        {
+          action: "attach",
+          sessionId: "peer",
+          agentId: "child",
+          requestId: "share",
+          deadlineId: first.id,
+        },
+        cwd,
+        now
+      )
+      store.mutate({ ...input, requestId: "elsewhere" }, other, now)
+      const items = store.listProject(cwd)
+      expect(items).toHaveLength(1)
+      expect(items[0]?.sessionKeys).toEqual(["owner", "peer#agent:child"])
+      expect(store.listProject(other)).toHaveLength(1)
+      expect(store.list(deadlineSessionKey(cwd, "unrelated"))).toEqual([])
+      expect(store.history(first.id)).toHaveLength(1)
+    } finally {
+      store.close()
+    }
+  })
+
   test("requires a delivery parent before persisting a child or attachment", async () => {
     const cwd = await tmp.create()
     const store = (await DeadlineStore.open(join(cwd, "deadlines.db"), true))!

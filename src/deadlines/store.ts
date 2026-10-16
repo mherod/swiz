@@ -89,6 +89,28 @@ export class DeadlineStore {
       .map((row) => ({ deadline: JSON.parse(row.body) as Deadline, reason: row.reason }))
   }
 
+  /** Dashboard projection: bindings are observed, never attached or changed by a read. */
+  listProject(cwd: string): Array<Deadline & { sessionKeys: string[] }> {
+    const rows = this.db
+      .query<{ body: string; scope: string }, [string]>(
+        "SELECT d.body, b.scope FROM deadlines d JOIN deadline_bindings b ON b.id = d.id WHERE json_extract(b.scope, '$[0]') = ? ORDER BY d.id, b.scope"
+      )
+      .all(canonicalClaimPath(cwd))
+    const items = new Map<string, Deadline & { sessionKeys: string[] }>()
+    for (const row of rows) {
+      const deadline = JSON.parse(row.body) as Deadline
+      const item = items.get(deadline.id) ?? { ...deadline, sessionKeys: [] }
+      item.sessionKeys.push((JSON.parse(row.scope) as [string, string])[1])
+      items.set(deadline.id, item)
+    }
+    return [...items.values()].sort(
+      (a, b) =>
+        Number(b.status === "active") - Number(a.status === "active") ||
+        a.dueAt.localeCompare(b.dueAt) ||
+        a.id.localeCompare(b.id)
+    )
+  }
+
   private save(deadline: Deadline, reason: string): Deadline {
     const body = JSON.stringify(deadline)
     this.db
