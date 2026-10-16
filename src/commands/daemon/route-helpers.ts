@@ -7,6 +7,23 @@
  */
 import { resolveProjectRoot } from "../../project-identity.ts"
 
+type ProjectRouteContext = {
+  touchProject: (cwd: string) => void
+  registerProjectWatchers: (cwd: string) => void
+}
+
+/** Parse legacy cwd-only requests; relative paths remain usable without watcher registration. */
+export async function readProjectRequestCwd(
+  req: Request,
+  ctx: ProjectRouteContext
+): Promise<string | Response> {
+  const body = (await req.json().catch(() => null)) as { cwd?: string } | null
+  if (typeof body?.cwd !== "string" || !body.cwd) {
+    return Response.json({ error: "Missing required field: cwd" }, { status: 400 })
+  }
+  return (await registerProjectAndTouch(ctx, body.cwd)) ?? body.cwd
+}
+
 /**
  * True when `cwd` is a usable project identity — an absolute filesystem path.
  * Placeholder cwds like `"."` (sent by DaemonBackedIssueStore, which has no real
@@ -29,7 +46,7 @@ export async function resolveRegisterableProjectCwd(cwd: string): Promise<string
  * scoped to a project cwd. Returns the canonical root for downstream caches.
  */
 export async function registerProjectAndTouch(
-  ctx: { touchProject: (cwd: string) => void; registerProjectWatchers: (cwd: string) => void },
+  ctx: ProjectRouteContext,
   cwd: string,
   signal?: AbortSignal
 ): Promise<string | null> {

@@ -9,7 +9,7 @@
 import type { LRUCache } from "lru-cache"
 import { getIssueStoreReader } from "../../issue-store.ts"
 import type { CiWatchRegistry } from "./ci-watch-registry.ts"
-import { registerProjectAndTouch } from "./route-helpers.ts"
+import { readProjectRequestCwd, registerProjectAndTouch } from "./route-helpers.ts"
 import {
   type CooldownRegistry,
   type FileWatcherRegistry,
@@ -62,11 +62,8 @@ async function handleGhQuery(req: Request, ctx: CacheRoutesContext): Promise<Res
 }
 
 async function handleHooksEligible(req: Request, ctx: CacheRoutesContext): Promise<Response> {
-  const body = (await req.json().catch(() => null)) as { cwd?: string } | null
-  if (typeof body?.cwd !== "string" || !body.cwd) {
-    return Response.json({ error: "Missing required field: cwd" }, { status: 400 })
-  }
-  const projectCwd = (await registerProjectAndTouch(ctx, body.cwd)) ?? body.cwd
+  const projectCwd = await readProjectRequestCwd(req, ctx)
+  if (projectCwd instanceof Response) return projectCwd
   const snapshot = await ctx.eligibilityCache.compute(projectCwd)
   return Response.json(snapshot)
 }
@@ -135,13 +132,8 @@ async function handleCooldownMark(req: Request, ctx: CacheRoutesContext): Promis
 }
 
 async function handleGitState(req: Request, ctx: CacheRoutesContext): Promise<Response> {
-  const body = (await req.json().catch(() => null)) as {
-    cwd?: string
-  } | null
-  if (typeof body?.cwd !== "string" || !body.cwd) {
-    return Response.json({ error: "Missing required field: cwd" }, { status: 400 })
-  }
-  const projectCwd = (await registerProjectAndTouch(ctx, body.cwd)) ?? body.cwd
+  const projectCwd = await readProjectRequestCwd(req, ctx)
+  if (projectCwd instanceof Response) return projectCwd
   const state = await ctx.gitStateCache.get(projectCwd)
   if (!state) {
     return Response.json({ error: "Not a git repository or no branch" }, { status: 404 })

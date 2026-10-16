@@ -8,7 +8,7 @@ import {
   writeProjectSettings,
   writeSwizSettings,
 } from "../../settings.ts"
-import { registerProjectAndTouch } from "./route-helpers.ts"
+import { readProjectRequestCwd, registerProjectAndTouch } from "./route-helpers.ts"
 import { handleScopedSettingsRoutes } from "./scoped-settings-routes.ts"
 import { invalidateProjectSettings, type SettingsRoutesContext } from "./settings-route-helpers.ts"
 
@@ -51,11 +51,8 @@ async function handleProjectSettingsGet(
   req: Request,
   ctx: SettingsRoutesContext
 ): Promise<Response> {
-  const body = (await req.json().catch(() => null)) as { cwd?: string } | null
-  if (typeof body?.cwd !== "string" || !body.cwd) {
-    return Response.json({ error: "Missing required field: cwd" }, { status: 400 })
-  }
-  const projectCwd = (await registerProjectAndTouch(ctx, body.cwd)) ?? body.cwd
+  const projectCwd = await readProjectRequestCwd(req, ctx)
+  if (projectCwd instanceof Response) return projectCwd
   return projectSettingsResponse(ctx, projectCwd)
 }
 

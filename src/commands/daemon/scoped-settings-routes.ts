@@ -7,7 +7,7 @@ import {
   readProjectSettings,
   readSwizSettings,
 } from "../../settings/persistence.ts"
-import { SETTINGS_REGISTRY } from "../../settings/registry.ts"
+import { SETTINGS_REGISTRY, settingValueSchema } from "../../settings/registry.ts"
 import { resolveSettingSourceTier } from "../../settings/resolution.ts"
 import { SettingsStore } from "../../settings/store.ts"
 import type { ProjectSwizSettings, SettingDef } from "../../settings/types.ts"
@@ -31,17 +31,6 @@ interface InspectionInputs {
   globalValues: Record<string, unknown>
   project: ProjectSwizSettings | null
   explicitKeys: Set<string>
-}
-
-function valueSchema(def: SettingDef): z.ZodTypeAny {
-  if (def.zodSchema) return def.zodSchema
-  if (def.kind === "boolean") return z.boolean()
-  if (def.kind === "numeric")
-    return z
-      .number()
-      .int()
-      .min(def.default === 0 ? 0 : 1)
-  return z.string().max(200)
 }
 
 async function inspectSettings(scope: Scope, home?: string) {
@@ -101,7 +90,7 @@ function updateError(body: Update, def: SettingDef): string | null {
     if (body.value !== undefined) return "Specify either inherit or value, not both"
     return null
   }
-  const parsed = valueSchema(def).safeParse(body.value)
+  const parsed = settingValueSchema(def).safeParse(body.value)
   if (!parsed.success) return `${def.key}: ${parsed.error.issues.map((i) => i.message).join("; ")}`
   return def.validate?.(String(body.value)) ?? null
 }

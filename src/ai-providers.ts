@@ -25,6 +25,7 @@ import { memoize } from "lodash-es"
 import { type ZodType, z } from "zod"
 import { createAgyModel } from "./agy-provider.ts"
 import type { BaseAiPromptOptions } from "./ai-prompt-options.ts"
+import { withProviderFallback } from "./ai-provider-fallback.ts"
 import { resetShutdownController, resolveSignal } from "./ai-signal.ts"
 import { readAiTextStream } from "./ai-stream.ts"
 import {
@@ -461,26 +462,15 @@ export async function withProviderModel<T>(
 ): Promise<T> {
   const providers = availableProviders(options?.provider, options?.preferredProvider)
   if (providers.length === 0) throw new Error("No AI provider available.")
-  const { signal, cleanup } = resolveSignal(options)
-  try {
-    let lastError: unknown
-    for (const provider of providers) {
-      signal.throwIfAborted()
-      try {
-        if (provider === "gemini") validateGeminiModelName(options?.model, "options.model")
-        const model = await PROVIDER_REGISTRY[provider].model(options?.model)
-        const result = await operation(model, provider, signal)
-        signal.throwIfAborted()
-        return result
-      } catch (error) {
-        signal.throwIfAborted()
-        lastError = error
-      }
-    }
-    throw lastError
-  } finally {
-    cleanup()
-  }
+  return withProviderFallback(
+    providers,
+    async (provider, signal) => {
+      if (provider === "gemini") validateGeminiModelName(options?.model, "options.model")
+      const model = await PROVIDER_REGISTRY[provider].model(options?.model)
+      return operation(model, provider, signal)
+    },
+    options
+  )
 }
 
 /**
@@ -627,28 +617,17 @@ export async function promptObject<T>(
   }
 
   const providers = providersForPrompt("promptObject", options)
-  const { signal, cleanup } = resolveSignal(options)
-  try {
-    let lastError: unknown
-    for (const provider of providers) {
-      signal.throwIfAborted()
-      try {
-        const result = await PROVIDER_REGISTRY[provider].object(prompt, schema, {
-          ...options,
-          timeout: undefined,
-          signal,
-        })
-        signal.throwIfAborted()
-        return result as T
-      } catch (err) {
-        signal.throwIfAborted()
-        lastError = err
-      }
-    }
-    throw lastError
-  } finally {
-    cleanup()
-  }
+  return withProviderFallback(
+    providers,
+    async (provider, signal) => {
+      return (await PROVIDER_REGISTRY[provider].object(prompt, schema, {
+        ...options,
+        timeout: undefined,
+        signal,
+      })) as T
+    },
+    options
+  )
 }
 
 // Re-export ensureGeminiApiKey so callers only need this module for startup setup.

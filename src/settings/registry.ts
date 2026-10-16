@@ -909,22 +909,19 @@ export function deriveSchemaShape(): Record<string, z.ZodTypeAny> {
   const shape: Record<string, z.ZodTypeAny> = {}
   for (const def of SETTINGS_REGISTRY) {
     if (def.default === undefined) continue
-    if (def.zodSchema) {
-      shape[def.key] = def.zodSchema.catch(def.default)
-    } else if (def.kind === "boolean") {
-      shape[def.key] = z.boolean().catch(def.default as boolean)
-    } else if (def.kind === "numeric") {
-      shape[def.key] = z
-        .number()
-        .int()
-        .min(def.default === 0 ? 0 : 1)
-        .catch(def.default as number)
-    } else {
-      shape[def.key] = z
-        .string()
-        .max(200)
-        .catch(def.default as string)
-    }
+    shape[def.key] = settingValueSchema(def).catch(def.default)
   }
   return shape
+}
+
+/** Strict value schema shared by settings writes and default-tolerant file reads. */
+export function settingValueSchema(def: SettingDef): z.ZodTypeAny {
+  if (def.zodSchema) return def.zodSchema
+  if (def.kind === "boolean") return z.boolean()
+  if (def.kind === "numeric")
+    return z
+      .number()
+      .int()
+      .min(def.default === 0 ? 0 : 1)
+  return z.string().max(200)
 }

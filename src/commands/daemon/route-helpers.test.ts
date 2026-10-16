@@ -3,7 +3,47 @@ import { mkdir, mkdtemp, rm, symlink } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { canonicalizePath } from "../../project-identity.ts"
-import { isRegisterableProjectCwd, registerProjectAndTouch } from "./route-helpers.ts"
+import {
+  isRegisterableProjectCwd,
+  readProjectRequestCwd,
+  registerProjectAndTouch,
+} from "./route-helpers.ts"
+
+describe("readProjectRequestCwd", () => {
+  it("rejects malformed and missing cwd bodies without registering a project", async () => {
+    const events: string[] = []
+    const ctx = {
+      touchProject: (cwd: string) => events.push(cwd),
+      registerProjectWatchers: (cwd: string) => events.push(cwd),
+    }
+    for (const body of ["{broken", "null", "{}", '{"cwd":42}', '{"cwd":""}']) {
+      const result = await readProjectRequestCwd(
+        new Request("http://daemon", { method: "POST", body }),
+        ctx
+      )
+      expect(result).toBeInstanceOf(Response)
+      expect((result as Response).status).toBe(400)
+      expect(await (result as Response).json()).toEqual({ error: "Missing required field: cwd" })
+    }
+    expect(events).toEqual([])
+  })
+
+  it("preserves relative legacy paths without registering watchers", async () => {
+    const events: string[] = []
+    const result = await readProjectRequestCwd(
+      new Request("http://daemon", {
+        method: "POST",
+        body: JSON.stringify({ cwd: "." }),
+      }),
+      {
+        touchProject: (cwd) => events.push(cwd),
+        registerProjectWatchers: (cwd) => events.push(cwd),
+      }
+    )
+    expect(result).toBe(".")
+    expect(events).toEqual([])
+  })
+})
 
 describe("isRegisterableProjectCwd", () => {
   it("accepts absolute paths", () => {
