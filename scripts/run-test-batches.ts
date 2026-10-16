@@ -1,6 +1,9 @@
 import { resolve } from "node:path"
 
-/** Keep isolated Bun workers short-lived without changing the selected tests. */
+/**
+ * Long-lived isolated Bun workers can stall during full-suite runs. Recycle the
+ * pool after 80 files while retaining four concurrent workers and every selected test.
+ */
 const BATCH_SIZE = 80
 
 export function discoverTestFiles(cwd: string): string[] {

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 import { daemonDispatchPolicy } from "../dispatch/daemon-client.ts"
 import { filterPrMergeModeHooks, resolvePrMergeActive } from "../dispatch/index.ts"
-import { hookIdentifier, isInlineHookDef, manifest } from "../manifest.ts"
+import { hookIdentifier, isInlineHookDef, bundledHookManifest as manifest } from "../manifest.ts"
 
 describe("dispatch.ts unit tests", () => {
   describe("cross-agent tool matching patterns", () => {
@@ -367,6 +367,8 @@ describe("dispatch.ts unit tests", () => {
     it("long timeouts are reserved for steering and special checks", () => {
       const steeringHooks = new Set([
         "pretooluse-task-governance.ts",
+        "pretooluse-enforce-taskupdate.ts",
+        "pretooluse-require-tasks.ts",
         "pretooluse-offensive-language.ts",
         "posttooluse-auto-steer.ts",
         "posttooluse-task-advisor.ts",
@@ -388,8 +390,11 @@ describe("dispatch.ts unit tests", () => {
           return t != null && t > 30 && !steeringHooks.has(hookIdentifier(h))
         })
 
-      // Only special cases like stop-auto-continue should exceed 30s
-      expect(longTimeouts.length).toBeLessThanOrEqual(3)
+      // These checks run subprocess validation; all other extended budgets are for steering.
+      expect(longTimeouts.map(hookIdentifier).sort()).toEqual([
+        "stop-quality-checks.ts",
+        "stop-ship-checklist.ts",
+      ])
     })
 
     it("stop-auto-continue has extended 15s timeout", () => {
