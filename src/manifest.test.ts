@@ -106,6 +106,7 @@ describe("manifest.ts", () => {
         // adding a tool-specific blocker to their group still fails this test.
         const allToolHooks = new Set([
           "pretooluse-active-skills.ts",
+          "pretooluse-process-memory.ts",
           "pretooluse-task-governance.ts",
         ])
         const allHandleEveryTool =

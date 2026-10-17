@@ -6,7 +6,7 @@ One manifest of TypeScript hook scripts gets installed across Claude Code, Curso
 
 When `swiz idea` and `swiz continue` are used together, the system can enter a **self-directed loop** — a closed-loop state where the agent's own outputs become the next inputs, expanding the project without external prompts. See [docs/ai-providers.md](docs/ai-providers.md#self-directed-loop) for the canonical terminology.
 
-**169 hooks. 17 event types. Every agent. Zero compromises.**
+**171 hooks. 17 event types. Every agent. Zero compromises.**
 
 ## Install
 
@@ -100,7 +100,7 @@ The JSON must name a supported agent and contain only valid tool-name strings. M
 
 ## Bundled Hooks
 
-159 hook scripts across 17 event types. All TypeScript.
+161 hook scripts across 17 event types. All TypeScript.
 
 The bundled hooks cover seven events: Stop, PreToolUse, PostToolUse, SessionStart, PreCompact, UserPromptSubmit, and Notification. Five additional events — **SubagentStart**, **SubagentStop**, **TaskCreated**, **TaskCompleted**, and **SessionEnd** — are formally registered in the dispatch system. Claude supports all five; other agents retain their existing event surface. Task lifecycle events update a daemon-owned registry and feed unfinished background work into a non-blocking Stop advisory. For the full picture of which Claude lifecycle events swiz maps versus intentionally leaves reserved (and why), see [docs/lifecycle-event-coverage.md](docs/lifecycle-event-coverage.md).
 
@@ -140,13 +140,14 @@ Stop hooks run before the agent is allowed to end a session. They're the last li
 | `stop-git-status.ts` | Modular git workflow validation — detects uncommitted changes, unpushed commits, branch divergence. Blocks stop until git state is clean. Separated into independent validators (context, uncommitted-changes, remote-state, push-cooldown, background-push-detector, action-plan, evaluate) for testability and reusability. See [hook-extraction-pattern.md](docs/hook-extraction-pattern.md) for modular architecture details. |
 | `stop-personal-repo-issues.ts` | Blocks stop if there are unassigned issues on a personal repository. |
 
-### PreToolUse (85)
+### PreToolUse (86)
 
 PreToolUse hooks intercept tool calls *before* they execute. A blocking hook here prevents the action entirely — the agent has to find another way.
 
 | Hook                                           | What it does                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 |------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `pretooluse-active-skills.ts`                  | Injects the skills invoked within the configured recency window before every tool call, keeping the active workflows present in tool context. |
+| `pretooluse-process-memory.ts` | Reports individual processes using more than 24 GiB of resident RAM (RSS) before tools run on macOS/Linux. Includes PID, executable name, and usage for the ten largest offenders; never blocks. Checks at most once per minute per session and project. |
 | `pretooluse-apply-dashboard-polish-gate.ts` | Requires `/apply-dashboard-polish` before editing `.tsx` files at any depth beneath an `admin/` or `dashboard/` directory. Handles multi-file patches and recent Codex `SKILL.md` reads. Skipped when the skill or transcript is unavailable. |
 | `pretooluse-no-mixed-tool-calls.ts`            | Blocks Bash commands that are actually tool invocations (e.g. `TaskCreate ...` or `WebFetch ...` in a shell). These are agent tool names, not executables — they must be called as tools, not shell commands.                                                                                                                                                                                                                                                                                                                                                                                                      |
 | `pretooluse-guardian-awareness.ts`             | Detects Codex shell calls that proactively request guardian review. Requires an ordinary sandboxed attempt first, keeps successful sandboxed operations non-escalated even when they emit incidental permission warnings, and permits a narrowly scoped escalation only after the transcript proves a concrete sandbox permission or network failure. A confirmed `git add` index-lock failure is denied at most three times per rolling minute: each denial explicitly permits retrying, then the hook stands down so the retry can reach the approval path. Isolated tracked-file work can still use `git commit -a`; untracked or mixed changes must not use that route. |
@@ -233,13 +234,14 @@ PreToolUse hooks intercept tool calls *before* they execute. A blocking hook her
 
 | `pretooluse-session-edits.ts` | Captures file fingerprints before edit, shell and Codex code-mode calls; correlates observations by session and tool call. |
 
-### PostToolUse (36)
+### PostToolUse (37)
 
 PostToolUse hooks run after a tool completes. They can feed error context back to the agent or inject advisory information.
 
 | Hook | What it does |
 |------|-------------|
 | `posttooluse-active-skills.ts` | Refreshes the configured recently active skill context after every tool call so it remains available for the next action. |
+| `posttooluse-process-memory.ts` | Reports the same excess-RAM context after tools complete, with an independent one-minute cooldown per session and project. Process-inspection failures remain silent. |
 | `posttooluse-git-context.ts` | Injects current git status context after every tool use (branch, upstream, uncommitted count, ahead/behind). After git Bash commands, also injects active swiz settings (trunk mode, push gate, collab mode) and synced branch protection rules. Keeps the agent informed of repo state and policy without repeated status/settings queries. |
 | `posttooluse-last-commit-age.ts` | Injects how long ago the current HEAD commit was made after tool use, refreshing at most once per minute so prolonged periods without committed progress stay visible. |
 | `posttooluse-commit-author-verification.ts` | After `git commit`, verifies the landed HEAD author and committer match git config and are not placeholder identities. Blocks immediately so incorrect author metadata is amended before push. |
