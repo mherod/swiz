@@ -27,6 +27,7 @@ import posttoolusPrChangesContext from "../hooks/posttooluse-pr-changes-context.
 import posttoolusPrContext from "../hooks/posttooluse-pr-context.ts"
 import posttoolusePrCreateRefine from "../hooks/posttooluse-pr-create-refine.ts"
 import posttoolusePrettierTs from "../hooks/posttooluse-prettier-ts.ts"
+import posttooluseProcessMemory from "../hooks/posttooluse-process-memory.ts"
 import posttoolusePushAutosteerIssue from "../hooks/posttooluse-push-autosteer-issue.ts"
 import posttoolusePostPushCooldown from "../hooks/posttooluse-push-cooldown.ts"
 import posttooluseReadClaims from "../hooks/posttooluse-read-claims.ts"
@@ -104,6 +105,7 @@ import pretoolusePrAgeGate from "../hooks/pretooluse-pr-age-gate.ts"
 import pretoolusePrChangesBranchGuard from "../hooks/pretooluse-pr-changes-branch-guard.ts"
 import pretoolusePrCommentReadGate from "../hooks/pretooluse-pr-comment-read-gate.ts"
 import pretoolusePrHeadCheckoutGate from "../hooks/pretooluse-pr-head-checkout-gate.ts"
+import pretooluseProcessMemory from "../hooks/pretooluse-process-memory.ts"
 import pretoolUseProtectSandbox from "../hooks/pretooluse-protect-sandbox.ts"
 import pretoolusePprotectStrictMain from "../hooks/pretooluse-protect-strict-main.ts"
 import pretoolusePushChecksGate from "../hooks/pretooluse-push-checks-gate.ts"
@@ -306,6 +308,7 @@ export const bundledHookManifest: HookGroup[] = [
     event: "preToolUse",
     hooks: [
       { hook: pretooluseActiveSkills },
+      { hook: pretooluseProcessMemory },
       { hook: speakNarrator },
       { hook: pretooluseTaskGovernance },
     ],
@@ -464,6 +467,7 @@ export const bundledHookManifest: HookGroup[] = [
     event: "postToolUse",
     hooks: [
       { hook: posttooluseActiveSkills },
+      { hook: posttooluseProcessMemory },
       { hook: posttooluseSessionEdits },
       { hook: posttooluseReadClaims },
       { hook: posttoolusGitContext },
