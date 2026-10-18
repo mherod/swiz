@@ -7,8 +7,10 @@
 import { stat } from "node:fs/promises"
 import { basename, resolve } from "node:path"
 import {
+  extractExecutableSubcommands,
   findNonCanonicalGitInvocation,
   type NonCanonicalGitInvocation,
+  normalizeCommand,
 } from "../src/command-utils.ts"
 import { resolveShellCwd } from "../src/cwd.ts"
 import {
@@ -29,6 +31,7 @@ import { isShellTool } from "../src/tool-matchers.ts"
 import { packagePolicyContext } from "../src/utils/bun-command-policy.ts"
 import { detectPackageManagerDetails } from "../src/utils/package-detection.ts"
 import {
+  extractCodexExecCommands,
   findGitCommitAttribution,
   hasGhFlag,
   hasGitNoVerifyFlag,
@@ -84,16 +87,26 @@ const PYTHON_CMD_RE = shellSegmentCommandRe("python3?(?:\\s|$)")
 const NODE_TS_NODE_CMD_RE = shellSegmentCommandRe("(node|ts-node)\\s")
 const PLAYWRIGHT_WRAPPERS = new Set(["command", "exec", "env", "noglob", "builtin"])
 const PLAYWRIGHT_RUNNERS = new Set(["npx", "bunx", "bun", "pnpm", "npm", "yarn"])
+const PLAYWRIGHT_SHELLS = new Set(["sh", "bash", "zsh", "dash", "ksh", "fish"])
+const CODEX_EXEC_TOOLS = new Set(["exec", "functions.exec"])
+const PLAYWRIGHT_DENIAL =
+  "Do not use `playwright-cli` or `playwriter`, including package-runner and shell-wrapper invocations. Use the available browser automation tools instead."
 const PLAYWRIGHT_VALUE_FLAGS: Record<string, Set<string>> = {
   env: new Set(["-u", "--unset", "-C", "--chdir"]),
   exec: new Set(["-a"]),
   npx: new Set(["-p", "--package", "--registry", "--cache", "--userconfig"]),
   bunx: new Set(["-p", "--package"]),
+  npm: new Set(["-p", "--package", "--registry", "--cache", "--userconfig"]),
+}
+
+function isPlaywrightCallOption(executable: string, option: string): boolean {
+  return (executable === "npx" || executable === "npm") && /^(?:-c|--call)(?:=|$)/.test(option)
 }
 
 function skipPlaywrightOptions(tokens: string[], start: number, executable: string): number {
   let index = start
   while (tokens[index]?.startsWith("-")) {
+    if (isPlaywrightCallOption(executable, tokens[index]!)) break
     const option = tokens[index++]!
     if (option === "--") break
     if (executable === "command" && /^-[p]*[vV]/.test(option)) return tokens.length
@@ -117,21 +130,51 @@ function playwrightExecutableIndex(tokens: string[]): number {
 }
 
 function hasPlaywrightCliCommand(command: string): boolean {
-  return splitShellSegments(command).some((segment) => {
-    const tokens = tokenizeShellSegment(segment)
-    let index = playwrightExecutableIndex(tokens)
-    const executable = basename(tokens[index] ?? "")
-    if (PLAYWRIGHT_RUNNERS.has(executable)) {
-      index++
-      if (executable === "bun") {
-        if (tokens[index++] !== "x") return false
-      } else if (executable !== "npx" && executable !== "bunx") {
-        if (!new Set(["exec", "dlx"]).has(tokens[index++] ?? "")) return false
-      }
-      index = skipPlaywrightOptions(tokens, index, executable)
+  return (
+    extractExecutableSubcommands(command).some(hasPlaywrightCliCommand) ||
+    splitShellSegments(normalizeCommand(command)).some((segment) =>
+      hasPlaywrightCliTokens(tokenizeShellSegment(segment))
+    )
+  )
+}
+
+function playwrightShellBody(tokens: string[], start: number): string {
+  for (let index = start; index < tokens.length; index++) {
+    const option = tokens[index]!
+    if (option === "--command" || /^-[^-]*c/.test(option)) {
+      return tokens[index + 1] ?? ""
     }
-    return /^playwright-cli(?:@[^\s]+)?$/.test(basename(tokens[index] ?? ""))
-  })
+    if (option.startsWith("--command=")) return option.slice("--command=".length)
+    if (!option.startsWith("-")) break
+  }
+  return ""
+}
+
+function hasPlaywrightRunnerCommand(tokens: string[], index: number, executable: string): boolean {
+  if (executable === "bun") {
+    if (tokens[index++] !== "x") return false
+  } else if (!["npx", "bunx"].includes(executable)) {
+    if (!new Set(["exec", "dlx"]).has(tokens[index++] ?? "")) return false
+  }
+  index = skipPlaywrightOptions(tokens, index, executable)
+  const option = tokens[index] ?? ""
+  if (isPlaywrightCallOption(executable, option)) {
+    const body = option.includes("=") ? option.slice(option.indexOf("=") + 1) : tokens[index + 1]
+    return hasPlaywrightCliCommand(body ?? "")
+  }
+  return hasPlaywrightCliTokens(tokens.slice(index))
+}
+
+function hasPlaywrightCliTokens(tokens: string[]): boolean {
+  const index = playwrightExecutableIndex(tokens)
+  const executable = basename(tokens[index] ?? "")
+  if (PLAYWRIGHT_SHELLS.has(executable)) {
+    return hasPlaywrightCliCommand(playwrightShellBody(tokens, index + 1))
+  }
+  if (PLAYWRIGHT_RUNNERS.has(executable)) {
+    return hasPlaywrightRunnerCommand(tokens, index + 1, executable)
+  }
+  return /^(?:playwright-cli|playwriter)(?:@[^\s]+)?$/.test(executable)
 }
 
 // Generic shell output redirects to files — excludes fd-to-fd (2>&1) and /dev/ paths.
@@ -310,7 +353,7 @@ function buildShellToolRules(payload: Record<string, unknown>): Rule[] {
     {
       useRawCommand: true,
       match: hasPlaywrightCliCommand,
-      message: "Do not use `playwright-cli`. Use the available browser automation tools instead.",
+      message: PLAYWRIGHT_DENIAL,
     },
     {
       match: (c) => GREP_CMD_RE.test(c),
@@ -910,7 +953,7 @@ function parseHookInput(input: Record<string, any>): {
   cwd: string
 } {
   return {
-    command: ((input?.tool_input as Record<string, any>)?.command as string) ?? "",
+    command: input.tool_input?.cmd ?? input.tool_input?.command ?? "",
     transcriptPath: (input?.transcript_path as string) ?? "",
     cwd: resolveShellCwd(input).cwd,
   }
@@ -933,8 +976,19 @@ function commandRulesOutput(
   return null
 }
 
+function codexExecBrowserCliOutput(input: Record<string, any>): SwizHookOutput | null {
+  if (!CODEX_EXEC_TOOLS.has(input.tool_name ?? "")) return null
+  const code = input.tool_input?.code ?? input.tool_input?.input
+  if (typeof code === "string" && extractCodexExecCommands(code).some(hasPlaywrightCliCommand)) {
+    return preToolUseDeny(PLAYWRIGHT_DENIAL)
+  }
+  return {}
+}
+
 export async function evaluatePretooluseBannedCommands(input: unknown): Promise<SwizHookOutput> {
   const parsed = toolHookInputSchema.parse(input)
+  const codexOutput = codexExecBrowserCliOutput(parsed)
+  if (codexOutput) return codexOutput
   if (!isShellTool(parsed.tool_name ?? "")) return {}
   const { command, transcriptPath, cwd } = parseHookInput(parsed as Record<string, any>)
   const RULES = await buildRules(parsed as Record<string, unknown>, cwd)
