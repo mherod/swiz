@@ -390,12 +390,16 @@ export const bundledHookManifest: HookGroup[] = [
   },
   {
     event: "preToolUse",
+    matcher: "Bash|exec|functions.exec",
+    hooks: [{ hook: pretooluseBannedCommands }],
+  },
+  {
+    event: "preToolUse",
     matcher: "Bash",
     hooks: [
       { hook: pretooluseNoMixedToolCalls },
       { hook: pretooluseGuardianAwareness },
       { hook: pretooluseEnforceTaskupdate },
-      { hook: pretooluseBannedCommands },
       { hook: pretooluesePeerStagedPathDeletion },
       { hook: pretooluseInlineScriptWriteGate },
       { hook: pretooluseNoMergeConflictComments },
