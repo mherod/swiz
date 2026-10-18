@@ -129,7 +129,7 @@ function playwrightExecutableIndex(tokens: string[]): number {
   return index
 }
 
-function hasPlaywrightCliCommand(command: string): boolean {
+export function hasPlaywrightCliCommand(command: string): boolean {
   return (
     extractExecutableSubcommands(command).some(hasPlaywrightCliCommand) ||
     splitShellSegments(normalizeCommand(command)).some((segment) =>

@@ -53,12 +53,14 @@ describe("install post-install doctor", () => {
 
   it("runs after a hook install and allows Codex repair when Codex is targeted", async () => {
     expect(await installRecordingDoctor(["--claude", "--codex"])).toEqual([
-      { repairCodexHooks: true },
+      { repairCodexHooks: true, repairMissingScripts: false },
     ])
   })
 
   it("leaves Codex hook files alone when the install did not target Codex", async () => {
-    expect(await installRecordingDoctor(["--claude"])).toEqual([{ repairCodexHooks: false }])
+    expect(await installRecordingDoctor(["--claude"])).toEqual([
+      { repairCodexHooks: false, repairMissingScripts: false },
+    ])
   })
 
   it("is skipped by --no-doctor", async () => {
@@ -114,6 +116,35 @@ describe("daemon LaunchAgent environment", () => {
 })
 
 describe("install --codex writes hooks", () => {
+  it("scoped install and uninstall preserve project settings and the shared shell profile", async () => {
+    const home = await mkdtemp(join(tmpdir(), "swiz-install-scoped-state-"))
+    const project = join(home, ".swiz/config.json")
+    const profile = join(home, ".zshenv")
+    const original = '{"collaborationMode":"solo"}\n'
+    await mkdir(dirname(project), { recursive: true })
+    await Bun.write(project, original)
+    await Bun.write(profile, "# existing user profile\n")
+    expect((await runInstall(["--codex"], home)).exitCode).toBe(0)
+    expect(await Bun.file(project).text()).toBe(original)
+    expect(await Bun.file(profile).text()).toBe("# existing user profile\n")
+    expect((await runInstall(["--uninstall", "--codex"], home)).exitCode).toBe(0)
+    expect(await Bun.file(project).text()).toBe(original)
+    expect(await Bun.file(profile).text()).toBe("# existing user profile\n")
+    expect(await Bun.file(join(home, ".local/share/swiz/self-heal-codex.json")).json()).toEqual({
+      enabled: false,
+    })
+  })
+
+  it("hooks-only recovery leaves MCP settings untouched", async () => {
+    const home = await mkdtemp(join(tmpdir(), "swiz-install-hooks-only-"))
+    const path = join(home, ".codex/config.toml")
+    await mkdir(dirname(path), { recursive: true })
+    await Bun.write(path, "# user settings\n")
+    expect((await runInstall(["--codex", "--hooks-only"], home)).exitCode).toBe(0)
+    expect(await Bun.file(path).text()).toBe("# user settings\n")
+    expect(await Bun.file(join(home, ".codex/hooks.json")).exists()).toBe(true)
+  })
+
   it("writes swiz dispatch entries to ~/.codex/hooks.json without touching other agents", async () => {
     // Codex hooks are configurable (agents.ts sets hooksConfigurable: true), so install must
     // actually write the file rather than only reporting status — the behaviour README once

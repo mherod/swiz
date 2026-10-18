@@ -335,6 +335,8 @@ async function handleAutoFixes(
 }
 
 export interface PostInstallDoctorOptions {
+  /** Scoped agent recovery must not register scripts belonging to other agents. */
+  repairMissingScripts?: boolean
   /** False when the install did not target Codex, so its hook files stay untouched. */
   repairCodexHooks?: boolean
   allChecks?: DiagnosticCheck[]
@@ -356,7 +358,8 @@ export async function runPostInstallDoctor(options: PostInstallDoctorOptions = {
       let collected = await collectDoctorChecks(false, allChecks)
       const repairCodex =
         options.repairCodexHooks !== false && hasCodexHookSourceWarnings(collected.results)
-      const missingScripts = (await findMissingConfigScriptPaths()).length > 0
+      const missingScripts =
+        options.repairMissingScripts !== false && (await findMissingConfigScriptPaths()).length > 0
       if (repairCodex) await fixCodex(collected.results)
       if (missingScripts) await fixMissingConfigs()
       if (repairCodex || missingScripts) collected = await collectDoctorChecks(false, allChecks)

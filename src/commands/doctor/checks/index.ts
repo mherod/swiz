@@ -7,6 +7,7 @@ import { codexHookSourcesCheck } from "./codex-hook-sources.ts"
 import { codexMemoryCheck } from "./codex-memory.ts"
 import { configScriptsCheck } from "./config-scripts.ts"
 import { daemonLaunchAgentEnvCheck } from "./daemon-launch-agent-env.ts"
+import { enforcementCheck } from "./enforcement.ts"
 import { gateRequiredSkillsCheck } from "./gate-required-skills.ts"
 import { ghAuthCheck } from "./gh-auth.ts"
 import { hookScriptsCheck } from "./hook-scripts.ts"
@@ -35,6 +36,7 @@ export const DIAGNOSTIC_CHECKS: DiagnosticCheck[] = [
   shellShimCheck,
   agentConfigSyncCheck,
   codexHookSourcesCheck,
+  enforcementCheck,
   codexMemoryCheck,
   gateRequiredSkillsCheck,
   skillConflictsCheck,

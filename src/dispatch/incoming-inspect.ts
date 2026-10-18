@@ -67,7 +67,7 @@ async function listCaptureFiles(
 }
 
 /** Load a capture envelope from disk. */
-function isCaptureEnvelope(value: unknown): value is CaptureEnvelope {
+export function isCaptureEnvelope(value: unknown): value is CaptureEnvelope {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false
   const metadata = (value as Record<string, unknown>)._swizIncomingCapture
   if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) return false

@@ -3,7 +3,10 @@ import { AGENTS, getAgentByFlag, hasAnyAgentFlag } from "../agents.ts"
 import { DIM, GREEN, RED, RESET, YELLOW } from "../ansi.ts"
 import { getHomeDirOrNull } from "../home.ts"
 import { loadAllPlugins, pluginErrorHint, pluginResultsToJson } from "../plugins.ts"
-import { pauseSessionstartSelfHeal } from "../sessionstart-self-heal-state.ts"
+import {
+  pauseSessionstartSelfHeal,
+  setAgentSelfHealEnabled,
+} from "../sessionstart-self-heal-state.ts"
 import { readProjectSettings, writeProjectSettings } from "../settings.ts"
 import { HOOKS_DIR } from "../swiz-hook-commands.ts"
 import type { Command } from "../types.ts"
@@ -67,6 +70,7 @@ function parseInstallRunOptions(args: string[], homeDir: string | null): Install
     daemon,
     daemonPort,
     mcpOnly,
+    hooksOnly: args.includes("--hooks-only"),
     targets: getAgentByFlag(args).map((agent) => ({
       ...agent,
       settingsPath: homeDir ? getAgentSettingsPath(agent.id, homeDir) : agent.settingsPath,
@@ -82,6 +86,7 @@ function isFullUninstall(args: string[], opts: InstallRunOptions): boolean {
     !opts.statusLine &&
     !opts.daemon &&
     !opts.mcpOnly &&
+    !opts.hooksOnly &&
     !hasAnyAgentFlag(args)
   )
 }
@@ -94,6 +99,7 @@ function isScopedInvocation(args: string[], opts: InstallRunOptions): boolean {
     opts.statusLine ||
     opts.daemon ||
     opts.mcpOnly ||
+    opts.hooksOnly ||
     hasAnyAgentFlag(args)
   )
 }
@@ -136,7 +142,7 @@ async function runOptionalInstallSteps(opts: InstallRunOptions): Promise<void> {
 }
 
 async function installShellShimStep(args: string[], opts: InstallRunOptions): Promise<void> {
-  if (!shouldInstallHooks(args, opts)) return
+  if (!shouldInstallHooks(args, opts) || isScopedInvocation(args, opts)) return
   const home = getHomeDirOrNull()
   if (!home) return
   const result = await ensureShimInstallation({
@@ -154,7 +160,7 @@ async function installShellShimStep(args: string[], opts: InstallRunOptions): Pr
 }
 
 async function uninstallShellShimStep(args: string[], opts: InstallRunOptions): Promise<void> {
-  if (!isFullUninstall(args, opts) && !hasAnyAgentFlag(args)) return
+  if (!isFullUninstall(args, opts)) return
   const home = getHomeDirOrNull()
   if (!home) return
   const result = await uninstallShimInstallation({ home, dryRun: opts.dryRun })
@@ -167,7 +173,7 @@ async function uninstallShellShimStep(args: string[], opts: InstallRunOptions): 
 }
 
 async function installSwizMcpServerStep(args: string[], opts: InstallRunOptions): Promise<void> {
-  if (!shouldInstallHooks(args, opts) && !opts.mcpOnly) return
+  if (!shouldInstallMcp(args, opts)) return
   const home = getHomeDirOrNull()
   if (!home) return
   const targets = getScopedMcpTargets(args, opts)
@@ -184,7 +190,12 @@ async function installSwizMcpServerStep(args: string[], opts: InstallRunOptions)
   console.log()
 }
 
+function shouldInstallMcp(args: string[], opts: InstallRunOptions): boolean {
+  return !opts.hooksOnly && (shouldInstallHooks(args, opts) || !!opts.mcpOnly)
+}
+
 async function uninstallSwizMcpServerStep(args: string[], opts: InstallRunOptions): Promise<void> {
+  if (opts.hooksOnly) return
   if (!isFullUninstall(args, opts) && !hasAnyAgentFlag(args) && !opts.mcpOnly) return
   const home = getHomeDirOrNull()
   if (!home) return
@@ -256,17 +267,21 @@ async function installHooksForTargets(args: string[], opts: InstallRunOptions): 
 
   for (const agent of opts.targets) {
     await installAgent(agent, opts.dryRun)
+    if (!opts.dryRun && agent.hooksConfigurable) await setAgentSelfHealEnabled(agent.id, true)
   }
   return false
 }
 
 async function uninstallHooksForTargets(args: string[], opts: InstallRunOptions): Promise<void> {
-  if (!isFullUninstall(args, opts) && !hasAnyAgentFlag(args)) return
+  if (!isFullUninstall(args, opts) && !hasAnyAgentFlag(args) && !opts.hooksOnly) return
 
   console.log(`  Hooks: ${HOOKS_DIR}`)
   console.log(`  Agents: ${opts.targets.map((a) => a.name).join(", ")}\n`)
 
   await uninstallSwizFromAgents(opts.targets, opts.dryRun)
+  if (!opts.dryRun) {
+    for (const agent of opts.targets) await setAgentSelfHealEnabled(agent.id, false)
+  }
 }
 
 async function installProjectHooks(dryRun: boolean): Promise<void> {
@@ -381,24 +396,31 @@ async function runInstallMode(
     return
   }
   await runOptionalInstallSteps(opts)
-  await installProjectHooks(opts.dryRun)
+  if (!isScopedInvocation(args, opts)) await installProjectHooks(opts.dryRun)
   await installSwizMcpServerStep(args, opts)
   await installShellShimStep(args, opts)
   if (await installHooksForTargets(args, opts)) return
   await runCleanupAgentStep(args, opts, cleanupOptions)
   if (opts.dryRun) console.log("  No changes written.\n")
   else if (shouldInstallHooks(args, opts) && !args.includes("--no-doctor")) {
-    await postInstallDoctor({ repairCodexHooks: opts.targets.some((a) => a.id === "codex") })
+    await postInstallDoctor({
+      repairCodexHooks: opts.targets.some((a) => a.id === "codex"),
+      repairMissingScripts: !isScopedInvocation(args, opts),
+    })
   }
 }
 
 export const installCommand: Command<InstallCommandOptions> = {
   name: "install",
   description: "Install swiz hooks into agent settings",
-  usage: `swiz install [${AGENTS.map((a) => `--${a.id}`).join("] [")}] [--dry-run] [--json] [--mcp] [--merge-tool] [--status-line] [--daemon [--port <n>]] [--no-doctor] [--uninstall]`,
+  usage: `swiz install [${AGENTS.map((a) => `--${a.id}`).join("] [")}] [--dry-run] [--json] [--mcp | --hooks-only] [--merge-tool] [--status-line] [--daemon [--port <n>]] [--no-doctor] [--uninstall]`,
   options: [
     ...AGENTS.map((a) => ({ flags: `--${a.id}`, description: `Install for ${a.name} only` })),
     { flags: "--dry-run", description: "Preview changes without writing to disk" },
+    {
+      flags: "--hooks-only",
+      description: "Repair target hook registrations without MCP, shell, or project changes",
+    },
     {
       flags: "--uninstall",
       description:
@@ -425,6 +447,9 @@ export const installCommand: Command<InstallCommandOptions> = {
     },
   ],
   async run(args, dependencies = {}) {
+    if (args.includes("--hooks-only") && (args.includes("--mcp") || args.includes("--mcp-only"))) {
+      throw new Error("--hooks-only cannot be combined with --mcp")
+    }
     const homeDir = dependencies.homeDir ?? getHomeDirOrNull()
     const opts = parseInstallRunOptions(args, homeDir)
     const cleanupOptions = { homeDir: homeDir ?? undefined, ...dependencies.cleanupAgentOptions }

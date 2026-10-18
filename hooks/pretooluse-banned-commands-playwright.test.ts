@@ -107,6 +107,35 @@ describe("Playwriter fallback ban", () => {
 })
 
 describe("Codex browser CLI enforcement", () => {
+  test.each([
+    "playwriter",
+    "playwright-cli",
+  ])("checks the host-resolved %s command after code-mode computation", async (executable) => {
+    const command = ["false &&", executable, "--help"].join(" ")
+    const payload = {
+      _agent: "codex",
+      tool_name: "Bash",
+      tool_input: { command },
+      session_id: "resolved-command-contract",
+      cwd: process.cwd(),
+    }
+    const groups = bundledHookManifest.filter(
+      (group) => group.event === "preToolUse" && groupMatches(group, payload.tool_name, undefined)
+    )
+    expect(groups.flatMap((group) => group.hooks.map(hookIdentifier))).toContain(
+      "pretooluse-banned-commands.ts"
+    )
+    expect(await evaluatePretooluseBannedCommands(payload)).toMatchObject({
+      hookSpecificOutput: { permissionDecision: "deny" },
+    })
+    expect(
+      await evaluatePretooluseBannedCommands({
+        ...payload,
+        tool_input: { command: `echo ${executable}` },
+      })
+    ).toEqual({})
+  })
+
   const command = "npx --offline --yes --package @playwright/mcp playwright-cli --help"
 
   test.each(["exec_command", "functions.exec_command"])("checks %s cmd input", async (toolName) => {

@@ -4,14 +4,15 @@
 import { createHash } from "node:crypto"
 import { mkdir } from "node:fs/promises"
 import { dirname, join } from "node:path"
+import { detectCurrentAgentFromHookPayload, getAgentSettingsPath } from "../src/agent-paths.ts"
+import type { AgentDef } from "../src/agents.ts"
 import { getHomeDir } from "../src/home.ts"
 import type { SwizHook, SwizHookOutput } from "../src/SwizHook.ts"
 import { buildContextHookOutput, runSwizHookAsMain } from "../src/SwizHook.ts"
 import { sessionStartHookInputSchema } from "../src/schemas.ts"
 import { isSessionstartSelfHealPaused } from "../src/sessionstart-self-heal-state.ts"
+import { extractDispatchEvents } from "../src/utils/config-commands.ts"
 import { spawnWithTimeout } from "../src/utils/process-utils.ts"
-
-const HASH_FILE = join(getHomeDir(), ".local", "share", "swiz", "manifest-hash")
 
 async function computeManifestHash(swizRoot: string): Promise<string | null> {
   const manifestPath = join(swizRoot, "src", "manifest.ts")
@@ -23,34 +24,37 @@ async function computeManifestHash(swizRoot: string): Promise<string | null> {
   }
 }
 
-async function readStoredHash(): Promise<string | null> {
+async function readStoredHash(path: string): Promise<string | null> {
   try {
-    return (await Bun.file(HASH_FILE).text()).trim()
+    return (await Bun.file(path).text()).trim()
   } catch {
     return null
   }
 }
 
-async function writeHash(hash: string): Promise<void> {
-  const dir = dirname(HASH_FILE)
+async function writeHash(path: string, hash: string): Promise<void> {
+  const dir = dirname(path)
   if (!(await Bun.file(dir).exists())) await mkdir(dir, { recursive: true })
-  await Bun.write(HASH_FILE, hash)
+  await Bun.write(path, hash)
 }
 
 const INSTALL_TIMEOUT_MS = 10_000
-const DISPATCH_RE = /swiz dispatch (\S+)/
-
-async function runInstall(swizRoot: string): Promise<boolean> {
+async function runInstall(swizRoot: string, agent: AgentDef): Promise<boolean> {
   // --no-doctor: the full doctor can exceed INSTALL_TIMEOUT_MS.
-  const args = ["bun", join(swizRoot, "index.ts"), "install", "--no-doctor"]
-
-  if (process.env.GEMINI_CLI) {
-    args.push("--gemini")
-  } else if (process.env.CLAUDECODE) {
-    args.push("--claude")
-  }
-
-  const result = await spawnWithTimeout(args, { cwd: swizRoot, timeoutMs: INSTALL_TIMEOUT_MS })
+  const args = [
+    "env",
+    "SWIZ_DIRECT=1",
+    process.execPath,
+    join(swizRoot, "index.ts"),
+    "install",
+    `--${agent.id}`,
+    "--hooks-only",
+    "--no-doctor",
+  ]
+  const result = await spawnWithTimeout(args, {
+    cwd: swizRoot,
+    timeoutMs: INSTALL_TIMEOUT_MS,
+  })
   return !result.timedOut && result.exitCode === 0
 }
 
@@ -58,40 +62,19 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null
 }
 
-function getSettingsHooks(settings: unknown): Record<string, unknown> {
-  if (settings === null) throw new TypeError("settings must not be null")
-  if (!isRecord(settings) || !isRecord(settings.hooks)) return {}
-  return settings.hooks
-}
-
-function getHookList(group: unknown): unknown[] {
-  if (!isRecord(group) || !Array.isArray(group.hooks)) return []
-  return group.hooks
-}
-
-function getDispatchEvent(hook: unknown): string | null {
-  if (!isRecord(hook) || typeof hook.command !== "string") return null
-  return DISPATCH_RE.exec(hook.command)?.[1] ?? null
-}
-
-function collectInstalledDispatchEvents(hooks: Record<string, unknown>): Set<string> {
-  const installed = new Set<string>()
-  for (const groups of Object.values(hooks)) {
-    if (!Array.isArray(groups)) continue
-    for (const group of groups) {
-      for (const hook of getHookList(group)) {
-        const event = getDispatchEvent(hook)
-        if (event) installed.add(event)
-      }
-    }
-  }
-  return installed
-}
-
-async function getMissingManifestEvents(installed: Set<string>): Promise<string[]> {
+async function getMissingManifestEvents(
+  installed: Set<string>,
+  agent: AgentDef
+): Promise<string[]> {
   const { manifest } = await import("../src/manifest.ts")
   return manifest
-    .filter((group) => !group.scheduled && !installed.has(group.event))
+    .filter(
+      (group) =>
+        !group.scheduled &&
+        group.hooks.length > 0 &&
+        !agent.unsupportedEvents?.includes(group.event) &&
+        !installed.has(group.event)
+    )
     .map((group) => group.event)
 }
 
@@ -99,12 +82,12 @@ async function getMissingManifestEvents(installed: Set<string>): Promise<string[
  * Check whether settings.json has all expected swiz dispatch entries.
  * Returns the list of missing canonical event names, or empty if all present.
  */
-async function findMissingDispatchEntries(): Promise<string[]> {
-  const settingsPath = join(getHomeDir(), ".claude", "settings.json")
+async function findMissingDispatchEntries(agent: AgentDef, homeDir: string): Promise<string[]> {
+  const settingsPath = getAgentSettingsPath(agent.id, homeDir)
   try {
     const settings: unknown = await Bun.file(settingsPath).json()
-    const installed = collectInstalledDispatchEvents(getSettingsHooks(settings))
-    return await getMissingManifestEvents(installed)
+    const installed = extractDispatchEvents(isRecord(settings) ? settings : {})
+    return await getMissingManifestEvents(installed, agent)
   } catch {
     // Can't read settings — assume missing
     return ["unknown"]
@@ -118,38 +101,59 @@ function isPluginDispatch(callerEnv: unknown): boolean {
   return process.env.SWIZ_PLUGIN === "1"
 }
 
-export async function evaluateSessionstartSelfHeal(input: unknown): Promise<SwizHookOutput> {
+export interface SelfHealOptions {
+  homeDir?: string
+  swizRoot?: string
+  install?: typeof runInstall
+}
+
+export async function evaluateSessionstartSelfHeal(
+  input: unknown,
+  options: SelfHealOptions = {}
+): Promise<SwizHookOutput> {
   const payload = sessionStartHookInputSchema.parse(input)
   if (isPluginDispatch(payload._env)) return {}
 
-  if (await isSessionstartSelfHealPaused()) return {}
+  const agent = detectCurrentAgentFromHookPayload(payload)
+  if (!agent?.hooksConfigurable) return {}
+  const homeDir = options.homeDir ?? getHomeDir()
+  if (await isSessionstartSelfHealPaused(agent.id, homeDir)) return {}
 
-  const swizRoot = dirname(dirname(import.meta.path))
+  return await healAgent(agent, homeDir, options)
+}
+
+async function healAgent(
+  agent: AgentDef,
+  homeDir: string,
+  options: SelfHealOptions
+): Promise<SwizHookOutput> {
+  const swizRoot = options.swizRoot ?? dirname(dirname(import.meta.path))
+  const hashPath = join(homeDir, ".local", "share", "swiz", `manifest-hash-${agent.id}`)
   const currentHash = await computeManifestHash(swizRoot)
   if (!currentHash) return {}
 
-  const storedHash = await readStoredHash()
+  const storedHash = await readStoredHash(hashPath)
   const manifestChanged = storedHash !== currentHash
 
   // Check if dispatch entries are missing from settings.json even when manifest hasn't changed.
   // Claude Code can overwrite settings.json, removing swiz entries without changing the manifest.
-  const missingEntries = manifestChanged ? [] : await findMissingDispatchEntries()
+  const missingEntries = manifestChanged ? [] : await findMissingDispatchEntries(agent, homeDir)
   const needsInstall = manifestChanged || missingEntries.length > 0
 
   if (!needsInstall) return {}
 
-  const installed = await runInstall(swizRoot)
+  const installed = await (options.install ?? runInstall)(swizRoot, agent)
   if (!installed) return {}
 
-  await writeHash(currentHash)
+  await writeHash(hashPath, currentHash)
 
   const reason = manifestChanged
     ? "manifest changed"
     : `${missingEntries.length} missing dispatch entries (${missingEntries.join(", ")})`
   const message =
     storedHash === null
-      ? "swiz install: initial agent config written."
-      : `swiz self-healed: ${reason}, agent configs updated.`
+      ? `swiz install: initial ${agent.name} hook config written.`
+      : `swiz self-healed: ${reason}, ${agent.name} hook config updated.`
 
   return buildContextHookOutput("SessionStart", message)
 }
