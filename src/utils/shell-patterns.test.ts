@@ -297,4 +297,34 @@ describe("extractCodexExecCommands", () => {
     const code = `await tools.exec_command({ cmd: "sed -n 1,5p \\"a.ts\\"" }); tools.exec_command({cmd: 'cat b.ts'})`
     expect(extractCodexExecCommands(code)).toEqual(['sed -n 1,5p "a.ts"', "cat b.ts"])
   })
+
+  test.each(['"', "'", "`"])("preserves quoted call delimiters inside %s strings", (quote) => {
+    const command = "playwriter -s 2 -e console.log(await state.page.evaluate(()=>({ready:true})))"
+    const code = `text(await tools.exec_command({cmd:${quote}${command}${quote},max_output_tokens:1200}));`
+    expect(extractCodexExecCommands(code)).toEqual([command])
+  })
+
+  test("reads direct command fields after nested options and comments", () => {
+    const code = `tools["exec_command"]({
+      env: Object.assign({}, {cmd: "not a shell command"}),
+      /* cmd: "also not a command" }) */
+      "cmd": "cat guide.md",
+    }); tools.exec_command({command: 'git status'})`
+    expect(extractCodexExecCommands(code)).toEqual(["cat guide.md", "git status"])
+  })
+
+  test("ignores calls in comments and strings without hiding later calls", () => {
+    const code = `// tools.exec_command({cmd: "playwriter skill"})
+      /* tools.exec_command({cmd: "playwriter skill"}) */
+      text('tools.exec_command({cmd: "playwriter skill"})');
+      tools.exec_command({cmd: "git status"})`
+    expect(extractCodexExecCommands(code)).toEqual(["git status"])
+  })
+
+  test.each([
+    "tools.exec_command({cmd: command})",
+    'tools.exec_command({env: {cmd: "not a shell command"}})',
+  ])("does not invent a static command for %s", (code) => {
+    expect(extractCodexExecCommands(code)).toEqual([])
+  })
 })

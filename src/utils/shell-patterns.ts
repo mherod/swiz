@@ -565,10 +565,9 @@ export function isShellFileReadSegment(segment: string): boolean {
   return _parseReadCommand(segment) !== null
 }
 
-const CODEX_EXEC_COMMAND_CALL_RE =
-  /\btools(?:\.exec_command|\[\s*["']exec_command["']\s*\])\s*\(\s*\{([\s\S]*?)\}\s*\)/g
-const CODEX_COMMAND_FIELD_RE =
-  /\b(?:cmd|command)\s*:\s*(?:"((?:\\.|[^"\\])*)"|'((?:\\.|[^'\\])*)'|`((?:\\.|[^`\\])*)`)/
+/** Keep quoted JavaScript and comments opaque when locating call and object boundaries. */
+const CODEX_CODE_TOKEN_RE =
+  /"(?:\\[\s\S]|[^"\\])*"|'(?:\\[\s\S]|[^'\\])*'|`(?:\\[\s\S]|[^`\\])*`|\/\/[^\r\n]*|\/\*[\s\S]*?\*\/|[$\w]+|[^\s]/g
 
 const _CODEX_ESCAPES: Record<string, string> = {
   "\\": "\\",
@@ -598,16 +597,69 @@ function _decodeCodexCommandString(raw: string, quote: '"' | "'" | "`"): string 
   )
 }
 
-/** Shell commands passed to `tools.exec_command({ cmd })` inside the body of Codex's `exec` tool. */
-export function extractCodexExecCommands(code: string): string[] {
+function _codexStringLiteral(token: string | undefined): string | null {
+  if (!token) return null
+  const quote = token[0]
+  if (quote !== '"' && quote !== "'" && quote !== "`") return null
+  if (token.length < 2 || !token.endsWith(quote)) return null
+  return _decodeCodexCommandString(token.slice(1, -1), quote)
+}
+
+function _codexExecArgumentStart(tokens: string[], index: number): number | null {
+  if (tokens[index] !== "tools" || tokens[index - 1] === ".") return null
+  let next = index + 1
+  if (tokens[next] === "." && tokens[next + 1] === "exec_command") {
+    next += 2
+  } else if (
+    tokens[next] === "[" &&
+    _codexStringLiteral(tokens[next + 1]) === "exec_command" &&
+    tokens[next + 2] === "]"
+  ) {
+    next += 3
+  } else {
+    return null
+  }
+  return tokens[next] === "(" && tokens[next + 1] === "{" ? next + 2 : null
+}
+
+function _codexCommandField(tokens: string[], index: number): string | null {
+  if (tokens[index - 1] !== "{" && tokens[index - 1] !== ",") return null
+  const key = _codexStringLiteral(tokens[index]) ?? tokens[index]
+  if (key !== "cmd" && key !== "command") return null
+  return tokens[index + 1] === ":" ? _codexStringLiteral(tokens[index + 2]) : null
+}
+
+const CODEX_OPEN_DELIMITERS = new Set(["{", "[", "("])
+const CODEX_CLOSE_DELIMITERS = new Set(["}", "]", ")"])
+
+function _codexCommandFields(tokens: string[], start: number): string[] {
   const commands: string[] = []
-  for (const call of code.matchAll(CODEX_EXEC_COMMAND_CALL_RE)) {
-    const field = call[1]?.match(CODEX_COMMAND_FIELD_RE)
-    if (!field) continue
-    const raw = field[1] ?? field[2] ?? field[3]
-    if (raw === undefined) continue
-    const quote = field[1] !== undefined ? '"' : field[2] !== undefined ? "'" : "`"
-    commands.push(_decodeCodexCommandString(raw, quote))
+  let depth = 1
+  for (let index = start; index < tokens.length && depth > 0; index++) {
+    const token = tokens[index]!
+    if (depth === 1) {
+      const value = _codexCommandField(tokens, index)
+      if (value !== null) commands.push(value)
+    }
+    if (CODEX_OPEN_DELIMITERS.has(token)) depth++
+    if (CODEX_CLOSE_DELIMITERS.has(token)) depth--
+  }
+  return commands
+}
+
+/**
+ * Literal command strings in `tools.exec_command({ cmd })` calls within Codex's `exec` tool.
+ * Balance delimiters outside strings; browser scripts commonly contain `})` inside `cmd`.
+ * This inspects literal values and does not evaluate computed JavaScript expressions.
+ */
+export function extractCodexExecCommands(code: string): string[] {
+  const tokens = (code.match(CODEX_CODE_TOKEN_RE) ?? []).filter(
+    (token) => !token.startsWith("//") && !token.startsWith("/*")
+  )
+  const commands: string[] = []
+  for (let index = 0; index < tokens.length; index++) {
+    const start = _codexExecArgumentStart(tokens, index)
+    if (start !== null) commands.push(..._codexCommandFields(tokens, start))
   }
   return commands
 }

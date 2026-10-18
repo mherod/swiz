@@ -147,6 +147,20 @@ describe("Codex browser CLI enforcement", () => {
   })
 
   test.each([
+    "code",
+    "input",
+  ])("blocks observed Playwriter JavaScript through %s", async (field) => {
+    const command =
+      "npx --offline --yes playwriter@latest -s 2 --timeout 15000 -e 'console.log(await state.model.evaluate(()=>({mode:MCR_DEBUG.getState().mode,position:MCR_DEBUG.getState().position,transition:MCR_DEBUG.getState().transitionActive,fps:document.getElementById(\"settings-fps\").textContent})));'"
+    const code = `text(await tools.exec_command({cmd:${JSON.stringify(command)},max_output_tokens:1200}));`
+    const result = await evaluatePretooluseBannedCommands({
+      tool_name: "exec",
+      tool_input: { [field]: code },
+    })
+    expect(result).toMatchObject({ hookSpecificOutput: { permissionDecision: "deny" } })
+  })
+
+  test.each([
     'text("playwright-cli");',
     'await tools.exec_command({cmd:"rg playwright-cli hooks"});',
     'await tools.exec_command({cmd:"bunx playwright test"});',
