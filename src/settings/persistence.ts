@@ -398,6 +398,7 @@ function normalizeProjectSettings(value: unknown): ProjectSwizSettings | null {
   applyBooleanFields(obj, result, [
     "autoContinue",
     "pushGate",
+    "gitSandboxEnforcement",
     "qualityChecksGate",
     "speak",
     "suggestWebSearch",

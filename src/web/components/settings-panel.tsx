@@ -9,6 +9,7 @@ interface GlobalSettingsForm {
   prMergeMode: boolean
   pushGate: boolean
   sandboxedEdits: boolean
+  gitSandboxEnforcement: boolean
   speak: boolean
   autoSteer: boolean
   humaniseHookContext: boolean
@@ -53,6 +54,7 @@ const DEFAULT_GLOBAL_FORM: GlobalSettingsForm = {
   prMergeMode: true,
   pushGate: true,
   sandboxedEdits: true,
+  gitSandboxEnforcement: true,
   speak: false,
   autoSteer: false,
   humaniseHookContext: false,
@@ -93,6 +95,7 @@ interface CachedProjectSettingsResponse {
     collaborationMode?: "auto" | "solo" | "team" | "relaxed-collab"
     strictNoDirectMain?: boolean
     trunkMode?: boolean
+    gitSandboxEnforcement?: boolean
     trivialMaxFiles?: number
     trivialMaxLines?: number
     defaultBranch?: string
@@ -117,6 +120,7 @@ interface ProjectSettingsForm {
   prMergeMode: boolean
   strictNoDirectMain: boolean
   trunkMode: boolean
+  gitSandboxEnforcement: boolean | "inherit"
   trivialMaxFiles: number
   trivialMaxLines: number
   defaultBranch: string
@@ -137,6 +141,7 @@ const DEFAULT_PROJECT_FORM: ProjectSettingsForm = {
   prMergeMode: true,
   strictNoDirectMain: false,
   trunkMode: false,
+  gitSandboxEnforcement: "inherit",
   trivialMaxFiles: 2,
   trivialMaxLines: 50,
   defaultBranch: "main",
@@ -175,6 +180,7 @@ function globalSettingsToForm(settings: Record<string, unknown>): GlobalSettings
     prMergeMode: readBooleanSetting(settings, "prMergeMode", true),
     pushGate: readBooleanSetting(settings, "pushGate", true),
     sandboxedEdits: readBooleanSetting(settings, "sandboxedEdits", true),
+    gitSandboxEnforcement: readBooleanSetting(settings, "gitSandboxEnforcement", true),
     speak: readBooleanSetting(settings, "speak"),
     autoSteer: readBooleanSetting(settings, "autoSteer"),
     humaniseHookContext: readBooleanSetting(settings, "humaniseHookContext"),
@@ -232,6 +238,7 @@ const PROJECT_FORM_DEFAULTS: ProjectSettingsForm = {
   prMergeMode: true,
   strictNoDirectMain: false,
   trunkMode: false,
+  gitSandboxEnforcement: "inherit",
   trivialMaxFiles: 2,
   trivialMaxLines: 50,
   defaultBranch: "main",
@@ -257,6 +264,7 @@ function projectSettingsToForm(response: CachedProjectSettingsResponse): Project
       prMergeMode: g.prMergeMode,
       strictNoDirectMain: s.strictNoDirectMain,
       trunkMode: s.trunkMode,
+      gitSandboxEnforcement: s.gitSandboxEnforcement ?? ("inherit" as const),
       trivialMaxFiles: s.trivialMaxFiles,
       trivialMaxLines: s.trivialMaxLines,
       defaultBranch: s.defaultBranch || undefined,
@@ -488,6 +496,11 @@ const GLOBAL_TOGGLES: Array<{
     desc: "Prevent git push commands unless explicitly allowed or required by a skill.",
   },
   {
+    key: "gitSandboxEnforcement",
+    label: "Git sandbox enforcement",
+    desc: "Apply Swiz's Git sandbox retry checks and guidance. Host sandbox permissions and commit/push policies still apply when disabled.",
+  },
+  {
     key: "sandboxedEdits",
     label: "Sandboxed edits",
     desc: "Restrict file write operations to the current project directory only.",
@@ -642,6 +655,7 @@ const GLOBAL_TOGGLE_GROUPS: Array<{
   {
     title: "Git & Push",
     keys: [
+      "gitSandboxEnforcement",
       "prMergeMode",
       "pushGate",
       "gitStatusGate",
@@ -1244,7 +1258,8 @@ function projectSectionVisibility(searchQuery: string) {
     "Git & Push",
     "PR merge mode",
     "Strict merge",
-    "Trunk mode"
+    "Trunk mode",
+    "Git sandbox enforcement"
   )
   const showAgent = matchesSettingsSearch(
     searchQuery,
@@ -1284,6 +1299,13 @@ function ProjectGitSettings({ form, set }: { form: ProjectSettingsForm; set: Pro
   return (
     <section className="settings-group">
       <h4>Git & Push</h4>
+      <ProjectBooleanOverrideField
+        id="project-gitSandboxEnforcement"
+        label="Git sandbox enforcement override"
+        desc='Control Swiz Git sandbox retry checks for this project. "inherit" uses the global setting.'
+        value={form.gitSandboxEnforcement}
+        onChange={(value) => set({ gitSandboxEnforcement: value })}
+      />
       <div className="settings-toggle-list">
         <CheckboxField
           id="project-pr-merge-mode"

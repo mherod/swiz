@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, test } from "bun:test"
-import { mkdtemp, rm } from "node:fs/promises"
+import { mkdir, mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import pretooluseGuardianAwareness from "../../hooks/pretooluse-guardian-awareness.ts"
@@ -18,10 +18,26 @@ describe("guardian review dispatch enrichment", () => {
     await Promise.all(tempDirs.map((dir) => rm(dir, { recursive: true, force: true })))
   })
 
-  test("blocks a proactive escalation through the real dispatch pipeline", async () => {
+  test.each([
+    [undefined, undefined, true],
+    [false, undefined, false],
+    [true, false, false],
+    [false, true, true],
+  ] as const)("resolves Git sandbox enforcement through dispatch: global=%s project=%s", async (globalEnabled, projectEnabled, blocked) => {
     const projectDir = await mkdtemp(join(tmpdir(), "swiz-guardian-project-"))
     const settingsHome = await mkdtemp(join(tmpdir(), "swiz-guardian-home-"))
     tempDirs.push(projectDir, settingsHome)
+
+    await mkdir(join(settingsHome, ".swiz"), { recursive: true })
+    await Bun.write(
+      join(settingsHome, ".swiz", "settings.json"),
+      JSON.stringify({ gitSandboxEnforcement: globalEnabled })
+    )
+    await mkdir(join(projectDir, ".swiz"), { recursive: true })
+    await Bun.write(
+      join(projectDir, ".swiz", "config.json"),
+      JSON.stringify({ gitSandboxEnforcement: projectEnabled })
+    )
 
     const transcriptLine = JSON.stringify({
       type: "response_item",
@@ -70,8 +86,13 @@ describe("guardian review dispatch enrichment", () => {
 
     for (const { response } of [first, second]) {
       const specific = getHookSpecificOutput(response)
-      expect(specific?.permissionDecision).toBe("deny")
-      expect(specific?.permissionDecisionReason).toContain("has not been attempted")
+      if (blocked) {
+        expect(specific?.permissionDecision).toBe("deny")
+        expect(specific?.permissionDecisionReason).toContain("has not been attempted")
+      } else {
+        expect(specific?.permissionDecision).not.toBe("deny")
+        expect(response.systemMessage ?? "").not.toContain("Guardian")
+      }
     }
   })
 

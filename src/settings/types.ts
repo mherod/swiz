@@ -120,6 +120,8 @@ export interface ProjectSwizSettings {
   ci?: boolean
   /** Block git push unless the user has explicitly approved it. */
   pushGate?: boolean
+  /** Enable Swiz's Git sandbox retry checks and guidance. */
+  gitSandboxEnforcement?: boolean
   /** Read agent output aloud using text-to-speech. */
   speak?: boolean
   /** Emit a WebSearch reminder in the session context at session start. Defaults to true. */
@@ -199,6 +201,8 @@ export interface SwizSettings {
   pushCooldownMinutes: number
   pushGate: boolean
   sandboxedEdits: boolean
+  /** Enable Swiz's Git sandbox retry checks and guidance; host permissions remain independent. */
+  gitSandboxEnforcement: boolean
   speak: boolean
   /** When true, emit a WebSearch reminder context block at session start. */
   suggestWebSearch: boolean
@@ -350,6 +354,7 @@ export const projectSettingsSchema = z.preprocess(
     autoSteerTranscriptWatching: z.boolean().optional(),
     transcriptMonitorMaxConcurrentDispatches: z.number().int().min(0).max(64).optional(),
     pushGate: z.boolean().optional(),
+    gitSandboxEnforcement: z.boolean().optional(),
     qualityChecksGate: z.boolean().optional(),
     ci: z.boolean().optional(),
     strictNoDirectMain: z.boolean().optional(),

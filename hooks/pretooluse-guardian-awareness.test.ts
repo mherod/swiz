@@ -9,11 +9,13 @@ import {
 async function evaluate(
   priorSandboxAttempt?: GuardianReviewContext["priorSandboxAttempt"],
   command = "git push origin main",
-  recentGitAddGuardianDenialCount = 0
+  recentGitAddGuardianDenialCount = 0,
+  gitSandboxEnforcement?: boolean
 ) {
   return await evaluateGuardianAwareness({
     tool_name: "Bash",
     tool_input: { command },
+    _effectiveSettings: { gitSandboxEnforcement },
     ...(priorSandboxAttempt
       ? {
           _guardianReview: {
@@ -82,6 +84,72 @@ describe("pretooluse-guardian-awareness", () => {
     const specific = getHookSpecificOutput(await evaluate("failed"))
     expect(specific?.permissionDecision).toBe("deny")
     expect(specific?.permissionDecisionReason).toContain("did not establish a sandbox restriction")
+  })
+})
+
+describe("git-sandbox-enforcement setting", () => {
+  test.each([
+    "not-attempted",
+    "succeeded",
+    "failed",
+    "unknown",
+    "permission-failed",
+  ] as const)("skips Git retry enforcement when disabled with %s evidence", async (evidence) => {
+    const specific = getHookSpecificOutput(
+      await evaluate(evidence, "git add -- src/app.ts", 0, false)
+    )
+    expect(specific?.permissionDecision).toBe("allow")
+    expect(specific?.permissionDecisionReason).toBe("")
+    expect(specific?.additionalContext).toBeUndefined()
+  })
+
+  test.each([
+    "git push origin main",
+    "git -C '/repo with spaces' fetch origin",
+    "git -c credential.helper= fetch origin",
+    "git fetch origin && git rev-parse HEAD origin/main",
+    "git status --short; git add -- src/app.ts",
+  ])("disables Git checks and advice for %s", async (command) => {
+    const output = await evaluateGuardianAwareness({
+      _agent: "codex",
+      tool_name: "Bash",
+      tool_input: { command },
+      _effectiveSettings: { gitSandboxEnforcement: false },
+    })
+    expect(getHookSpecificOutput(output)?.additionalContext).toBeUndefined()
+    expect(
+      getHookSpecificOutput(await evaluate("not-attempted", command, 0, false))?.permissionDecision
+    ).toBe("allow")
+  })
+
+  test.each([
+    "bun install",
+    "git fetch origin && bun install",
+    "bun install; git add -- src/app.ts",
+    "git diff | tee changes.patch",
+    "git add -- $(bun run paths.ts)",
+    "git show HEAD > snapshot.txt",
+    "printf '%s' 'git push origin main'",
+  ])("preserves general escalation checks for %s", async (command) => {
+    const specific = getHookSpecificOutput(await evaluate("not-attempted", command, 0, false))
+    expect(specific?.permissionDecision).toBe("deny")
+    expect(specific?.permissionDecisionReason).toContain("has not been attempted")
+  })
+
+  test("suppresses Git advice but retains general recovery context for mixed commands", async () => {
+    const specific = getHookSpecificOutput(
+      await evaluate("permission-failed", "git add -- src/app.ts && bun install", 0, false)
+    )
+    expect(specific?.permissionDecision).toBe("allow")
+    expect(specific?.additionalContext).toContain("narrowly scoped")
+    expect(specific?.additionalContext).not.toContain("Codex Git sandbox guidance")
+  })
+
+  test("explicitly enabling restores Git retry enforcement", async () => {
+    const specific = getHookSpecificOutput(
+      await evaluate("not-attempted", "git push origin main", 0, true)
+    )
+    expect(specific?.permissionDecision).toBe("deny")
   })
 })
 

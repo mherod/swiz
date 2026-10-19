@@ -6,6 +6,7 @@ import { detectCurrentAgentFromHookPayload } from "../src/agent-paths.ts"
 import {
   GIT_ADD_GUARDIAN_DENIAL_LIMIT,
   GIT_ADD_GUARDIAN_DENIAL_MARKER,
+  type GuardianReviewContext,
   getGuardianReviewContext,
   type SandboxAttemptEvidence,
 } from "../src/guardian-review.ts"
@@ -18,7 +19,8 @@ import {
   type SwizHookOutput,
   type SwizShellHook,
 } from "../src/SwizHook.ts"
-import { shellHookInputSchema } from "../src/schemas.ts"
+import { type ShellHookInput, shellHookInputSchema } from "../src/schemas.ts"
+import type { EffectiveSwizSettings } from "../src/settings/types.ts"
 import { isShellTool } from "../src/tool-matchers.ts"
 import {
   buildOwnershipHoldReason,
@@ -65,6 +67,13 @@ function needsGitSandboxGuidance(command: string, confirmedFailure = false): boo
       (confirmedFailure || segments.length > 1 || git.globalArgs.length > 0)
     )
   })
+}
+
+/** Mixed commands and shell substitutions still need the general escalation checks. */
+function isGitOnlyCommand(command: string): boolean {
+  if (/\$\(|`|[<>]/.test(command)) return false
+  const segments = splitShellSegments(command)
+  return segments.length > 0 && segments.every((segment) => parseGitInvocationTokens(segment))
 }
 
 function gitSandboxAdvice(input: object, command: string): SwizHookOutput {
@@ -143,38 +152,58 @@ function gitAddRetryContext(): string {
   ].join("\n")
 }
 
+async function confirmedRestrictionOutput(
+  parsed: ShellHookInput,
+  context: GuardianReviewContext,
+  enforceGitSandbox: boolean
+): Promise<SwizHookOutput> {
+  const rawCommand = parsed.tool_input?.command ?? ""
+  const command = stripQuotedShellStrings(rawCommand)
+  if (enforceGitSandbox && GIT_ADD_RE.test(command)) {
+    if (context.recentGitAddGuardianDenialCount >= GIT_ADD_GUARDIAN_DENIAL_LIMIT) {
+      return preToolUseAllowWithContext(
+        "Guardian retry allowance reached for this `git add`.",
+        gitAddRetryContext(),
+        { rephrase: false }
+      )
+    }
+    const peerHeldFiles = await resolvePeerHeldFiles(parsed.cwd, parsed.session_id)
+    return preToolUseDeny(
+      gitAddAvoidanceMessage(context.recentGitAddGuardianDenialCount, peerHeldFiles)
+    )
+  }
+
+  return preToolUseAllowWithContext(
+    "Guardian review follows a confirmed sandbox restriction.",
+    [
+      "A sandboxed attempt failed because of a concrete permission or network restriction. Keep this escalation narrowly scoped to the blocked operation and preserve the failure in the justification.",
+      ...(enforceGitSandbox && needsGitSandboxGuidance(rawCommand, true)
+        ? [GIT_SANDBOX_GUIDANCE]
+        : []),
+    ].join("\n\n"),
+    { rephrase: false }
+  )
+}
+
+function gitSandboxEnforcementEnabled(input: ShellHookInput): boolean {
+  const settings = input._effectiveSettings as Partial<EffectiveSwizSettings> | undefined
+  return settings?.gitSandboxEnforcement !== false
+}
+
 export async function evaluateGuardianAwareness(input: unknown): Promise<SwizHookOutput> {
   const parsed = shellHookInputSchema.parse(input)
   if (!isShellTool(parsed.tool_name ?? "")) return preToolUseAllow("")
 
   const rawCommand = parsed.tool_input?.command ?? ""
+  const enforceGitSandbox = gitSandboxEnforcementEnabled(parsed)
+  if (!enforceGitSandbox && isGitOnlyCommand(rawCommand)) return preToolUseAllow("")
+
   const context = getGuardianReviewContext(parsed)
-  if (!context) return gitSandboxAdvice(parsed, rawCommand)
+  if (!context)
+    return enforceGitSandbox ? gitSandboxAdvice(parsed, rawCommand) : preToolUseAllow("")
 
   if (context.priorSandboxAttempt === "permission-failed") {
-    const command = stripQuotedShellStrings(rawCommand)
-    if (GIT_ADD_RE.test(command)) {
-      if (context.recentGitAddGuardianDenialCount >= GIT_ADD_GUARDIAN_DENIAL_LIMIT) {
-        return preToolUseAllowWithContext(
-          "Guardian retry allowance reached for this `git add`.",
-          gitAddRetryContext(),
-          { rephrase: false }
-        )
-      }
-      const peerHeldFiles = await resolvePeerHeldFiles(parsed.cwd, parsed.session_id)
-      return preToolUseDeny(
-        gitAddAvoidanceMessage(context.recentGitAddGuardianDenialCount, peerHeldFiles)
-      )
-    }
-
-    return preToolUseAllowWithContext(
-      "Guardian review follows a confirmed sandbox restriction.",
-      [
-        "A sandboxed attempt failed because of a concrete permission or network restriction. Keep this escalation narrowly scoped to the blocked operation and preserve the failure in the justification.",
-        ...(needsGitSandboxGuidance(rawCommand, true) ? [GIT_SANDBOX_GUIDANCE] : []),
-      ].join("\n\n"),
-      { rephrase: false }
-    )
+    return await confirmedRestrictionOutput(parsed, context, enforceGitSandbox)
   }
 
   return preToolUseDeny(avoidanceMessage(context.priorSandboxAttempt))

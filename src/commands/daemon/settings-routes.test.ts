@@ -154,6 +154,53 @@ describe("settings routes", () => {
     })
   })
 
+  test("round-trips Git sandbox enforcement through the global web API", async () => {
+    const ctx = createContext()
+    globalSettings = { sandboxedEdits: true }
+    for (const value of [false, true]) {
+      const req = post("/settings/global/update", { updates: { gitSandboxEnforcement: value } })
+      const response = await routes.handleSettingsRoutes(req, new URL(req.url), ctx)
+      expect(response?.status).toBe(200)
+      expect((await response!.json()).settings).toEqual({
+        sandboxedEdits: true,
+        gitSandboxEnforcement: value,
+      })
+    }
+  })
+
+  test.each([
+    true,
+    false,
+    "inherit",
+    null,
+  ])("accepts project Git sandbox override %s", async (value) => {
+    const ctx = createContext()
+    const req = post("/settings/project/update", {
+      cwd: "/repo",
+      updates: { gitSandboxEnforcement: value },
+    })
+    const response = await routes.handleSettingsRoutes(req, new URL(req.url), ctx)
+    expect(response?.status).toBe(200)
+    expect(projectWrites).toEqual([
+      {
+        cwd: "/repo",
+        updates: { gitSandboxEnforcement: typeof value === "boolean" ? value : undefined },
+      },
+    ])
+    expect(globalWrites).toEqual([])
+  })
+
+  test("rejects an invalid Git sandbox override before writing", async () => {
+    const ctx = createContext()
+    const req = post("/settings/project/update", {
+      cwd: "/repo",
+      updates: { gitSandboxEnforcement: "false" },
+    })
+    const response = await routes.handleSettingsRoutes(req, new URL(req.url), ctx)
+    expect(response?.status).toBe(400)
+    expect(projectWrites).toEqual([])
+  })
+
   test("rejects non-boolean project fields", async () => {
     const ctx = createContext()
     const req = post("/settings/project/update", {

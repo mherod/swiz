@@ -128,6 +128,7 @@ const PROJECT_OVERRIDABLE_KEYS = [
   "auditStrictness",
   "collaborationMode",
   "pushGate",
+  "gitSandboxEnforcement",
   "qualityChecksGate",
   "strictNoDirectMain",
   "trunkMode",

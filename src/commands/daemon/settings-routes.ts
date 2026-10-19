@@ -25,6 +25,7 @@ async function handleGlobalSettingsUpdate(req: Request): Promise<Response> {
     "prMergeMode",
     "pushGate",
     "sandboxedEdits",
+    "gitSandboxEnforcement",
     "speak",
     "humaniseHookContext",
     "swizNotifyHooks",
@@ -90,6 +91,10 @@ function validateBooleanField(updates: Record<string, any>, key: string): string
   return null
 }
 
+function isInheritedGitSandboxOverride(key: string, value: unknown): boolean {
+  return key === "gitSandboxEnforcement" && (value === "inherit" || value === null)
+}
+
 function normalizeProjectSettingsUpdates(
   updates: Record<string, any>
 ): Record<string, any> | { error: string } {
@@ -119,9 +124,14 @@ function normalizeProjectSettingsUpdates(
     "autoContinue",
     "prMergeMode",
     "strictNoDirectMain",
+    "gitSandboxEnforcement",
     "autoSteerTranscriptWatching",
     "speak",
   ] as const) {
+    if (isInheritedGitSandboxOverride(boolKey, updates[boolKey])) {
+      result[boolKey] = undefined
+      continue
+    }
     const err = validateBooleanField(updates, boolKey)
     if (err) return { error: err }
     if (boolKey in updates) result[boolKey] = updates[boolKey]
@@ -144,6 +154,7 @@ async function handleProjectSettingsUpdate(
       collaborationMode?: "auto" | "solo" | "team" | "relaxed-collab"
       prMergeMode?: boolean
       strictNoDirectMain?: boolean
+      gitSandboxEnforcement?: boolean | "inherit" | null
       trivialMaxFiles?: number | null
       trivialMaxLines?: number | null
       defaultBranch?: string | null

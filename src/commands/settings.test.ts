@@ -231,6 +231,7 @@ describe("swiz settings", () => {
     expect(parsed).toHaveProperty("prMergeMode")
     expect(parsed).toHaveProperty("pushGate")
     expect(parsed).toHaveProperty("sandboxedEdits")
+    expect(parsed.gitSandboxEnforcement).toBe(true)
     expect(parsed).toHaveProperty("speak")
     expect(parsed).toHaveProperty("swizNotifyHooks")
     expect(parsed).toHaveProperty("mcpChannels")
@@ -1195,6 +1196,7 @@ describe("SETTINGS_REGISTRY", () => {
       "critiquesEnabled",
       "pushGate",
       "sandboxedEdits",
+      "gitSandboxEnforcement",
       "speak",
       "suggestWebSearch",
       "autoSteer",
@@ -2005,6 +2007,79 @@ describe("strictNoDirectMain setting", () => {
     const settings = buildTestSettings()
     const effective = getEffectiveSwizSettings(settings, null, { strictNoDirectMain: true })
     expect(effective.strictNoDirectMain).toBe(true)
+  })
+})
+
+describe("git-sandbox-enforcement setting", () => {
+  test("defaults to enabled independently of sandboxed edits", () => {
+    const settings = swizSettingsSchema.parse({ sandboxedEdits: false })
+    expect(settings.gitSandboxEnforcement).toBe(true)
+    expect(getEffectiveSwizSettings(settings).gitSandboxEnforcement).toBe(true)
+    expect(swizSettingsSchema.parse({ gitSandboxEnforcement: "false" }).gitSandboxEnforcement).toBe(
+      true
+    )
+  })
+
+  test.each([
+    "git-sandbox-enforcement",
+    "gitsandboxenforcement",
+    "git_sandbox_enforcement",
+  ])("%s round-trips globally with a backup and no unrelated changes", async (alias) => {
+    const home = await createTempHome()
+    await runSwiz(["settings", "enable", "sandboxed-edits", "--global"], home)
+    const path = join(home, ".swiz", "settings.json")
+    const before = await Bun.file(path).text()
+    const disabled = await runSwiz(["settings", "disable", alias, "--global", "--json"], home)
+    expect(disabled.exitCode).toBe(0)
+    expect(JSON.parse(disabled.stdout)).toMatchObject({
+      setting: "gitSandboxEnforcement",
+      value: false,
+    })
+    expect(await Bun.file(`${path}.bak`).text()).toBe(before)
+    const settings = await readSwizSettings({ home })
+    expect(settings.gitSandboxEnforcement).toBe(false)
+    expect(settings.sandboxedEdits).toBe(true)
+    const shown = await runSwiz(["settings", "show", "--global"], home)
+    expect(shown.stdout).toMatch(/git-sandbox-enforcement:\s+disabled \(user\)/)
+    expect((await runSwiz(["settings", "enable", alias, "--global"], home)).exitCode).toBe(0)
+    expect((await readSwizSettings({ home })).gitSandboxEnforcement).toBe(true)
+  })
+
+  test.each([true, false])("project override wins over global %s", async (globalEnabled) => {
+    const home = await createTempHome()
+    const projectDir = await createIsolatedGitProject(home)
+    await runSwiz(
+      ["settings", globalEnabled ? "enable" : "disable", "git-sandbox-enforcement", "--global"],
+      home
+    )
+    const args = [
+      "settings",
+      "disable",
+      "git-sandbox-enforcement",
+      "--project",
+      "--dir",
+      projectDir,
+    ]
+    expect((await runSwiz(args, home)).exitCode).toBe(0)
+    const path = join(projectDir, ".swiz", "config.json")
+    const before = await Bun.file(path).text()
+    const projectEnabled = !globalEnabled
+    args[1] = projectEnabled ? "enable" : "disable"
+    expect((await runSwiz(args, home)).exitCode).toBe(0)
+    expect(await Bun.file(`${path}.bak`).text()).toBe(before)
+    expect((await readProjectSettings(projectDir))?.gitSandboxEnforcement).toBe(projectEnabled)
+    const shown = await runSwiz(["settings", "show", "--project", "--dir", projectDir], home)
+    expect(shown.stdout).toMatch(
+      new RegExp(
+        `git-sandbox-enforcement:\\s+${projectEnabled ? "enabled" : "disabled"} \\(project\\)`
+      )
+    )
+    const json = await runSwiz(
+      ["settings", "show", "--project", "--dir", projectDir, "--json"],
+      home
+    )
+    expect(JSON.parse(json.stdout).gitSandboxEnforcement).toBe(projectEnabled)
+    expect((await readSwizSettings({ home })).gitSandboxEnforcement).toBe(globalEnabled)
   })
 })
 

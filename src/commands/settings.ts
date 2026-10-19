@@ -114,6 +114,7 @@ function usage(): string {
   return (
     "Usage: swiz settings [show | enable <setting> | disable <setting> | set <setting> <value> | disable-hook <filename> | enable-hook <filename>] [--global | --project | --session [id]] [--dir <path>] [--force]\n" +
     "Scope defaults outside agents: project in a Git repo or with --dir; global elsewhere. Agents must specify scope.\n" +
+    "Example: swiz settings disable git-sandbox-enforcement --project\n" +
     "Run swiz settings --help for all settings and options."
   )
 }

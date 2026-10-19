@@ -151,6 +151,20 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
     },
   },
   {
+    key: "gitSandboxEnforcement",
+    aliases: ["git-sandbox-enforcement", "gitsandboxenforcement", "git_sandbox_enforcement"],
+    kind: "boolean",
+    scopes: ["global", "project"],
+    default: true,
+    docs: {
+      description: "Apply Swiz's Git sandbox retry checks and guidance",
+      effectExplanation:
+        "When disabled, the Guardian hook skips sandbox retry checks for direct Git commands and suppresses Git sandbox guidance. Commands mixed with non-Git operations retain general escalation checks. Host sandbox permissions, approvals, file-edit restrictions, and commit/push policies remain in effect.",
+      enableDescription: "Enable Git sandbox retry checks and guidance",
+      disableDescription: "Disable Swiz's Git sandbox retry checks and guidance",
+    },
+  },
+  {
     key: "speak",
     aliases: ["speak", "tts"],
     kind: "boolean",
