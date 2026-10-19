@@ -208,6 +208,20 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
     },
   },
   {
+    key: "humaniseHookContext",
+    aliases: ["humanise-hook-context", "humanize-hook-context", "humanise_hook_context"],
+    kind: "boolean",
+    scopes: ["global"],
+    default: false,
+    docs: {
+      description: "Rewrite all hook context messages in natural language before delivery",
+      effectExplanation:
+        "Humanises context, notices, and blocking reasons for every hook event using the configured AI provider. Independent of humanise-auto-steer and auto-steer. Preserves requirements, commands, paths, and permission decisions. Reuses cached rewrites and keeps the original text if rewriting fails or exceeds 5 seconds.",
+      enableDescription: "Humanise all hook context messages",
+      disableDescription: "Deliver original hook context messages",
+    },
+  },
+  {
     key: "swizNotifyHooks",
     aliases: [
       "pseudo-hooks",

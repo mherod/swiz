@@ -11,6 +11,7 @@ interface GlobalSettingsForm {
   sandboxedEdits: boolean
   speak: boolean
   autoSteer: boolean
+  humaniseHookContext: boolean
   swizNotifyHooks: boolean
   autoSteerTranscriptWatching: boolean
   gitStatusGate: boolean
@@ -54,6 +55,7 @@ const DEFAULT_GLOBAL_FORM: GlobalSettingsForm = {
   sandboxedEdits: true,
   speak: false,
   autoSteer: false,
+  humaniseHookContext: false,
   swizNotifyHooks: false,
   autoSteerTranscriptWatching: false,
   gitStatusGate: true,
@@ -175,6 +177,7 @@ function globalSettingsToForm(settings: Record<string, unknown>): GlobalSettings
     sandboxedEdits: readBooleanSetting(settings, "sandboxedEdits", true),
     speak: readBooleanSetting(settings, "speak"),
     autoSteer: readBooleanSetting(settings, "autoSteer"),
+    humaniseHookContext: readBooleanSetting(settings, "humaniseHookContext"),
     swizNotifyHooks: readBooleanSetting(settings, "swizNotifyHooks"),
     autoSteerTranscriptWatching: readBooleanSetting(settings, "autoSteerTranscriptWatching"),
     gitStatusGate: readBooleanSetting(settings, "gitStatusGate", true),
@@ -500,6 +503,11 @@ const GLOBAL_TOGGLES: Array<{
     desc: "Type 'Continue' into the terminal after every tool call via AppleScript.",
   },
   {
+    key: "humaniseHookContext",
+    label: "Humanise hook context",
+    desc: "Rewrite all hook messages in natural language while preserving requirements and commands. Independent of auto-steer; keeps original text if rewriting fails.",
+  },
+  {
     key: "swizNotifyHooks",
     label: "Pseudo hooks",
     desc: "Allow transcript/session monitoring to synthesize pseudo-hook dispatches in the daemon.",
@@ -620,6 +628,7 @@ const GLOBAL_TOGGLE_GROUPS: Array<{
       "critiquesEnabled",
       "speak",
       "autoSteer",
+      "humaniseHookContext",
       "swizNotifyHooks",
       "autoSteerTranscriptWatching",
       "autoTransition",

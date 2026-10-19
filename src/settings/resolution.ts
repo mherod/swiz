@@ -177,6 +177,7 @@ function buildBaseSettings(
     mcpChannels: settings.mcpChannels,
     autoSteer: settings.autoSteer,
     humaniseAutoSteer: settings.humaniseAutoSteer,
+    humaniseHookContext: settings.humaniseHookContext,
     swizNotifyHooks: settings.swizNotifyHooks,
     updateMemoryFooter: settings.updateMemoryFooter,
     gitStatusGate: settings.gitStatusGate,

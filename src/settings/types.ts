@@ -206,6 +206,8 @@ export interface SwizSettings {
   autoSteer: boolean
   /** When true, rewrite scheduled steer messages into a natural paragraph via OpenRouter before delivery. */
   humaniseAutoSteer: boolean
+  /** Rewrite all delivered hook context independently of scheduled auto-steer messages. */
+  humaniseHookContext: boolean
   /** When true, allow transcript/session monitoring to synthesize pseudo-hook dispatches. */
   swizNotifyHooks: boolean
   /** When true, the daemon monitors session transcripts and triggers auto-steer via post-tool hooks. */

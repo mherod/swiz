@@ -3,10 +3,7 @@ import { hasDeadlineContext } from "../../dispatch/deadline-context.ts"
 import { isBlock } from "../../dispatch/engine.ts"
 import type { DispatchLifecycleUpdate } from "../../dispatch/execute.ts"
 import { isSubagentUsageKey, sessionUsageKey } from "../../dispatch/session-usage-key.ts"
-import {
-  DEFAULT_STOP_DISPATCH_ALLOW_CONTEXT,
-  isStopLikeDispatchEvent,
-} from "../../dispatch/stop-response.ts"
+import { isStopLikeDispatchEvent } from "../../dispatch/stop-response.ts"
 import { mcpCallerCwdRegistry } from "../../mcp-caller-cwd.ts"
 import { taskCompletedHookInputSchema, taskCreatedHookInputSchema } from "../../schemas.ts"
 import { isAnyProviderTaskCreateTool, isAnyProviderTaskUpdateTool } from "../../tool-matchers.ts"
@@ -546,22 +543,4 @@ export async function prepareLifecycleTaskDispatch(
   return isTaskLifecycleEvent(canonicalEvent)
     ? prepareTaskLifecycleDispatch(ctx, canonicalEvent, payload, signal)
     : prepareSessionLifecycleDispatch(ctx, canonicalEvent, payload, signal)
-}
-
-export function mergeLifecycleStopAdvisory(
-  response: Record<string, any>,
-  advisory: string | undefined
-): void {
-  if (!advisory) return
-  const existingSystemMessage =
-    typeof response.systemMessage === "string" ? response.systemMessage.trim() : ""
-  if (!existingSystemMessage.includes(advisory)) {
-    response.systemMessage = existingSystemMessage
-      ? `${existingSystemMessage}\n\n${advisory}`
-      : advisory
-  }
-  if (response.reason === DEFAULT_STOP_DISPATCH_ALLOW_CONTEXT) {
-    response.reason = advisory
-    response.stopReason = advisory
-  }
 }

@@ -26,6 +26,7 @@ async function handleGlobalSettingsUpdate(req: Request): Promise<Response> {
     "pushGate",
     "sandboxedEdits",
     "speak",
+    "humaniseHookContext",
     "swizNotifyHooks",
     "mcpChannels",
     "gitStatusGate",

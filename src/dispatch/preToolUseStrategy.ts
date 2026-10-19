@@ -294,60 +294,6 @@ function buildPreToolResponse(hints: string[], contexts: string[]): Record<strin
   })
 }
 
-/**
- * Replace the merged advisory response's context fields with humanised text.
- * Must write `additionalContext` (the agent-recognized PreToolUse field) — writing
- * any other key leaks an unknown field into `hookSpecificOutput`, which the agent
- * rejects as "hook returned invalid pre-tool-use JSON output" (schemas are looseObject,
- * so the bad key survives boundary validation).
- */
-export function applyPreToolHumanisedContext(
-  response: Record<string, any>,
-  humanised: string
-): void {
-  response.systemMessage = humanised
-  if (response.hookSpecificOutput) {
-    response.hookSpecificOutput.additionalContext = humanised
-  }
-}
-
-/**
- * Humanise the merged advisory response's context, unless humanisation is off or
- * we are inside the post-user-message grace window — the mechanical context
- * voice stays visually distinct from the user's own messages while they are
- * actively present.
- */
-async function maybeHumanisePreToolContexts(
-  response: Record<string, any>,
-  payload: Record<string, any>,
-  contexts: readonly string[]
-): Promise<void> {
-  if (contexts.length === 0) return
-  let humaniseEnabled = false
-  let sessionId: string | undefined
-  let transcriptPath: string | undefined
-  let withinGrace = false
-  try {
-    humaniseEnabled = payload._effectiveSettings?.humaniseAutoSteer ?? false
-    sessionId = typeof payload.session_id === "string" ? payload.session_id : undefined
-    transcriptPath =
-      typeof payload.transcript_path === "string" ? payload.transcript_path : undefined
-    const { isWithinUserMessageGrace } = await import("../tasks/task-governance-grace.ts")
-    withinGrace = await isWithinUserMessageGrace(payload)
-  } catch {}
-
-  if (!humaniseEnabled || withinGrace) return
-  const rawContext = contexts.join("\n\n").trim()
-  if (!rawContext) return
-  const { humaniseText, STRATEGY_HUMANISE_SYSTEM_PROMPT } = await import("../utils/humanise.ts")
-  const humanised = await humaniseText(rawContext, {
-    systemPrompt: STRATEGY_HUMANISE_SYSTEM_PROMPT,
-    sessionId,
-    transcriptPath,
-  })
-  applyPreToolHumanisedContext(response, humanised)
-}
-
 export class PreToolUseStrategy implements HookExecutionStrategy {
   async execute(ctx: HookStrategyContext): Promise<Record<string, any>> {
     const hints: string[] = []
@@ -376,7 +322,6 @@ export class PreToolUseStrategy implements HookExecutionStrategy {
         })
         if (!isDeny(finalResponse)) {
           const response = buildPreToolResponse(hints, contexts)
-          await maybeHumanisePreToolContexts(response, payload, contexts)
           merge(finalResponse, response)
         }
         return finalResponse

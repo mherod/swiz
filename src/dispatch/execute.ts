@@ -37,6 +37,7 @@ import {
   releaseDispatchSessionLines,
   type TranscriptSummary,
 } from "../transcript-summary.ts"
+import { type HookContextRewriter, humaniseHookContext } from "./context-humanise.ts"
 import { injectDeadlineContext } from "./deadline-context.ts"
 import { dispatchToolUseId, ensureDispatchId } from "./dispatch-id.ts"
 import {
@@ -61,7 +62,11 @@ import { backfillPayloadDefaults } from "./payload-backfill.ts"
 import { normalizeAgentHookPayload } from "./payload-normalize.ts"
 import { sessionUsageKey } from "./session-usage-key.ts"
 import { injectProjectStateProvenance } from "./state-provenance.ts"
-import { isStopLikeDispatchEvent, normalizeStopDispatchResponseInPlace } from "./stop-response.ts"
+import {
+  isStopLikeDispatchEvent,
+  mergeLifecycleStopAdvisory,
+  normalizeStopDispatchResponseInPlace,
+} from "./stop-response.ts"
 import { STRATEGY_REGISTRY } from "./strategies.ts"
 import { isSubagentSession } from "./subagent-detect.ts"
 import {
@@ -410,6 +415,10 @@ export interface DispatchRequest {
    *  `process.env.HOME`. Lets tests inject settings without mutating shared
    *  global env (avoids `--concurrent` races). Unset in production. */
   settingsHomeOverride?: string
+  /** Injectable text rewrite for deterministic dispatch tests; unset in production. */
+  hookContextRewriter?: HookContextRewriter
+  /** Trusted task context prepared by the daemon, merged before humanising. */
+  lifecycleStopAdvisory?: string
   /** Injectable device input idle probe; production samples macOS at each stop event. */
   idleSecondsProvider?: IdleSecondsProvider
 }
@@ -599,7 +608,17 @@ function buildLifecycleEvent(
 }
 
 export function executeDispatch(req: DispatchRequest): Promise<DispatchResult> {
-  return withLogBuffer(() => performDispatch(req))
+  return withLogBuffer(async () => {
+    const result = await performDispatch(req)
+    mergeLifecycleStopAdvisory(result.response, req.lifecycleStopAdvisory)
+    const settings = await readSwizSettings({ home: req.settingsHomeOverride })
+    await humaniseHookContext(result.response, {
+      enabled: settings.humaniseHookContext,
+      signal: req.signal,
+      rewrite: req.hookContextRewriter,
+    })
+    return result
+  })
 }
 
 /** Create an AbortController merged with an optional incoming abort signal. */

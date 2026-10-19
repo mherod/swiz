@@ -1199,6 +1199,7 @@ describe("SETTINGS_REGISTRY", () => {
       "suggestWebSearch",
       "autoSteer",
       "humaniseAutoSteer",
+      "humaniseHookContext",
       "swizNotifyHooks",
       "autoSteerTranscriptWatching",
       "transcriptMonitorMaxConcurrentDispatches",
@@ -2004,6 +2005,47 @@ describe("strictNoDirectMain setting", () => {
     const settings = buildTestSettings()
     const effective = getEffectiveSwizSettings(settings, null, { strictNoDirectMain: true })
     expect(effective.strictNoDirectMain).toBe(true)
+  })
+})
+
+describe("humanise-hook-context setting", () => {
+  test("defaults to false independently of humanise-auto-steer", () => {
+    const settings = buildTestSettings({ humaniseAutoSteer: true })
+    expect(settings.humaniseHookContext).toBe(false)
+    expect(getEffectiveSwizSettings(settings).humaniseHookContext).toBe(false)
+    expect(swizSettingsSchema.parse({ humaniseHookContext: "true" }).humaniseHookContext).toBe(
+      false
+    )
+  })
+
+  test.each([
+    "humanise-hook-context",
+    "humanize-hook-context",
+    "humanise_hook_context",
+  ])("%s persists independently with a backup and effective readback", async (alias) => {
+    const home = await createTempHome()
+    await runSwiz(["settings", "enable", "humanise-auto-steer", "--global"], home)
+    const path = join(home, ".swiz", "settings.json")
+    const before = await Bun.file(path).text()
+    const enabled = await runSwiz(["settings", "enable", alias, "--global", "--json"], home)
+    expect(enabled.exitCode).toBe(0)
+    expect(JSON.parse(enabled.stdout)).toMatchObject({
+      setting: "humaniseHookContext",
+      value: true,
+    })
+    expect(await Bun.file(`${path}.bak`).text()).toBe(before)
+    const settings = await readSwizSettings({ home })
+    expect(settings.humaniseHookContext).toBe(true)
+    expect(settings.humaniseAutoSteer).toBe(true)
+    expect(settings.autoSteer).toBe(false)
+    expect(getEffectiveSwizSettings(settings).humaniseHookContext).toBe(true)
+    const shown = await runSwiz(["settings", "show", "--global"], home)
+    expect(shown.stdout).toMatch(/humanise-hook-context:\s+enabled/)
+    const disabled = await runSwiz(["settings", "disable", alias, "--global"], home)
+    expect(disabled.exitCode).toBe(0)
+    const after = await readSwizSettings({ home })
+    expect(after.humaniseHookContext).toBe(false)
+    expect(after.humaniseAutoSteer).toBe(true)
   })
 })
 

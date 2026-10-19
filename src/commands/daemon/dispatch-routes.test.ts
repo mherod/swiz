@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test"
+import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { tmpdir } from "node:os"
 import stopLifecycleTasks from "../../../hooks/stop-lifecycle-tasks.ts"
 import type { HookGroup } from "../../manifest.ts"
@@ -8,6 +8,7 @@ import {
   buildConcurrentFileEditGuidance,
   buildConcurrentWorkGuidance,
 } from "../../utils/concurrent-work-guidance.ts"
+import { acquireEnvLock, releaseEnvLockFn, useTempDir } from "../../utils/test-utils.ts"
 import { resolveSessionLines } from "../../utils/transcript.ts"
 import { CappedMap } from "./cache/capped-map.ts"
 import { LastUserMessageCache } from "./cache/last-user-message-cache.ts"
@@ -30,6 +31,27 @@ import {
 import type { ActiveHookDispatch } from "./types.ts"
 import type { DaemonWebServerContext } from "./web-server-context.ts"
 import { DaemonWorkerRuntime } from "./worker-runtime.ts"
+
+const temp = useTempDir("swiz-dispatch-routes-")
+let previousHome: string | undefined
+let previousNoBackend: string | undefined
+
+beforeEach(async () => {
+  const home = await temp.create()
+  await acquireEnvLock()
+  previousHome = process.env.HOME
+  previousNoBackend = process.env.AI_TEST_NO_BACKEND
+  process.env.HOME = home
+  process.env.AI_TEST_NO_BACKEND = "1"
+})
+
+afterEach(() => {
+  if (previousHome === undefined) delete process.env.HOME
+  else process.env.HOME = previousHome
+  if (previousNoBackend === undefined) delete process.env.AI_TEST_NO_BACKEND
+  else process.env.AI_TEST_NO_BACKEND = previousNoBackend
+  releaseEnvLockFn()
+})
 
 const DISPATCH_CONTEXT_KEYS = [
   "projectMetrics",

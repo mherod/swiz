@@ -396,53 +396,6 @@ async function checkOnSessionStopShortCircuit(
   return response
 }
 
-async function resolveBlockingHumaniseParams(enrichedPayloadStr: string): Promise<{
-  humaniseEnabled: boolean
-  sessionId?: string
-  transcriptPath?: string
-  withinGrace: boolean
-}> {
-  let humaniseEnabled = false
-  let sessionId: string | undefined
-  let transcriptPath: string | undefined
-  let withinGrace = false
-  try {
-    const payload = JSON.parse(enrichedPayloadStr)
-    humaniseEnabled = payload._effectiveSettings?.humaniseAutoSteer ?? false
-    sessionId = typeof payload.session_id === "string" ? payload.session_id : undefined
-    transcriptPath =
-      typeof payload.transcript_path === "string" ? payload.transcript_path : undefined
-    const { isWithinUserMessageGrace } = await import("../../src/tasks/task-governance-grace.ts")
-    withinGrace = await isWithinUserMessageGrace(payload)
-  } catch {}
-  return { humaniseEnabled, sessionId, transcriptPath, withinGrace }
-}
-
-async function maybeHumaniseBlockingResponse(
-  finalResponse: Record<string, any>,
-  ctx: HookStrategyContext
-): Promise<void> {
-  const { humaniseEnabled, sessionId, transcriptPath, withinGrace } =
-    await resolveBlockingHumaniseParams(ctx.enrichedPayloadStr)
-
-  // Skip humanisation inside the post-user-message grace window so the
-  // mechanical context voice stays visually distinct from the user's own
-  // messages while they are actively present.
-  if (!humaniseEnabled || withinGrace) return
-
-  const rawContext = finalResponse.hookSpecificOutput?.additionalContext?.trim()
-  if (!rawContext) return
-
-  const { humaniseText, STRATEGY_HUMANISE_SYSTEM_PROMPT } = await import("../utils/humanise.ts")
-  const humanised = await humaniseText(rawContext, {
-    systemPrompt: STRATEGY_HUMANISE_SYSTEM_PROMPT,
-    sessionId,
-    transcriptPath,
-  })
-  finalResponse.systemMessage = humanised
-  finalResponse.hookSpecificOutput.additionalContext = humanised
-}
-
 async function finalizeStopBlock(
   response: Record<string, any>,
   enrichedPayloadStr: string
@@ -480,8 +433,6 @@ export class BlockingStrategy implements HookExecutionStrategy {
         } else {
           processBlockingResults(results, executions, finalResponse, ctx.hookEventName)
         }
-
-        await maybeHumaniseBlockingResponse(finalResponse, ctx)
 
         if (!isBlock(finalResponse)) {
           log(`   result: all passed`)

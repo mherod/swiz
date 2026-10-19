@@ -1,15 +1,7 @@
 import { hookOutputSchema, hookSpecificOutputSchema } from "../schemas.ts"
-import { shouldHumaniseContextOutput } from "./context-humanise.ts"
 import { extractContext, type HookExecution, log } from "./engine.ts"
 import type { HookExecutionStrategy, HookStrategyContext } from "./strategy-base.ts"
 import { runStrategyPipeline } from "./strategy-base.ts"
-
-interface HumaniseContextParams {
-  humaniseEnabled: boolean
-  sessionId?: string
-  transcriptPath?: string
-  withinGrace: boolean
-}
 
 function collectContextsFromResults(
   results: Array<{ execution: HookExecution; parsed: Record<string, any> | null }>,
@@ -47,46 +39,6 @@ function collectHookContext(response: Record<string, any>): string[] | null {
   return fields.length > 0 ? fields : null
 }
 
-async function resolveHumaniseParams(enrichedPayloadStr: string): Promise<HumaniseContextParams> {
-  let humaniseEnabled = false
-  let sessionId: string | undefined
-  let transcriptPath: string | undefined
-  let withinGrace = false
-  try {
-    const payload = JSON.parse(enrichedPayloadStr)
-    humaniseEnabled = payload._effectiveSettings?.humaniseAutoSteer ?? false
-    sessionId = typeof payload.session_id === "string" ? payload.session_id : undefined
-    transcriptPath =
-      typeof payload.transcript_path === "string" ? payload.transcript_path : undefined
-    const { isWithinUserMessageGrace } = await import("../tasks/task-governance-grace.ts")
-    withinGrace = await isWithinUserMessageGrace(payload)
-  } catch {}
-  return { humaniseEnabled, sessionId, transcriptPath, withinGrace }
-}
-
-async function applyContextHumanisation(
-  mergedContext: string,
-  canonicalEvent: string,
-  params: HumaniseContextParams
-): Promise<string> {
-  if (
-    !shouldHumaniseContextOutput({
-      canonicalEvent,
-      humaniseEnabled: params.humaniseEnabled,
-      withinGrace: params.withinGrace,
-    }) ||
-    !mergedContext.trim()
-  ) {
-    return mergedContext
-  }
-  const { humaniseText, STRATEGY_HUMANISE_SYSTEM_PROMPT } = await import("../utils/humanise.ts")
-  return humaniseText(mergedContext, {
-    systemPrompt: STRATEGY_HUMANISE_SYSTEM_PROMPT,
-    sessionId: params.sessionId,
-    transcriptPath: params.transcriptPath,
-  })
-}
-
 /**
  * Runs hooks for every context-routed event in DISPATCH_ROUTES, preserving each
  * distinct systemMessage and additionalContext once. The shared pipeline's final
@@ -105,13 +57,7 @@ export class ContextStrategy implements HookExecutionStrategy {
           return hookOutputSchema.parse({})
         }
 
-        const mergedContext = contexts.join("\n\n")
-        const params = await resolveHumaniseParams(ctx.enrichedPayloadStr)
-        const additionalContext = await applyContextHumanisation(
-          mergedContext,
-          ctx.canonicalEvent,
-          params
-        )
+        const additionalContext = contexts.join("\n\n")
 
         log(`   result: merged ${contexts.length} context(s), hookEventName=${hookEventName}`)
         return hookOutputSchema.parse({

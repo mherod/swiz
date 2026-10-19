@@ -120,6 +120,25 @@ describe("settings routes", () => {
     expect(globalWrites).toEqual([{ key: "autoContinue", value: true }])
   })
 
+  test("round-trips hook humanising through the web API independently", async () => {
+    const ctx = createContext()
+    globalSettings = { autoSteer: false, humaniseAutoSteer: true }
+    for (const value of [true, false]) {
+      const req = post("/settings/global/update", { updates: { humaniseHookContext: value } })
+      const response = await routes.handleSettingsRoutes(req, new URL(req.url), ctx)
+      expect(response?.status).toBe(200)
+      expect((await response!.json()).settings).toEqual({
+        autoSteer: false,
+        humaniseAutoSteer: true,
+        humaniseHookContext: value,
+      })
+    }
+    expect(globalWrites).toEqual([
+      { key: "humaniseHookContext", value: true },
+      { key: "humaniseHookContext", value: false },
+    ])
+  })
+
   test("rejects an invalid project collaboration mode", async () => {
     const ctx = createContext()
     const req = post("/settings/project/update", {

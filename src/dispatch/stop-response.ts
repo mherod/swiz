@@ -13,6 +13,25 @@ import { isBlock } from "./engine.ts"
 /** Default context when stop hooks emit no agent-visible fields (after merge). */
 export const DEFAULT_STOP_DISPATCH_ALLOW_CONTEXT = "Stop hooks completed with no findings."
 
+/** Merge trusted task context before the final envelope is humanised. */
+export function mergeLifecycleStopAdvisory(
+  response: Record<string, any>,
+  advisory: string | undefined
+): void {
+  if (!advisory) return
+  const existingSystemMessage =
+    typeof response.systemMessage === "string" ? response.systemMessage.trim() : ""
+  if (!existingSystemMessage.includes(advisory)) {
+    response.systemMessage = existingSystemMessage
+      ? `${existingSystemMessage}\n\n${advisory}`
+      : advisory
+  }
+  if (response.reason === DEFAULT_STOP_DISPATCH_ALLOW_CONTEXT) {
+    response.reason = advisory
+    response.stopReason = advisory
+  }
+}
+
 /** JSON-serializable values for pre-parse dispatch envelopes (avoids eslint `no-restricted-types` on `unknown`). */
 type DispatchJsonValue = string | number | boolean | null | DispatchJsonValue[] | DispatchJsonRecord
 

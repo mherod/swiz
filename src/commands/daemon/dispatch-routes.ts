@@ -25,7 +25,6 @@ import {
   getCurrentSessionToolUsageFromDaemon,
   type LifecycleTaskDispatchPreparation,
   maybeSuppressDuplicateAllowMessage,
-  mergeLifecycleStopAdvisory,
   prepareLifecycleTaskDispatch,
   updateParsedPayloadMetrics,
 } from "./dispatch-session.ts"
@@ -288,6 +287,7 @@ async function executeDaemonDispatch(options: {
   dispatchPayloadStr: string
   hookEventName: string
   scope: DispatchRequestScope
+  lifecycleStopAdvisory?: string
 }): Promise<DispatchResult> {
   const { canonicalEvent, ctx, dispatchPayloadStr, hookEventName, scope } = options
   scope.signal.throwIfAborted()
@@ -298,6 +298,7 @@ async function executeDaemonDispatch(options: {
       hookEventName,
       payloadStr: dispatchPayloadStr,
       daemonContext: true,
+      lifecycleStopAdvisory: options.lifecycleStopAdvisory,
       signal: scope.signal,
       transcriptSummaryProvider: (transcriptPath) => ctx.transcriptIndex.getSummary(transcriptPath),
       currentSessionToolUsageProvider: async (sessionId, transcriptPath) =>
@@ -334,7 +335,6 @@ async function completeDaemonDispatch(options: {
   canonicalEvent: string
   ctx: DispatchRoutesContext
   hookEventName: string
-  lifecyclePreparation: LifecycleTaskDispatchPreparation
   parsedPayload: Record<string, unknown> | null
   raceResult: DispatchResult
   recordCompletedDispatch: ReturnType<typeof createDispatchMetricRecorder>
@@ -346,7 +346,6 @@ async function completeDaemonDispatch(options: {
     ctx,
     dispatchPayloadStr,
     hookEventName,
-    lifecyclePreparation,
     parsedPayload,
     raceResult,
     recordCompletedDispatch,
@@ -368,7 +367,6 @@ async function completeDaemonDispatch(options: {
       canonicalEvent,
       hookEventName
     )
-    mergeLifecycleStopAdvisory(response, lifecyclePreparation.advisory)
     maybeSuppressDuplicateAllowMessage(ctx, parsedPayload, canonicalEvent, hookEventName, response)
     if (shouldCaptureIncomingPayloads()) scheduleStaleIncomingCapturePrune()
     const httpResponse = Response.json(response)
@@ -433,13 +431,13 @@ export async function handleDispatchRoute(
         dispatchPayloadStr,
         hookEventName,
         scope,
+        lifecycleStopAdvisory: lifecyclePreparation.advisory,
       })
       return completeDaemonDispatch({
         canonicalEvent,
         ctx,
         dispatchPayloadStr,
         hookEventName,
-        lifecyclePreparation,
         parsedPayload,
         raceResult,
         recordCompletedDispatch,
