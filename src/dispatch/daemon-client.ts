@@ -1,6 +1,6 @@
 /** Lightweight transport shared by both CLI entry points; no manifest or engine imports. */
 import { detectTerminal } from "../utils/terminal-detection.ts"
-import { DISPATCH_TIMEOUTS } from "./timeouts.ts"
+import { dispatchTimeoutSeconds } from "./timeouts.ts"
 
 const BACKOFF_MS = 30_000
 let lastDaemonFailureAt = 0
@@ -14,7 +14,7 @@ export function daemonDispatchPolicy(canonicalEvent: string): {
   timeoutMs: number
   timeoutFallback: "local" | "allow"
 } {
-  const budgetMs = (DISPATCH_TIMEOUTS[canonicalEvent] ?? 30) * 1000
+  const budgetMs = dispatchTimeoutSeconds(canonicalEvent) * 1000
   const stop = canonicalEvent === "stop" || canonicalEvent === "subagentStop"
   return {
     timeoutMs: Math.max(1000, budgetMs - 3000),

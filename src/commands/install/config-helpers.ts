@@ -1,5 +1,6 @@
 import { type AgentDef, translateEvent } from "../../agents.ts"
-import { buildManifestForAgent, DISPATCH_TIMEOUTS } from "../../manifest.ts"
+import { dispatchTimeoutSeconds } from "../../dispatch/timeouts.ts"
+import { buildManifestForAgent } from "../../manifest.ts"
 import { isManagedSwizCommand } from "../../swiz-hook-commands.ts"
 
 /**
@@ -41,7 +42,7 @@ function buildDispatchEntry(
   canonicalEvent: string
 ): { eventName: string; timeout: number; cmd: string } {
   const timeoutScale = agent.id === "gemini" ? 1000 : 1
-  const timeout = (DISPATCH_TIMEOUTS[canonicalEvent] ?? 30) * timeoutScale
+  const timeout = dispatchTimeoutSeconds(canonicalEvent) * timeoutScale
   const eventName = translateEvent(canonicalEvent, agent)
   const cmd = `command -v swiz >/dev/null 2>&1 || exit 0; swiz dispatch --agent ${agent.id} ${canonicalEvent} ${eventName}`
   return { eventName, timeout, cmd }
@@ -56,7 +57,7 @@ function addAdditionalDispatchEntries(
   if (!agent.additionalDispatchEntries) return
   for (const [agentEventName, canonicalEvent] of Object.entries(agent.additionalDispatchEntries)) {
     if (!seenEvents.has(canonicalEvent)) continue
-    const timeout = DISPATCH_TIMEOUTS[canonicalEvent] ?? 30
+    const timeout = dispatchTimeoutSeconds(canonicalEvent)
     const cmd = `command -v swiz >/dev/null 2>&1 || exit 0; swiz dispatch --agent ${agent.id} ${canonicalEvent} ${agentEventName}`
     if (!merged[agentEventName]) merged[agentEventName] = []
     merged[agentEventName]!.push(wrapEntry(cmd, timeout, agentEventName))

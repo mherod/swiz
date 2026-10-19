@@ -14,7 +14,11 @@ import {
   shouldCaptureIncomingPayloads,
 } from "../../dispatch/incoming-capture.ts"
 import { DISPATCH_ROUTES } from "../../dispatch/index.ts"
-import { DISPATCH_TIMEOUTS } from "../../dispatch/timeouts.ts"
+import {
+  DISPATCH_TIMEOUTS,
+  dispatchTimeoutSeconds,
+  HOOK_CONTEXT_HUMANISE_TIMEOUT_MS,
+} from "../../dispatch/timeouts.ts"
 import type { DispatchStageDurations } from "../../dispatch/timing.ts"
 import { createTaskStoreForHookPayload } from "../../task-roots.ts"
 import { sessionDirPath, sessionStoreKey } from "../../tasks/task-store-path.ts"
@@ -44,7 +48,8 @@ export {
 } from "./dispatch-session.ts"
 
 /** Hard request-level timeout for daemon dispatch (ms).
- *  Uses DISPATCH_TIMEOUTS + 10s grace. Fallback: 60s for unknown events. */
+ *  Includes hook execution, context humanising and 10s grace.
+ *  Unknown events keep their 60s execution fallback plus context humanising. */
 const DAEMON_REQUEST_TIMEOUT_GRACE_MS = 10_000
 const DAEMON_REQUEST_TIMEOUT_FALLBACK_MS = 60_000
 
@@ -89,8 +94,8 @@ export function buildDispatchRoutesContext(ctx: DaemonWebServerContext): Dispatc
 function daemonDispatchRequestTimeoutMs(canonicalEvent: string): number {
   const budgetSec = DISPATCH_TIMEOUTS[canonicalEvent]
   return budgetSec
-    ? budgetSec * 1000 + DAEMON_REQUEST_TIMEOUT_GRACE_MS
-    : DAEMON_REQUEST_TIMEOUT_FALLBACK_MS
+    ? dispatchTimeoutSeconds(canonicalEvent) * 1000 + DAEMON_REQUEST_TIMEOUT_GRACE_MS
+    : DAEMON_REQUEST_TIMEOUT_FALLBACK_MS + HOOK_CONTEXT_HUMANISE_TIMEOUT_MS
 }
 
 /**

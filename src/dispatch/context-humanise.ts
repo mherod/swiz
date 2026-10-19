@@ -1,8 +1,9 @@
 import { resolveSignal } from "../ai-signal.ts"
+import { HOOK_CONTEXT_HUMANISE_TIMEOUT_MS } from "./timeouts.ts"
 
 export type HookContextRewriter = (message: string, signal: AbortSignal) => Promise<string>
 
-export const HOOK_CONTEXT_HUMANISE_TIMEOUT_MS = 5_000
+export { HOOK_CONTEXT_HUMANISE_TIMEOUT_MS } from "./timeouts.ts"
 
 export const HOOK_CONTEXT_HUMANISE_PROMPT = [
   "Rewrite the supplied hook context in natural, clear, courteous language.",

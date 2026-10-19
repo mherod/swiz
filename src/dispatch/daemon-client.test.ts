@@ -5,7 +5,11 @@ import {
   resetDaemonBackoff,
   tryDaemonDispatch,
 } from "./daemon-client.ts"
-import { DISPATCH_TIMEOUTS } from "./timeouts.ts"
+import {
+  DISPATCH_TIMEOUTS,
+  dispatchTimeoutSeconds,
+  HOOK_CONTEXT_HUMANISE_TIMEOUT_MS,
+} from "./timeouts.ts"
 
 const envKeys = [
   "SWIZ_NO_DAEMON",
@@ -204,7 +208,7 @@ describe("shared daemon transport", () => {
 describe("dispatch fallback policy", () => {
   test("Stop events retain local checks after timeout", () => {
     expect(daemonDispatchPolicy("stop")).toEqual({
-      timeoutMs: DISPATCH_TIMEOUTS.stop! * 1000 - 3000,
+      timeoutMs: dispatchTimeoutSeconds("stop") * 1000 - 3000,
       timeoutFallback: "local",
     })
     expect(daemonDispatchPolicy("subagentStop").timeoutFallback).toBe("local")
@@ -215,10 +219,11 @@ describe("dispatch fallback policy", () => {
       if (event === "stop") continue
       const policy = daemonDispatchPolicy(event)
       expect(policy.timeoutFallback).toBe("allow")
-      expect(policy.timeoutMs).toBeLessThan(seconds * 1000)
+      expect(policy.timeoutMs).toBe(seconds * 1000 - 3000 + HOOK_CONTEXT_HUMANISE_TIMEOUT_MS)
+      expect(policy.timeoutMs).toBeLessThan(dispatchTimeoutSeconds(event) * 1000)
     }
     expect(daemonDispatchPolicy("unknownEvent")).toEqual({
-      timeoutMs: 27_000,
+      timeoutMs: 42_000,
       timeoutFallback: "allow",
     })
   })

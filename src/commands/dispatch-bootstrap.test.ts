@@ -2,7 +2,7 @@ import { afterAll, describe, expect, test } from "bun:test"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { DISPATCH_TIMEOUTS } from "../dispatch/timeouts.ts"
+import { DISPATCH_TIMEOUTS, dispatchTimeoutSeconds } from "../dispatch/timeouts.ts"
 import { daemonClientTimeoutMs } from "./dispatch-bootstrap.ts"
 
 // PROCESS_CONTRACT_TEST: verifies the dispatch client's timeout fallback (exit code, stdout envelope, stderr notice) at the CLI boundary.
@@ -15,13 +15,13 @@ afterAll(async () => {
 
 describe("daemonClientTimeoutMs", () => {
   test("leaves headroom under the agent hook timeout for every event", () => {
-    for (const [event, seconds] of Object.entries(DISPATCH_TIMEOUTS)) {
-      expect(daemonClientTimeoutMs(event)).toBeLessThan(seconds * 1000)
+    for (const event of Object.keys(DISPATCH_TIMEOUTS)) {
+      expect(daemonClientTimeoutMs(event)).toBeLessThan(dispatchTimeoutSeconds(event) * 1000)
     }
   })
 
-  test("userPromptSubmit gives up 3s before the 15s agent budget", () => {
-    expect(daemonClientTimeoutMs("userPromptSubmit")).toBe(12_000)
+  test("userPromptSubmit reserves 15s for humanising with 3s agent headroom", () => {
+    expect(daemonClientTimeoutMs("userPromptSubmit")).toBe(27_000)
   })
 })
 
@@ -145,10 +145,10 @@ spyOn(execution, "executeDispatch").mockImplementation(async (request) => {
       expect(requests).toBe(1)
       expect(JSON.parse(stdout.trim())).toEqual({})
       expect(stderr).toContain("allowing without local re-run")
-      // Must finish inside the 10s agent budget for postCompact.
-      expect(elapsed).toBeLessThan(DISPATCH_TIMEOUTS.postCompact! * 1000)
+      // Must finish inside the agent budget, including context humanising.
+      expect(elapsed).toBeLessThan(dispatchTimeoutSeconds("postCompact") * 1000)
     } finally {
       await server.stop(true)
     }
-  }, 20_000)
+  }, 35_000)
 })

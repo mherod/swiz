@@ -20,7 +20,7 @@ describe("mergeConfig — Antigravity flat-lifecycle", () => {
     const stop = config.Stop as Array<Record<string, unknown>>
     expect(stop).toHaveLength(1)
     // Flat shape: no nested {matcher,hooks} wrapper, explicit type, no statusMessage.
-    expect(stop[0]).toMatchObject({ type: "command", timeout: 180 })
+    expect(stop[0]).toMatchObject({ type: "command", timeout: 195 })
     expect(stop[0]).not.toHaveProperty("hooks")
     expect(stop[0]).not.toHaveProperty("matcher")
     expect(stop[0]).not.toHaveProperty("statusMessage")

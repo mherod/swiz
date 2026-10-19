@@ -1,5 +1,5 @@
 /**
- * Per-event timeout budget for daemon-backed dispatch requests (seconds).
+ * Per-event hook execution budget (seconds), before context humanising.
  *
  * This module intentionally has no runtime imports so the hook-dispatch
  * bootstrap can read the canonical budgets without loading the manifest and
@@ -21,4 +21,11 @@ export const DISPATCH_TIMEOUTS: Readonly<Record<string, number>> = {
   preCommit: 30,
   commitMsg: 10,
   prePush: 30,
+}
+
+export const HOOK_CONTEXT_HUMANISE_TIMEOUT_MS = 15_000
+
+/** Reserve the full rewrite budget in transport and installed agent deadlines. */
+export function dispatchTimeoutSeconds(canonicalEvent: string): number {
+  return (DISPATCH_TIMEOUTS[canonicalEvent] ?? 30) + HOOK_CONTEXT_HUMANISE_TIMEOUT_MS / 1000
 }
