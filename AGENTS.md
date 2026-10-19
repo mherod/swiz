@@ -7,6 +7,10 @@ alwaysApply: false
 ## Runtime
 - Use Bun only. DO NOT use Node.js, npm, pnpm, vite, dotenv, or Node-specific tooling.
 - Use `bun <file>`, `bun test`, `bun install`, `bun run index.ts`, `bun --hot index.ts`, `bun link`.
+- For permitted public-registry installation, run `bun install --registry=https://registry.npmjs.org/` from the repository root. Keep the override command-scoped; do not change persistent registry settings or bypass an active security-policy denial.
+- Distinguish dependency resolution from installation success: `prepare` runs `lefthook install` and can fail with `core.hooksPath is set globally` when PushPatrol owns `/Library/Application Support/OpenAI/Tools/PushPatrol/git-hooks`. Preserve that path; do not unset it or use Lefthook's `--reset-hooks-path` or `--force` to replace managed hooks.
+- For a stale global hook path approved for removal, remediate with `git config --unset-all --global core.hooksPath`, then rerun installation. This affects every repository using that global setting; do not apply it to bypass active PushPatrol enforcement.
+- After dependency repair, rerun `bun run typecheck`, `bun run lint`, and affected tests. Passing checks does not prove the `prepare` step installed repository hooks.
 - Prefer `swiz <command>`.
 - Use `bun run index.ts <command>` to guarantee checkout execution and avoid PATH `swiz` version drift.
 - Use `Bun.file()` and `Bun.write()` for file I/O.
