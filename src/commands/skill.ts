@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs"
-import { cp, mkdir, mkdtemp, readdir, rename, rm, stat } from "node:fs/promises"
+import { cp, lstat, mkdir, mkdtemp, readdir, readlink, rename, rm, stat } from "node:fs/promises"
 import { basename, dirname, join } from "node:path"
 import { orderBy } from "lodash-es"
 import { AGENTS, type AgentDef, getAgent } from "../agents.ts"
@@ -250,17 +250,24 @@ async function discoverSkillNames(skillsDir: string): Promise<string[]> {
   return orderBy(names, [(n) => n], ["asc"])
 }
 
-async function discoverSkillSources(
-  skillsDirs: string[]
-): Promise<{ name: string; sourceDir: string }[]> {
-  const byName = new Map<string, string>()
+interface SkillSource {
+  name: string
+  sourceDir: string
+  /** Lower-precedence roots that also define this skill and are ignored. */
+  shadowedDirs: string[]
+}
+
+async function discoverSkillSources(skillsDirs: string[]): Promise<SkillSource[]> {
+  const byName = new Map<string, Omit<SkillSource, "name">>()
   for (const sourceDir of skillsDirs) {
     for (const name of await discoverSkillNames(sourceDir)) {
-      if (!byName.has(name)) byName.set(name, sourceDir)
+      const existing = byName.get(name)
+      if (existing) existing.shadowedDirs.push(sourceDir)
+      else byName.set(name, { sourceDir, shadowedDirs: [] })
     }
   }
   return orderBy(
-    [...byName].map(([name, sourceDir]) => ({ name, sourceDir })),
+    [...byName].map(([name, source]) => ({ name, ...source })),
     [(entry) => entry.name],
     ["asc"]
   )
@@ -410,14 +417,15 @@ async function convertSkills(options: {
 }
 
 function printSyncSummary(
-  copied: number,
-  overwritten: number,
-  skipped: number,
+  counts: Record<SkillSyncAction, number>,
+  failed: number,
   overwrite: boolean
 ): void {
+  const { copied, overwritten, unchanged, skipped } = counts
   console.log(
-    `\nSummary: ${copied} copied, ${overwritten} overwritten, ${skipped} skipped` +
-      (!overwrite && skipped > 0 ? " (use --overwrite to replace existing targets)" : "")
+    `\nSummary: ${copied} copied, ${overwritten} overwritten, ${unchanged} unchanged, ${skipped} skipped` +
+      (failed > 0 ? `, ${failed} failed` : "") +
+      (!overwrite && skipped > 0 ? " (use --overwrite to replace differing targets)" : "")
   )
 }
 
@@ -471,9 +479,9 @@ async function safelyRemoveDirectory(path: string, fileSystem: SkillSyncFileSyst
 async function replaceSkillDirectory(
   sourceDir: string,
   targetDir: string,
-  fileSystemOverrides: Partial<SkillSyncFileSystem> = {}
+  options: { allowReplace: boolean; fileSystem?: Partial<SkillSyncFileSystem> }
 ): Promise<void> {
-  const fileSystem = resolveSkillSyncFileSystem(fileSystemOverrides)
+  const fileSystem = resolveSkillSyncFileSystem(options.fileSystem)
   const targetParent = dirname(targetDir)
   const targetName = basename(targetDir)
   const stagingRoot = await fileSystem.createTemporaryDirectory(
@@ -492,6 +500,12 @@ async function replaceSkillDirectory(
     if (!existsSync(targetDir)) {
       await fileSystem.moveDirectory(replacementDir, targetDir)
       return
+    }
+    // The target was absent when sync decided to copy, but appeared while staging.
+    if (!options.allowReplace) {
+      throw new Error(
+        `${targetName} appeared in the target while syncing; rerun with --overwrite to replace it.`
+      )
     }
 
     backupRoot = await fileSystem.createTemporaryDirectory(
@@ -550,20 +564,90 @@ async function collectSkillTreeEntries(
   return entries
 }
 
-async function findTargetOnlySkillPaths(sourceDir: string, targetDir: string): Promise<string[]> {
+/** Whether two same-kind entries hold the same link target, or the same bytes and mode. */
+async function skillTreeEntriesMatch(
+  sourcePath: string,
+  targetPath: string,
+  kind: SkillTreeEntryKind
+): Promise<boolean> {
+  if (kind === "directory") return true
+  if (kind === "symlink") return (await readlink(sourcePath)) === (await readlink(targetPath))
+  const [sourceStat, targetStat] = await Promise.all([lstat(sourcePath), lstat(targetPath)])
+  if (sourceStat.size !== targetStat.size) return false
+  if ((sourceStat.mode & 0o777) !== (targetStat.mode & 0o777)) return false
+  const [sourceBytes, targetBytes] = await Promise.all([
+    Bun.file(sourcePath).bytes(),
+    Bun.file(targetPath).bytes(),
+  ])
+  return Buffer.from(sourceBytes).equals(targetBytes)
+}
+
+interface SkillTreeDiff {
+  added: string[]
+  modified: string[]
+  removed: string[]
+}
+
+async function diffSkillTrees(sourceDir: string, targetDir: string): Promise<SkillTreeDiff> {
   const [sourceEntries, targetEntries] = await Promise.all([
     collectSkillTreeEntries(sourceDir),
     collectSkillTreeEntries(targetDir),
   ])
-  const stalePaths: string[] = []
+  const label = (path: string, kind: SkillTreeEntryKind) =>
+    kind === "directory" ? `${path}/` : path
+  const diff: SkillTreeDiff = { added: [], modified: [], removed: [] }
   for (const [path, kind] of targetEntries) {
-    if (sourceEntries.get(path) === kind) continue
-    stalePaths.push(kind === "directory" ? `${path}/` : path)
+    const sourceKind = sourceEntries.get(path)
+    if (sourceKind === undefined) diff.removed.push(label(path, kind))
+    else if (sourceKind !== kind) diff.modified.push(label(path, sourceKind))
+    else if (!(await skillTreeEntriesMatch(join(sourceDir, path), join(targetDir, path), kind))) {
+      diff.modified.push(label(path, kind))
+    }
   }
-  return stalePaths.sort()
+  for (const [path, kind] of sourceEntries) {
+    if (!targetEntries.has(path)) diff.added.push(label(path, kind))
+  }
+  diff.added.sort()
+  diff.modified.sort()
+  diff.removed.sort()
+  return diff
 }
 
-type SkillSyncAction = "copied" | "overwritten" | "skipped"
+function describeSkillTreeDiff(diff: SkillTreeDiff): string {
+  const parts = [
+    diff.added.length > 0 ? `${diff.added.length} added` : "",
+    diff.modified.length > 0 ? `${diff.modified.length} modified` : "",
+    diff.removed.length > 0 ? `${diff.removed.length} removed` : "",
+  ].filter(Boolean)
+  return parts.join(", ")
+}
+
+function printSkillTreeDiff(name: string, diff: SkillTreeDiff): void {
+  for (const path of diff.added) console.log(`    - would add ${name}/${path}`)
+  for (const path of diff.modified) console.log(`    - would update ${name}/${path}`)
+  for (const path of diff.removed) console.log(`    - would remove ${name}/${path}`)
+}
+
+type SkillSyncAction = "copied" | "overwritten" | "unchanged" | "skipped"
+
+/** Settle an existing target that must not be replaced; null means proceed with the copy. */
+function settleExistingTarget(
+  name: string,
+  diff: SkillTreeDiff | null,
+  overwrite: boolean
+): SkillSyncAction | null {
+  if (!diff) return null
+  const changes = describeSkillTreeDiff(diff)
+  if (!changes) {
+    console.log(`  - unchanged ${name}`)
+    return "unchanged"
+  }
+  if (!overwrite) {
+    console.log(`  - skipped ${name} (target differs: ${changes})`)
+    return "skipped"
+  }
+  return null
+}
 
 async function syncSingleSkill(options: {
   name: string
@@ -577,26 +661,47 @@ async function syncSingleSkill(options: {
   const sourceSkillDir = join(sourceDir, name)
   const targetDir = join(targetRoot, name)
   const targetExists = existsSync(targetDir)
+  const diff = targetExists ? await diffSkillTrees(sourceSkillDir, targetDir) : null
+  const settled = settleExistingTarget(name, diff, overwrite)
+  if (settled) return settled
 
-  if (targetExists && !overwrite) {
-    console.log(`  - skipped ${name} (already exists)`)
-    return "skipped"
-  }
-
+  const label = diff ? `${name} (${describeSkillTreeDiff(diff)})` : name
   if (dryRun) {
-    const action = logSkillAction(name, targetExists, true, "copied", "copy")
-    if (targetExists) {
-      for (const stalePath of await findTargetOnlySkillPaths(sourceSkillDir, targetDir)) {
-        console.log(`    - would remove ${name}/${stalePath}`)
-      }
-    }
+    const action = logSkillAction(label, targetExists, true, "copied", "copy")
+    if (diff) printSkillTreeDiff(name, diff)
     return action === "overwrite" ? "overwritten" : "copied"
   }
 
-  await replaceSkillDirectory(sourceSkillDir, targetDir, fileSystem)
-  return logSkillAction(name, targetExists, false, "copied", "copy") === "overwrite"
+  await replaceSkillDirectory(sourceSkillDir, targetDir, { allowReplace: overwrite, fileSystem })
+  return logSkillAction(label, targetExists, false, "copied", "copy") === "overwrite"
     ? "overwritten"
     : "copied"
+}
+
+/** Sync one skill, recording a failure instead of aborting the remaining skills. */
+async function syncSkillSource(
+  source: SkillSource,
+  options: {
+    targetRoot: string
+    dryRun: boolean
+    overwrite: boolean
+    fileSystem?: Partial<SkillSyncFileSystem>
+  }
+): Promise<SkillSyncAction | { failure: string }> {
+  const { name, sourceDir, shadowedDirs } = source
+  let result: SkillSyncAction | { failure: string }
+  try {
+    result = await syncSingleSkill({ name, sourceDir, ...options })
+  } catch (error) {
+    console.log(`  - failed ${name}`)
+    result = { failure: `${name}: ${messageFromUnknownError(error)}` }
+  }
+  for (const shadowedDir of shadowedDirs) {
+    console.log(
+      `    - ignored ${displayPath(join(shadowedDir, name))} (shadowed by ${displayPath(sourceDir)})`
+    )
+  }
+  return result
 }
 
 // Copy-only sync (no tool name remapping). Used by --sync --from <agent> and --sync-gemini alias.
@@ -630,25 +735,31 @@ async function syncSkills(options: {
   console.log(`Sources: ${fromSkillsDirs.map(displayPath).join(" > ")}`)
   console.log(`Target: ${displayPath(toSkillsDir)}\n`)
 
-  let copied = 0,
-    overwritten = 0,
-    skipped = 0
+  const counts: Record<SkillSyncAction, number> = {
+    copied: 0,
+    overwritten: 0,
+    unchanged: 0,
+    skipped: 0,
+  }
+  const failures: string[] = []
 
-  for (const { name, sourceDir } of orderedSkills) {
-    const action = await syncSingleSkill({
-      name,
-      sourceDir,
+  for (const source of orderedSkills) {
+    const result = await syncSkillSource(source, {
       targetRoot: toSkillsDir,
       dryRun,
       overwrite,
       fileSystem,
     })
-    if (action === "skipped") skipped++
-    else if (action === "overwritten") overwritten++
-    else copied++
+    if (typeof result === "string") counts[result]++
+    else failures.push(result.failure)
   }
 
-  printSyncSummary(copied, overwritten, skipped, overwrite)
+  printSyncSummary(counts, failures.length, overwrite)
+  if (failures.length > 0) {
+    throw new Error(
+      `Failed to sync ${failures.length} skill(s):\n${failures.map((f) => `  - ${f}`).join("\n")}`
+    )
+  }
 }
 
 // ─── Flag parsing and routing ───────────────────────────────────────────────
@@ -930,8 +1041,16 @@ export const skillCommand: Command<SkillCommandOptions> = {
       description:
         "Target agent ID (claude|cursor|gemini|codex|agents). The `agents` target is supported by --sync only and writes to ~/.agents/skills/.",
     },
-    { flags: "--dry-run", description: "Preview actions without writing files" },
-    { flags: "--overwrite", description: "Allow overwriting existing target skills or commands" },
+    {
+      flags: "--dry-run",
+      description:
+        "Preview actions without writing files (--sync also lists paths it would add, update, or remove)",
+    },
+    {
+      flags: "--overwrite",
+      description:
+        "Allow overwriting existing target skills or commands (--sync leaves identical targets untouched)",
+    },
   ],
   async run(args, options) {
     const handled = await handleSkillTransferArgs(args, options?.syncFileSystem)

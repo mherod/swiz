@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { existsSync } from "node:fs"
-import { chmod, lstat, mkdir, readlink, symlink, writeFile } from "node:fs/promises"
+import { chmod, cp, lstat, mkdir, readlink, stat, symlink, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { AGENTS, getAgent } from "../agents.ts"
 import { convertSkillContent } from "../utils/skill-conversion.ts"
@@ -559,6 +559,167 @@ describe("swiz skill --sync --to agents", () => {
     expect(exitCode).not.toBe(0)
     expect(stderr).toContain('do not support the "agents" source')
     expect(stderr).toContain("Use --sync")
+  })
+})
+
+// ─── swiz skill --sync conflict handling ─────────────────────────────────────
+
+async function writeSkill(dir: string, skillMd: string, extra: Record<string, string> = {}) {
+  await mkdir(dir, { recursive: true })
+  await writeFile(join(dir, "SKILL.md"), skillMd)
+  for (const [relativePath, content] of Object.entries(extra)) {
+    await mkdir(join(dir, relativePath, ".."), { recursive: true })
+    await writeFile(join(dir, relativePath), content)
+  }
+}
+
+describe("swiz skill --sync conflict handling", () => {
+  test("identical targets are reported unchanged and not replaced, even with --overwrite", async () => {
+    const fakeHome = await createTempDir()
+    const skillName = "sync-identical-xyz"
+    const targetDir = join(fakeHome, ".claude", "skills", skillName)
+    await writeSkill(join(fakeHome, ".gemini", "skills", skillName), "same\n", { "a/b.md": "b\n" })
+    await writeSkill(targetDir, "same\n", { "a/b.md": "b\n" })
+    const inodeBefore = (await stat(targetDir)).ino
+
+    const { stdout, exitCode } = await runSkillCli(["--sync-gemini", "--overwrite"], fakeHome)
+
+    expect(exitCode).toBe(0)
+    expect(stdout).toContain(`unchanged ${skillName}`)
+    expect(stdout).toContain("1 unchanged")
+    expect(stdout).not.toContain(`overwritten ${skillName}`)
+    expect((await stat(targetDir)).ino).toBe(inodeBefore)
+  })
+
+  test("a differing target is replaced with --overwrite (control for the identical case)", async () => {
+    const fakeHome = await createTempDir()
+    const skillName = "sync-differs-control-xyz"
+    const targetDir = join(fakeHome, ".claude", "skills", skillName)
+    await writeSkill(join(fakeHome, ".gemini", "skills", skillName), "new\n")
+    await writeSkill(targetDir, "old\n")
+    const inodeBefore = (await stat(targetDir)).ino
+
+    const { stdout, exitCode } = await runSkillCli(["--sync-gemini", "--overwrite"], fakeHome)
+
+    expect(exitCode).toBe(0)
+    expect(stdout).toContain(`overwritten ${skillName} (1 modified)`)
+    expect((await stat(targetDir)).ino).not.toBe(inodeBefore)
+  })
+
+  test("skipped targets say how they differ from the source", async () => {
+    const fakeHome = await createTempDir()
+    const skillName = "sync-skip-differs-xyz"
+    await writeSkill(join(fakeHome, ".gemini", "skills", skillName), "new\n", { "added.md": "x\n" })
+    await writeSkill(join(fakeHome, ".claude", "skills", skillName), "old\n", { "gone.md": "y\n" })
+
+    const { stdout, exitCode } = await runSkillCli(["--sync-gemini"], fakeHome)
+
+    expect(exitCode).toBe(0)
+    expect(stdout).toContain(
+      `skipped ${skillName} (target differs: 1 added, 1 modified, 1 removed)`
+    )
+  })
+
+  test("dry-run lists added and updated paths alongside removals", async () => {
+    const fakeHome = await createTempDir()
+    const skillName = "sync-dry-diff-xyz"
+    const targetPath = join(fakeHome, ".claude", "skills", skillName, "SKILL.md")
+    await writeSkill(join(fakeHome, ".gemini", "skills", skillName), "new\n", {
+      "scripts/new.sh": "#!/bin/sh\n",
+    })
+    await writeSkill(join(fakeHome, ".claude", "skills", skillName), "old\n")
+
+    const { stdout, exitCode } = await runSkillCli(
+      ["--sync-gemini", "--overwrite", "--dry-run"],
+      fakeHome
+    )
+
+    expect(exitCode).toBe(0)
+    expect(stdout).toContain(`would add ${skillName}/scripts/`)
+    expect(stdout).toContain(`would add ${skillName}/scripts/new.sh`)
+    expect(stdout).toContain(`would update ${skillName}/SKILL.md`)
+    expect(await Bun.file(targetPath).text()).toBe("old\n")
+  })
+
+  test("a permission-only change counts as a difference", async () => {
+    const fakeHome = await createTempDir()
+    const skillName = "sync-mode-diff-xyz"
+    const sourceDir = join(fakeHome, ".gemini", "skills", skillName)
+    await writeSkill(sourceDir, "same\n", { "run.sh": "#!/bin/sh\n" })
+    await writeSkill(join(fakeHome, ".claude", "skills", skillName), "same\n", {
+      "run.sh": "#!/bin/sh\n",
+    })
+    await chmod(join(sourceDir, "run.sh"), 0o755)
+
+    const { stdout, exitCode } = await runSkillCli(["--sync-gemini"], fakeHome)
+
+    expect(exitCode).toBe(0)
+    expect(stdout).toContain(`skipped ${skillName} (target differs: 1 modified)`)
+  })
+
+  test("one failing skill does not stop the rest and the run exits non-zero", async () => {
+    const fakeHome = await createTempDir()
+    const failing = "sync-fail-a-xyz"
+    const passing = "sync-fail-b-xyz"
+    await writeSkill(join(fakeHome, ".gemini", "skills", failing), "a\n")
+    await writeSkill(join(fakeHome, ".gemini", "skills", passing), "b\n")
+
+    const { stdout, stderr, exitCode } = await runSkillCli(["--sync-gemini"], fakeHome, {
+      syncFileSystem: {
+        async copyDirectory(sourceDir, targetDir) {
+          if (sourceDir.endsWith(failing)) throw new Error("simulated copy failure")
+          await cp(sourceDir, targetDir, { recursive: true })
+        },
+      },
+    })
+
+    expect(exitCode).not.toBe(0)
+    expect(stdout).toContain(`failed ${failing}`)
+    expect(stdout).toContain(`copied ${passing}`)
+    expect(stdout).toContain("1 copied")
+    expect(stdout).toContain("1 failed")
+    expect(stderr).toContain(`${failing}: simulated copy failure`)
+    expect(await Bun.file(join(fakeHome, ".claude", "skills", passing, "SKILL.md")).text()).toBe(
+      "b\n"
+    )
+  })
+
+  test("a target that appears mid-sync is not replaced without --overwrite", async () => {
+    const fakeHome = await createTempDir()
+    const skillName = "sync-race-xyz"
+    const targetDir = join(fakeHome, ".claude", "skills", skillName)
+    await writeSkill(join(fakeHome, ".gemini", "skills", skillName), "source\n")
+
+    const { stdout, stderr, exitCode } = await runSkillCli(["--sync-gemini"], fakeHome, {
+      syncFileSystem: {
+        async copyDirectory(sourceDir, stagedDir) {
+          await cp(sourceDir, stagedDir, { recursive: true })
+          await writeSkill(targetDir, "written by someone else\n")
+        },
+      },
+    })
+
+    expect(exitCode).not.toBe(0)
+    expect(stdout).toContain(`failed ${skillName}`)
+    expect(stderr).toContain("appeared in the target while syncing")
+    expect(await Bun.file(join(targetDir, "SKILL.md")).text()).toBe("written by someone else\n")
+  })
+
+  test("shadowed lower-precedence sources are reported and ignored", async () => {
+    const fakeHome = await createTempDir()
+    const skillName = "sync-shadowed-xyz"
+    await writeSkill(join(fakeHome, ".agents", "skills", skillName), "winner\n")
+    await writeSkill(join(fakeHome, ".agents", skillName), "legacy\n")
+
+    const { stdout, exitCode } = await runSkillCli(
+      ["--sync", "--from", "agents", "--to", "claude"],
+      fakeHome
+    )
+
+    expect(exitCode).toBe(0)
+    expect(stdout).toContain(`ignored ~/.agents/${skillName} (shadowed by ~/.agents/skills)`)
+    const targetPath = join(fakeHome, ".claude", "skills", skillName, "SKILL.md")
+    expect(await Bun.file(targetPath).text()).toBe("winner\n")
   })
 })
 
