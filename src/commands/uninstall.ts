@@ -3,6 +3,7 @@ import { BOLD, DIM, GREEN, RED, RESET } from "../ansi.ts"
 import { pauseSessionstartSelfHeal } from "../sessionstart-self-heal-state.ts"
 import { isManagedSwizCommand } from "../swiz-hook-commands.ts"
 import type { Command } from "../types.ts"
+import { syncGlobalStopHookRules } from "./install/agent-helpers.ts"
 
 function removeSwizHooks(obj: unknown): unknown {
   if (Array.isArray(obj)) {
@@ -120,12 +121,17 @@ function countSwizHooks(hooks: Record<string, any>): number {
 export async function uninstallSwizFromAgents(targets: AgentDef[], dryRun: boolean): Promise<void> {
   for (const agent of targets) {
     await uninstallAgent(agent, dryRun)
+    for (const path of await syncGlobalStopHookRules(agent, dryRun, targets)) {
+      console.log(
+        `    ${dryRun ? "- would remove" : "✓ removed"} global stop-hook rules: ${path}\n`
+      )
+    }
   }
 }
 
 export const uninstallCommand: Command = {
   name: "uninstall",
-  description: "Remove swiz hooks from agent settings",
+  description: "Remove swiz hooks and managed global agent rules",
   usage: `swiz uninstall [${AGENTS.map((a) => `--${a.id}`).join("] [")}] [--dry-run]`,
   options: [
     ...AGENTS.map((a) => ({ flags: `--${a.id}`, description: `Uninstall from ${a.name} only` })),

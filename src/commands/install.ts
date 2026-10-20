@@ -412,14 +412,14 @@ async function runInstallMode(
 
 export const installCommand: Command<InstallCommandOptions> = {
   name: "install",
-  description: "Install swiz hooks into agent settings",
+  description: "Install swiz hooks and global agent rules",
   usage: `swiz install [${AGENTS.map((a) => `--${a.id}`).join("] [")}] [--dry-run] [--json] [--mcp | --hooks-only] [--merge-tool] [--status-line] [--daemon [--port <n>]] [--no-doctor] [--uninstall]`,
   options: [
     ...AGENTS.map((a) => ({ flags: `--${a.id}`, description: `Install for ${a.name} only` })),
     { flags: "--dry-run", description: "Preview changes without writing to disk" },
     {
       flags: "--hooks-only",
-      description: "Repair target hook registrations without MCP, shell, or project changes",
+      description: "Repair target hooks and global rules without MCP, shell, or project changes",
     },
     {
       flags: "--uninstall",

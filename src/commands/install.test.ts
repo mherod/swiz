@@ -2,8 +2,12 @@ import { mkdir, mkdtemp } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { describe, expect, it } from "vitest"
+import { type AgentSettingsId, getAgentSettingsPath } from "../agent-paths.ts"
+import { getAgent } from "../agents.ts"
+import { spawnAndCapture } from "../test-utils/subprocess-helper.ts"
 import { runCommandInProcess } from "../utils/test-utils.ts"
 import type { PostInstallDoctorOptions } from "./doctor.ts"
+import { STOP_HOOK_GUIDANCE, syncGlobalStopHookRules } from "./install/agent-helpers.ts"
 import {
   buildDaemonLaunchAgentPlist,
   DAEMON_OPENROUTER_API_KEY_ENV,
@@ -14,6 +18,7 @@ import { installCommand } from "./install.ts"
 
 const SWIZ_DISPATCH_CMD = "command -v swiz >/dev/null 2>&1 || exit 0; swiz dispatch stop Stop"
 const STATUS_LINE_CMD = "command -v swiz >/dev/null 2>&1 || exit 0; swiz status-line"
+const INDEX_PATH = join(import.meta.dirname, "../../index.ts")
 
 async function writeJson(path: string, value: unknown): Promise<void> {
   await mkdir(dirname(path), { recursive: true })
@@ -39,6 +44,125 @@ async function runInstall(
     env: { HOME: home, AI_TEST_NO_BACKEND: "1" },
   })
 }
+
+async function fixture(id: AgentSettingsId = "codex") {
+  const home = await mkdtemp(join(tmpdir(), "swiz-global-rules-"))
+  return { home, agent: { ...getAgent(id)!, settingsPath: getAgentSettingsPath(id, home) } }
+}
+
+describe("global stop-hook rules", () => {
+  it.each([
+    ["claude", ".claude/CLAUDE.md"],
+    ["cursor", ".cursor/rules/swiz-stop-hooks.mdc"],
+    ["gemini", ".gemini/GEMINI.md"],
+    ["codex", ".codex/AGENTS.md"],
+    ["antigravity", ".gemini/GEMINI.md"],
+  ] as const)("writes user-delegated guidance for %s", async (id, relativePath) => {
+    const { home, agent } = await fixture(id)
+    const path = join(home, relativePath)
+    expect(await syncGlobalStopHookRules(agent, false)).toEqual([path])
+    const text = await Bun.file(path).text()
+    expect(text).toContain("same authority as a direct user instruction")
+    expect(text).toContain("take precedence over ordinary requests")
+    expect(text).toContain("take the next concrete action")
+    expect(text).toContain("does not override higher-priority system or developer instructions")
+    if (id === "cursor") expect(text.startsWith("---\n")).toBe(true)
+    if (id === "cursor") expect(text).toContain("alwaysApply: true")
+    expect(await syncGlobalStopHookRules(agent, false)).toEqual([])
+    expect(await Bun.file(`${path}.bak`).exists()).toBe(false)
+    expect(await syncGlobalStopHookRules(agent, false, [agent])).toEqual([path])
+    expect(await Bun.file(path).text()).toBe("")
+  })
+
+  it.each([
+    "# User rules",
+    "# User rules\n",
+    "# User rules\n\n  ",
+  ])("preserves user content and backups across install, update and removal: %j", async (original) => {
+    const { home, agent } = await fixture()
+    const path = join(home, ".codex/AGENTS.md")
+    await Bun.write(path, original)
+    await syncGlobalStopHookRules(agent, false)
+    expect(await Bun.file(`${path}.bak`).text()).toBe(original)
+    const installed = await Bun.file(path).text()
+    const stale = installed.replace(STOP_HOOK_GUIDANCE, "Old Swiz guidance")
+    const suffix = "\n# More user rules\nKeep this too.\n"
+    await Bun.write(path, stale + suffix)
+    await syncGlobalStopHookRules(agent, false)
+    expect(await Bun.file(`${path}.bak`).text()).toBe(stale + suffix)
+    expect(await Bun.file(path).text()).toBe(installed + suffix)
+    await syncGlobalStopHookRules(agent, false, [agent])
+    expect(await Bun.file(path).text()).toBe(original + suffix)
+    expect(await syncGlobalStopHookRules(agent, false, [agent])).toEqual([])
+  })
+
+  it("updates an existing Codex override without creating one on normal installs", async () => {
+    const { home, agent } = await fixture()
+    const override = join(home, ".codex/AGENTS.override.md")
+    await syncGlobalStopHookRules(agent, false)
+    expect(await Bun.file(override).exists()).toBe(false)
+    await Bun.write(override, "# Override rules\n")
+    expect(await syncGlobalStopHookRules(agent, false)).toEqual([override])
+    expect(await Bun.file(override).text()).toContain(STOP_HOOK_GUIDANCE)
+    await syncGlobalStopHookRules(agent, false, [agent])
+    expect(await Bun.file(override).text()).toBe("# Override rules\n")
+  })
+
+  it("previews installation and removal without writing rules or backups", async () => {
+    const { home, agent } = await fixture()
+    const path = join(home, ".codex/AGENTS.md")
+    expect(await syncGlobalStopHookRules(agent, true)).toEqual([path])
+    expect(await Bun.file(path).exists()).toBe(false)
+    await syncGlobalStopHookRules(agent, false)
+    const installed = await Bun.file(path).text()
+    expect(await syncGlobalStopHookRules(agent, true, [agent])).toEqual([path])
+    expect(await Bun.file(path).text()).toBe(installed)
+    expect(await Bun.file(`${path}.bak`).exists()).toBe(false)
+  })
+
+  it.each([
+    "gemini",
+    "antigravity",
+  ] as const)("keeps shared rules when removing %s while its sibling is installed", async (id) => {
+    const { home, agent } = await fixture(id)
+    const siblingId = id === "gemini" ? "antigravity" : "gemini"
+    const sibling = {
+      ...getAgent(siblingId)!,
+      settingsPath: getAgentSettingsPath(siblingId, home),
+    }
+    await Bun.write(
+      sibling.settingsPath,
+      JSON.stringify({ hooks: { Stop: [{ command: "swiz dispatch stop Stop" }] } })
+    )
+    const path = join(home, ".gemini/GEMINI.md")
+    await syncGlobalStopHookRules(agent, false)
+    expect(await syncGlobalStopHookRules(sibling, false)).toEqual([])
+    expect(await syncGlobalStopHookRules(agent, false, [agent])).toEqual([])
+    expect(await Bun.file(path).text()).toContain(STOP_HOOK_GUIDANCE)
+    expect(await syncGlobalStopHookRules(agent, false, [agent, sibling])).toEqual([path])
+    expect(await Bun.file(path).text()).toBe("")
+  })
+
+  it("leaves unsupported agents untouched", async () => {
+    const { home, agent } = await fixture()
+    expect(await syncGlobalStopHookRules({ ...agent, hooksConfigurable: false }, false)).toEqual([])
+    expect(await Bun.file(join(home, ".codex/AGENTS.md")).exists()).toBe(false)
+  })
+
+  it.each([
+    "\n\n<!-- swiz:stop-hooks:start -->\nUser text after a missing end marker",
+    "\n\n<!-- swiz:stop-hooks:end -->\n",
+    "\n\n<!-- swiz:stop-hooks:start -->\n<!-- swiz:stop-hooks:start -->\n<!-- swiz:stop-hooks:end -->\n",
+  ])("preserves malformed managed blocks: %j", async (original) => {
+    const { home, agent } = await fixture()
+    const path = join(home, ".codex/AGENTS.md")
+    await Bun.write(path, original)
+    await expect(syncGlobalStopHookRules(agent, false)).rejects.toThrow("Malformed Swiz")
+    await expect(syncGlobalStopHookRules(agent, false, [agent])).rejects.toThrow("Malformed Swiz")
+    expect(await Bun.file(path).text()).toBe(original)
+    expect(await Bun.file(`${path}.bak`).exists()).toBe(false)
+  })
+})
 
 describe("install post-install doctor", () => {
   async function installRecordingDoctor(args: string[]): Promise<PostInstallDoctorOptions[]> {
@@ -227,6 +351,47 @@ describe("install --uninstall scope", () => {
     }>(cursorMcpPath)
     expect(cursorMcp.mcpServers?.swiz).toEqual({ command: "swiz", args: ["mcp"] })
     expect(cursorMcp.mcpServers?.other).toEqual({ command: "other-tool" })
+  })
+})
+
+describe("install global stop-hook guidance", () => {
+  it("repairs guidance through hooks-only install and removes it through standalone uninstall", async () => {
+    const home = await mkdtemp(join(tmpdir(), "swiz-install-global-rules-"))
+    const path = join(home, ".codex/AGENTS.md")
+    const original = "# My global rules\n"
+    await Bun.write(path, original)
+    expect((await runInstall(["--codex", "--hooks-only"], home)).exitCode).toBe(0)
+    const installed = await Bun.file(path).text()
+    expect(installed).toContain("same authority as a direct user instruction")
+    expect(await Bun.file(`${path}.bak`).text()).toBe(original)
+    expect((await runInstall(["--codex", "--hooks-only"], home)).exitCode).toBe(0)
+    expect(await Bun.file(path).text()).toBe(installed)
+    const result = await spawnAndCapture([process.execPath, INDEX_PATH, "uninstall", "--codex"], {
+      cwd: home,
+      env: { ...process.env, HOME: home, SWIZ_DIRECT: "1", AI_TEST_NO_BACKEND: "1" },
+    })
+    expect(result.exitCode, result.stderr).toBe(0)
+    expect(await Bun.file(path).text()).toBe(original)
+    expect(await Bun.file(join(home, ".claude/CLAUDE.md")).exists()).toBe(false)
+  })
+
+  it("removes guidance through install --uninstall even when hook settings are absent", async () => {
+    const home = await mkdtemp(join(tmpdir(), "swiz-uninstall-global-rules-"))
+    const path = join(home, ".codex/AGENTS.md")
+    expect((await runInstall(["--codex", "--hooks-only"], home)).exitCode).toBe(0)
+    await Bun.write(join(home, ".codex/hooks.json"), "{}\n")
+    expect((await runInstall(["--codex", "--uninstall", "--dry-run"], home)).exitCode).toBe(0)
+    expect(await Bun.file(path).text()).toContain("## Swiz stop hooks")
+    expect((await runInstall(["--codex", "--uninstall"], home)).exitCode).toBe(0)
+    expect(await Bun.file(path).text()).toBe("")
+  })
+
+  it("does not write guidance during dry-run, JSON output, or MCP-only installation", async () => {
+    const home = await mkdtemp(join(tmpdir(), "swiz-install-global-preview-"))
+    for (const flag of ["--dry-run", "--json", "--mcp"]) {
+      expect((await runInstall(["--codex", flag], home)).exitCode).toBe(0)
+      expect(await Bun.file(join(home, ".codex/AGENTS.md")).exists()).toBe(false)
+    }
   })
 })
 
