@@ -189,8 +189,11 @@ async function loadAllCommands(): Promise<import("./src/types.ts").Command[]> {
 
 async function runGeneralCli(): Promise<void> {
   const cli = await import("./src/cli.ts")
-  const commands = await loadAllCommands()
-  for (const command of commands) cli.registerCommand(command)
+  const [commands, { complianceCommand }] = await Promise.all([
+    loadAllCommands(),
+    import("./src/commands/compliance.ts"),
+  ])
+  for (const command of [...commands, complianceCommand]) cli.registerCommand(command)
   await cli.run()
 }
 
