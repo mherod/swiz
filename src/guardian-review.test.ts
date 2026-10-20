@@ -4,6 +4,7 @@ import {
   detectGuardianReviewRequest,
   enrichPayloadWithGuardianReview,
   GIT_ADD_GUARDIAN_DENIAL_MARKER,
+  GIT_ADD_GUARDIAN_DENIAL_TOKEN,
 } from "./guardian-review.ts"
 import type { JsonLike } from "./schemas.ts"
 import { getHookSpecificOutput } from "./utils/hook-specific-output.ts"
@@ -90,8 +91,11 @@ describe("guardian review transcript detection", () => {
   test("counts only git add guardian denials from the last minute", () => {
     const nowMs = Date.parse("2026-08-11T12:01:00.000Z")
     const lines = [
+      wrapperCall("old", GIT_ADD_COMMAND, true),
       guardianDeniedOutput("old", "2026-08-11T11:59:59.000Z"),
+      wrapperCall("recent-a", GIT_ADD_COMMAND, true),
       guardianDeniedOutput("recent-a", "2026-08-11T12:00:10.000Z"),
+      wrapperCall("recent-b", GIT_ADD_COMMAND, true),
       guardianDeniedOutput("recent-b", "2026-08-11T12:00:30.000Z"),
       wrapperOutput(
         "quoted",
@@ -104,6 +108,43 @@ describe("guardian review transcript detection", () => {
     expect(
       detectGuardianReviewRequest(lines, GIT_ADD_COMMAND, nowMs)?.recentGitAddGuardianDenialCount
     ).toBe(2)
+  })
+
+  test("counts humanised denials once per matching escalation, excluding unrelated output", () => {
+    const nowMs = Date.parse("2026-08-11T12:01:00.000Z")
+    const timestamp = "2026-08-11T12:00:30.000Z"
+    const denial =
+      "Script error:\nCommand blocked by PreToolUse hook: Guardian review was avoided " +
+      "because this `git add` retry needs escalation only because the sandbox cannot " +
+      `write Git's index lock.\nDiagnostic: ${GIT_ADD_GUARDIAN_DENIAL_TOKEN}`
+    const lines = [
+      wrapperCall("matching", GIT_ADD_COMMAND, true),
+      wrapperOutput("matching", denial, timestamp),
+      wrapperOutput("matching", denial, timestamp),
+      wrapperCall("other-command", "git add -- other.ts", true),
+      wrapperOutput("other-command", denial, timestamp),
+      wrapperCall("sandboxed", GIT_ADD_COMMAND, false),
+      wrapperOutput("sandboxed", denial, timestamp),
+      wrapperOutput("unmatched", denial, timestamp),
+      multiCommandWrapperCall("ambiguous", [
+        { command: GIT_ADD_COMMAND, escalated: true },
+        { command: "git status --short" },
+      ]),
+      wrapperOutput("ambiguous", denial, timestamp),
+      wrapperCall("quoted", GIT_ADD_COMMAND, true),
+      wrapperOutput("quoted", `Documentation: ${denial}`, timestamp),
+      wrapperCall("missing-timestamp", GIT_ADD_COMMAND, true),
+      wrapperOutput("missing-timestamp", denial),
+      wrapperCall("future", GIT_ADD_COMMAND, true),
+      wrapperOutput("future", denial, "2026-08-11T12:01:01.000Z"),
+      wrapperCall("approval-denied", GIT_ADD_COMMAND, true),
+      wrapperOutput("approval-denied", "Approval review denied the request.", timestamp),
+      wrapperCall("current", GIT_ADD_COMMAND, true),
+      wrapperOutput("current", denial, timestamp),
+    ]
+    expect(
+      detectGuardianReviewRequest(lines, GIT_ADD_COMMAND, nowMs)?.recentGitAddGuardianDenialCount
+    ).toBe(1)
   })
 
   test("treats successful work as sandbox success even when output contains an incidental denial", () => {

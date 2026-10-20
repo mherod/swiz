@@ -6,6 +6,7 @@ import { detectCurrentAgentFromHookPayload } from "../src/agent-paths.ts"
 import {
   GIT_ADD_GUARDIAN_DENIAL_LIMIT,
   GIT_ADD_GUARDIAN_DENIAL_MARKER,
+  GIT_ADD_GUARDIAN_DENIAL_TOKEN,
   type GuardianReviewContext,
   getGuardianReviewContext,
   type SandboxAttemptEvidence,
@@ -135,6 +136,7 @@ export function gitAddAvoidanceMessage(
         ]
   return [
     `${GIT_ADD_GUARDIAN_DENIAL_MARKER} only needs escalation because the sandbox cannot write Git's index lock.`,
+    `Diagnostic: ${GIT_ADD_GUARDIAN_DENIAL_TOKEN}`,
     "",
     `Guardian denial ${denialNumber} of at most ${GIT_ADD_GUARDIAN_DENIAL_LIMIT} in the last minute.`,
     "Retry permitted by guard: you may retry this same narrowly scoped `git add` after this denial.",

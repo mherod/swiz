@@ -96,7 +96,9 @@ const TOOL_CALL_TYPES = new Set<CodexResponsePayload["type"]>(["function_call", 
 export const GIT_ADD_GUARDIAN_DENIAL_LIMIT = 3
 export const GIT_ADD_GUARDIAN_DENIAL_WINDOW_MS = 60_000
 export const GIT_ADD_GUARDIAN_DENIAL_MARKER = "Guardian review avoided: this `git add` retry"
-const GIT_ADD_GUARDIAN_DENIAL_OUTPUT_PREFIX = `Script error:\nCommand blocked by PreToolUse hook: ${GIT_ADD_GUARDIAN_DENIAL_MARKER}`
+/** Code literals survive both hook voice variation and final-envelope humanising. */
+export const GIT_ADD_GUARDIAN_DENIAL_TOKEN = "`swiz:guardian-git-add-denial`"
+const PRE_TOOL_USE_DENIAL_OUTPUT_PREFIX = "Script error:\nCommand blocked by PreToolUse hook: "
 const MAX_ENCODED_OUTPUT_DEPTH = 2
 
 function parseResponseItem(line: string): CodexResponseItem | null {
@@ -296,24 +298,42 @@ function collectOutputEvidence(lines: string[]): Map<string, SandboxOutputEviden
 }
 
 function isGitAddGuardianDenialOutput(payload: CodexResponsePayload): boolean {
+  if (payload.type !== "function_call_output" && payload.type !== "custom_tool_call_output") {
+    return false
+  }
   const blocks = Array.isArray(payload.output) ? payload.output : [payload.output ?? ""]
   return blocks.some((block) => {
     const text =
       block && typeof block === "object" && !Array.isArray(block) && typeof block.text === "string"
         ? block.text
         : flattenOutputText(block)
-    return text.startsWith(GIT_ADD_GUARDIAN_DENIAL_OUTPUT_PREFIX)
+    if (!text.startsWith(PRE_TOOL_USE_DENIAL_OUTPUT_PREFIX)) return false
+    const reason = text.slice(PRE_TOOL_USE_DENIAL_OUTPUT_PREFIX.length)
+    return (
+      reason.includes(GIT_ADD_GUARDIAN_DENIAL_TOKEN) ||
+      reason.startsWith(GIT_ADD_GUARDIAN_DENIAL_MARKER)
+    )
   })
 }
 
-function countRecentGitAddGuardianDenials(lines: string[], nowMs: number): number {
-  let count = 0
+function countRecentGitAddGuardianDenials(
+  lines: string[],
+  matchingCalls: CodexToolCall[],
+  nowMs: number
+): number {
+  const eligibleCalls = new Set(
+    matchingCalls
+      .filter((call) => call.escalated && call.outputAttributable)
+      .map((call) => call.callId)
+  )
+  const deniedCalls = new Set<string>()
   for (const line of lines) {
     const item = parseResponseItem(line)
     const payload = item?.payload
     if (
       !payload ||
-      (payload.type !== "function_call_output" && payload.type !== "custom_tool_call_output") ||
+      !payload.call_id ||
+      !eligibleCalls.has(payload.call_id) ||
       !isGitAddGuardianDenialOutput(payload)
     ) {
       continue
@@ -325,10 +345,10 @@ function countRecentGitAddGuardianDenials(lines: string[], nowMs: number): numbe
       timestampMs >= nowMs - GIT_ADD_GUARDIAN_DENIAL_WINDOW_MS &&
       timestampMs <= nowMs
     ) {
-      count++
+      deniedCalls.add(payload.call_id)
     }
   }
-  return count
+  return deniedCalls.size
 }
 
 function classifyPriorSandboxAttempt(
@@ -376,7 +396,11 @@ export function detectGuardianReviewRequest(
     requested: true,
     source: "codex-transcript",
     priorSandboxAttempt,
-    recentGitAddGuardianDenialCount: countRecentGitAddGuardianDenials(sessionLines, nowMs),
+    recentGitAddGuardianDenialCount: countRecentGitAddGuardianDenials(
+      sessionLines.slice(0, current.lineIndex),
+      matchingCalls.slice(0, -1),
+      nowMs
+    ),
   }
 }
 
