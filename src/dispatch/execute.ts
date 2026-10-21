@@ -48,7 +48,7 @@ import {
   parseDispatchPayloadString,
   parseValidatedAgentDispatchWireJson,
 } from "./dispatch-zod-surfaces.ts"
-import { applyDispatchEnv, type HookExecution } from "./engine.ts"
+import { applyDispatchEnv, type HookExecution, isDeny } from "./engine.ts"
 import {
   applyHookSettingFilters,
   countHooks,
@@ -981,6 +981,34 @@ async function decorateSkippedDeadline(
   coerceDispatchAgentEnvelopeInPlace(response, ctx.canonicalEvent, ctx.hookEventName, ctx.agentId)
 }
 
+function hasActionableMcpResponse(response: Record<string, any>): boolean {
+  return (
+    isDeny(response) ||
+    response.hookSpecificOutput?.permissionDecision === "ask" ||
+    Boolean(response.error) ||
+    response.ok === false ||
+    response.isError === true
+  )
+}
+
+/** Keep MCP side effects and actionable responses without emitting advisory context. */
+function suppressMcpToolContext(response: Record<string, any>, ctx: DispatchContext): void {
+  if (!ctx.toolName?.startsWith("mcp__")) return
+  if (!["preToolUse", "postToolUse", "postToolUseFailure"].includes(ctx.canonicalEvent)) return
+  if (hasActionableMcpResponse(response)) return
+
+  for (const key of ["systemMessage", "reason", "stopReason", "additionalContext"]) {
+    unset(response, key)
+  }
+  const specific = response.hookSpecificOutput
+  if (!specific) return
+  unset(specific, "additionalContext")
+  unset(specific, "permissionDecisionReason")
+  if (Object.keys(specific).every((key) => key === "hookEventName")) {
+    unset(response, "hookSpecificOutput")
+  }
+}
+
 async function performDispatch(req: DispatchRequest): Promise<DispatchResult> {
   const signal = req.signal ?? new AbortController().signal
   const notifyLifecycle = req.onDispatchLifecycle ?? (() => {})
@@ -991,10 +1019,11 @@ async function performDispatch(req: DispatchRequest): Promise<DispatchResult> {
   signal.throwIfAborted()
   const repositoryCapability = ctx.repositoryCapability
   const route = DISPATCH_ROUTES[ctx.canonicalEvent] ?? "blocking"
-  const result = (response: Record<string, any>, hookCount = 0): DispatchResult => ({
-    response,
-    timing: { route, stages: stageDurations, hookCount },
-  })
+  const result = (response: Record<string, any>, hookCount = 0): DispatchResult => {
+    suppressMcpToolContext(response, ctx)
+    assertDispatchResponseMatchesWire(response, ctx.canonicalEvent, ctx.hookEventName, ctx.agentId)
+    return { response, timing: { route, stages: stageDurations, hookCount } }
+  }
 
   // Never trust agent-provided capability fields. This assignment overwrites
   // inbound data with a value resolved inside Swiz before any hook can read it.
@@ -1005,7 +1034,6 @@ async function performDispatch(req: DispatchRequest): Promise<DispatchResult> {
   signal.throwIfAborted()
   if (earlySkip) {
     await decorateSkippedDeadline(earlySkip, ctx)
-    assertDispatchResponseMatchesWire(earlySkip, ctx.canonicalEvent, ctx.hookEventName, ctx.agentId)
     return result(earlySkip)
   }
 
@@ -1019,7 +1047,6 @@ async function performDispatch(req: DispatchRequest): Promise<DispatchResult> {
   if (!filteredGroups) {
     const response = buildFilteredSkipResponse(ctx)
     await decorateSkippedDeadline(response, ctx)
-    assertDispatchResponseMatchesWire(response, ctx.canonicalEvent, ctx.hookEventName, ctx.agentId)
     return result(response)
   }
 
@@ -1071,7 +1098,6 @@ async function performDispatch(req: DispatchRequest): Promise<DispatchResult> {
     const executions = (response.hookExecutions ?? []) as HookExecution[]
     recordDispatchLogs(executions, ctx, dispatchStart)
     normalizeDispatchResponse(response, ctx)
-    assertDispatchResponseMatchesWire(response, ctx.canonicalEvent, ctx.hookEventName, ctx.agentId)
 
     log(
       `   ⏱ total: ${Math.round(performance.now() - t0)}ms (hooks: ${Math.round(performance.now() - dispatchStart)}ms)`

@@ -372,7 +372,7 @@ test.each([
   "preToolUse",
   "postToolUse",
   "postToolUseFailure",
-])("silent dispatch still emits clock context for %s", async (event) => {
+])("silent dispatch emits clock context only for native tools for %s", async (event) => {
   await runMcpTool("Deadline", create, cwd)
   const request = {
     canonicalEvent: event,
@@ -381,7 +381,7 @@ test.each([
     payloadStr: JSON.stringify({
       cwd,
       session_id: "agent",
-      tool_name: "mcp__example__query",
+      tool_name: "Read",
       tool_input: {},
       tool_response: {},
       _agent: "claude",
@@ -410,6 +410,14 @@ test.each([
       response
     )
   expect(response.systemMessage).toContain("[Swiz deadline clock]")
+  const mcpResult = await executeDispatch({
+    ...request,
+    payloadStr: JSON.stringify({
+      ...JSON.parse(request.payloadStr),
+      tool_name: "mcp__example__query",
+    }),
+  })
+  expect(mcpResult.response).toEqual({})
 })
 
 test("bounds hook context to one delivery and one task deadline", async () => {

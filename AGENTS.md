@@ -7,12 +7,12 @@ alwaysApply: false
 ## Runtime
 - Use Bun only. DO NOT use Node.js, npm, pnpm, vite, dotenv, or Node-specific tooling.
 - Use `bun <file>`, `bun test`, `bun install`, `bun run index.ts`, `bun --hot index.ts`, `bun link`.
-- For permitted public-registry installation, run `bun install --registry=https://registry.npmjs.org/` from the repository root. Keep the override command-scoped; do not change persistent registry settings or bypass an active security-policy denial.
-- Distinguish dependency resolution from installation success: `prepare` runs `lefthook install` and can fail with `core.hooksPath is set globally` when PushPatrol owns `/Library/Application Support/OpenAI/Tools/PushPatrol/git-hooks`. Preserve that path; do not unset it or use Lefthook's `--reset-hooks-path` or `--force` to replace managed hooks.
-- For a stale global hook path approved for removal, remediate with `git config --unset-all --global core.hooksPath`, then rerun installation. This affects every repository using that global setting; do not apply it to bypass active PushPatrol enforcement.
-- After dependency repair, rerun `bun run typecheck`, `bun run lint`, and affected tests. Passing checks does not prove the `prepare` step installed repository hooks.
+- Permitted public-registry installation: run `bun install --registry=https://registry.npmjs.org/` at repository root. Keep overrides command-scoped; never change persistent registry settings or bypass security-policy denials.
+- Resolution is not installation success: `prepare` runs `lefthook install`; `core.hooksPath is set globally` can fail when PushPatrol owns `/Library/Application Support/OpenAI/Tools/PushPatrol/git-hooks`. Preserve managed hooks; never unset that path or replace it using `--reset-hooks-path`/`--force`.
+- Only for approved stale global hook-path removal: `git config --unset-all --global core.hooksPath`, then reinstall. This affects all repositories using that setting; never bypass active PushPatrol enforcement.
+- After dependency repair: `bun run typecheck`, `bun run lint`, affected tests. Passing checks do not prove `prepare` installed hooks.
 - Prefer `swiz <command>`.
-- Use `bun run index.ts <command>` to guarantee checkout execution and avoid PATH `swiz` version drift.
+- Use `bun run index.ts <command>` for checkout execution without PATH `swiz` drift.
 - Use `Bun.file()` and `Bun.write()` for file I/O.
 - Use `node:fs/promises` only for directories (`readdir`, `mkdir`, `stat`).
 ## CLI Architecture
@@ -34,8 +34,8 @@ alwaysApply: false
 - After compaction: `TaskList`; close stale tasks via `git log --oneline -3`.
 - One verb per task subject; `pretooluse-task-subject-validation.ts` rejects compound subjects. DON'T list multiple files/steps in one subject.
 - Keep ≥1 `pending`/`in_progress` task before `git add`/`git commit`; mark complete after success.
-- **DON'T**: Complete the final incomplete task without first creating a pending next-step task — `pretooluse-require-tasks.ts` blocks when zero incomplete tasks remain.
-- **NEVER** let guardrails, task-gates, branch-gates, or scope boundaries harden into a refusal to do obviously-wanted work. When the queue or user asks for tracked, well-specified issues, prioritize forward progress. Do not explain why you "cannot" do them — execute a minimal, concrete step immediately.
+- Before completing the final task, create its pending next step; `pretooluse-require-tasks.ts` blocks zero incomplete tasks.
+- **NEVER** let guardrails, task-gates, branch-gates, or scope boundaries prevent requested work. For tracked, well-specified issues, execute a concrete step immediately instead of explaining refusal.
 - Run `/commit` before `git commit`; `pretooluse-commit-skill-gate` enforces it.
 - `/commit` checks: task preflight, Conventional Commits `<type>(<scope>): <summary>`.
 - Call task tools every 20 calls; staleness gate at 40.
@@ -49,7 +49,7 @@ alwaysApply: false
 - DO NOT create task solely for `git push`, `gh`, or `swiz issue close/comment` (`SWIZ_ISSUE_RE`, `GH_CMD_RE`).
 - **Task completion**: `TaskUpdate` `taskId` + `status: completed`; evidence in `description`: `commit:`, `pr:`, `file:`, `test:`, `note:`.
 - **Subject changes**: `TaskUpdate` `subject`/`description` — not the CLI.
-- **DON'T**: Assume CI success from partial output. Confirm every job: `gh run view <run-id> --json conclusion,status,jobs`.
+- Confirm every CI job, never partial output: `gh run view <run-id> --json conclusion,status,jobs`.
 - Treat `gh issue create` and task completion as atomic; recover with `TaskUpdate`.
 - Run `git diff <files>` before `git add`; `git status` after each `git commit`.
 - After each `CLAUDE.md` edit, run `wc -w CLAUDE.md`; run `/compact-memory` near threshold.
@@ -77,13 +77,13 @@ alwaysApply: false
 - Don't stop after step 3; stop hook requires origin current.
 - Push is inseparable from commit.
 - Await background pushes (`TaskOutput block:true`) before CI. **DON'T** pass `TaskOutput` timeout > 120000ms; 300000 always fails.
-- **DO**: Await active background tasks (`manage_task`) before triggering concurrent `git commit` or `git push` commands to prevent `.git/index.lock` collisions.
+- Await background tasks (`manage_task`) before `git commit`/`git push` to prevent `.git/index.lock` collisions.
 - Use `swiz issue resolve <number> --body "<text>"` (not `gh issue comment` + `gh issue close`); close-only: `swiz issue close <number>`.
 - **DON'T** close as `duplicate`/`wontfix` without file+line evidence per acceptance criterion.
 - **DO** check issue state before resolving: `gh api repos/:owner/:repo/issues/{number} --jq '.state'`; `Fixes #N` auto-closes on push.
 ## Push and CI
 - **DO**: Run `swiz settings show --project` before `/commit`, `/push`, or `/rebase-and-merge-into-main`.
-- **DO**: Treat `.swiz/config.json` as the baseline policy for `mherod/swiz` (solo + trunk). Live `/push` signals override it: if `OPEN_PRS_FROM_OTHERS>0`, other contributors are active, or collaboration state is unknown, create a feature branch and PR. Output such as `Open PRs from others: 1` for PR #732 is a signal, not an exception.
+- `.swiz/config.json` is the `mherod/swiz` baseline (solo + trunk). Live `/push` signals override: `OPEN_PRS_FROM_OTHERS>0`, active contributors, or unknown collaboration require a feature branch and PR. `Open PRs from others: 1` for PR #732 counts.
 - Run `/push` before `git push`; PreToolUse push gate requires it.
 - CI `paths-ignore`: `.claude/**`, `docs/**` — only those paths skip; markdown triggers CI.
 - Pre-push checklist:
@@ -115,9 +115,9 @@ alwaysApply: false
 - DO NOT use top-level `await` in `src/` files (ESLint `no-restricted-syntax` rule). Use lazy async initialization with cached results. Hooks in `hooks/` are exempt.
 - DO NOT embed ESC (0x1b) in regex literals (Biome `no-control-regex` rule). Construct at runtime: `new RegExp(String.fromCharCode(27) + "\\[[0-9;]*[a-zA-Z]", "g")`. Reference: `hooks/posttooluse-task-output.ts`.
 - When parsing bun test output, check `/\bRan \d+ tests? across \d+ files?\./`; if absent, emit "unknown number of". Strip ANSI before matching.
-- **DO**: Rename declarations and all usages in one edit — splits in PreToolUse hooks cause deadlocks. **DON'T** add unrequested renames; change only what was asked for.
-- **DO**: When removing utility functions, grep usages and remove atomically. Removing only the definition leaves broken imports.
-- DO: Read every file in full before editing — snippets miss conflicts and patterns in other sections.
+- Rename declarations and usages atomically; split PreToolUse edits deadlock. No unrequested renames.
+- Before removing utilities, grep usages; remove atomically to avoid broken imports.
+- Read full files before editing; snippets miss conflicts and patterns.
 - Use ANSI escape codes directly; do not add color libraries.
 - Prefer `Bun.spawn(["sh", "-c", cmd])` for shell execution in skills/hooks.
 - With piped `Bun.spawn`, drain stdout/stderr concurrently via `Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()])` before `await proc.exited`.
