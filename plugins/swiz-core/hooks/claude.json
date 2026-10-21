@@ -6,7 +6,7 @@
           {
             "type": "command",
             "command": "command -v swiz >/dev/null 2>&1 || { printf '%s\\n' 'swiz-core: swiz is not on PATH. Install Bun and run bun install --frozen-lockfile && bun link in the swiz checkout; restart the agent.' >&2; exit 1; }; SWIZ_PLUGIN=1 swiz dispatch --agent claude stop Stop",
-            "timeout": 180,
+            "timeout": 195,
             "statusMessage": "Swizzling..."
           }
         ]
@@ -18,7 +18,7 @@
           {
             "type": "command",
             "command": "command -v swiz >/dev/null 2>&1 || { printf '%s\\n' 'swiz-core: swiz is not on PATH. Install Bun and run bun install --frozen-lockfile && bun link in the swiz checkout; restart the agent.' >&2; exit 1; }; SWIZ_PLUGIN=1 swiz dispatch --agent claude preToolUse PreToolUse",
-            "timeout": 60,
+            "timeout": 75,
             "statusMessage": "Swizzling..."
           }
         ]
@@ -30,7 +30,7 @@
           {
             "type": "command",
             "command": "command -v swiz >/dev/null 2>&1 || { printf '%s\\n' 'swiz-core: swiz is not on PATH. Install Bun and run bun install --frozen-lockfile && bun link in the swiz checkout; restart the agent.' >&2; exit 1; }; SWIZ_PLUGIN=1 swiz dispatch --agent claude postToolUse PostToolUse",
-            "timeout": 45,
+            "timeout": 60,
             "statusMessage": "Swizzling..."
           }
         ]
@@ -42,7 +42,7 @@
           {
             "type": "command",
             "command": "command -v swiz >/dev/null 2>&1 || { printf '%s\\n' 'swiz-core: swiz is not on PATH. Install Bun and run bun install --frozen-lockfile && bun link in the swiz checkout; restart the agent.' >&2; exit 1; }; SWIZ_PLUGIN=1 swiz dispatch --agent claude postToolUseFailure PostToolUseFailure",
-            "timeout": 10,
+            "timeout": 25,
             "statusMessage": "Swizzling..."
           }
         ]
@@ -54,7 +54,7 @@
           {
             "type": "command",
             "command": "command -v swiz >/dev/null 2>&1 || { printf '%s\\n' 'swiz-core: swiz is not on PATH. Install Bun and run bun install --frozen-lockfile && bun link in the swiz checkout; restart the agent.' >&2; exit 1; }; SWIZ_PLUGIN=1 swiz dispatch --agent claude sessionStart SessionStart",
-            "timeout": 20,
+            "timeout": 35,
             "statusMessage": "Swizzling..."
           }
         ]
@@ -66,7 +66,7 @@
           {
             "type": "command",
             "command": "command -v swiz >/dev/null 2>&1 || { printf '%s\\n' 'swiz-core: swiz is not on PATH. Install Bun and run bun install --frozen-lockfile && bun link in the swiz checkout; restart the agent.' >&2; exit 1; }; SWIZ_PLUGIN=1 swiz dispatch --agent claude preCompact PreCompact",
-            "timeout": 15,
+            "timeout": 30,
             "statusMessage": "Swizzling..."
           }
         ]
@@ -78,7 +78,7 @@
           {
             "type": "command",
             "command": "command -v swiz >/dev/null 2>&1 || { printf '%s\\n' 'swiz-core: swiz is not on PATH. Install Bun and run bun install --frozen-lockfile && bun link in the swiz checkout; restart the agent.' >&2; exit 1; }; SWIZ_PLUGIN=1 swiz dispatch --agent claude postCompact PostCompact",
-            "timeout": 10,
+            "timeout": 25,
             "statusMessage": "Swizzling..."
           }
         ]
@@ -90,7 +90,7 @@
           {
             "type": "command",
             "command": "command -v swiz >/dev/null 2>&1 || { printf '%s\\n' 'swiz-core: swiz is not on PATH. Install Bun and run bun install --frozen-lockfile && bun link in the swiz checkout; restart the agent.' >&2; exit 1; }; SWIZ_PLUGIN=1 swiz dispatch --agent claude permissionRequest PermissionRequest",
-            "timeout": 10,
+            "timeout": 25,
             "statusMessage": "Swizzling..."
           }
         ]
@@ -102,7 +102,7 @@
           {
             "type": "command",
             "command": "command -v swiz >/dev/null 2>&1 || { printf '%s\\n' 'swiz-core: swiz is not on PATH. Install Bun and run bun install --frozen-lockfile && bun link in the swiz checkout; restart the agent.' >&2; exit 1; }; SWIZ_PLUGIN=1 swiz dispatch --agent claude userPromptSubmit UserPromptSubmit",
-            "timeout": 15,
+            "timeout": 30,
             "statusMessage": "Swizzling..."
           }
         ]
@@ -114,7 +114,7 @@
           {
             "type": "command",
             "command": "command -v swiz >/dev/null 2>&1 || { printf '%s\\n' 'swiz-core: swiz is not on PATH. Install Bun and run bun install --frozen-lockfile && bun link in the swiz checkout; restart the agent.' >&2; exit 1; }; SWIZ_PLUGIN=1 swiz dispatch --agent claude notification Notification",
-            "timeout": 30,
+            "timeout": 45,
             "statusMessage": "Swizzling..."
           }
         ]
