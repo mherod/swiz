@@ -7,6 +7,7 @@ import type { ShellHookInput } from "../src/schemas.ts"
 import { resolveSafeSessionId } from "../src/session-id.ts"
 import { TMP_ROOT } from "../src/temp-paths.ts"
 import { isShellTool } from "../src/tool-matchers.ts"
+import { collectTargets } from "../src/utils/command-targets.ts"
 import { tokenize } from "../src/utils/inline-hook-helpers.ts"
 import { splitShellSegments } from "../src/utils/shell-patterns.ts"
 
@@ -26,8 +27,6 @@ const LINT_FLAGS_WITH_VALUES = new Set([
   "--parser-options",
   "--env",
 ])
-const REDIRECTIONS = new Set(["1>", "2>", ">", ">>", "<", "2>&1", "2>>", "&>", "1>>"])
-const SHELL_OPERATORS = new Set(["&&", "||", ";", "|", "&"])
 
 function firstCommandIndex(tokens: string[]): number {
   let index = 0
@@ -54,35 +53,12 @@ function lintTargetIndex(tokens: string[], commandIndex: number): number | null 
     : null
 }
 
-function collectTargets(tokens: string[], startIndex: number): string[] {
-  const targets: string[] = []
-  let inDoubleDash = false
-
-  for (let index = startIndex; index < tokens.length; index++) {
-    const token = tokens[index]!
-    if (token === "--") {
-      inDoubleDash = true
-    } else if (!inDoubleDash && token.startsWith("-")) {
-      const name = token.includes("=") ? token.slice(0, token.indexOf("=")) : token
-      if (!token.includes("=") && LINT_FLAGS_WITH_VALUES.has(name)) index++
-    } else if (REDIRECTIONS.has(token)) {
-      index++
-    } else if (SHELL_OPERATORS.has(token)) {
-      break
-    } else {
-      targets.push(token)
-    }
-  }
-
-  return targets
-}
-
 export function parseLintCommand(segment: string): { isLint: boolean; targets: string[] } {
   const tokens = tokenize(segment)
   const targetIndex = lintTargetIndex(tokens, firstCommandIndex(tokens))
   return targetIndex === null
     ? { isLint: false, targets: [] }
-    : { isLint: true, targets: collectTargets(tokens, targetIndex) }
+    : { isLint: true, targets: collectTargets(tokens, targetIndex, LINT_FLAGS_WITH_VALUES) }
 }
 
 export function isFullLintSuiteRun(command: string): boolean {

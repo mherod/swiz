@@ -30,6 +30,7 @@ import {
 } from "../tool-matchers.ts"
 import { hasNonEmptyHookOutput, messageFromUnknownError } from "../utils/hook-json-helpers.ts"
 import { getHookSpecificOutput } from "../utils/hook-specific-output.ts"
+import { collectProcessOutput } from "../utils/process-utils.ts"
 import { isWithinCooldown, markHookCooldown } from "./filters.ts"
 import { getWorkerPool } from "./worker-pool.ts"
 import {
@@ -439,22 +440,6 @@ function resolveSpawnOptions(
   return { cmd, cwd: spawnCwd, env: spawnEnv }
 }
 
-async function collectProcessOutput(proc: {
-  stdout?: any
-  stderr?: any
-  exited: Promise<number>
-}): Promise<{
-  output: string
-  stderr: string
-}> {
-  const [output, stderr] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-  ])
-  await proc.exited
-  return { output, stderr }
-}
-
 export async function runHook(
   file: string,
   payloadStr: string,
@@ -496,7 +481,7 @@ export async function runHook(
     { once: true }
   )
 
-  const { output, stderr } = await collectProcessOutput(proc)
+  const { stdout: output, stderr } = await collectProcessOutput(proc)
 
   clearTimeout(timeoutState.timer)
   if (timeoutState.sigkillTimer) clearTimeout(timeoutState.sigkillTimer)

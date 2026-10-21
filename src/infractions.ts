@@ -21,6 +21,7 @@ import { normalizeCommand } from "./command-utils.ts"
 import type { JsonLike } from "./schemas.ts"
 import { isCodeChangeTool, isShellTool } from "./tool-matchers.ts"
 import { tryParseJsonLine } from "./utils/jsonl.ts"
+import { parseTimestampMs } from "./utils/timestamp.ts"
 
 /** How far back denied attempts count toward an infraction. */
 export const INFRACTION_WINDOW_MS = 20 * 60 * 1000
@@ -109,13 +110,6 @@ function wantedAssessment(
   toolName: string
 ): InfractionAssessment {
   return { level, wantedLevel: WANTED_LEVEL_BY_INFRACTION[level], priorDenialCount, key, toolName }
-}
-
-function parseTimestampMs(value: string | number | null | undefined): number | null {
-  if (typeof value === "number" && Number.isFinite(value)) return value
-  if (typeof value !== "string" || !value.trim()) return null
-  const parsed = Date.parse(value)
-  return Number.isFinite(parsed) ? parsed : null
 }
 
 function textFromContent(value: JsonLike | undefined): string {

@@ -53,6 +53,8 @@ import type { Command } from "../types.ts"
 import { messageFromUnknownError } from "../utils/hook-json-helpers.ts"
 import { type McpFileData, type McpServerDef, readMcpFile } from "./mcp-config.ts"
 
+export { verifyTaskSubject } from "../tasks/task-subject-verification.ts"
+
 export {
   compareTaskIds,
   findTaskAcrossSessions,
@@ -937,15 +939,4 @@ export async function runTasks(args: string[], cwd: string = process.cwd()): Pro
     throw new Error(`Unknown subcommand: ${subcommand}\nRun "swiz help tasks" for usage.`)
   }
   await handler(rest, resolveFilterCwd(commandArgs, cwd))
-}
-
-export function verifyTaskSubject(taskSubject: string, verifyText: string): string | null {
-  const normalizedSubject = taskSubject.toLowerCase().trim()
-  const normalizedVerify = verifyText.toLowerCase().trim()
-  if (normalizedSubject.startsWith(normalizedVerify)) return null
-  return (
-    `Verification failed.\n` +
-    `  Expected subject to start with: "${verifyText}"\n` +
-    `  Actual subject: "${taskSubject}"`
-  )
 }

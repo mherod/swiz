@@ -3,7 +3,6 @@ import { join } from "node:path"
 import { resolveTranslationAgent } from "../agent-paths.ts"
 import { type AgentDef, translateMatcher } from "../agents.ts"
 import { RESET } from "../ansi.ts"
-import { verifyTaskSubject } from "../commands/tasks.ts"
 import { finishTaskDeadline } from "../deadlines/task-deadlines.ts"
 import { getGitClient } from "../git/client.ts"
 import {
@@ -37,6 +36,7 @@ import { collectIncompleteTasks, getTaskStoreKeys, resolveTaskById } from "./tas
 import { readTaskStorePath } from "./task-store-layout.ts"
 import { taskStoreId } from "./task-store-path.ts"
 import { detect, formatMessage } from "./task-subject-validation.ts"
+import { verifyTaskSubject } from "./task-subject-verification.ts"
 
 export { compareTaskIds, legacySessionPrefix, parseTaskId, sessionPrefix }
 

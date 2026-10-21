@@ -2,6 +2,7 @@ import { z } from "zod"
 import type { JsonLike } from "./schemas.ts"
 import { tryParseJsonLine } from "./utils/jsonl.ts"
 import { escapeRegex } from "./utils/shell-patterns.ts"
+import { parseTimestampMs } from "./utils/timestamp.ts"
 
 export type SandboxAttemptEvidence =
   | "not-attempted"
@@ -187,13 +188,6 @@ function extractMatchingToolCall(
   const callId = payload.call_id ?? payload.id ?? ""
   const extractCall = selectToolCallExtractor(name)
   return callId && extractCall ? extractCall(payload, callId, lineIndex, command) : null
-}
-
-function parseTimestampMs(value: string | number | undefined): number | null {
-  if (typeof value === "number" && Number.isFinite(value)) return value
-  if (typeof value !== "string" || !value.trim()) return null
-  const parsed = Date.parse(value)
-  return Number.isFinite(parsed) ? parsed : null
 }
 
 function parseExitCode(value: JsonLike): number | null {

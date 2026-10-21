@@ -13,6 +13,7 @@ import {
   isShellTool,
   isSkillTool,
 } from "../src/tool-matchers.ts"
+import { parseTimestampMs } from "../src/utils/timestamp.ts"
 import { resolveSessionLines } from "../src/utils/transcript.ts"
 
 const WINDOW_MS = 20 * 60 * 1000
@@ -45,13 +46,6 @@ interface CurrentTool {
   kind: "file" | "bash"
   filePath?: string
   commandKey?: string
-}
-
-function parseTimestampMs(value: any): number | null {
-  if (typeof value === "number" && Number.isFinite(value)) return value
-  if (typeof value !== "string" || !value.trim()) return null
-  const parsed = Date.parse(value)
-  return Number.isFinite(parsed) ? parsed : null
 }
 
 function textFromUnknown(value: any): string {
