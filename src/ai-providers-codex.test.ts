@@ -274,11 +274,14 @@ test.each([
   const f = await fixture()
   const result = await run(
     f,
-    `try { await promptStreamText("hello", {provider: "codex"}); console.log(JSON.stringify({rejected:false})); } catch (error) { console.log(JSON.stringify({rejected:true, error:String(error)})); }`,
+    `try { await promptStreamText("hello", {provider: "codex"}); console.log(JSON.stringify({rejected:false})); } catch (error) { console.log(JSON.stringify({rejected:true, error:String(error), stderr:error.data?.stderr})); }`,
     { CODEX_STUB_MODE: mode }
   )
   expect(result.rejected).toBe(true)
-  expect(result.error).toContain(mode === "fail" ? "exited with code 1" : "fixture stream failed")
+  expect(result.error).toContain("exited with code 1")
+  expect(result.stderr).toContain(
+    mode === "fail" ? "fixture authentication failed" : "fixture stream failed"
+  )
 })
 
 test("Codex streaming rejects empty replies", async () => {
@@ -309,10 +312,11 @@ test("auto-reply propagates provider errors", async () => {
   const result = await run(
     f,
     `const {streamAutoReply} = await import(${JSON.stringify(join(import.meta.dir, "commands/transcript.ts"))});
-    try { await streamAutoReply([], {sessionId:"preview",flipRoles:false,cwd:${JSON.stringify(f.cwd)},passNumber:1,provider:"codex"}); console.log(JSON.stringify({rejected:false})); } catch(error) { console.log(JSON.stringify({error:String(error)})); }`,
+    try { await streamAutoReply([], {sessionId:"preview",flipRoles:false,cwd:${JSON.stringify(f.cwd)},passNumber:1,provider:"codex"}); console.log(JSON.stringify({rejected:false})); } catch(error) { console.log(JSON.stringify({error:String(error), stderr:error.data?.stderr})); }`,
     { CODEX_STUB_MODE: "stream-error" }
   )
-  expect(result.error).toContain("fixture stream failed")
+  expect(result.error).toContain("exited with code 1")
+  expect(result.stderr).toContain("fixture stream failed")
 })
 
 test("steering uses Codex ahead of OpenRouter with a fresh cache", async () => {

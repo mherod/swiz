@@ -4,17 +4,28 @@ import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
+async function forwardFailureDetail(event: object): Promise<void> {
+  const detail = "error" in event && event.error ? event.error : event
+  if (typeof detail === "object" && "message" in detail && typeof detail.message === "string") {
+    // The SDK prioritises nonzero exit status; retain the cause in its stderr data.
+    await Bun.write(Bun.stderr, `${detail.message}\n`)
+  }
+}
+
 async function forwardOutput(
   stdout: ReadableStream<Uint8Array>,
   onEvent: (type: string) => void
 ): Promise<void> {
   const decoder = new TextDecoder()
   let pending = ""
-  const inspectLine = (line: string) => {
+  const inspectLine = async (line: string) => {
     try {
       const event: unknown = JSON.parse(line)
       if (event && typeof event === "object" && "type" in event && typeof event.type === "string") {
         onEvent(event.type)
+        if (event.type === "error" || event.type === "turn.failed") {
+          await forwardFailureDetail(event)
+        }
       }
     } catch {
       // Preserve non-JSON output; only complete protocol events end generation.
@@ -28,12 +39,12 @@ async function forwardOutput(
       await Bun.write(Bun.stdout, value)
       const lines = (pending + decoder.decode(value, { stream: true })).split(/\r?\n/)
       pending = lines.pop() ?? ""
-      for (const line of lines) inspectLine(line)
+      for (const line of lines) await inspectLine(line)
     }
   } finally {
     reader.releaseLock()
   }
-  inspectLine(pending + decoder.decode())
+  await inspectLine(pending + decoder.decode())
 }
 
 async function main(): Promise<void> {

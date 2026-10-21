@@ -87,13 +87,21 @@ process.exit(7)
 })
 
 test.each(["error", "turn.failed"])("%s cannot be converted to success", async (type) => {
-  const output = `${JSON.stringify({ type, message: "fixture failure" })}\n{"type":"turn.completed"}\n`
+  const detail = { message: "fixture failure" }
+  const output = `${JSON.stringify({ type, ...(type === "turn.failed" ? { error: detail } : detail) })}\n{"type":"turn.completed"}\n`
   const result = await runAdapter(`
 await Bun.write(Bun.stdout, ${JSON.stringify(output)})
 process.exit(0)
 `)
   expect(result.exitCode).toBe(1)
   expect(result.stdout).toBe(output)
+  expect(result.stderr).toBe("fixture failure\n")
+})
+
+test("preserves failure details from the final event without a newline", async () => {
+  const output = JSON.stringify({ type: "turn.failed", error: { message: "échec du service" } })
+  const result = await runAdapter(`await Bun.write(Bun.stdout, ${JSON.stringify(output)})`)
+  expect(result).toEqual({ exitCode: 1, stdout: output, stderr: "échec du service\n" })
 })
 
 test("caller cancellation remains a failure and terminates the child", async () => {
