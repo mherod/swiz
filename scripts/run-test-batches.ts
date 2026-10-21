@@ -1,8 +1,8 @@
 import { resolve } from "node:path"
 
 /**
- * Long-lived isolated Bun workers can stall during full-suite runs. Recycle the
- * pool after 80 files while retaining four concurrent workers and every selected test.
+ * Keep reporting in batches, but give each file a fresh Bun process: reused
+ * isolated workers can stall on subprocess exits even within an 80-file batch.
  */
 const BATCH_SIZE = 80
 
@@ -18,25 +18,52 @@ export function discoverTestFiles(cwd: string): string[] {
     .map((path) => resolve(cwd, path))
 }
 
-async function runBunTests(files: string[], timeoutMs: number): Promise<number> {
+async function runBunTest(file: string, timeoutMs: number): Promise<number> {
   const proc = Bun.spawn(
-    [
-      process.execPath,
-      "test",
-      "--reporter=dots",
-      ...(files.length > 1 ? ["--parallel=4"] : []),
-      `--timeout=${timeoutMs}`,
-      ...files,
-    ],
-    { stdin: "inherit", stdout: "inherit", stderr: "inherit" }
+    [process.execPath, "test", "--reporter=dots", `--timeout=${timeoutMs}`, file],
+    { stdin: "inherit", stdout: "pipe", stderr: "pipe" }
   )
+  const [stdout, stderr] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+  ])
   await proc.exited
+  await Bun.write(Bun.stderr, `${file}\n${stdout}${stderr}`)
   return proc.exitCode ?? 1
+}
+
+/** Run at most four files at once; drain active files before returning any failure. */
+export async function runTestFiles(
+  files: string[],
+  runFile: (file: string) => Promise<number>
+): Promise<number> {
+  let next = 0
+  let exitCode = 0
+  const worker = async () => {
+    while (exitCode === 0 && next < files.length) {
+      const file = files[next++]!
+      try {
+        const code = await runFile(file)
+        if (code !== 0 && exitCode === 0) exitCode = code
+      } catch (error) {
+        if (exitCode === 0) exitCode = 1
+        throw error
+      }
+    }
+  }
+  const results = await Promise.allSettled(
+    Array.from({ length: Math.min(4, files.length) }, worker)
+  )
+  for (const result of results) {
+    if (result.status === "rejected") throw result.reason
+  }
+  return exitCode
 }
 
 export async function runTestBatches(
   files: string[],
-  runBatch: (batch: string[]) => Promise<number> = (batch) => runBunTests(batch, 60_000)
+  runBatch: (batch: string[]) => Promise<number> = (batch) =>
+    runTestFiles(batch, (file) => runBunTest(file, 60_000))
 ): Promise<number> {
   if (files.length === 0) throw new Error("No test files selected")
   for (let offset = 0; offset < files.length; offset += BATCH_SIZE) {
@@ -67,7 +94,7 @@ export async function runTestSuite(args: string[], cwd = process.cwd()): Promise
     }
   }
   return runTestBatches(files.length ? files : discoverTestFiles(cwd), (batch) =>
-    runBunTests(batch, timeoutMs)
+    runTestFiles(batch, (file) => runBunTest(file, timeoutMs))
   )
 }
 
