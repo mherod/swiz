@@ -241,6 +241,10 @@ export function logSlowHookSummary(executions: HookExecution[]): void {
 // ─── Cross-agent matcher ────────────────────────────────────────────────────
 
 export function toolMatchesToken(toolName: string, token: string): boolean {
+  if (/^mcp__[\w-]+__\.\*$/.test(token)) {
+    const prefix = token.slice(0, -2)
+    return toolName.startsWith(prefix) && toolName.length > prefix.length
+  }
   const toolMatchers = [
     isShellTool,
     isEditTool,

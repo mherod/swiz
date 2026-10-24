@@ -622,6 +622,28 @@ function _codexExecArgumentStart(tokens: string[], index: number): number | null
   return tokens[next] === "(" && tokens[next + 1] === "{" ? next + 2 : null
 }
 
+/** Literal tool calls in Codex orchestration; strings and comments remain opaque. */
+export function extractCodexToolCalls(code: string): string[] {
+  const tokens = (code.match(CODEX_CODE_TOKEN_RE) ?? []).filter(
+    (token) => !token.startsWith("//") && !token.startsWith("/*")
+  )
+  const names: string[] = []
+  for (let index = 0; index < tokens.length; index++) {
+    const name = _codexToolCallName(tokens, index)
+    if (name !== null) names.push(name)
+  }
+  return names
+}
+
+function _codexToolCallName(tokens: string[], index: number): string | null {
+  if (tokens[index] !== "tools" || tokens[index - 1] === ".") return null
+  if (tokens[index + 1] === "." && tokens[index + 3] === "(") return tokens[index + 2]!
+  if (tokens[index + 1] === "[" && tokens[index + 3] === "]" && tokens[index + 4] === "(") {
+    return _codexStringLiteral(tokens[index + 2])
+  }
+  return null
+}
+
 function _codexCommandField(tokens: string[], index: number): string | null {
   if (tokens[index - 1] !== "{" && tokens[index - 1] !== ",") return null
   const key = _codexStringLiteral(tokens[index]) ?? tokens[index]

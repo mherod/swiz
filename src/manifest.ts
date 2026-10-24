@@ -181,6 +181,7 @@ import userpromptsubmitTaskAdvisor from "../hooks/userpromptsubmit-task-advisor.
 import { debugLog } from "./debug.ts"
 import { detectFrameworks, type Framework } from "./detect-frameworks.ts"
 import { SESSION_EDIT_OBSERVATION_MATCHER } from "./session-edit-snapshot.ts"
+import { BANNED_BROWSER_TOOL_MATCHER } from "./tool-matchers.ts"
 
 export { DISPATCH_TIMEOUTS } from "./dispatch/timeouts.ts"
 
@@ -390,7 +391,7 @@ export const bundledHookManifest: HookGroup[] = [
   },
   {
     event: "preToolUse",
-    matcher: "Bash|exec|functions.exec",
+    matcher: `Bash|exec|functions.exec|${BANNED_BROWSER_TOOL_MATCHER}`,
     hooks: [{ hook: pretooluseBannedCommands }],
   },
   {

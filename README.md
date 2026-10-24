@@ -102,6 +102,8 @@ The JSON must name a supported agent and contain only valid tool-name strings. M
 
 161 hook scripts across 17 event types. All TypeScript.
 
+`pretooluse-banned-commands.ts` also blocks Chrome DevTools, Playwright, and Puppeteer MCP tool families, directly and through literal Codex `exec` tool calls. Direct browser calls remain checked when MCP skipping or subagent relaxation is enabled. It directs browser automation to `cua_repl`; unrelated tools, textual mentions, and ordinary Playwright test commands remain allowed.
+
 The bundled hooks cover seven events: Stop, PreToolUse, PostToolUse, SessionStart, PreCompact, UserPromptSubmit, and Notification. Five additional events — **SubagentStart**, **SubagentStop**, **TaskCreated**, **TaskCompleted**, and **SessionEnd** — are formally registered in the dispatch system. Claude supports all five; other agents retain their existing event surface. Task lifecycle events update a daemon-owned registry and feed unfinished background work into a non-blocking Stop advisory. For the full picture of which Claude lifecycle events swiz maps versus intentionally leaves reserved (and why), see [docs/lifecycle-event-coverage.md](docs/lifecycle-event-coverage.md).
 
 ### Stop (29)

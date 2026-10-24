@@ -27,11 +27,12 @@ import {
   resolveSkillRecencyOptions,
   skillExistsForHookPayload,
 } from "../src/skill-utils.ts"
-import { isShellTool } from "../src/tool-matchers.ts"
+import { isBannedBrowserTool, isShellTool } from "../src/tool-matchers.ts"
 import { packagePolicyContext } from "../src/utils/bun-command-policy.ts"
 import { detectPackageManagerDetails } from "../src/utils/package-detection.ts"
 import {
   extractCodexExecCommands,
+  extractCodexToolCalls,
   findGitCommitAttribution,
   hasGhFlag,
   hasGitNoVerifyFlag,
@@ -91,6 +92,8 @@ const PLAYWRIGHT_SHELLS = new Set(["sh", "bash", "zsh", "dash", "ksh", "fish"])
 const CODEX_EXEC_TOOLS = new Set(["exec", "functions.exec"])
 const PLAYWRIGHT_DENIAL =
   "Do not use `playwright-cli` or `playwriter`, including package-runner and shell-wrapper invocations. Use the available browser automation tools instead."
+const BROWSER_TOOL_DENIAL =
+  "Do not use Chrome DevTools, Playwright, or Puppeteer MCP tools. Use the available computer-use browser tools (cua_repl) instead."
 const PLAYWRIGHT_VALUE_FLAGS: Record<string, Set<string>> = {
   env: new Set(["-u", "--unset", "-C", "--chdir"]),
   exec: new Set(["-a"]),
@@ -977,9 +980,15 @@ function commandRulesOutput(
 }
 
 function codexExecBrowserCliOutput(input: Record<string, any>): SwizHookOutput | null {
-  if (!CODEX_EXEC_TOOLS.has(input.tool_name ?? "")) return null
+  const toolName = input.tool_name ?? ""
+  if (isBannedBrowserTool(toolName)) return preToolUseDeny(BROWSER_TOOL_DENIAL)
+  if (!CODEX_EXEC_TOOLS.has(toolName)) return null
   const code = input.tool_input?.code ?? input.tool_input?.input
-  if (typeof code === "string" && extractCodexExecCommands(code).some(hasPlaywrightCliCommand)) {
+  if (typeof code !== "string") return {}
+  if (extractCodexToolCalls(code).some(isBannedBrowserTool)) {
+    return preToolUseDeny(BROWSER_TOOL_DENIAL)
+  }
+  if (extractCodexExecCommands(code).some(hasPlaywrightCliCommand)) {
     return preToolUseDeny(PLAYWRIGHT_DENIAL)
   }
   return {}

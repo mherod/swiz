@@ -29,7 +29,11 @@ import {
 } from "../settings.ts"
 import { type IdleSecondsProvider, resolveStopContinuationMode } from "../stop-continuation.ts"
 import { syncCodexUpdatePlanFromTranscriptSummary } from "../tasks/codex-update-plan.ts"
-import { isMarkdownOnlyFileReadPayload, isSkillMdOnlyFileEditPayload } from "../tool-matchers.ts"
+import {
+  isBannedBrowserTool,
+  isMarkdownOnlyFileReadPayload,
+  isSkillMdOnlyFileEditPayload,
+} from "../tool-matchers.ts"
 import {
   type CurrentSessionToolUsage,
   computeTranscriptSummary,
@@ -819,6 +823,7 @@ function assertDispatchResponseMatchesWire(
  */
 async function shouldSkipMcpToolDispatch(ctx: DispatchContext): Promise<boolean> {
   if (!ctx.toolName?.startsWith("mcp__")) return false
+  if (ctx.canonicalEvent === "preToolUse" && isBannedBrowserTool(ctx.toolName)) return false
   if (TOOL_NAME_OPTIONAL_EVENTS.has(ctx.canonicalEvent)) return false
   // PostToolUse still dispatches so stateful hooks run; the blocking strategy
   // drops the advisory ones for ignored MCP tools (#994).
@@ -833,6 +838,7 @@ async function shouldSkipMcpToolDispatch(ctx: DispatchContext): Promise<boolean>
 const SUBAGENT_FLOOR_EVENTS = new Set(["preCommit", "commitMsg", "prePush"])
 
 async function shouldSkipSubagentDispatch(ctx: DispatchContext): Promise<boolean> {
+  if (ctx.canonicalEvent === "preToolUse" && isBannedBrowserTool(ctx.toolName ?? "")) return false
   if (SUBAGENT_FLOOR_EVENTS.has(ctx.canonicalEvent)) return false
   if (!isSubagentSession(ctx.payload)) return false
   const settings = await readSwizSettings(

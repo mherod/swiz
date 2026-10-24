@@ -73,6 +73,14 @@ export const SEARCH_TOOLS = new Set([
 ])
 export const SKILL_TOOLS = new Set(["Skill"])
 
+/** Browser MCP families prohibited in favour of the computer-use browser tools. */
+export const BANNED_BROWSER_TOOL_MATCHER =
+  "mcp__chrome_devtools__.*|mcp__chrome-devtools__.*|mcp__playwright__.*|mcp__puppeteer__.*"
+
+export function isBannedBrowserTool(name: string): boolean {
+  return /^(?:mcp__chrome[_-]devtools__|mcp__playwright__|mcp__puppeteer__).+$/.test(name)
+}
+
 export function isShellTool(name: string): boolean {
   return SHELL_TOOLS.has(name)
 }
