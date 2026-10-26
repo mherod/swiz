@@ -21,7 +21,7 @@
     "prepare": "lefthook install"
   },
   "dependencies": {
-    "@ai-sdk/anthropic": "^4.0.80",
+    "@ai-sdk/anthropic": "^4.0.87",
     "@ai-sdk/google": "4.0.96",
     "@ai-sdk/provider": "4.0.27",
     "@anthropic-ai/claude-agent-sdk": "^0.3.300",
