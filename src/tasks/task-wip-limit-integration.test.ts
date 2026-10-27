@@ -146,6 +146,24 @@ describe("updateStatus in-progress cap", () => {
     )
   })
 
+  test("cancelling an in_progress task at the cap is allowed and frees a slot", async () => {
+    await withSeededHome(
+      "wip-cancel-active-at-cap",
+      atCapacity(MAX_IN_PROGRESS_TASKS_PER_PROJECT),
+      async () => {
+        await updateStatus("wip-cancel-active-at-cap", "w1", "cancelled", {
+          filterCwd: process.cwd(),
+        })
+        await updateStatus("wip-cancel-active-at-cap", "next", "in_progress", {
+          filterCwd: process.cwd(),
+        })
+        const after = await readTasks("wip-cancel-active-at-cap")
+        expect(after.find((t) => t.id === "w1")?.status).toBe("cancelled")
+        expect(after.find((t) => t.id === "next")?.status).toBe("in_progress")
+      }
+    )
+  })
+
   test("the cap frees up once an open task closes", async () => {
     await withSeededHome(
       "wip-frees-up",
