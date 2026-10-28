@@ -138,9 +138,9 @@ export function gitAddAvoidanceMessage(
     `${GIT_ADD_GUARDIAN_DENIAL_MARKER} only needs escalation because the sandbox cannot write Git's index lock.`,
     `Diagnostic: ${GIT_ADD_GUARDIAN_DENIAL_TOKEN}`,
     "",
-    `Guardian denial ${denialNumber} of at most ${GIT_ADD_GUARDIAN_DENIAL_LIMIT} in the last minute.`,
+    `Guardian denial ${denialNumber} of at most ${GIT_ADD_GUARDIAN_DENIAL_LIMIT} for this command.`,
     "Retry permitted by guard: you may retry this same narrowly scoped `git add` after this denial.",
-    "After three guardian denials in one minute, this guard stands down so the next retry can reach the approval path.",
+    "After three guardian denials for this command, this guard stands down so the next retry can reach the approval path. This count does not expire while the command remains blocked.",
     ...commitRoute,
     GIT_SANDBOX_GUIDANCE,
   ].join("\n")
@@ -148,7 +148,7 @@ export function gitAddAvoidanceMessage(
 
 function gitAddRetryContext(): string {
   return [
-    "Guardian retry allowance reached: this narrowly scoped `git add` already received three guardian denials in the last minute.",
+    "Guardian retry allowance reached: this narrowly scoped `git add` already received three guardian denials without a successful attempt.",
     "The retry is permitted now. Keep the escalation limited to this `git add` and preserve the original sandbox index-lock failure in the justification.",
     GIT_SANDBOX_GUIDANCE,
   ].join("\n")

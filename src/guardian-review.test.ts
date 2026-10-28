@@ -14,13 +14,20 @@ const GIT_ADD_COMMAND = "git add -- hooks/shim.sh src/commands/shim.test.ts"
 
 function wrapperCall(callId: string, command: string, escalated: boolean): string {
   const sandbox = escalated ? ',sandbox_permissions:"require_escalated"' : ""
+  return wrapperCode(
+    callId,
+    `const r = await tools.exec_command({cmd:${JSON.stringify(command)}${sandbox}}); text(r.output)`
+  )
+}
+
+function wrapperCode(callId: string, code: string): string {
   return JSON.stringify({
     type: "response_item",
     payload: {
       type: "custom_tool_call",
       name: "exec",
       call_id: callId,
-      input: `const r = await tools.exec_command({cmd:${JSON.stringify(command)}${sandbox}}); text(r.output)`,
+      input: code,
     },
   })
 }
@@ -88,7 +95,7 @@ describe("guardian review transcript detection", () => {
     })
   })
 
-  test("counts only git add guardian denials from the last minute", () => {
+  test("preserves the retry budget when prescribed checks take longer than a minute", () => {
     const nowMs = Date.parse("2026-08-11T12:01:00.000Z")
     const lines = [
       wrapperCall("old", GIT_ADD_COMMAND, true),
@@ -107,7 +114,23 @@ describe("guardian review transcript detection", () => {
 
     expect(
       detectGuardianReviewRequest(lines, GIT_ADD_COMMAND, nowMs)?.recentGitAddGuardianDenialCount
-    ).toBe(2)
+    ).toBe(3)
+  })
+
+  test("resets prior denials after the same attributable command succeeds", () => {
+    const nowMs = Date.parse("2026-08-11T12:05:00.000Z")
+    const lines = [
+      wrapperCall("old-denial", GIT_ADD_COMMAND, true),
+      guardianDeniedOutput("old-denial", "2026-08-11T12:00:00.000Z"),
+      wrapperCall("success", GIT_ADD_COMMAND, true),
+      wrapperResult("success", { exit_code: 0, output: "" }, "2026-08-11T12:01:00.000Z"),
+      wrapperCall("new-denial", GIT_ADD_COMMAND, true),
+      guardianDeniedOutput("new-denial", "2026-08-11T12:02:00.000Z"),
+      wrapperCall("current", GIT_ADD_COMMAND, true),
+    ]
+    expect(
+      detectGuardianReviewRequest(lines, GIT_ADD_COMMAND, nowMs)?.recentGitAddGuardianDenialCount
+    ).toBe(1)
   })
 
   test("counts humanised denials once per matching escalation, excluding unrelated output", () => {
@@ -306,6 +329,60 @@ describe("guardian review transcript detection", () => {
   test("does not reuse an older escalation for the current sandboxed retry", () => {
     const lines = [wrapperCall("old", COMMAND, true), wrapperCall("current", COMMAND, false)]
     expect(detectGuardianReviewRequest(lines, COMMAND)).toBeNull()
+  })
+
+  test("does not transfer escalation from a later command to the preceding read-only call", () => {
+    const status = "git status --short"
+    const current = multiCommandWrapperCall("current", [
+      { command: status },
+      { command: GIT_ADD_COMMAND, escalated: true },
+    ])
+    const lines = [
+      wrapperCall("status", status, false),
+      wrapperResult("status", { exit_code: 0, output: "" }),
+      wrapperCall("add", GIT_ADD_COMMAND, false),
+      wrapperResult("add", { exit_code: 128, output: "Operation not permitted" }),
+      current,
+    ]
+    expect(detectGuardianReviewRequest(lines, status)).toBeNull()
+    expect(detectGuardianReviewRequest(lines, GIT_ADD_COMMAND)?.priorSandboxAttempt).toBe(
+      "permission-failed"
+    )
+  })
+
+  test("ignores escalation text in comments, nested options and quoted examples", () => {
+    const examples = [
+      `// {sandbox_permissions:"require_escalated"}\n`,
+      `const example = '{sandbox_permissions:"require_escalated"}';`,
+    ]
+    for (const example of examples) {
+      const code = `${example} await tools.exec_command({cmd:${JSON.stringify(COMMAND)}})`
+      expect(detectGuardianReviewRequest([wrapperCode("current", code)], COMMAND)).toBeNull()
+    }
+    const code = `await tools.exec_command({cmd:${JSON.stringify(COMMAND)},env:{sandbox_permissions:"require_escalated"}})`
+    expect(detectGuardianReviewRequest([wrapperCode("current", code)], COMMAND)).toBeNull()
+  })
+
+  test("does not reuse a completed escalation when the current wrapper command is dynamic", () => {
+    for (const argument of ["cmd", 'cmd:load("stage")']) {
+      const lines = [
+        wrapperCall("old", GIT_ADD_COMMAND, true),
+        guardianDeniedOutput("old", "2026-08-11T12:00:00.000Z"),
+        wrapperCode(
+          "current",
+          `text(await tools.exec_command({${argument},sandbox_permissions:"require_escalated"}))`
+        ),
+      ]
+      expect(detectGuardianReviewRequest(lines, GIT_ADD_COMMAND)).toBeNull()
+    }
+  })
+
+  test("does not infer which duplicate invocation of one command is being executed", () => {
+    const line = multiCommandWrapperCall("current", [
+      { command: COMMAND },
+      { command: COMMAND, escalated: true },
+    ])
+    expect(detectGuardianReviewRequest([line], COMMAND)).toBeNull()
   })
 
   test("supports direct exec_command function calls", () => {

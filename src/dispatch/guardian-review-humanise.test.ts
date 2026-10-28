@@ -10,10 +10,10 @@ import { executeDispatch } from "./execute.ts"
 const temp = useTempDir("swiz-guardian-humanise-")
 const command = "git add -- index.ts src/hook-compliance.ts"
 
-function call(callId: string, escalated: boolean): string {
+function call(callId: string, escalated: boolean, timestampMs: number): string {
   const input = { cmd: command, ...(escalated && { sandbox_permissions: "require_escalated" }) }
   return JSON.stringify({
-    timestamp: new Date().toISOString(),
+    timestamp: new Date(timestampMs).toISOString(),
     type: "response_item",
     payload: {
       type: "custom_tool_call",
@@ -24,29 +24,35 @@ function call(callId: string, escalated: boolean): string {
   })
 }
 
-function result(callId: string, text: string): string {
+function result(callId: string, text: string, timestampMs: number): string {
   return JSON.stringify({
-    timestamp: new Date().toISOString(),
+    timestamp: new Date(timestampMs).toISOString(),
     type: "response_item",
     payload: { type: "custom_tool_call_output", call_id: callId, output: text },
   })
 }
 
-test("humanised git add denials advance to approval review after three retries", async () => {
+test("humanised git add denials reach approval even when retries take more than a minute", async () => {
   const home = await temp.create()
   await mkdir(join(home, ".swiz"), { recursive: true })
   await Bun.write(
     join(home, ".swiz/settings.json"),
     JSON.stringify({ humaniseHookContext: true, autoSteer: false, autoContinue: false })
   )
+  const startedAt = Date.now() - 8 * 60_000
   const lines = [
-    call("sandbox", false),
-    result("sandbox", "fatal: Unable to create '/repo/.git/index.lock': Operation not permitted"),
+    call("sandbox", false, startedAt),
+    result(
+      "sandbox",
+      "fatal: Unable to create '/repo/.git/index.lock': Operation not permitted",
+      startedAt + 1_000
+    ),
   ]
 
   for (let attempt = 1; attempt <= 4; attempt++) {
     const callId = `retry-${attempt}`
-    lines.push(call(callId, true))
+    const attemptedAt = startedAt + attempt * 90_000
+    lines.push(call(callId, true, attemptedAt))
     const { response } = await executeDispatch({
       canonicalEvent: "preToolUse",
       hookEventName: "PreToolUse",
@@ -86,7 +92,13 @@ test("humanised git add denials advance to approval review after three retries",
       const reason = String(specific?.permissionDecisionReason)
       expect(reason).toStartWith("Guardian review was avoided because")
       expect(reason).toContain(`Guardian denial ${attempt} of at most 3`)
-      lines.push(result(callId, `Script error:\nCommand blocked by PreToolUse hook: ${reason}`))
+      lines.push(
+        result(
+          callId,
+          `Script error:\nCommand blocked by PreToolUse hook: ${reason}`,
+          attemptedAt + 1_000
+        )
+      )
     } else {
       expect(wire.decision).toBeUndefined()
       expect(specific?.permissionDecision).toBeUndefined()

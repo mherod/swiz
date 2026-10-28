@@ -66,17 +66,20 @@ describe("pretooluse-guardian-awareness", () => {
     expect(specific?.permissionDecisionReason).toContain("Guardian denial 1 of at most 3")
     expect(specific?.permissionDecisionReason).toContain("Retry permitted by guard")
     expect(specific?.permissionDecisionReason).toContain("you may retry")
+    expect(specific?.permissionDecisionReason).toContain("count does not expire")
+    expect(specific?.permissionDecisionReason).not.toContain("in the last minute")
     expect(specific?.permissionDecisionReason).toContain("missing-cwd")
     expect(specific?.permissionDecisionReason).not.toContain("git commit -a")
   })
 
-  test("allows the retry after three recent git add guardian denials", async () => {
+  test("allows the retry after three unresolved git add guardian denials", async () => {
     const specific = getHookSpecificOutput(
       await evaluate("permission-failed", "git add -- src/guardian-review.ts", 3)
     )
     expect(specific?.permissionDecision).toBe("allow")
     expect(specific?.permissionDecisionReason).toContain("retry allowance reached")
     expect(specific?.additionalContext).toContain("three guardian denials")
+    expect(specific?.additionalContext).toContain("without a successful attempt")
     expect(specific?.additionalContext).toContain("retry is permitted")
   })
 
