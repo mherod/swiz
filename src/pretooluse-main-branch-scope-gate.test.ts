@@ -339,9 +339,53 @@ describe("evaluatePretooluseMainBranchScopeGate (Pull Request merge state transi
     const parsed = hookOutputSchema.parse(result)
 
     expect(parsed.hookSpecificOutput?.permissionDecision).toBe("allow")
-    expect(parsed.hookSpecificOutput?.permissionDecisionReason).toContain(
-      "approved-production-merge"
+    expect(parsed.hookSpecificOutput?.permissionDecisionReason).toContain("repository-policy-merge")
+  })
+
+  test.each([
+    ["no required review", "", "CLEAN", "MERGEABLE", "allow"],
+    ["null review decision", null, "CLEAN", "MERGEABLE", "allow"],
+    ["approved review", "APPROVED", "CLEAN", "MERGEABLE", "allow"],
+    ["required review outstanding", "REVIEW_REQUIRED", "CLEAN", "MERGEABLE", "deny"],
+    ["changes requested", "CHANGES_REQUESTED", "CLEAN", "MERGEABLE", "deny"],
+    ["missing review field", undefined, "CLEAN", "MERGEABLE", "deny"],
+    ["unknown review state", "PENDING", "CLEAN", "MERGEABLE", "deny"],
+    ["checks blocked without reviews", "", "BLOCKED", "MERGEABLE", "deny"],
+    ["checks failing after approval", "APPROVED", "UNSTABLE", "MERGEABLE", "deny"],
+    ["conflicts without reviews", "", "DIRTY", "CONFLICTING", "deny"],
+    ["unknown mergeability", "", "UNKNOWN", "UNKNOWN", "deny"],
+  ] as const)("uses repository requirements: %s", async (_, reviewDecision, mergeStateStatus, mergeable, decision) => {
+    const deps = testDeps()
+    deps.ghJsonViaDaemon = async <T>(args: string[]): Promise<T | null> => {
+      if (args[0] === "api") return { base: { ref: "main" } } as T
+      return { reviewDecision, mergeStateStatus, mergeable } as T
+    }
+    const result = await evaluatePretooluseMainBranchScopeGate(
+      {
+        tool_name: "Bash",
+        tool_input: { command: "gh pr merge 902 --squash" },
+        cwd: process.cwd(),
+      },
+      deps
     )
+    expect(hookOutputSchema.parse(result).hookSpecificOutput?.permissionDecision).toBe(decision)
+  })
+
+  test("denies when live GitHub status is unavailable", async () => {
+    const deps = testDeps()
+    deps.ghJsonViaDaemon = async <T>(args: string[]): Promise<T | null> => {
+      if (args[0] === "api") return { base: { ref: "main" } } as T
+      throw new Error("GitHub unavailable")
+    }
+    const result = await evaluatePretooluseMainBranchScopeGate(
+      {
+        tool_name: "Bash",
+        tool_input: { command: "gh pr merge 902 --squash" },
+        cwd: process.cwd(),
+      },
+      deps
+    )
+    expect(hookOutputSchema.parse(result).hookSpecificOutput?.permissionDecision).toBe("deny")
   })
 })
 

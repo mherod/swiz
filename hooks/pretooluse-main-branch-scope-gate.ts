@@ -283,6 +283,10 @@ async function getCachedMergeBlock(
   }
 }
 
+function reviewsSatisfyRepositoryPolicy(reviewDecision: string | null | undefined): boolean {
+  return reviewDecision === "APPROVED" || reviewDecision === "" || reviewDecision === null
+}
+
 async function getLiveMergeability(
   repoSlug: string,
   prNumber: string,
@@ -293,7 +297,7 @@ async function getLiveMergeability(
     const result = await deps.ghJsonViaDaemon<{
       mergeStateStatus?: string
       mergeable?: string
-      reviewDecision?: string
+      reviewDecision?: string | null
     }>(
       [
         "pr",
@@ -309,14 +313,15 @@ async function getLiveMergeability(
 
     const mergeStateStatus = result?.mergeStateStatus ?? "UNKNOWN"
     const isMergeable = result?.mergeable === "MERGEABLE"
-    const reviewDecision = result?.reviewDecision ?? "PENDING"
-    const canMerge =
-      isMergeable &&
-      mergeStateStatus === "CLEAN" &&
-      (reviewDecision === "APPROVED" || reviewDecision === "REVIEW_REQUIRED")
+    const reviewDecision = result?.reviewDecision
+    // GitHub's aggregate review decision reflects the applicable repository
+    // requirements. Empty/null means no review is required, not pending approval.
+    // Missing or unrecognized fields still fail closed.
+    const reviewsSatisfied = reviewsSatisfyRepositoryPolicy(reviewDecision)
+    const canMerge = isMergeable && mergeStateStatus === "CLEAN" && reviewsSatisfied
     return {
       mergeable: canMerge,
-      statusContext: `${mergeStateStatus}, review: ${reviewDecision}`,
+      statusContext: `${mergeStateStatus}, review: ${reviewDecision === undefined ? "unknown" : reviewDecision || "not required"}`,
     }
   } catch {
     return { mergeable: false, statusContext: "Could not fetch PR status from GitHub" }
@@ -405,12 +410,12 @@ Please verify the PR number and your network connection, then try again.
   const baseBranchResult = getBaseBranchPolicyResult(baseBranch, defaultBranch)
   if (baseBranchResult) return baseBranchResult
 
-  // If we are merging into a production branch, check if the PR is approved/ready.
+  // Require GitHub's merge requirements, not approval inferred from collaboration.
   const prStatus = await getPrMergeability(prNumber, cwd, deps)
 
   if (prStatus.mergeable) {
     return preToolUseAllow(
-      `Continue in approved-production-merge mode: PR #${prNumber} is approved and mergeable (${prStatus.statusContext}).`
+      `Continue in repository-policy-merge mode: PR #${prNumber} satisfies GitHub's merge requirements (${prStatus.statusContext}).`
     )
   }
 
@@ -420,13 +425,11 @@ Please verify the PR number and your network connection, then try again.
   return preToolUseDeny(`
 Merging ${prRef} via \`gh pr merge\` is currently blocked in ${repoContext}
 
-The PR is not in a fully approved, mergeable state (${prStatus.statusContext}).
-\`gh pr merge\` directly to '${baseBranch}' is restricted to approved PRs.
+The PR does not currently satisfy GitHub's merge requirements (${prStatus.statusContext}).
+Merges to '${baseBranch}' require a clean, mergeable PR and any reviews required by repository policy.
 
-Allowed merge paths:
-  1. Wait for required CI checks and reviews to finish, then rerun \`gh pr merge\`
-  2. Merge via the GitHub web UI after required reviews are approved
-  3. Use auto-merge if branch protection requires it: gh pr merge ${prNumber} --auto --squash
+Resolve outstanding required checks, reviews, or conflicts, then rerun \`gh pr merge\`.
+If status could not be fetched, restore GitHub access and retry.
 
 Repository: ${policy.owner}/${policy.repo}
 `)
