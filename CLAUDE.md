@@ -9,7 +9,7 @@ alwaysApply: false
 - Use `bun <file>`, `bun test`, `bun install`, `bun run index.ts`, `bun --hot index.ts`, `bun link`.
 - Prefer `swiz <command>`.
 - Use `bun run index.ts <command>` to guarantee checkout execution and avoid PATH `swiz` version drift.
-- Use `Bun.file()` and `Bun.write()` for file I/O.
+- Use `Bun.file()` and `Bun.write()` for file I/O. Recreate `Bun.file(path)` after atomic replacement before reading again; a reused handle can return `Unexpected EOF`.
 - Use `node:fs/promises` only for directories (`readdir`, `mkdir`, `stat`).
 ## CLI Architecture
 - Entry: `index.ts`; register `src/cli.ts` commands through `Command` (`src/types.ts`); keep manual `process.argv` parsing.
@@ -45,7 +45,7 @@ alwaysApply: false
 - **Task completion**: `TaskUpdate` `taskId` + `status: completed`; evidence in `description`: `commit:`, `pr:`, `file:`, `test:`, `note:`.
 - **DON'T**: Assume CI success from partial output or from `gh run watch` alone. Confirm every job: `gh run view <run-id> --json conclusion,status,jobs`.
 - Treat `gh issue create` and task completion as atomic; recover with `TaskUpdate`.
-- After each `CLAUDE.md` edit run `wc -w CLAUDE.md`: the lefthook `memory` step hard-fails commits above project `memory-word-threshold` (2000 via `swiz settings show --project`, not `/compact-memory`'s 5000 analyzer default). Offset additions with trims in the same pass.
+- Before editing `CLAUDE.md`, resolve `memoryWordThreshold` from project settings and verify it with `swiz memory --strict`; use the stricter value if they differ. Run `wc -w <target>` after each edit and the same strict memory check before committing; never assume a historical limit or the analyzer's 5000-word default.
 - Before adding a `CLAUDE.md` rule, scan nearby rules for conflicts.
 - Before issue labeling, run `gh label list`; use requested literal labels when present.
 - After `gh issue create`, run `/refine-issue <number>` and apply readiness label.
@@ -96,6 +96,7 @@ alwaysApply: false
 - DO NOT add `Co-Authored-By` or AI attribution in commits/PR descriptions.
 - DO NOT use destructive git: `revert`, `restore`, `stash`, `reset --hard`, `checkout -- <file>`; use `reflog`. Exception: `stash list`/`stash show` (read-only).
 - DO: Read full file before reverting edits — Biome auto-formatting changes other sections.
+- **DO**: Run each permission-sensitive command as one literal invocation in its own tool call, separate from read-only checks. Establish its exact sandbox failure before requesting escalation; helper-spawned or batched output is not attributable evidence. For `.git/index.lock: Operation not permitted`, preserve explicit paths, authentication, options, and normal hooks; retry only as the guard permits. Never broaden the operation, delete locks, change permissions, or repush a successful remote update to repair local metadata.
 ## Source components
 - Read [src/CLAUDE.md](src/CLAUDE.md) before daemon, settings, or CLI work. Paths are repository-relative.
 ## Conventions
@@ -132,7 +133,7 @@ alwaysApply: false
 - **DO NOT mark tasks complete without shipped code:** modify source, verify `git diff`, commit, mark complete.
 - Stop footers with `REMINDER_FRAGMENT` re-trigger memory enforcement. `pretooluse-update-memory-enforcement.ts` uses 30-min `CLAUDE.md` mtime cooldown; run `swiz install` after hook changes.
 - Cache keys: use `getCanonicalPathHash()` in `hook-utils.ts`. DO NOT duplicate cache-key logic.
-- In CLI subprocess tests, do not set `cwd: process.cwd()`; use absolute `indexPath = join(process.cwd(), "index.ts")`, temp `cwd`, and `HOME: tempDir`.
+- In CLI subprocess tests, do not set `cwd: process.cwd()`; use absolute `indexPath = join(process.cwd(), "index.ts")`, temp `cwd`, and `HOME: tempDir`. Keep `.swiz/*-execution-stats.json` fixtures in temporary projects; never delete real project stats during setup or cleanup.
 - No Agent tool `isolation: "worktree"` — corrupts `.git/config`.
 - For secret test fixtures, build via array join (`['s','k','_','l','i','v','e','_',...].join('')`) — push protection blocks literal secrets.
 - **DO**: In subprocess tests reaching `hasAiProvider() || detectAgentCli()`, pass `AI_TEST_NO_BACKEND: "1"` — prevents real backend calls. Exempt: tests with `GEMINI_API_KEY: "test-key"` + `GEMINI_TEST_RESPONSE`.
