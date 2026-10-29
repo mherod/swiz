@@ -93,7 +93,7 @@ export interface WarmStatusLineSnapshot {
   fileOwnership?: ProjectFileOwnershipSummary | null
   /** True when the daemon's upstream sync hasn't succeeded for this project in over 10 minutes. Null/undefined when unknown (non-daemon path). */
   issueSyncStale?: boolean | null
-  /** Average test/lint execution times recorded by the measure-*-time hooks. Null when no runs recorded. */
+  /** Average test/lint/typecheck execution times. Null when no runs recorded. */
   execStats?: ProjectExecutionStats | null
   /** Pending auto-steer messages queued for this session, by trigger. Null when none or unknown. */
   queuedSteers?: QueuedSteerCounts | null
@@ -1195,12 +1195,14 @@ function formatExecStat(label: string, stat: ExecutionStatsSummary | null): stri
   return `${DIM}${label}${R} ${color}${avg}s${R}${DIM}×${stat.count}${R}`
 }
 
-/** Average test/lint runtimes recorded by the measure-*-time hooks, e.g. `⏱ test 1.2s×12 lint 0.8s×4`. */
+/** Average check runtimes, e.g. `⏱ test 1.2s×12 lint 0.8s×4 typecheck 2.0s×3`. */
 export function formatExecStatsSegment(stats: ProjectExecutionStats | null | undefined): string {
   if (!stats) return ""
-  const parts = [formatExecStat("test", stats.test), formatExecStat("lint", stats.lint)].filter(
-    Boolean
-  )
+  const parts = [
+    formatExecStat("test", stats.test),
+    formatExecStat("lint", stats.lint),
+    formatExecStat("typecheck", stats.typecheck),
+  ].filter(Boolean)
   if (parts.length === 0) return ""
   return `⏱ ${parts.join(" ")}`
 }

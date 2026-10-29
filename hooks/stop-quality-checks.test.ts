@@ -52,6 +52,23 @@ async function qualityFixture(source: string): Promise<string> {
   return cwd
 }
 
+async function expectRecordedDuration(
+  cwd: string,
+  kind: "lint" | "typecheck",
+  outcome: "passed" | "failed" | "timeout" | "unavailable"
+): Promise<void> {
+  const stats = await Bun.file(join(cwd, ".swiz", `${kind}-execution-stats.json`)).json()
+  expect(stats.count).toBe(1)
+  expect(stats.totalTimeMs).toBeGreaterThan(0)
+  expect(stats.recentRuns).toHaveLength(1)
+  expect(stats.recentRuns[0]).toEqual({
+    durationMs: stats.totalTimeMs,
+    source: "stop-hook",
+    outcome,
+    recordedAt: expect.any(Number),
+  })
+}
+
 describe("stop-quality-checks: subprocess outcomes", () => {
   test("accepts delayed success without treating output text as the exit status", async () => {
     const cwd = await qualityFixture('await Bun.sleep(100); process.stdout.write("0 errors\\n")')
@@ -60,6 +77,7 @@ describe("stop-quality-checks: subprocess outcomes", () => {
       hookTimeoutMs: 7_000,
     })
     expect(result.status).toBe("passed")
+    await expectRecordedDuration(cwd, "lint", "passed")
     expect(await qualityResultsResponse([result], { cwd, settings: {} })).toEqual({})
     expect(
       await qualityResultsResponse(
@@ -81,6 +99,7 @@ describe("stop-quality-checks: subprocess outcomes", () => {
     )
     const result = await runQualityScript(process.execPath, "lint", cwd)
     expect(result.status).toBe("failed")
+    await expectRecordedDuration(cwd, "lint", "failed")
     const response = await qualityResultsResponse([result], { cwd, settings: { trunkMode: true } })
     expect(response).toMatchObject({ decision: "block" })
     expect("reason" in response && response.reason).toContain("invalid code")
@@ -93,6 +112,7 @@ describe("stop-quality-checks: subprocess outcomes", () => {
       hookTimeoutMs: 5_150,
     })
     expect(result.status).toBe("timeout")
+    await expectRecordedDuration(cwd, "lint", "timeout")
     expect(result.output).toContain("Check budget: 0.15s; hook budget: 5.15s")
     const response = await qualityResultsResponse([result], { cwd, settings: {} })
     expect(response).toMatchObject({ decision: "block" })
@@ -107,6 +127,7 @@ describe("stop-quality-checks: subprocess outcomes", () => {
     const result = await runQualityScript(join(cwd, "missing-manager"), "lint", cwd)
     expect(result.status).toBe("unavailable")
     expect(result.output).toContain("Could not execute")
+    await expectRecordedDuration(cwd, "lint", "unavailable")
   })
 
   test("cancels an active check when dispatch aborts", async () => {
@@ -163,6 +184,73 @@ describe("stop-quality-checks: subprocess outcomes", () => {
     })
     expect(qualityCheckBudget({ timeoutMs: 999_999 }).hookTimeoutMs).toBe(120_000)
     expect(qualityCheckBudget({ timeoutMs: 1_000 }).timeoutMs).toBe(0)
+  })
+})
+
+describe("stop-quality-checks: execution timing", () => {
+  test("records both script durations while preserving parallel execution", async () => {
+    const cwd = await qualityFixture(`
+const kind = process.argv.at(-1)
+const other = kind === "lint" ? "typecheck" : "lint"
+const deadline = setTimeout(() => process.exit(23), 3_000)
+await Bun.write(kind + ".started", "started")
+while (!(await Bun.file(other + ".started").exists())) await Bun.sleep(5)
+await Bun.sleep(20)
+await Bun.write(kind + ".observed", other)
+clearTimeout(deadline)
+`)
+    await Bun.write(
+      join(cwd, "package.json"),
+      JSON.stringify({
+        packageManager: "bun@1.3.14",
+        scripts: {
+          "lint:check": "bun check.ts lint",
+          "check:types": "bun check.ts typecheck",
+        },
+      })
+    )
+
+    const result = await evaluateStopQualityChecks({
+      cwd,
+      session_id: "quality-timing-test",
+      _effectiveSettings: { qualityChecksGate: true },
+    })
+
+    expect(result).toEqual({})
+    expect(await Bun.file(join(cwd, "lint.observed")).text()).toBe("typecheck")
+    expect(await Bun.file(join(cwd, "typecheck.observed")).text()).toBe("lint")
+    await expectRecordedDuration(cwd, "lint", "passed")
+    await expectRecordedDuration(cwd, "typecheck", "passed")
+  }, 10_000)
+
+  test("does not count a check that could not start within its budget", async () => {
+    const cwd = await qualityFixture('throw new Error("should not run")')
+    const result = await runQualityScript(process.execPath, "lint", cwd, {
+      timeoutMs: 0,
+      hookTimeoutMs: 5_000,
+    })
+
+    expect(result.status).toBe("timeout")
+    expect(result.output).toContain("No execution time remains")
+    expect(await Bun.file(join(cwd, ".swiz", "lint-execution-stats.json")).exists()).toBe(false)
+  })
+
+  test.each([
+    "passed",
+    "failed",
+  ] as const)("preserves a %s verification result when timing cannot be written", async (status) => {
+    const cwd = await qualityFixture(
+      `process.stdout.write("verification output"); process.exitCode = ${status === "passed" ? 0 : 1}`
+    )
+    await Bun.write(join(cwd, ".swiz"), "a file prevents telemetry directory creation")
+
+    const result = await runQualityScript(process.execPath, "lint", cwd)
+
+    expect(result.status).toBe(status)
+    expect(result.output).toContain("verification output")
+    expect(await Bun.file(join(cwd, ".swiz")).text()).toBe(
+      "a file prevents telemetry directory creation"
+    )
   })
 })
 

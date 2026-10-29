@@ -1,24 +1,27 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import { unlink } from "node:fs/promises"
 import { join } from "node:path"
 import type { PostToolHookInput, ShellHookInput } from "../src/schemas.ts"
 import { TMP_ROOT } from "../src/temp-paths.ts"
+import { useTempDir } from "../src/utils/test-utils.ts"
 import posttooluseMeasureLintTime from "./posttooluse-measure-lint-time.ts"
 import pretooluseMeasureLintTime, { isFullLintSuiteRun } from "./pretooluse-measure-lint-time.ts"
 
-const SESSION_ID = "test-session-measure-lint-time"
+const SESSION_ID = `test-session-measure-lint-time-${crypto.randomUUID()}`
 const SENTINEL_PATH = join(TMP_ROOT, `swiz-lint-start-${SESSION_ID}.json`)
-const STATS_PATH = join(process.cwd(), ".swiz", "lint-execution-stats.json")
+const { create } = useTempDir("swiz-measure-lint-")
+let projectDir: string
+let statsPath: string
 
 describe("Measure Lint Time Hooks", () => {
   beforeEach(async () => {
-    await unlink(SENTINEL_PATH).catch(() => {})
-    await unlink(STATS_PATH).catch(() => {})
+    projectDir = await create()
+    statsPath = join(projectDir, ".swiz", "lint-execution-stats.json")
   })
 
   afterEach(async () => {
-    await unlink(SENTINEL_PATH).catch(() => {})
-    await unlink(STATS_PATH).catch(() => {})
+    await Bun.file(SENTINEL_PATH)
+      .delete()
+      .catch(() => {})
   })
 
   describe("parseLintCommand & isFullLintSuiteRun", () => {
@@ -57,7 +60,7 @@ describe("Measure Lint Time Hooks", () => {
         tool_input: {
           command: "eslint .",
         },
-        cwd: process.cwd(),
+        cwd: projectDir,
       }
 
       const preOutput = await pretooluseMeasureLintTime.run(preInput)
@@ -81,7 +84,7 @@ describe("Measure Lint Time Hooks", () => {
         tool_input: {
           command: "eslint .",
         },
-        cwd: process.cwd(),
+        cwd: projectDir,
       }
 
       const postOutput = (await posttooluseMeasureLintTime.run(postInput)) as any
@@ -93,9 +96,8 @@ describe("Measure Lint Time Hooks", () => {
       expect(await Bun.file(SENTINEL_PATH).exists()).toBe(false)
 
       // Verify stats file is written
-      const statsFile = Bun.file(STATS_PATH)
-      expect(await statsFile.exists()).toBe(true)
-      const statsData = JSON.parse(await statsFile.text())
+      expect(await Bun.file(statsPath).exists()).toBe(true)
+      const statsData = await Bun.file(statsPath).json()
       expect(statsData.count).toBe(1)
       expect(statsData.totalTimeMs).toBeGreaterThanOrEqual(1500)
 
@@ -108,7 +110,7 @@ describe("Measure Lint Time Hooks", () => {
       const postOutput2 = (await posttooluseMeasureLintTime.run(postInput)) as any
       expect(postOutput2.systemMessage).toContain("based on 2 runs")
 
-      const statsData2 = JSON.parse(await statsFile.text())
+      const statsData2 = await Bun.file(statsPath).json()
       expect(statsData2.count).toBe(2)
       expect(statsData2.totalTimeMs).toBeGreaterThanOrEqual(4000)
       const expectedAverage = statsData2.totalTimeMs / 2 / 1000

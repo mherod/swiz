@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import {
+  type ExecutionStatsKind,
   getExecutionStatsPath,
   readExecutionStats,
   readProjectExecutionStats,
@@ -12,7 +13,7 @@ function makeTempProject(): string {
   return mkdtempSync(join(tmpdir(), "swiz-exec-stats-test-"))
 }
 
-async function writeStats(dir: string, kind: "test" | "lint", content: unknown): Promise<void> {
+async function writeStats(dir: string, kind: ExecutionStatsKind, content: unknown): Promise<void> {
   mkdirSync(join(dir, ".swiz"), { recursive: true })
   await Bun.write(getExecutionStatsPath(dir, kind), JSON.stringify(content))
 }
@@ -79,5 +80,15 @@ describe("readProjectExecutionStats", () => {
     const stats = await readProjectExecutionStats(dir)
     expect(stats?.test).toBeNull()
     expect(stats?.lint?.count).toBe(1)
+    expect(stats?.typecheck).toBeNull()
+  })
+
+  it("returns typecheck stats when no lint or test data exists", async () => {
+    const dir = makeTempProject()
+    await writeStats(dir, "typecheck", { totalTimeMs: 1000, count: 2 })
+    const stats = await readProjectExecutionStats(dir)
+    expect(stats?.test).toBeNull()
+    expect(stats?.lint).toBeNull()
+    expect(stats?.typecheck?.averageMs).toBe(500)
   })
 })

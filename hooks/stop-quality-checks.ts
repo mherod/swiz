@@ -10,6 +10,7 @@ import { getOpenPrForBranch, git } from "../src/git-helpers.ts"
 import type { SwizHookOutput, SwizHookRunContext, SwizStopHook } from "../src/SwizHook.ts"
 import { runSwizHookAsMain } from "../src/SwizHook.ts"
 import { type StopHookInput, stopHookInputSchema } from "../src/schemas.ts"
+import { recordExecutionDuration } from "../src/utils/execution-timing.ts"
 import { getDefaultBranch, isDefaultBranch } from "../src/utils/git-utils.ts"
 import { blockStopObj } from "../src/utils/hook-response.ts"
 import { detectPackageManagerDetails } from "../src/utils/package-detection.ts"
@@ -81,28 +82,41 @@ export async function runQualityScript(
   pm: string,
   scriptName: string,
   cwd: string,
-  budget: QualityCheckBudget = qualityCheckBudget()
+  budget: QualityCheckBudget = qualityCheckBudget(),
+  kind: "lint" | "typecheck" = TYPECHECK_SCRIPTS.some((name) => name === scriptName)
+    ? "typecheck"
+    : "lint"
 ): Promise<QualityCheckResult> {
   const command = `${pm} run ${scriptName}`
   const budgets = `Check budget: ${budget.timeoutMs / 1000}s; hook budget: ${budget.hookTimeoutMs / 1000}s.`
   if (budget.timeoutMs <= 0) {
     return { status: "timeout", command, output: `No execution time remains. ${budgets}` }
   }
+  const startedAt = performance.now()
+  let result: QualityCheckResult
   try {
-    const result = await spawnWithTimeout([pm, "run", scriptName], {
+    const execution = await spawnWithTimeout([pm, "run", scriptName], {
       cwd,
       timeoutMs: budget.timeoutMs,
       signal: budget.signal,
       killProcessGroup: true,
     })
-    return classifyQualityExecution(result, command, budgets)
+    result = classifyQualityExecution(execution, command, budgets)
   } catch (error) {
-    return {
+    result = {
       status: "unavailable",
       command,
       output: `Could not execute the check: ${error instanceof Error ? error.message : String(error)}`,
     }
   }
+  await recordExecutionDuration({
+    cwd,
+    kind,
+    durationMs: performance.now() - startedAt,
+    source: "stop-hook",
+    outcome: result.status,
+  })
+  return result
 }
 
 export function classifyQualityExecution(
@@ -302,9 +316,15 @@ async function collectQualityResults(
     ]
   }
   const pm = selection.packageManager
-  const scriptNames = [resolved.lint, resolved.typecheck].filter((s): s is string => s !== null)
+  const kinds = ["lint", "typecheck"] as const
+  const scripts = kinds.flatMap((kind) => {
+    const name = resolved[kind]
+    return name === null ? [] : [{ name, kind }]
+  })
   const budget = qualityCheckBudget(context, Date.now() - startedAt)
-  const results = await Promise.all(scriptNames.map((s) => runQualityScript(pm, s, cwd, budget)))
+  const results = await Promise.all(
+    scripts.map(({ name, kind }) => runQualityScript(pm, name, cwd, budget, kind))
+  )
   return results.map((result) => ({
     ...result,
     output: `${result.output}\nSelection: ${pm}; root: ${selection.root}; evidence: ${selection.source}; command cwd: ${cwd}`,

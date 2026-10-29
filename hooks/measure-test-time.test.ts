@@ -1,24 +1,27 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import { unlink } from "node:fs/promises"
 import { join } from "node:path"
 import type { PostToolHookInput, ShellHookInput } from "../src/schemas.ts"
 import { TMP_ROOT } from "../src/temp-paths.ts"
+import { useTempDir } from "../src/utils/test-utils.ts"
 import posttooluseMeasureTestTime from "./posttooluse-measure-test-time.ts"
 import pretooluseMeasureTestTime, { isFullTestSuiteRun } from "./pretooluse-measure-test-time.ts"
 
-const SESSION_ID = "test-session-measure-time"
+const SESSION_ID = `test-session-measure-time-${crypto.randomUUID()}`
 const SENTINEL_PATH = join(TMP_ROOT, `swiz-test-start-${SESSION_ID}.json`)
-const STATS_PATH = join(process.cwd(), ".swiz", "test-execution-stats.json")
+const { create } = useTempDir("swiz-measure-test-")
+let projectDir: string
+let statsPath: string
 
 describe("Measure Test Time Hooks", () => {
   beforeEach(async () => {
-    await unlink(SENTINEL_PATH).catch(() => {})
-    await unlink(STATS_PATH).catch(() => {})
+    projectDir = await create()
+    statsPath = join(projectDir, ".swiz", "test-execution-stats.json")
   })
 
   afterEach(async () => {
-    await unlink(SENTINEL_PATH).catch(() => {})
-    await unlink(STATS_PATH).catch(() => {})
+    await Bun.file(SENTINEL_PATH)
+      .delete()
+      .catch(() => {})
   })
 
   describe("parseTestCommand & isFullTestSuiteRun", () => {
@@ -70,7 +73,7 @@ describe("Measure Test Time Hooks", () => {
         tool_input: {
           command: "bun test --concurrent",
         },
-        cwd: process.cwd(),
+        cwd: projectDir,
       }
 
       const preOutput = await pretooluseMeasureTestTime.run(preInput)
@@ -94,7 +97,7 @@ describe("Measure Test Time Hooks", () => {
         tool_input: {
           command: "bun test --concurrent",
         },
-        cwd: process.cwd(),
+        cwd: projectDir,
       }
 
       const postOutput = (await posttooluseMeasureTestTime.run(postInput)) as any
@@ -106,22 +109,21 @@ describe("Measure Test Time Hooks", () => {
       expect(await Bun.file(SENTINEL_PATH).exists()).toBe(false)
 
       // Verify stats file is written
-      const statsFile = Bun.file(STATS_PATH)
-      expect(await statsFile.exists()).toBe(true)
-      const statsData = JSON.parse(await statsFile.text())
+      expect(await Bun.file(statsPath).exists()).toBe(true)
+      const statsData = await Bun.file(statsPath).json()
       expect(statsData.count).toBe(1)
       expect(statsData.totalTimeMs).toBeGreaterThanOrEqual(2000)
 
       // 3. Run again to verify averaging
       await pretooluseMeasureTestTime.run(preInput)
-      const sentinelData2 = JSON.parse(await sentinelFile.text())
+      const sentinelData2 = await Bun.file(SENTINEL_PATH).json()
       sentinelData2.startTime -= 4000 // simulate 4 seconds
       await Bun.write(SENTINEL_PATH, JSON.stringify(sentinelData2))
 
       const postOutput2 = (await posttooluseMeasureTestTime.run(postInput)) as any
       expect(postOutput2.systemMessage).toContain("based on 2 runs")
 
-      const statsData2 = JSON.parse(await statsFile.text())
+      const statsData2 = await Bun.file(statsPath).json()
       expect(statsData2.count).toBe(2)
       // totalTime should be around 6000ms
       expect(statsData2.totalTimeMs).toBeGreaterThanOrEqual(6000)
@@ -138,7 +140,7 @@ describe("Measure Test Time Hooks", () => {
         tool_input: {
           command: "bun test hooks/pretooluse-bun-test-concurrent.test.ts",
         },
-        cwd: process.cwd(),
+        cwd: projectDir,
       }
 
       await pretooluseMeasureTestTime.run(preInput)
@@ -150,7 +152,7 @@ describe("Measure Test Time Hooks", () => {
         tool_input: {
           command: "bun test hooks/pretooluse-bun-test-concurrent.test.ts",
         },
-        cwd: process.cwd(),
+        cwd: projectDir,
       }
 
       const postOutput = await posttooluseMeasureTestTime.run(postInput)

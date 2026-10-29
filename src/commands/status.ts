@@ -188,6 +188,7 @@ interface ProjectHealth {
   ciConclusion: string | null
   testStats: ExecutionStatsSummary | null
   lintStats: ExecutionStatsSummary | null
+  typecheckStats: ExecutionStatsSummary | null
 }
 
 interface ProjectHealthOptions {
@@ -357,9 +358,10 @@ async function getProjectHealth(
   const { ciStatus, ciConclusion } = await resolveProjectCi(cwd, branch, options.refreshCi)
 
   const projectRoot = repoRoot || cwd
-  const [testStats, lintStats] = await Promise.all([
+  const [testStats, lintStats, typecheckStats] = await Promise.all([
     readExecutionStats(projectRoot, "test"),
     readExecutionStats(projectRoot, "lint"),
+    readExecutionStats(projectRoot, "typecheck"),
   ])
 
   return {
@@ -374,6 +376,7 @@ async function getProjectHealth(
     ciConclusion,
     testStats,
     lintStats,
+    typecheckStats,
   }
 }
 
@@ -448,6 +451,7 @@ function renderHealthPanel(health: ProjectHealth, write: (line?: string) => void
   write(`    CI:        ${formatCiLine(health.ciStatus, health.ciConclusion)}`)
   write(formatExecutionStatsLine("Test", health.testStats))
   write(formatExecutionStatsLine("Lint", health.lintStats))
+  if (health.typecheckStats) write(formatExecutionStatsLine("Typecheck", health.typecheckStats))
 
   write()
 }

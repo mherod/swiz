@@ -958,23 +958,37 @@ describe("formatExecStatsSegment", () => {
     expect(formatExecStatsSegment(undefined)).toBe("")
   })
 
-  it("returns empty string when both test and lint stats are null", () => {
-    expect(formatExecStatsSegment({ test: null, lint: null })).toBe("")
+  it("returns empty string when all check stats are null", () => {
+    expect(formatExecStatsSegment({ test: null, lint: null, typecheck: null })).toBe("")
   })
 
   it("renders test average with run count", () => {
-    const out = stripAnsi(formatExecStatsSegment({ test: fastTest, lint: null }))
+    const out = stripAnsi(formatExecStatsSegment({ test: fastTest, lint: null, typecheck: null }))
     expect(out).toBe("⏱ test 1.2s×2")
   })
 
   it("renders both test and lint averages", () => {
-    const out = stripAnsi(formatExecStatsSegment({ test: fastTest, lint: slowLint }))
+    const out = stripAnsi(
+      formatExecStatsSegment({ test: fastTest, lint: slowLint, typecheck: null })
+    )
     expect(out).toBe("⏱ test 1.2s×2 lint 12s×2")
   })
 
   it("renders lint-only stats", () => {
-    const out = stripAnsi(formatExecStatsSegment({ test: null, lint: slowLint }))
+    const out = stripAnsi(formatExecStatsSegment({ test: null, lint: slowLint, typecheck: null }))
     expect(out).toBe("⏱ lint 12s×2")
+  })
+
+  it("renders typecheck-only stats with run count", () => {
+    const out = stripAnsi(formatExecStatsSegment({ test: null, lint: null, typecheck: fastTest }))
+    expect(out).toBe("⏱ typecheck 1.2s×2")
+  })
+
+  it("renders typecheck alongside existing test and lint stats", () => {
+    const out = stripAnsi(
+      formatExecStatsSegment({ test: fastTest, lint: slowLint, typecheck: fastTest })
+    )
+    expect(out).toBe("⏱ test 1.2s×2 lint 12s×2 typecheck 1.2s×2")
   })
 })
 
@@ -1025,6 +1039,7 @@ describe("renderStatusLineFromSnapshot checks segment", () => {
   const execStats = {
     test: { totalTimeMs: 4800, count: 4, averageMs: 1200, assessment: "negligible" as const },
     lint: { totalTimeMs: 1600, count: 2, averageMs: 800, assessment: "negligible" as const },
+    typecheck: { totalTimeMs: 6000, count: 3, averageMs: 2000, assessment: "negligible" as const },
   }
 
   it("renders exec stats from the snapshot in line 3", () => {
@@ -1040,6 +1055,8 @@ describe("renderStatusLineFromSnapshot checks segment", () => {
     expect(out).toContain("⏱")
     expect(out).toContain("1.2s")
     expect(out).toContain("0.8s")
+    expect(out).toContain("typecheck")
+    expect(out).toContain("2.0s")
   })
 
   it("omits the checks segment when no exec stats recorded", () => {

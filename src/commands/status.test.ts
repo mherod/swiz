@@ -98,7 +98,7 @@ describe("swiz status — agent environment detection", () => {
   }, 15_000)
 })
 
-describe("swiz status — test and lint execution stats rendering", () => {
+describe("swiz status — check execution stats rendering", () => {
   async function runStatusInProcess(cwd: string, args: string[] = []): Promise<string> {
     // Capture output via an injected writer rather than a process-global
     // console.log spy. A shared spy with mockRestore() bleeds across
@@ -132,6 +132,7 @@ describe("swiz status — test and lint execution stats rendering", () => {
       const out = await runStatusInProcess(tempDir)
       expect(out).toContain("Avg Test:  no runs recorded")
       expect(out).toContain("Avg Lint:  no runs recorded")
+      expect(out).not.toContain("Avg Typecheck:")
     })
   })
 
@@ -179,6 +180,20 @@ describe("swiz status — test and lint execution stats rendering", () => {
     })
   })
 
+  it("renders typecheck timings without requiring test or lint runs", async () => {
+    await withTempDir(async (tempDir) => {
+      await Bun.write(
+        join(tempDir, ".swiz", "typecheck-execution-stats.json"),
+        JSON.stringify({ totalTimeMs: 15000, count: 3 })
+      )
+
+      const out = await runStatusInProcess(tempDir)
+      expect(out).toContain("Avg Typecheck:  5.00s (based on 3 runs) [significant]")
+      expect(out).toContain("Avg Test:  no runs recorded")
+      expect(out).toContain("Avg Lint:  no runs recorded")
+    })
+  })
+
   it("outputs JSON with correct stats structure when --json is passed", async () => {
     await withTempDir(async (tempDir) => {
       await mkdir(join(tempDir, ".swiz"), { recursive: true })
@@ -191,6 +206,11 @@ describe("swiz status — test and lint execution stats rendering", () => {
       await Bun.write(
         join(tempDir, ".swiz", "lint-execution-stats.json"),
         JSON.stringify({ totalTimeMs: 18000, count: 3 })
+      )
+
+      await Bun.write(
+        join(tempDir, ".swiz", "typecheck-execution-stats.json"),
+        JSON.stringify({ totalTimeMs: 3000, count: 2 })
       )
 
       const out = await runStatusInProcess(tempDir, ["--json"])
@@ -207,6 +227,12 @@ describe("swiz status — test and lint execution stats rendering", () => {
         count: 3,
         averageMs: 6000,
         assessment: "significant",
+      })
+      expect(parsed.typecheckStats).toEqual({
+        totalTimeMs: 3000,
+        count: 2,
+        averageMs: 1500,
+        assessment: "negligible",
       })
     })
   })
