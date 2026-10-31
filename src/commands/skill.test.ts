@@ -1034,6 +1034,38 @@ describe("swiz skill --sync converted-copy edits", () => {
     )
   })
 
+  test("a new skill reaches another agent in that agent's tool names, while agents stays verbatim", async () => {
+    const fakeHome = await createTempDir()
+    const skillName = "new-skill-converted-xyz"
+    const claude = getAgent("claude")!
+    const gemini = getAgent("gemini")!
+    const toGemini = (text: string) => convertSkillContent(text, claude, gemini, AGENTS).content
+    const text = "Use Bash, then Read the output.\n"
+    const notes = "Run Bash first.\n"
+    await writeSkill(join(fakeHome, ".claude", "skills", skillName), text, {
+      "references/notes.md": notes,
+    })
+
+    const { stdout, exitCode } = await runSkillCli(
+      ["--sync", "--from", "claude", "--to", "gemini"],
+      fakeHome
+    )
+
+    expect(exitCode).toBe(0)
+    expect(stdout).toContain(`converted ${skillName}/SKILL.md to target tool names`)
+    const geminiDir = join(fakeHome, ".gemini", "skills", skillName)
+    expect(await Bun.file(join(geminiDir, "SKILL.md")).text()).toBe(toGemini(text))
+    expect(await Bun.file(join(geminiDir, "references", "notes.md")).text()).toBe(toGemini(notes))
+    expect(toGemini(text)).not.toBe(text)
+
+    // Control: the agents root shares Claude's vocabulary, so its copy stays verbatim.
+    const agents = await runSkillCli(["--sync", "--from", "claude", "--to", "agents"], fakeHome)
+    expect(agents.stdout).not.toContain("to target tool names")
+    expect(await Bun.file(join(fakeHome, ".agents", "skills", skillName, "SKILL.md")).text()).toBe(
+      text
+    )
+  })
+
   test("--overwrite replaces a converted copy in target tool names, not raw source text", async () => {
     const fakeHome = await createTempDir()
     const skillName = "overwrite-converted-xyz"

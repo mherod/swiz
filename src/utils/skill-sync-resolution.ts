@@ -664,27 +664,34 @@ async function targetKeepsOwnVocabulary(
 }
 
 /**
- * Markdown for an --overwrite replacement, keyed by path. Forcing the source side must not
- * copy its tool names into a target kept in another agent's vocabulary, so every source
- * markdown file is converted; empty when no conversion applies.
+ * Markdown for a skill copied whole from the source, keyed by path: every source markdown
+ * file whose tool names differ in the target vocabulary. Empty when no conversion applies.
  */
-export async function convertOverwriteMarkdown(
-  context: SkillResolutionContext
+export async function convertSourceMarkdown(
+  context: Pick<SkillResolutionContext, "sourceDir" | "vocabulary">
 ): Promise<Map<string, string>> {
   const contents = new Map<string, string>()
   if (context.vocabulary.identity) return contents
-  const [sourceEntries, targetEntries] = await Promise.all([
-    collectSkillTreeEntries(context.sourceDir),
-    collectSkillTreeEntries(context.targetDir),
-  ])
-  if (!(await targetKeepsOwnVocabulary(context, targetEntries))) return contents
-  for (const [path, kind] of sourceEntries) {
+  for (const [path, kind] of await collectSkillTreeEntries(context.sourceDir)) {
     if (kind !== "file" || !isConvertible(path)) continue
     const text = await Bun.file(join(context.sourceDir, path)).text()
     const converted = context.vocabulary.toTarget(text)
     if (converted !== text) contents.set(path, converted)
   }
   return contents
+}
+
+/**
+ * Markdown for an --overwrite replacement. Forcing the source side must not copy its tool
+ * names into a target kept in another agent's vocabulary; empty when the target is not.
+ */
+export async function convertOverwriteMarkdown(
+  context: SkillResolutionContext
+): Promise<Map<string, string>> {
+  if (context.vocabulary.identity) return new Map()
+  const targetEntries = await collectSkillTreeEntries(context.targetDir)
+  if (!(await targetKeepsOwnVocabulary(context, targetEntries))) return new Map()
+  return await convertSourceMarkdown(context)
 }
 
 function planOutcome(files: SkillFileResolution[]): SkillResolutionPlan["outcome"] {

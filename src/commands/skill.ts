@@ -34,6 +34,7 @@ import { lazySkillHistory, type SkillHistory } from "../utils/skill-git-history.
 import {
   collectSkillTreeEntries,
   convertOverwriteMarkdown,
+  convertSourceMarkdown,
   createSkillReferenceHistory,
   createSkillVocabulary,
   describeSkillResolution,
@@ -723,16 +724,36 @@ async function stageSkillUpdate(
   }
 }
 
+/** Stage a whole-skill copy of the source with its markdown in the target's tool names. */
+function stageConvertedCopy(sourceSkillDir: string, converted: Map<string, string>) {
+  return async (replacementDir: string, fs: SkillSyncFileSystem): Promise<void> => {
+    await fs.copyDirectory(sourceSkillDir, replacementDir)
+    for (const [path, content] of converted) {
+      await Bun.write(join(replacementDir, path), content)
+    }
+  }
+}
+
+function printConversions(name: string, converted: Map<string, string>, dryRun: boolean): void {
+  for (const path of [...converted.keys()].sort()) {
+    console.log(
+      `    - ${dryRun ? "would convert" : "converted"} ${name}/${path} to target tool names`
+    )
+  }
+}
+
 async function copyNewSkill(sync: SingleSkillSync): Promise<SkillSyncAction> {
   const { name, sourceSkillDir, targetDir, dryRun, overwrite, fileSystem } = sync
+  const converted = await convertSourceMarkdown(sync.createContext(sourceSkillDir, targetDir))
   if (!dryRun) {
     await replaceSkillDirectory(targetDir, {
       allowReplace: overwrite,
       fileSystem,
-      stage: (replacementDir, fs) => fs.copyDirectory(sourceSkillDir, replacementDir),
+      stage: stageConvertedCopy(sourceSkillDir, converted),
     })
   }
   logSkillAction(name, false, dryRun, "copied", "copy")
+  printConversions(name, converted, dryRun)
   return "copied"
 }
 
@@ -784,21 +805,12 @@ async function settleConflict(
     await replaceSkillDirectory(targetDir, {
       allowReplace: true,
       fileSystem,
-      stage: async (replacementDir, fs) => {
-        await fs.copyDirectory(sourceSkillDir, replacementDir)
-        for (const [path, content] of converted) {
-          await Bun.write(join(replacementDir, path), content)
-        }
-      },
+      stage: stageConvertedCopy(sourceSkillDir, converted),
     })
   }
   logSkillAction(label, true, dryRun, "copied", "copy")
   if (dryRun) printSkillTreeDiff(name, diff)
-  for (const path of [...converted.keys()].sort()) {
-    console.log(
-      `    - ${dryRun ? "would convert" : "converted"} ${name}/${path} to target tool names`
-    )
-  }
+  printConversions(name, converted, dryRun)
   return "overwritten"
 }
 
@@ -880,7 +892,7 @@ function createSkillContextFactory(
   })
 }
 
-// Copy-only for new skills (no tool name remapping); existing targets are resolved per file.
+// New skills are copied with markdown converted to the target's tool names; existing targets are resolved per file.
 // Used by --sync --from <agent> and the --sync-gemini alias.
 async function syncSkills(options: {
   from: string
@@ -1808,7 +1820,7 @@ export const skillCommand: Command<SkillCommandOptions> = {
     {
       flags: "--sync",
       description:
-        "Copy skills from --from <agent> to --to <agent> (default: claude). New skills are copied as-is (use --convert for tool name remapping); existing targets are resolved per file from tool-name conversion, git history, and modification times — converted copies and newer targets are kept, stale targets are updated, divergent edits are three-way merged, and only unresolved conflicts are skipped",
+        "Copy skills from --from <agent> to --to <agent> (default: claude). New skills are copied with their markdown converted into the target agent's tool names; existing targets are resolved per file from tool-name conversion, git history, and modification times — converted copies and newer targets are kept, stale targets are updated, divergent edits are three-way merged, and only unresolved conflicts are skipped",
     },
     {
       flags: "--sync-gemini",
