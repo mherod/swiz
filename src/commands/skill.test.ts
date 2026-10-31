@@ -1,6 +1,17 @@
 import { describe, expect, test } from "bun:test"
 import { existsSync } from "node:fs"
-import { chmod, cp, lstat, mkdir, readlink, stat, symlink, writeFile } from "node:fs/promises"
+import {
+  chmod,
+  cp,
+  lstat,
+  mkdir,
+  readlink,
+  rm,
+  stat,
+  symlink,
+  utimes,
+  writeFile,
+} from "node:fs/promises"
 import { join } from "node:path"
 import { AGENTS, getAgent } from "../agents.ts"
 import { convertSkillContent } from "../utils/skill-conversion.ts"
@@ -720,6 +731,280 @@ describe("swiz skill --sync conflict handling", () => {
     expect(stdout).toContain(`ignored ~/.agents/${skillName} (shadowed by ~/.agents/skills)`)
     const targetPath = join(fakeHome, ".claude", "skills", skillName, "SKILL.md")
     expect(await Bun.file(targetPath).text()).toBe("winner\n")
+  })
+})
+
+// ─── swiz skill --sync conflict resolution (git and conversion evidence) ─────
+
+async function runGit(cwd: string, args: string[], env: Record<string, string> = {}) {
+  const proc = Bun.spawn(["git", ...args], {
+    cwd,
+    stdout: "pipe",
+    stderr: "pipe",
+    // Isolate from the developer's global config, hooks, and signing setup.
+    env: { ...process.env, HOME: cwd, GIT_CONFIG_NOSYSTEM: "1", ...env },
+  })
+  const [, stderr] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+  ])
+  await proc.exited
+  if (proc.exitCode !== 0) throw new Error(`git ${args.join(" ")} failed: ${stderr}`)
+}
+
+/** Commit everything under `repo` (initialising it on first use) at a fixed date. */
+async function commitAll(repo: string, message: string, isoDate: string) {
+  if (!existsSync(join(repo, ".git"))) await runGit(repo, ["init", "-q", "-b", "main"])
+  await runGit(repo, ["add", "-A"])
+  await runGit(
+    repo,
+    [
+      "-c",
+      "user.name=Test",
+      "-c",
+      "user.email=test@example.com",
+      "-c",
+      "commit.gpgsign=false",
+      "commit",
+      "-q",
+      "-m",
+      message,
+    ],
+    { GIT_AUTHOR_DATE: isoDate, GIT_COMMITTER_DATE: isoDate }
+  )
+}
+
+async function setMtime(path: string, isoDate: string) {
+  const date = new Date(isoDate)
+  await utimes(path, date, date)
+}
+
+const TEN_LINES = "a\nb\nc\nd\ne\nf\ng\nh\ni\nj\n"
+
+describe("swiz skill --sync conflict resolution", () => {
+  test("a converted copy of the target is unchanged, not a conflict", async () => {
+    const fakeHome = await createTempDir()
+    const skillName = "resolve-converted-xyz"
+    const claudeText = "---\nallowed-tools: Bash, Read\n---\nUse Bash, then Read the output.\n"
+    const geminiText = convertSkillContent(
+      claudeText,
+      getAgent("claude")!,
+      getAgent("gemini")!,
+      AGENTS
+    ).content
+    expect(geminiText).not.toBe(claudeText)
+    const targetDir = join(fakeHome, ".claude", "skills", skillName)
+    await writeSkill(join(fakeHome, ".gemini", "skills", skillName), geminiText)
+    await writeSkill(targetDir, claudeText)
+    const inodeBefore = (await stat(targetDir)).ino
+
+    const { stdout, exitCode } = await runSkillCli(["--sync-gemini", "--overwrite"], fakeHome)
+
+    expect(exitCode).toBe(0)
+    expect(stdout).toContain(`unchanged ${skillName} (1 equivalent after tool-name conversion)`)
+    expect(stdout).toContain("0 overwritten")
+    expect((await stat(targetDir)).ino).toBe(inodeBefore)
+  })
+
+  test("a source matching an older commit never replaces the newer target, even with --overwrite", async () => {
+    const fakeHome = await createTempDir()
+    const skillName = "resolve-stale-source-xyz"
+    const claudeRoot = join(fakeHome, ".claude", "skills")
+    const targetPath = join(claudeRoot, skillName, "SKILL.md")
+    await writeSkill(join(claudeRoot, skillName), "version one\n")
+    await commitAll(claudeRoot, "v1", "2026-01-01T00:00:00Z")
+    await writeFile(targetPath, "version two\n")
+    await commitAll(claudeRoot, "v2", "2026-02-01T00:00:00Z")
+    await writeSkill(join(fakeHome, ".gemini", "skills", skillName), "version one\n")
+
+    const { stdout, exitCode } = await runSkillCli(["--sync-gemini", "--overwrite"], fakeHome)
+
+    expect(exitCode).toBe(0)
+    expect(stdout).toContain(`unchanged ${skillName} (1 newer in target)`)
+    expect(stdout).toContain(`keep ${skillName}/SKILL.md: source matches older`)
+    expect(await Bun.file(targetPath).text()).toBe("version two\n")
+  })
+
+  test("a target matching a commit older than the source's edits is fast-forwarded without --overwrite", async () => {
+    const fakeHome = await createTempDir()
+    const skillName = "resolve-stale-target-xyz"
+    const claudeRoot = join(fakeHome, ".claude", "skills")
+    const targetPath = join(claudeRoot, skillName, "SKILL.md")
+    await writeSkill(join(claudeRoot, skillName), "version one\n", { "keep.md": "target only\n" })
+    await commitAll(claudeRoot, "v1", "2026-01-01T00:00:00Z")
+    await writeSkill(join(fakeHome, ".gemini", "skills", skillName), "version two\n")
+
+    const dry = await runSkillCli(["--sync-gemini", "--dry-run"], fakeHome)
+    expect(dry.stdout).toContain(`would update ${skillName} (1 updated)`)
+    expect(await Bun.file(targetPath).text()).toBe("version one\n")
+
+    const { stdout, exitCode } = await runSkillCli(["--sync-gemini"], fakeHome)
+
+    expect(exitCode).toBe(0)
+    expect(stdout).toContain(`updated ${skillName} (1 updated)`)
+    expect(stdout).toContain("source has later unrecorded edits")
+    expect(stdout).toContain("1 updated")
+    expect(await Bun.file(targetPath).text()).toBe("version two\n")
+    expect(await Bun.file(join(claudeRoot, skillName, "keep.md")).text()).toBe("target only\n")
+  })
+
+  test("independent edits on both sides are three-way merged against the committed base", async () => {
+    const fakeHome = await createTempDir()
+    const skillName = "resolve-merge-xyz"
+    const claudeRoot = join(fakeHome, ".claude", "skills")
+    const targetPath = join(claudeRoot, skillName, "SKILL.md")
+    await writeSkill(join(claudeRoot, skillName), TEN_LINES)
+    await commitAll(claudeRoot, "base", "2026-01-01T00:00:00Z")
+    await writeFile(targetPath, TEN_LINES.replace("a\n", "A target\n"))
+    await writeSkill(
+      join(fakeHome, ".gemini", "skills", skillName),
+      TEN_LINES.replace("j\n", "J source\n")
+    )
+
+    const { stdout, exitCode } = await runSkillCli(["--sync-gemini"], fakeHome)
+
+    expect(exitCode).toBe(0)
+    expect(stdout).toContain(`updated ${skillName} (1 merged)`)
+    expect(await Bun.file(targetPath).text()).toBe(
+      TEN_LINES.replace("a\n", "A target\n").replace("j\n", "J source\n")
+    )
+  })
+
+  test("overlapping edits are a conflict that only --overwrite replaces", async () => {
+    const fakeHome = await createTempDir()
+    const skillName = "resolve-conflict-xyz"
+    const claudeRoot = join(fakeHome, ".claude", "skills")
+    const targetPath = join(claudeRoot, skillName, "SKILL.md")
+    await writeSkill(join(claudeRoot, skillName), TEN_LINES)
+    await commitAll(claudeRoot, "base", "2026-01-01T00:00:00Z")
+    await writeFile(targetPath, TEN_LINES.replace("e\n", "E target\n"))
+    await writeSkill(
+      join(fakeHome, ".gemini", "skills", skillName),
+      TEN_LINES.replace("e\n", "E source\n")
+    )
+
+    const skipped = await runSkillCli(["--sync-gemini"], fakeHome)
+    expect(skipped.exitCode).toBe(0)
+    expect(skipped.stdout).toContain(`skipped ${skillName} (target differs: 1 modified)`)
+    expect(skipped.stdout).toContain(
+      `conflict ${skillName}/SKILL.md: both sides edited the same lines since`
+    )
+    expect(await Bun.file(targetPath).text()).toContain("E target")
+
+    const overwritten = await runSkillCli(["--sync-gemini", "--overwrite"], fakeHome)
+    expect(overwritten.stdout).toContain(`overwritten ${skillName} (1 modified)`)
+    expect(await Bun.file(targetPath).text()).toContain("E source")
+  })
+
+  test("a source last changed before the target's history began is kept out", async () => {
+    const fakeHome = await createTempDir()
+    const skillName = "resolve-predates-xyz"
+    const claudeRoot = join(fakeHome, ".claude", "skills")
+    const targetPath = join(claudeRoot, skillName, "SKILL.md")
+    await writeSkill(join(claudeRoot, skillName), "reshaped by the target\n")
+    await commitAll(claudeRoot, "import", "2026-03-01T00:00:00Z")
+    const sourcePath = join(fakeHome, ".gemini", "skills", skillName, "SKILL.md")
+    await writeSkill(join(fakeHome, ".gemini", "skills", skillName), "upstream original\n")
+    await setMtime(sourcePath, "2026-01-01T00:00:00Z")
+
+    const { stdout, exitCode } = await runSkillCli(["--sync-gemini"], fakeHome)
+
+    expect(exitCode).toBe(0)
+    expect(stdout).toContain(`unchanged ${skillName} (1 newer in target)`)
+    expect(stdout).toContain("before target history began")
+    expect(await Bun.file(targetPath).text()).toBe("reshaped by the target\n")
+  })
+
+  test("a committed deletion is kept, while a file merely missing from the checkout is added", async () => {
+    const fakeHome = await createTempDir()
+    const deleted = "resolve-deleted-xyz"
+    const missing = "resolve-missing-xyz"
+    const claudeRoot = join(fakeHome, ".claude", "skills")
+    for (const name of [deleted, missing]) {
+      await writeSkill(join(claudeRoot, name), "same\n", { "extra.md": "extra\n" })
+      await writeSkill(join(fakeHome, ".gemini", "skills", name), "same\n", {
+        "extra.md": "extra\n",
+      })
+    }
+    await commitAll(claudeRoot, "add", "2026-01-01T00:00:00Z")
+    await rm(join(claudeRoot, deleted, "extra.md"))
+    await runGit(claudeRoot, ["rm", "-q", "--cached", join(deleted, "extra.md")])
+    await commitAll(claudeRoot, "remove extra", "2026-02-01T00:00:00Z")
+    // Missing from the working tree, but no commit records the removal.
+    await rm(join(claudeRoot, missing, "extra.md"))
+
+    const { stdout, exitCode } = await runSkillCli(["--sync-gemini"], fakeHome)
+
+    expect(exitCode).toBe(0)
+    expect(stdout).toContain(`unchanged ${deleted} (1 newer in target)`)
+    expect(stdout).toContain(`keep ${deleted}/extra.md: removed from target in`)
+    expect(existsSync(join(claudeRoot, deleted, "extra.md"))).toBe(false)
+    expect(stdout).toContain(`updated ${missing} (1 added)`)
+    expect(await Bun.file(join(claudeRoot, missing, "extra.md")).text()).toBe("extra\n")
+  })
+
+  test("Claude skills history decides between two stale copies when neither side is Claude", async () => {
+    const fakeHome = await createTempDir()
+    const skillName = "resolve-reference-xyz"
+    const claudeRoot = join(fakeHome, ".claude", "skills")
+    await writeSkill(join(claudeRoot, skillName), "version one\n")
+    await commitAll(claudeRoot, "v1", "2026-01-01T00:00:00Z")
+    await writeFile(join(claudeRoot, skillName, "SKILL.md"), "version two\n")
+    await commitAll(claudeRoot, "v2", "2026-02-01T00:00:00Z")
+    // A copy of old content with a fresh mtime: mtimes alone would call it newest.
+    await writeSkill(join(fakeHome, ".agents", "skills", skillName), "version one\n")
+    const targetPath = join(fakeHome, ".gemini", "skills", skillName, "SKILL.md")
+    await writeSkill(join(fakeHome, ".gemini", "skills", skillName), "version two\n")
+    await setMtime(targetPath, "2026-02-02T00:00:00Z")
+
+    const { stdout, exitCode } = await runSkillCli(
+      ["--sync", "--from", "agents", "--to", "gemini", "--overwrite"],
+      fakeHome
+    )
+
+    expect(exitCode).toBe(0)
+    expect(stdout).toContain(`unchanged ${skillName} (1 newer in target)`)
+    expect(await Bun.file(targetPath).text()).toBe("version two\n")
+  })
+
+  test("new markdown in a converted copy is converted on the way in", async () => {
+    const fakeHome = await createTempDir()
+    const skillName = "resolve-converted-added-xyz"
+    const claude = getAgent("claude")!
+    const gemini = getAgent("gemini")!
+    const claudeText = "Use Bash to run it.\n"
+    const addedClaude = "Read the file, then use Bash.\n"
+    await writeSkill(join(fakeHome, ".claude", "skills", skillName), claudeText)
+    await writeSkill(
+      join(fakeHome, ".gemini", "skills", skillName),
+      convertSkillContent(claudeText, claude, gemini, AGENTS).content,
+      { "references/extra.md": convertSkillContent(addedClaude, claude, gemini, AGENTS).content }
+    )
+
+    const { stdout, exitCode } = await runSkillCli(["--sync-gemini"], fakeHome)
+
+    expect(exitCode).toBe(0)
+    expect(stdout).toContain(`updated ${skillName} (1 added)`)
+    const added = join(fakeHome, ".claude", "skills", skillName, "references", "extra.md")
+    expect(await Bun.file(added).text()).toBe(addedClaude)
+  })
+
+  test("node_modules and .DS_Store are never synced as skill content", async () => {
+    const fakeHome = await createTempDir()
+    const skillName = "resolve-junk-xyz"
+    await writeSkill(join(fakeHome, ".gemini", "skills", "node_modules"), "not a skill\n")
+    await writeSkill(join(fakeHome, ".gemini", "skills", skillName), "same\n", {
+      ".DS_Store": "finder\n",
+    })
+    await writeSkill(join(fakeHome, ".claude", "skills", skillName), "same\n")
+
+    const { stdout, exitCode } = await runSkillCli(["--sync-gemini"], fakeHome)
+
+    expect(exitCode).toBe(0)
+    expect(stdout).not.toContain("node_modules")
+    expect(stdout).toContain(`unchanged ${skillName}`)
+    expect(existsSync(join(fakeHome, ".claude", "skills", "node_modules"))).toBe(false)
+    expect(existsSync(join(fakeHome, ".claude", "skills", skillName, ".DS_Store"))).toBe(false)
   })
 })
 

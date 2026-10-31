@@ -27,6 +27,19 @@ import {
   unwrapInlineCommands,
 } from "../utils/skill-content.ts"
 import { convertSkillContent } from "../utils/skill-conversion.ts"
+import { lazySkillHistory } from "../utils/skill-git-history.ts"
+import {
+  collectSkillTreeEntries,
+  createSkillReferenceHistory,
+  createSkillVocabulary,
+  describeSkillResolution,
+  planSkillResolution,
+  type SkillFileResolution,
+  type SkillFileResolutionKind,
+  type SkillFileWrite,
+  type SkillResolutionContext,
+  type SkillTreeEntryKind,
+} from "../utils/skill-sync-resolution.ts"
 
 export { parseFrontmatterField, stripFrontmatter }
 
@@ -245,6 +258,8 @@ async function discoverSkillNames(skillsDir: string): Promise<string[]> {
   const names: string[] = []
   for (const entry of entries) {
     if (!entry.isDirectory() && !entry.isSymbolicLink()) continue
+    // Package installs and hidden folders are never skills, even if they contain a SKILL.md.
+    if (entry.name === "node_modules" || entry.name.startsWith(".")) continue
     if (await Bun.file(join(skillsDir, entry.name, "SKILL.md")).exists()) names.push(entry.name)
   }
   return orderBy(names, [(n) => n], ["asc"])
@@ -421,11 +436,13 @@ function printSyncSummary(
   failed: number,
   overwrite: boolean
 ): void {
-  const { copied, overwritten, unchanged, skipped } = counts
+  const { copied, updated, overwritten, unchanged, skipped } = counts
   console.log(
-    `\nSummary: ${copied} copied, ${overwritten} overwritten, ${unchanged} unchanged, ${skipped} skipped` +
+    `\nSummary: ${copied} copied, ${updated} updated, ${overwritten} overwritten, ${unchanged} unchanged, ${skipped} skipped` +
       (failed > 0 ? `, ${failed} failed` : "") +
-      (!overwrite && skipped > 0 ? " (use --overwrite to replace differing targets)" : "")
+      (!overwrite && skipped > 0
+        ? " (use --overwrite to replace targets with unresolved conflicts)"
+        : "")
   )
 }
 
@@ -477,9 +494,13 @@ async function safelyRemoveDirectory(path: string, fileSystem: SkillSyncFileSyst
 }
 
 async function replaceSkillDirectory(
-  sourceDir: string,
   targetDir: string,
-  options: { allowReplace: boolean; fileSystem?: Partial<SkillSyncFileSystem> }
+  options: {
+    allowReplace: boolean
+    fileSystem?: Partial<SkillSyncFileSystem>
+    /** Populate the staged replacement directory. */
+    stage: (replacementDir: string, fileSystem: SkillSyncFileSystem) => Promise<void>
+  }
 ): Promise<void> {
   const fileSystem = resolveSkillSyncFileSystem(options.fileSystem)
   const targetParent = dirname(targetDir)
@@ -492,7 +513,7 @@ async function replaceSkillDirectory(
   let preserveBackup = false
 
   try {
-    await fileSystem.copyDirectory(sourceDir, replacementDir)
+    await options.stage(replacementDir, fileSystem)
     if (!(await fileSystem.isFile(join(replacementDir, "SKILL.md")))) {
       throw new Error(`Copied skill ${targetName} is missing a valid SKILL.md.`)
     }
@@ -539,29 +560,6 @@ async function replaceSkillDirectory(
       await safelyRemoveDirectory(backupRoot, fileSystem)
     }
   }
-}
-
-type SkillTreeEntryKind = "directory" | "file" | "symlink"
-
-async function collectSkillTreeEntries(
-  rootDir: string,
-  relativeDir = "",
-  entries = new Map<string, SkillTreeEntryKind>()
-): Promise<Map<string, SkillTreeEntryKind>> {
-  const children = await readdir(join(rootDir, relativeDir), { withFileTypes: true })
-  for (const child of children) {
-    const relativePath = relativeDir ? join(relativeDir, child.name) : child.name
-    const kind: SkillTreeEntryKind = child.isDirectory()
-      ? "directory"
-      : child.isSymbolicLink()
-        ? "symlink"
-        : "file"
-    entries.set(relativePath, kind)
-    if (kind === "directory") {
-      await collectSkillTreeEntries(rootDir, relativePath, entries)
-    }
-  }
-  return entries
 }
 
 /** Whether two same-kind entries hold the same link target, or the same bytes and mode. */
@@ -628,70 +626,160 @@ function printSkillTreeDiff(name: string, diff: SkillTreeDiff): void {
   for (const path of diff.removed) console.log(`    - would remove ${name}/${path}`)
 }
 
-type SkillSyncAction = "copied" | "overwritten" | "unchanged" | "skipped"
+type SkillSyncAction = "copied" | "updated" | "overwritten" | "unchanged" | "skipped"
 
-/** Settle an existing target that must not be replaced; null means proceed with the copy. */
-function settleExistingTarget(
-  name: string,
-  diff: SkillTreeDiff | null,
-  overwrite: boolean
-): SkillSyncAction | null {
-  if (!diff) return null
-  const changes = describeSkillTreeDiff(diff)
-  if (!changes) {
-    console.log(`  - unchanged ${name}`)
-    return "unchanged"
-  }
-  if (!overwrite) {
-    console.log(`  - skipped ${name} (target differs: ${changes})`)
-    return "skipped"
-  }
-  return null
-}
+/** Builds the evidence context for one skill's source and target directories. */
+type SkillContextFactory = (sourceSkillDir: string, targetDir: string) => SkillResolutionContext
 
-async function syncSingleSkill(options: {
-  name: string
-  sourceDir: string
+interface SkillSyncOptions {
   targetRoot: string
   dryRun: boolean
   overwrite: boolean
   fileSystem?: Partial<SkillSyncFileSystem>
-}): Promise<SkillSyncAction> {
-  const { name, sourceDir, targetRoot, dryRun, overwrite, fileSystem } = options
-  const sourceSkillDir = join(sourceDir, name)
-  const targetDir = join(targetRoot, name)
-  const targetExists = existsSync(targetDir)
-  const diff = targetExists ? await diffSkillTrees(sourceSkillDir, targetDir) : null
-  const settled = settleExistingTarget(name, diff, overwrite)
-  if (settled) return settled
+  createContext: SkillContextFactory
+}
 
-  const label = diff ? `${name} (${describeSkillTreeDiff(diff)})` : name
-  if (dryRun) {
-    const action = logSkillAction(label, targetExists, true, "copied", "copy")
-    if (diff) printSkillTreeDiff(name, diff)
-    return action === "overwrite" ? "overwritten" : "copied"
+interface SingleSkillSync extends SkillSyncOptions {
+  name: string
+  sourceSkillDir: string
+  targetDir: string
+}
+
+const FILE_RESOLUTION_VERBS: Partial<Record<SkillFileResolutionKind, string>> = {
+  "source-newer": "update",
+  merged: "merge",
+  added: "add",
+  "target-newer": "keep",
+  diverged: "conflict",
+}
+
+function printFileResolutions(
+  name: string,
+  files: SkillFileResolution[],
+  kinds: SkillFileResolutionKind[]
+): void {
+  for (const file of files) {
+    if (!kinds.includes(file.kind)) continue
+    console.log(`    - ${FILE_RESOLUTION_VERBS[file.kind]} ${name}/${file.path}: ${file.reason}`)
   }
+}
 
-  await replaceSkillDirectory(sourceSkillDir, targetDir, { allowReplace: overwrite, fileSystem })
-  return logSkillAction(label, targetExists, false, "copied", "copy") === "overwrite"
-    ? "overwritten"
-    : "copied"
+async function writeResolvedFile(write: SkillFileWrite, destination: string): Promise<void> {
+  if ("content" in write) {
+    await Bun.write(destination, write.content)
+    return
+  }
+  // Keep the source mtime so later syncs still order the two sides correctly.
+  await cp(write.copyFrom, destination, { force: true, preserveTimestamps: true })
+}
+
+/** Stage the current target plus resolved writes; target-only and newer target files survive. */
+async function stageSkillUpdate(
+  targetDir: string,
+  replacementDir: string,
+  files: SkillFileResolution[],
+  fileSystem: SkillSyncFileSystem
+): Promise<void> {
+  await fileSystem.copyDirectory(targetDir, replacementDir)
+  for (const file of files) {
+    if (!file.write) continue
+    const destination = join(replacementDir, file.path)
+    await mkdir(dirname(destination), { recursive: true })
+    await writeResolvedFile(file.write, destination)
+  }
+}
+
+async function copyNewSkill(sync: SingleSkillSync): Promise<SkillSyncAction> {
+  const { name, sourceSkillDir, targetDir, dryRun, overwrite, fileSystem } = sync
+  if (!dryRun) {
+    await replaceSkillDirectory(targetDir, {
+      allowReplace: overwrite,
+      fileSystem,
+      stage: (replacementDir, fs) => fs.copyDirectory(sourceSkillDir, replacementDir),
+    })
+  }
+  logSkillAction(name, false, dryRun, "copied", "copy")
+  return "copied"
+}
+
+function reportResolvedUnchanged(name: string, files: SkillFileResolution[]): SkillSyncAction {
+  const summary = describeSkillResolution(files, ["equivalent", "target-newer", "target-only"])
+  console.log(`  - unchanged ${name}${summary ? ` (${summary})` : ""}`)
+  printFileResolutions(name, files, ["target-newer"])
+  return "unchanged"
+}
+
+async function applyResolvedUpdate(
+  sync: SingleSkillSync,
+  files: SkillFileResolution[]
+): Promise<SkillSyncAction> {
+  const { name, targetDir, dryRun, fileSystem } = sync
+  if (!dryRun) {
+    await replaceSkillDirectory(targetDir, {
+      allowReplace: true,
+      fileSystem,
+      stage: (replacementDir, fs) => stageSkillUpdate(targetDir, replacementDir, files, fs),
+    })
+  }
+  const summary = describeSkillResolution(files, ["source-newer", "merged", "added"])
+  console.log(`  - ${dryRun ? "would update" : "updated"} ${name} (${summary})`)
+  printFileResolutions(name, files, ["source-newer", "merged", "added", "target-newer"])
+  return "updated"
+}
+
+/** Unresolved conflicts keep the target unless --overwrite replaces it with the source. */
+async function settleConflict(
+  sync: SingleSkillSync,
+  files: SkillFileResolution[],
+  diff: SkillTreeDiff
+): Promise<SkillSyncAction> {
+  const { name, sourceSkillDir, targetDir, dryRun, overwrite, fileSystem } = sync
+  const label = `${name} (${describeSkillTreeDiff(diff)})`
+  if (!overwrite) {
+    console.log(`  - skipped ${name} (target differs: ${describeSkillTreeDiff(diff)})`)
+    printFileResolutions(name, files, ["diverged"])
+    return "skipped"
+  }
+  if (!dryRun) {
+    await replaceSkillDirectory(targetDir, {
+      allowReplace: true,
+      fileSystem,
+      stage: (replacementDir, fs) => fs.copyDirectory(sourceSkillDir, replacementDir),
+    })
+  }
+  logSkillAction(label, true, dryRun, "copied", "copy")
+  if (dryRun) printSkillTreeDiff(name, diff)
+  return "overwritten"
+}
+
+async function syncSingleSkill(sync: SingleSkillSync): Promise<SkillSyncAction> {
+  const { name, sourceSkillDir, targetDir } = sync
+  if (!existsSync(targetDir)) return await copyNewSkill(sync)
+  const diff = await diffSkillTrees(sourceSkillDir, targetDir)
+  if (!describeSkillTreeDiff(diff)) {
+    console.log(`  - unchanged ${name}`)
+    return "unchanged"
+  }
+  const plan = await planSkillResolution(sync.createContext(sourceSkillDir, targetDir))
+  if (plan.outcome === "unchanged") return reportResolvedUnchanged(name, plan.files)
+  if (plan.outcome === "update") return await applyResolvedUpdate(sync, plan.files)
+  return await settleConflict(sync, plan.files, diff)
 }
 
 /** Sync one skill, recording a failure instead of aborting the remaining skills. */
 async function syncSkillSource(
   source: SkillSource,
-  options: {
-    targetRoot: string
-    dryRun: boolean
-    overwrite: boolean
-    fileSystem?: Partial<SkillSyncFileSystem>
-  }
+  options: SkillSyncOptions
 ): Promise<SkillSyncAction | { failure: string }> {
   const { name, sourceDir, shadowedDirs } = source
   let result: SkillSyncAction | { failure: string }
   try {
-    result = await syncSingleSkill({ name, sourceDir, ...options })
+    result = await syncSingleSkill({
+      ...options,
+      name,
+      sourceSkillDir: join(sourceDir, name),
+      targetDir: join(options.targetRoot, name),
+    })
   } catch (error) {
     console.log(`  - failed ${name}`)
     result = { failure: `${name}: ${messageFromUnknownError(error)}` }
@@ -704,7 +792,40 @@ async function syncSkillSource(
   return result
 }
 
-// Copy-only sync (no tool name remapping). Used by --sync --from <agent> and --sync-gemini alias.
+/** Tool-name vocabulary a sync side writes in; the shared .agents roots use Claude's names. */
+function vocabularyAgent(id: string): AgentDef {
+  return getAgent(id) ?? getAgent("claude")!
+}
+
+/**
+ * Evidence sources for resolving existing targets. When neither side is the
+ * Claude skills checkout, its history is consulted as a reference: a side's own
+ * checkout may be a stale clone whose commits describe content it no longer holds.
+ */
+function createSkillContextFactory(from: string, to: string): SkillContextFactory {
+  const source = vocabularyAgent(from)
+  const target = vocabularyAgent(to)
+  const vocabulary = createSkillVocabulary(source, target)
+  const referenceRoot = from === "claude" || to === "claude" ? null : primarySkillDir("claude")
+  const reference = getAgent("claude")!
+  return (sourceSkillDir, targetDir) => ({
+    sourceDir: sourceSkillDir,
+    targetDir,
+    sourceHistory: lazySkillHistory(sourceSkillDir),
+    targetHistory: lazySkillHistory(targetDir),
+    vocabulary,
+    reference: referenceRoot
+      ? createSkillReferenceHistory(
+          lazySkillHistory(join(referenceRoot, basename(targetDir))),
+          reference,
+          { source, target }
+        )
+      : undefined,
+  })
+}
+
+// Copy-only for new skills (no tool name remapping); existing targets are resolved per file.
+// Used by --sync --from <agent> and the --sync-gemini alias.
 async function syncSkills(options: {
   from: string
   to: string
@@ -737,11 +858,13 @@ async function syncSkills(options: {
 
   const counts: Record<SkillSyncAction, number> = {
     copied: 0,
+    updated: 0,
     overwritten: 0,
     unchanged: 0,
     skipped: 0,
   }
   const failures: string[] = []
+  const createContext = createSkillContextFactory(from, to)
 
   for (const source of orderedSkills) {
     const result = await syncSkillSource(source, {
@@ -749,6 +872,7 @@ async function syncSkills(options: {
       dryRun,
       overwrite,
       fileSystem,
+      createContext,
     })
     if (typeof result === "string") counts[result]++
     else failures.push(result.failure)
@@ -1015,7 +1139,7 @@ export const skillCommand: Command<SkillCommandOptions> = {
     {
       flags: "--sync",
       description:
-        "Copy skills from --from <agent> to --to <agent> (default: claude) (copy-only; use --convert for tool name remapping)",
+        "Copy skills from --from <agent> to --to <agent> (default: claude). New skills are copied as-is (use --convert for tool name remapping); existing targets are resolved per file from tool-name conversion, git history, and modification times — converted copies and newer targets are kept, stale targets are updated, divergent edits are three-way merged, and only unresolved conflicts are skipped",
     },
     {
       flags: "--sync-gemini",
@@ -1049,7 +1173,7 @@ export const skillCommand: Command<SkillCommandOptions> = {
     {
       flags: "--overwrite",
       description:
-        "Allow overwriting existing target skills or commands (--sync leaves identical targets untouched)",
+        "Allow overwriting existing target skills or commands (--sync only replaces targets with unresolved conflicts; identical, converted, and newer targets are never replaced)",
     },
   ],
   async run(args, options) {
