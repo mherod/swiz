@@ -986,15 +986,18 @@ git() {
           continue
         fi
         has_targets=true
-        if [[ -d "$arg" ]]; then
+        # Pathspecs are relative to the -C directory, not the shell's cwd.
+        local target_path="$arg"
+        [[ "$target_path" == /* ]] || target_path="$git_context_dir/$target_path"
+        if [[ -d "$target_path" ]]; then
           target_empty_or_missing=false
           break
-        elif [[ -f "$arg" ]]; then
-          if [[ -s "$arg" ]]; then
+        elif [[ -f "$target_path" ]]; then
+          if [[ -s "$target_path" ]]; then
             target_empty_or_missing=false
             break
           fi
-        elif [[ -e "$arg" ]]; then
+        elif [[ -e "$target_path" ]]; then
           target_empty_or_missing=false
           break
         fi
@@ -1002,7 +1005,7 @@ git() {
 
       if ! $has_targets || ! $target_empty_or_missing; then
         printf 'swiz: Do not use `git restore` directly on files with existing content. It silently discards uncommitted changes without recovery.\n' >&2
-        printf 'To discard changes safely, trash the file first with `trash <file>` (recoverable), then run `git restore <file>` to restore the clean revision.\n' >&2
+        printf 'To discard changes safely, trash the file first with `trash <file>` (recoverable), then run `git restore <file>` to restore the clean revision. Run them as separate commands: this check reads the files before any part of the command runs.\n' >&2
         return 1
       fi
       ;;

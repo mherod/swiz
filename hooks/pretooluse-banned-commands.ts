@@ -435,7 +435,7 @@ function buildGitRules(payload: Record<string, unknown>): Rule[] {
       useRawCommand: true,
       match: isGitRestoreCommand,
       message:
-        "Do not use `git restore` directly on files with existing content. It silently discards uncommitted changes without recovery.\n\nInstead:\n  • To discard changes safely, trash the file first: `trash <file>` (creates a recoverable backup), then run `git restore <file>` to restore the clean tracked revision\n  • Use the Edit tool to make targeted corrections without discarding other edits\n  • If you want to revert a commit, use `git revert <hash>` (preserves history)",
+        "Do not use `git restore` directly on files with existing content. It silently discards uncommitted changes without recovery.\n\nInstead:\n  • To discard changes safely, trash the file first: `trash <file>` (creates a recoverable backup), then run `git restore <file>` to restore the clean tracked revision. Run them as separate commands: this check reads the files before any part of the command runs\n  • Use the Edit tool to make targeted corrections without discarding other edits\n  • If you want to revert a commit, use `git revert <hash>` (preserves history)",
     },
     {
       match: (c) => /git\s+reset\s+--hard/.test(c),

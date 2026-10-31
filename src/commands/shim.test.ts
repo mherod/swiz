@@ -837,6 +837,48 @@ describe("shell shim runtime", () => {
     }
   )
 
+  testWithZsh(
+    "resolves git restore targets against the -C directory, not the shell cwd",
+    async () => {
+      const { repo, env } = await createMockGitProject("restore-context")
+      const other = join(repo, "other")
+      // The same relative path is populated in the shell cwd but already trashed in the -C repo.
+      await Bun.write(join(repo, "skill", "notes.md"), "live content in the cwd\n")
+      await mkdir(join(other, "skill"), { recursive: true })
+
+      const trashed = await runShell(
+        ZSH_PATH ?? "zsh",
+        [
+          "-f",
+          "-c",
+          'source "$1"; git -C "$2" restore -- skill/notes.md',
+          "swiz",
+          SHIM_PATH,
+          other,
+        ],
+        { cwd: repo, env }
+      )
+      expect(trashed.stderr).not.toContain("Do not use `git restore`")
+
+      // Control: populated inside the -C repo is still blocked, whatever the cwd holds.
+      await Bun.write(join(other, "skill", "notes.md"), "uncommitted edit\n")
+      const populated = await runShell(
+        ZSH_PATH ?? "zsh",
+        [
+          "-f",
+          "-c",
+          'source "$1"; git -C "$2" restore -- skill/notes.md',
+          "swiz",
+          SHIM_PATH,
+          other,
+        ],
+        { cwd: join(repo, "skill"), env }
+      )
+      expect(populated.exitCode).toBe(1)
+      expect(populated.stderr).toContain("separate commands")
+    }
+  )
+
   test("does not remove an existing Git index lock", async () => {
     const { repo, env } = await createMockGitProject("lock")
     const lockPath = join(repo, ".git", "index.lock")
