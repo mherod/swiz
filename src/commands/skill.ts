@@ -5,6 +5,7 @@ import { orderBy } from "lodash-es"
 import { AGENTS, type AgentDef, getAgent } from "../agents.ts"
 import { detectCurrentAgent } from "../detect.ts"
 import { getHomeDir } from "../home.ts"
+import { SWIZ_SKILL_SYNC_LABEL } from "../launch-agents.ts"
 import { getProviderAdapter } from "../provider-adapters.ts"
 import { claimShutdownSignals } from "../shutdown-claim.ts"
 import {
@@ -43,6 +44,12 @@ import {
   snapshotSkillBaseline,
 } from "../utils/skill-sync-resolution.ts"
 import { DEFAULT_SKILL_SYNC_QUIET_MS, watchSkillSync } from "../utils/skill-sync-watch.ts"
+import type { LaunchAgentFileAction } from "./install/launch-agent-config.ts"
+import {
+  installSkillSyncLaunchAgent,
+  type SkillSyncAgentOptions,
+  uninstallSkillSyncLaunchAgent,
+} from "./install/skill-sync-agent.ts"
 
 export { parseFrontmatterField, stripFrontmatter }
 
@@ -1471,29 +1478,90 @@ async function handleSyncWatch(
 ): Promise<void> {
   if (extractPositionals(args).length > 0)
     throw new Error("--sync-watch does not accept a skill name.")
+  if (args.includes("--install") || args.includes("--uninstall")) {
+    await handleSyncWatchAgent(args, { dryRun, overwrite }, options?.launchAgent)
+    return
+  }
   const watch = {
     quietMs: options?.watchQuietMs,
     sweepMs: options?.watchSweepMs,
     signal: options?.watchSignal,
   }
-  const from = extractFlagValue(args, "--from")
-  if (!from) {
-    const agents = automaticSyncAgents(args, overwrite, "--sync-watch")
-    await watchAllSkills({ agents, dryRun, fileSystem: options?.syncFileSystem, watch })
+  const fileSystem = options?.syncFileSystem
+  if (args.includes("--from")) {
+    await watchOneWay(args, { dryRun, overwrite, fileSystem, watch })
     return
   }
+  const agents = automaticSyncAgents(args, overwrite, "--sync-watch")
+  await watchAllSkills({ agents, dryRun, fileSystem, watch })
+}
+
+async function watchOneWay(
+  args: string[],
+  settings: {
+    dryRun: boolean
+    overwrite: boolean
+    fileSystem?: Partial<SkillSyncFileSystem>
+    watch: SkillSyncWatchSettings
+  }
+): Promise<void> {
+  const from = extractFlagValue(args, "--from")
+  if (!from) throw new Error("--from requires an <agent>.")
   if (args.includes("--agents")) {
     throw new Error("--agents selects automatic two-way sync; drop --from/--to to use it.")
   }
   const to = extractFlagValue(args, "--to") ?? "claude"
-  await watchSyncSkills({
-    from,
-    to,
-    dryRun,
-    overwrite,
-    fileSystem: options?.syncFileSystem,
-    watch,
-  })
+  await watchSyncSkills({ from, to, ...settings })
+}
+
+const SKILL_SYNC_AGENT_OUTCOMES: Record<LaunchAgentFileAction, [done: string, preview: string]> = {
+  unsupported: ["not supported", "not supported"],
+  unchanged: ["already installed and running", "already installed and running"],
+  install: ["installed and started", "would be installed and started"],
+  reload: ["updated and restarted", "would be updated and restarted"],
+  load: ["started", "would be started"],
+  remove: ["stopped and removed", "would be stopped and removed"],
+}
+
+/** Fail at install time, not at the next login, when the persisted arguments are invalid. */
+function validateWatchArgs(watchArgs: string[], overwrite: boolean): void {
+  const from = extractFlagValue(watchArgs, "--from")
+  if (from) {
+    resolveForSync(from)
+    resolveForSync(extractFlagValue(watchArgs, "--to") ?? "claude")
+    return
+  }
+  resolveSyncRoots(automaticSyncAgents(watchArgs, overwrite, "--sync-watch"))
+}
+
+/** `--sync-watch --install|--uninstall`: manage the login LaunchAgent that runs the watch. */
+async function handleSyncWatchAgent(
+  args: string[],
+  flags: { dryRun: boolean; overwrite: boolean },
+  agentOptions: SkillSyncAgentOptions = {}
+): Promise<void> {
+  if (args.includes("--install") && args.includes("--uninstall")) {
+    throw new Error("--install and --uninstall are mutually exclusive.")
+  }
+  let action: LaunchAgentFileAction
+  let watchArgs: string[] = []
+  if (args.includes("--install")) {
+    // --dry-run previews the install; it is not persisted into the agent.
+    watchArgs = args.filter((arg) => !["--sync-watch", "--install", "--dry-run"].includes(arg))
+    validateWatchArgs(watchArgs, flags.overwrite)
+    action = await installSkillSyncLaunchAgent(watchArgs, flags.dryRun, agentOptions)
+  } else {
+    action = await uninstallSkillSyncLaunchAgent(flags.dryRun, agentOptions)
+  }
+  if (action === "unsupported") throw new Error("LaunchAgents are only available on macOS.")
+  const [done, preview] = SKILL_SYNC_AGENT_OUTCOMES[action]
+  console.log(`${SWIZ_SKILL_SYNC_LABEL}: ${flags.dryRun ? preview : done}`)
+  if (action !== "remove") {
+    console.log(`Runs at login: swiz skill --sync-watch ${watchArgs.join(" ")}`.trimEnd())
+    console.log(
+      `Logs: ${displayPath(join(agentOptions.homeDir ?? getHomeDir(), "Library/Logs/Swiz/skill-sync.log"))}`
+    )
+  }
 }
 
 /** --agents for automatic sync; --overwrite cannot apply because no side is "the source". */
@@ -1552,13 +1620,15 @@ export interface SkillCommandOptions {
   watchQuietMs?: number
   watchSweepMs?: number
   watchSignal?: AbortSignal
+  /** Test seam for --sync-watch --install/--uninstall (home, launchctl runtime, paths). */
+  launchAgent?: SkillSyncAgentOptions
 }
 
 export const skillCommand: Command<SkillCommandOptions> = {
   name: "skill",
   description: "Read, list, sync, and convert skills",
   usage:
-    "swiz skill [--raw] [--no-front-matter] [skill-name] | --sync --from <agent> [--to <agent>] [--dry-run] [--overwrite] | --sync-gemini [--dry-run] [--overwrite] | --sync-all [--agents <hub,agent,...>] [--dry-run] | --sync-watch [--agents <hub,agent,...>] [--dry-run] | --sync-watch --from <agent> [--to <agent>] [--dry-run] [--overwrite] | --convert --from <agent> --to <agent> [skill-name] [--dry-run] [--overwrite] | --to-command --from <agent> [skill-name] [--dry-run] [--overwrite]",
+    "swiz skill [--raw] [--no-front-matter] [skill-name] | --sync --from <agent> [--to <agent>] [--dry-run] [--overwrite] | --sync-gemini [--dry-run] [--overwrite] | --sync-all [--agents <hub,agent,...>] [--dry-run] | --sync-watch [--agents <hub,agent,...>] [--dry-run] [--install|--uninstall] | --sync-watch --from <agent> [--to <agent>] [--dry-run] [--overwrite] | --convert --from <agent> --to <agent> [skill-name] [--dry-run] [--overwrite] | --to-command --from <agent> [skill-name] [--dry-run] [--overwrite]",
   options: [
     { flags: "<skill-name>", description: "Print the skill content (omit to list all skills)" },
     { flags: "--raw", description: "Skip inline command expansion (!`cmd` substitutions)" },
@@ -1582,6 +1652,11 @@ export const skillCommand: Command<SkillCommandOptions> = {
       flags: "--sync-watch",
       description:
         "Keep running and sync as skills change: two-way across --agents like --sync-all, or one-way with --from <agent> [--to <agent>]. A skill syncs only after 20s with no changes in any root, so edits in progress are never copied half-written; runs until SIGTERM or Ctrl+C",
+    },
+    {
+      flags: "--install / --uninstall",
+      description:
+        "With --sync-watch: install (or remove) a login LaunchAgent (com.swiz.skill-sync) that runs the watch with the given arguments, restarts it if it exits, and logs to ~/Library/Logs/Swiz/skill-sync.log. --dry-run previews the change",
     },
     {
       flags: "--agents <hub,agent,...>",
@@ -1621,6 +1696,10 @@ export const skillCommand: Command<SkillCommandOptions> = {
   async run(args, options) {
     const handled = await handleSkillTransferArgs(args, options)
     if (handled) return
+
+    if (args.includes("--install") || args.includes("--uninstall")) {
+      throw new Error("--install and --uninstall are only valid with --sync-watch.")
+    }
 
     if (args.includes("--dry-run") || args.includes("--overwrite")) {
       throw new Error(

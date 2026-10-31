@@ -3,6 +3,7 @@ import { getHomeDir } from "./home.ts"
 
 export const SWIZ_DAEMON_LABEL = "com.swiz.daemon"
 export const SWIZ_CLEANUP_LABEL = "com.swiz.doctor-clean"
+export const SWIZ_SKILL_SYNC_LABEL = "com.swiz.skill-sync"
 
 export interface LaunchAgentCommandResult {
   exitCode: number
