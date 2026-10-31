@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs"
+import { existsSync, realpathSync } from "node:fs"
 import { cp, lstat, mkdir, mkdtemp, readdir, readlink, rename, rm, stat } from "node:fs/promises"
 import { basename, dirname, join } from "node:path"
 import { orderBy } from "lodash-es"
@@ -145,9 +145,9 @@ function displayPath(path: string): string {
   return path.startsWith(home) ? `~${path.slice(home.length)}` : path
 }
 
-/** Positional (non-flag) args, excluding values consumed by --from/--to. */
+/** Positional (non-flag) args, excluding values consumed by --from/--to/--agents. */
 function extractPositionals(args: string[]): string[] {
-  const flagsWithValue = new Set(["--from", "--to"])
+  const flagsWithValue = new Set(["--from", "--to", "--agents"])
   return args.filter((a, i) => !a.startsWith("--") && !flagsWithValue.has(args[i - 1] ?? ""))
 }
 
@@ -640,6 +640,8 @@ interface SkillSyncOptions {
   overwrite: boolean
   fileSystem?: Partial<SkillSyncFileSystem>
   createContext: SkillContextFactory
+  /** Omit lines for skills that need no change (watch mode re-checks every settled skill). */
+  quiet?: boolean
 }
 
 interface SingleSkillSync extends SkillSyncOptions {
@@ -705,7 +707,12 @@ async function copyNewSkill(sync: SingleSkillSync): Promise<SkillSyncAction> {
   return "copied"
 }
 
-function reportResolvedUnchanged(name: string, files: SkillFileResolution[]): SkillSyncAction {
+function reportResolvedUnchanged(
+  name: string,
+  files: SkillFileResolution[],
+  quiet = false
+): SkillSyncAction {
+  if (quiet) return "unchanged"
   const summary = describeSkillResolution(files, ["equivalent", "target-newer", "target-only"])
   console.log(`  - unchanged ${name}${summary ? ` (${summary})` : ""}`)
   printFileResolutions(name, files, ["target-newer"])
@@ -760,11 +767,11 @@ async function syncSingleSkill(sync: SingleSkillSync): Promise<SkillSyncAction> 
   if (!existsSync(targetDir)) return await copyNewSkill(sync)
   const diff = await diffSkillTrees(sourceSkillDir, targetDir)
   if (!describeSkillTreeDiff(diff)) {
-    console.log(`  - unchanged ${name}`)
+    if (!sync.quiet) console.log(`  - unchanged ${name}`)
     return "unchanged"
   }
   const plan = await planSkillResolution(sync.createContext(sourceSkillDir, targetDir))
-  if (plan.outcome === "unchanged") return reportResolvedUnchanged(name, plan.files)
+  if (plan.outcome === "unchanged") return reportResolvedUnchanged(name, plan.files, sync.quiet)
   if (plan.outcome === "update") return await applyResolvedUpdate(sync, plan.files)
   return await settleConflict(sync, plan.files, diff)
 }
@@ -828,7 +835,7 @@ function createSkillContextFactory(
           { source, target }
         )
       : undefined,
-    baseline: baselines?.get(basename(targetDir)),
+    baseline: baselines?.get(sourceSkillDir),
   })
 }
 
@@ -968,6 +975,7 @@ async function watchSyncSkills(options: {
     overwrite,
     fileSystem,
     createContext: createSkillContextFactory(from, to, baselines),
+    quiet: true,
   }
   const stop = watchStopSignal(options.watch.signal)
   try {
@@ -984,7 +992,256 @@ async function watchSyncSkills(options: {
         const result = await syncSkillSource(source, syncOptions)
         if (typeof result !== "string") console.log(`    ${result.failure}`)
         // The source as just synced is the base for resolving the next round of edits.
-        baselines.set(name, await snapshotSkillBaseline(join(source.sourceDir, name)))
+        const sourceSkillDir = join(source.sourceDir, name)
+        baselines.set(sourceSkillDir, await snapshotSkillBaseline(sourceSkillDir))
+      },
+      log: (message) => console.log(`  - ${message}`),
+    })
+  } finally {
+    stop.dispose()
+  }
+  console.log("\nStopped watching.")
+}
+
+// ─── Automatic-direction sync across agent skill roots ───────────────────────
+//
+// The hub (Claude's skills checkout unless --agents names another first) is
+// reconciled with every spoke root in both directions: newer spoke edits flow
+// into the hub, then newer hub content — including what just arrived — flows out
+// to every spoke. Each file's direction comes from the same evidence as --sync.
+
+interface SkillSyncRoot {
+  id: string
+  name: string
+  dir: string
+  vocabulary: AgentDef
+}
+
+function physicalPath(path: string): string {
+  return existsSync(path) ? realpathSync(path) : path
+}
+
+/** Hub first; agents sharing one skills directory (gemini/antigravity) are synced once. */
+function resolveSyncRoots(agentsArg: string | null): SkillSyncRoot[] {
+  const ids =
+    agentsArg === null
+      ? ["claude", ...AGENTS.map((a) => a.id).filter((id) => id !== "claude")]
+      : agentsArg
+          .split(",")
+          .map((id) => id.trim())
+          .filter(Boolean)
+  const roots: SkillSyncRoot[] = []
+  const seen = new Set<string>()
+  for (const id of ids) {
+    const { name } = resolveForSync(id)
+    const dir = primarySkillDir(id)
+    const physical = physicalPath(dir)
+    // By default only roots that exist join; an explicit list may create them.
+    if (seen.has(physical) || (agentsArg === null && roots.length > 0 && !existsSync(dir))) continue
+    seen.add(physical)
+    roots.push({ id, name, dir, vocabulary: vocabularyAgent(id) })
+  }
+  if (roots.length < 2) {
+    throw new Error(
+      "Automatic sync needs at least two skill roots; pass --agents <hub>,<agent>[,...]."
+    )
+  }
+  return roots
+}
+
+async function listSkillsAcrossRoots(roots: SkillSyncRoot[]): Promise<string[]> {
+  const names = new Set<string>()
+  for (const root of roots) for (const name of await discoverSkillNames(root.dir)) names.add(name)
+  return [...names].sort()
+}
+
+function hasSkill(root: SkillSyncRoot, name: string): Promise<boolean> {
+  return Bun.file(join(root.dir, name, "SKILL.md")).exists()
+}
+
+/** Copy a skill into a root that lacks it, converted into that agent's tool names. */
+async function stageConvertedSkillCopy(
+  sourceSkillDir: string,
+  replacementDir: string,
+  vocabulary: { from: AgentDef; to: AgentDef },
+  fileSystem: SkillSyncFileSystem
+): Promise<void> {
+  await fileSystem.copyDirectory(sourceSkillDir, replacementDir)
+  if (vocabulary.from.id === vocabulary.to.id) return
+  for (const [path, kind] of await collectSkillTreeEntries(replacementDir)) {
+    if (kind !== "file" || !path.endsWith(".md")) continue
+    const file = join(replacementDir, path)
+    const text = await Bun.file(file).text()
+    const converted = convertSkillContent(text, vocabulary.from, vocabulary.to, AGENTS).content
+    if (converted !== text) await Bun.write(file, converted)
+  }
+}
+
+interface RootSyncSettings {
+  dryRun: boolean
+  quiet: boolean
+  fileSystem?: Partial<SkillSyncFileSystem>
+  /** Per-skill-directory snapshots from the last pass (watch mode only). */
+  baselines?: Map<string, SkillHistory>
+}
+
+async function copySkillAcross(
+  name: string,
+  roots: { from: SkillSyncRoot; to: SkillSyncRoot },
+  settings: RootSyncSettings
+): Promise<SkillSyncAction> {
+  const { from, to } = roots
+  if (!settings.dryRun) {
+    await replaceSkillDirectory(join(to.dir, name), {
+      allowReplace: false,
+      fileSystem: settings.fileSystem,
+      stage: (replacementDir, fs) =>
+        stageConvertedSkillCopy(
+          join(from.dir, name),
+          replacementDir,
+          { from: from.vocabulary, to: to.vocabulary },
+          fs
+        ),
+    })
+  }
+  logSkillAction(`${from.id}→${to.id}/${name}`, false, settings.dryRun, "copied", "copy")
+  return "copied"
+}
+
+/** Bring one skill from `from` into `to`, resolving per file when both roots have it. */
+async function syncSkillDirection(
+  name: string,
+  roots: { from: SkillSyncRoot; to: SkillSyncRoot },
+  settings: RootSyncSettings
+): Promise<SkillSyncAction | null> {
+  const { from, to } = roots
+  const [inFrom, inTo] = await Promise.all([hasSkill(from, name), hasSkill(to, name)])
+  if (!inFrom) return null
+  if (!inTo) return await copySkillAcross(name, roots, settings)
+  // A skill linked into both roots is one directory; there is nothing to reconcile.
+  if (physicalPath(join(from.dir, name)) === physicalPath(join(to.dir, name))) return null
+  return await syncSingleSkill({
+    name: `${from.id}→${to.id}/${name}`,
+    sourceSkillDir: join(from.dir, name),
+    targetDir: join(to.dir, name),
+    targetRoot: to.dir,
+    dryRun: settings.dryRun,
+    overwrite: false,
+    quiet: settings.quiet,
+    fileSystem: settings.fileSystem,
+    createContext: createSkillContextFactory(from.id, to.id, settings.baselines),
+  })
+}
+
+/**
+ * Sync one skill across every root: first every spoke into the hub, then the hub out to
+ * every spoke, so an edit in any root reaches all of them in one pass. Failures are
+ * recorded per direction so the rest still sync.
+ */
+async function syncSkillAcrossRoots(
+  name: string,
+  roots: SkillSyncRoot[],
+  settings: RootSyncSettings
+): Promise<{ actions: SkillSyncAction[]; failures: string[] }> {
+  const [hub, ...spokes] = roots as [SkillSyncRoot, ...SkillSyncRoot[]]
+  const directions = [
+    ...spokes.map((spoke) => ({ from: spoke, to: hub })),
+    ...spokes.map((spoke) => ({ from: hub, to: spoke })),
+  ]
+  const actions: SkillSyncAction[] = []
+  const failures: string[] = []
+  for (const direction of directions) {
+    const label = `${direction.from.id}→${direction.to.id}/${name}`
+    try {
+      const action = await syncSkillDirection(name, direction, settings)
+      if (action) actions.push(action)
+    } catch (error) {
+      console.log(`  - failed ${label}`)
+      failures.push(`${label}: ${messageFromUnknownError(error)}`)
+    }
+  }
+  if (settings.baselines) {
+    // Every root as just settled is the merge base for the next round of edits.
+    for (const root of roots) {
+      const skillDir = join(root.dir, name)
+      if (await hasSkill(root, name)) {
+        settings.baselines.set(skillDir, await snapshotSkillBaseline(skillDir))
+      }
+    }
+  }
+  return { actions, failures }
+}
+
+function printRootsHeader(verb: string, roots: SkillSyncRoot[], dryRun: boolean): void {
+  const [hub, ...spokes] = roots as [SkillSyncRoot, ...SkillSyncRoot[]]
+  console.log(
+    `${verb} skills between ${hub.name} (hub) and ${spokes.map((r) => r.name).join(", ")}; direction is resolved per file${dryRun ? " (dry run: no files will be changed)" : ""}.`
+  )
+  console.log(`Roots: ${roots.map((r) => `${r.id} ${displayPath(r.dir)}`).join(" | ")}`)
+}
+
+async function syncAllSkills(options: {
+  agents: string | null
+  dryRun: boolean
+  fileSystem?: Partial<SkillSyncFileSystem>
+}): Promise<void> {
+  const { dryRun, fileSystem } = options
+  const roots = resolveSyncRoots(options.agents)
+  printRootsHeader("Syncing", roots, dryRun)
+  console.log()
+  if (!dryRun) for (const root of roots) await mkdir(root.dir, { recursive: true })
+
+  const counts: Record<SkillSyncAction, number> = {
+    copied: 0,
+    updated: 0,
+    overwritten: 0,
+    unchanged: 0,
+    skipped: 0,
+  }
+  const failures: string[] = []
+  for (const name of await listSkillsAcrossRoots(roots)) {
+    const result = await syncSkillAcrossRoots(name, roots, { dryRun, quiet: false, fileSystem })
+    for (const action of result.actions) counts[action]++
+    failures.push(...result.failures)
+  }
+  // Counts are per direction. Conflicts have no --overwrite remedy here: that needs a direction.
+  printSyncSummary(counts, failures.length, true)
+  if (failures.length > 0) {
+    throw new Error(
+      `Failed to sync ${failures.length} skill(s):\n${failures.map((f) => `  - ${f}`).join("\n")}`
+    )
+  }
+}
+
+async function watchAllSkills(options: {
+  agents: string | null
+  dryRun: boolean
+  fileSystem?: Partial<SkillSyncFileSystem>
+  watch: SkillSyncWatchSettings
+}): Promise<void> {
+  const { dryRun, fileSystem } = options
+  const roots = resolveSyncRoots(options.agents)
+  const [hub, ...spokes] = roots as [SkillSyncRoot, ...SkillSyncRoot[]]
+  const quietMs = options.watch.quietMs ?? DEFAULT_SKILL_SYNC_QUIET_MS
+  if (!dryRun) for (const root of roots) await mkdir(root.dir, { recursive: true })
+  printRootsHeader("Watching", roots, dryRun)
+  console.log(
+    `Each skill syncs after ${quietMs / 1000}s with no changes in any root. Stop with Ctrl+C or SIGTERM.\n`
+  )
+
+  const settings: RootSyncSettings = { dryRun, quiet: true, fileSystem, baselines: new Map() }
+  const stop = watchStopSignal(options.watch.signal)
+  try {
+    await watchSkillSync({
+      sourceRoots: spokes.map((root) => root.dir),
+      targetRoot: hub.dir,
+      quietMs,
+      sweepMs: options.watch.sweepMs ?? quietMs * 3,
+      signal: stop.signal,
+      listSkills: () => listSkillsAcrossRoots(roots),
+      syncSkill: async (name) => {
+        const { failures } = await syncSkillAcrossRoots(name, roots, settings)
+        for (const failure of failures) console.log(`    ${failure}`)
       },
       log: (message) => console.log(`  - ${message}`),
     })
@@ -1165,7 +1422,7 @@ function extractFlagValue(args: string[], flag: string): string | null {
 function validateTransferExclusivity(selected: boolean[]): void {
   if (selected.filter(Boolean).length > 1) {
     throw new Error(
-      "--sync, --sync-gemini, --sync-watch, --convert, and --to-command are mutually exclusive."
+      "--sync, --sync-gemini, --sync-all, --sync-watch, --convert, and --to-command are mutually exclusive."
     )
   }
 }
@@ -1214,8 +1471,20 @@ async function handleSyncWatch(
 ): Promise<void> {
   if (extractPositionals(args).length > 0)
     throw new Error("--sync-watch does not accept a skill name.")
+  const watch = {
+    quietMs: options?.watchQuietMs,
+    sweepMs: options?.watchSweepMs,
+    signal: options?.watchSignal,
+  }
   const from = extractFlagValue(args, "--from")
-  if (!from) throw new Error("--sync-watch requires --from <agent>.")
+  if (!from) {
+    const agents = automaticSyncAgents(args, overwrite, "--sync-watch")
+    await watchAllSkills({ agents, dryRun, fileSystem: options?.syncFileSystem, watch })
+    return
+  }
+  if (args.includes("--agents")) {
+    throw new Error("--agents selects automatic two-way sync; drop --from/--to to use it.")
+  }
   const to = extractFlagValue(args, "--to") ?? "claude"
   await watchSyncSkills({
     from,
@@ -1223,12 +1492,32 @@ async function handleSyncWatch(
     dryRun,
     overwrite,
     fileSystem: options?.syncFileSystem,
-    watch: {
-      quietMs: options?.watchQuietMs,
-      sweepMs: options?.watchSweepMs,
-      signal: options?.watchSignal,
-    },
+    watch,
   })
+}
+
+/** --agents for automatic sync; --overwrite cannot apply because no side is "the source". */
+function automaticSyncAgents(args: string[], overwrite: boolean, mode: string): string | null {
+  if (overwrite) {
+    throw new Error(
+      `${mode} resolves direction per file, so --overwrite has no side to favour; use --sync --from <agent> --to <agent> --overwrite.`
+    )
+  }
+  if (args.includes("--to")) throw new Error(`${mode} without --from does not take --to.`)
+  return extractFlagValue(args, "--agents")
+}
+
+async function handleSyncAll(
+  args: string[],
+  dryRun: boolean,
+  overwrite: boolean,
+  fileSystem?: Partial<SkillSyncFileSystem>
+): Promise<void> {
+  if (extractPositionals(args).length > 0)
+    throw new Error("--sync-all does not accept a skill name.")
+  if (args.includes("--from")) throw new Error("--sync-all resolves direction itself; drop --from.")
+  const agents = automaticSyncAgents(args, overwrite, "--sync-all")
+  await syncAllSkills({ agents, dryRun, fileSystem })
 }
 
 async function handleSkillTransferArgs(
@@ -1237,16 +1526,19 @@ async function handleSkillTransferArgs(
 ): Promise<boolean> {
   const sync = args.includes("--sync")
   const syncGemini = args.includes("--sync-gemini")
+  const syncAll = args.includes("--sync-all")
   const syncWatch = args.includes("--sync-watch")
   const convert = args.includes("--convert")
   const toCommand = args.includes("--to-command")
-  if (!sync && !syncGemini && !syncWatch && !convert && !toCommand) return false
-  validateTransferExclusivity([sync, syncGemini, syncWatch, convert, toCommand])
+  const modes = [sync, syncGemini, syncAll, syncWatch, convert, toCommand]
+  if (!modes.some(Boolean)) return false
+  validateTransferExclusivity(modes)
   const dryRun = args.includes("--dry-run")
   const overwrite = args.includes("--overwrite")
   if (convert) await handleConvert(args, dryRun, overwrite)
   else if (toCommand) await handleToCommand(args, dryRun, overwrite)
   else if (syncWatch) await handleSyncWatch(args, dryRun, overwrite, options)
+  else if (syncAll) await handleSyncAll(args, dryRun, overwrite, options?.syncFileSystem)
   else await handleSync(args, syncGemini, dryRun, overwrite, options?.syncFileSystem)
   return true
 }
@@ -1266,7 +1558,7 @@ export const skillCommand: Command<SkillCommandOptions> = {
   name: "skill",
   description: "Read, list, sync, and convert skills",
   usage:
-    "swiz skill [--raw] [--no-front-matter] [skill-name] | --sync --from <agent> [--to <agent>] [--dry-run] [--overwrite] | --sync-gemini [--dry-run] [--overwrite] | --sync-watch --from <agent> [--to <agent>] [--dry-run] [--overwrite] | --convert --from <agent> --to <agent> [skill-name] [--dry-run] [--overwrite] | --to-command --from <agent> [skill-name] [--dry-run] [--overwrite]",
+    "swiz skill [--raw] [--no-front-matter] [skill-name] | --sync --from <agent> [--to <agent>] [--dry-run] [--overwrite] | --sync-gemini [--dry-run] [--overwrite] | --sync-all [--agents <hub,agent,...>] [--dry-run] | --sync-watch [--agents <hub,agent,...>] [--dry-run] | --sync-watch --from <agent> [--to <agent>] [--dry-run] [--overwrite] | --convert --from <agent> --to <agent> [skill-name] [--dry-run] [--overwrite] | --to-command --from <agent> [skill-name] [--dry-run] [--overwrite]",
   options: [
     { flags: "<skill-name>", description: "Print the skill content (omit to list all skills)" },
     { flags: "--raw", description: "Skip inline command expansion (!`cmd` substitutions)" },
@@ -1282,9 +1574,19 @@ export const skillCommand: Command<SkillCommandOptions> = {
         "Alias for --sync --from gemini --to claude (copy ~/.gemini/skills into ~/.claude/skills)",
     },
     {
+      flags: "--sync-all",
+      description:
+        "Two-way sync across agent skill roots in one pass: the hub (claude) is reconciled with every other root, each file's direction resolved like --sync, so edits made in any root reach all the others. Skills missing from a root are copied in that agent's tool names",
+    },
+    {
       flags: "--sync-watch",
       description:
-        "Keep running and sync --from <agent> to --to <agent> (default: claude) as skills change, with the same resolution as --sync. A skill syncs only after 20s with no changes on either side, so edits in progress are never copied half-written; runs until SIGTERM or Ctrl+C",
+        "Keep running and sync as skills change: two-way across --agents like --sync-all, or one-way with --from <agent> [--to <agent>]. A skill syncs only after 20s with no changes in any root, so edits in progress are never copied half-written; runs until SIGTERM or Ctrl+C",
+    },
+    {
+      flags: "--agents <hub,agent,...>",
+      description:
+        "Roots for --sync-all/--sync-watch, hub first (default: claude plus every other agent whose skills directory exists; agents sharing a directory are synced once). `agents` adds ~/.agents/skills",
     },
     {
       flags: "--convert",
@@ -1322,7 +1624,7 @@ export const skillCommand: Command<SkillCommandOptions> = {
 
     if (args.includes("--dry-run") || args.includes("--overwrite")) {
       throw new Error(
-        "--dry-run and --overwrite are only valid with --sync, --sync-gemini, --sync-watch, --convert, or --to-command."
+        "--dry-run and --overwrite are only valid with --sync, --sync-gemini, --sync-all, --sync-watch, --convert, or --to-command."
       )
     }
 

@@ -30,11 +30,9 @@ export interface SkillSyncWatchOptions {
 }
 
 export interface SkillFingerprint {
-  /** Identity of both sides' file trees (paths, sizes, mtimes). */
+  /** Identity of every root's file tree for the skill (paths, sizes, mtimes). */
   key: string
-  /** Identity of the source side alone. */
-  sourceKey: string
-  /** Newest file mtime on either side, in epoch milliseconds. */
+  /** Newest file mtime in any root, in epoch milliseconds. */
   newestMtimeMs: number
 }
 
@@ -93,7 +91,6 @@ export async function fingerprintSkill(
   const sourceText = sources.map((s, i) => `#${i}\n${s.lines.join("\n")}`).join("\n")
   return {
     key: String(Bun.hash(`${sourceText}\n--target--\n${target.lines.join("\n")}`)),
-    sourceKey: String(Bun.hash(sourceText)),
     newestMtimeMs: Math.max(target.newest, ...sources.map((s) => s.newest)),
   }
 }
@@ -230,13 +227,14 @@ class SkillSyncWatcher {
     }
     await this.options.syncSkill(name)
     const after = await this.fingerprint(name)
-    this.settled.set(name, after.key)
-    if (after.sourceKey !== before.sourceKey) {
+    if (after.key !== before.key) {
+      // The pass wrote something — or an edit landed while it ran, in any root. Settle only
+      // once a later pass, after another quiet window, changes nothing; that also carries an
+      // edit from one spoke through the hub to the others, and catches mid-sync edits.
       this.pending.set(name, this.now())
-      const seconds = this.options.quietMs / 1000
-      this.options.log(`${name} changed while syncing; syncing again after ${seconds}s of quiet`)
       return
     }
+    this.settled.set(name, after.key)
     // Keep a change that arrived during the sync; otherwise the skill is settled.
     if ((this.pending.get(name) ?? 0) === lastChange) this.pending.delete(name)
   }

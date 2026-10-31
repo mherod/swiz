@@ -1035,6 +1035,81 @@ describe("swiz skill --sync converted-copy edits", () => {
   })
 })
 
+// ─── swiz skill --sync-all (direction resolved per file) ─────────────────────
+
+describe("swiz skill --sync-all", () => {
+  test("an edit in one spoke reaches the hub and every other spoke in one pass, then settles", async () => {
+    const fakeHome = await createTempDir()
+    const skillName = "all-propagate-xyz"
+    const claudeRoot = join(fakeHome, ".claude", "skills")
+    await writeSkill(join(claudeRoot, skillName), "one\n")
+    await commitAll(claudeRoot, "v1", "2026-01-01T00:00:00Z")
+    await writeSkill(join(fakeHome, ".gemini", "skills", skillName), "one\n")
+    await setMtime(join(fakeHome, ".gemini", "skills", skillName, "SKILL.md"), OLD_MTIME)
+    await writeSkill(join(fakeHome, ".codex", "skills", skillName), "two\n")
+    const args = ["--sync-all", "--agents", "claude,gemini,codex"]
+
+    const first = await runSkillCli(args, fakeHome)
+    const second = await runSkillCli(args, fakeHome)
+
+    expect(first.exitCode).toBe(0)
+    expect(first.stdout).toContain(`updated codex→claude/${skillName} (1 updated)`)
+    expect(first.stdout).toContain(`updated claude→gemini/${skillName} (1 updated)`)
+    for (const agent of ["claude", "gemini", "codex"]) {
+      const path = join(fakeHome, `.${agent}`, "skills", skillName, "SKILL.md")
+      expect(await Bun.file(path).text()).toBe("two\n")
+    }
+    expect(second.stdout).toContain("0 copied, 0 updated")
+  })
+
+  test("a skill found in one root is added to the others in each agent's tool names", async () => {
+    const fakeHome = await createTempDir()
+    const skillName = "all-new-xyz"
+    const claude = getAgent("claude")!
+    const gemini = getAgent("gemini")!
+    const codex = getAgent("codex")!
+    const claudeText = "Use Bash, then Read the result.\n"
+    const geminiText = convertSkillContent(claudeText, claude, gemini, AGENTS).content
+    await mkdir(join(fakeHome, ".claude", "skills"), { recursive: true })
+    await mkdir(join(fakeHome, ".codex", "skills"), { recursive: true })
+    await writeSkill(join(fakeHome, ".gemini", "skills", skillName), geminiText)
+
+    const { stdout, exitCode } = await runSkillCli(
+      ["--sync-all", "--agents", "claude,gemini,codex"],
+      fakeHome
+    )
+
+    expect(exitCode).toBe(0)
+    expect(stdout).toContain(`copied gemini→claude/${skillName}`)
+    expect(stdout).toContain(`copied claude→codex/${skillName}`)
+    const read = (agent: string) =>
+      Bun.file(join(fakeHome, `.${agent}`, "skills", skillName, "SKILL.md")).text()
+    expect(await read("claude")).toBe(claudeText)
+    expect(await read("codex")).toBe(convertSkillContent(claudeText, claude, codex, AGENTS).content)
+  })
+
+  test("by default every existing root joins once, even when two agents share a directory", async () => {
+    const fakeHome = await createTempDir()
+    await mkdir(join(fakeHome, ".claude", "skills"), { recursive: true })
+    await mkdir(join(fakeHome, ".gemini", "skills"), { recursive: true })
+
+    const { stdout, exitCode } = await runSkillCli(["--sync-all", "--dry-run"], fakeHome)
+
+    expect(exitCode).toBe(0)
+    // antigravity also uses ~/.gemini/skills; cursor and codex roots do not exist here.
+    expect(stdout).toContain("Roots: claude ~/.claude/skills | gemini ~/.gemini/skills\n")
+  })
+
+  test("--sync-all refuses a direction or --overwrite", async () => {
+    const fakeHome = await createTempDir()
+    const directed = await runSkillCli(["--sync-all", "--from", "gemini"], fakeHome)
+    const forced = await runSkillCli(["--sync-all", "--overwrite"], fakeHome)
+
+    expect(directed.stderr).toContain("--sync-all resolves direction itself")
+    expect(forced.stderr).toContain("--overwrite has no side to favour")
+  })
+})
+
 // ─── swiz skill --sync-watch ─────────────────────────────────────────────────
 
 async function waitFor(check: () => Promise<boolean>, timeoutMs: number): Promise<boolean> {
@@ -1148,16 +1223,42 @@ describe("swiz skill --sync-watch", () => {
     expect(stdout).toContain("target matches last sync")
   })
 
-  test("--sync-watch rejects a skill name, a missing --from, and other transfer modes", async () => {
+  test("two-way watch carries a spoke edit through the hub to the other spokes without git", async () => {
+    const fakeHome = await createTempDir()
+    const skillName = "watch-two-way-xyz"
+    const paths = ["claude", "gemini", "codex"].map((agent) =>
+      join(fakeHome, `.${agent}`, "skills", skillName, "SKILL.md")
+    )
+    for (const path of paths) {
+      await writeSkill(join(path, ".."), "version one\n")
+      await setMtime(path, OLD_MTIME)
+    }
+
+    const watch = startSyncWatch(fakeHome, 150, ["--agents", "claude,gemini,codex"])
+    // Let the first pass settle and record its baselines.
+    await Bun.sleep(500)
+    await writeFile(paths[2]!, "version two\n")
+    const propagated = await waitFor(async () => {
+      const texts = await Promise.all(paths.map((path) => Bun.file(path).text()))
+      return texts.every((text) => text === "version two\n")
+    }, 5000)
+    const { stdout } = await watch.stop()
+
+    expect(propagated).toBe(true)
+    expect(stdout).toContain(`updated codex→claude/${skillName} (1 updated)`)
+    expect(stdout).toContain(`updated claude→gemini/${skillName} (1 updated)`)
+  })
+
+  test("--sync-watch rejects a skill name, --overwrite without a direction, and other modes", async () => {
     const fakeHome = await createTempDir()
     const named = await runSkillCli(["--sync-watch", "--from", "gemini", "one-skill"], fakeHome)
-    const noFrom = await runSkillCli(["--sync-watch"], fakeHome)
+    const undirected = await runSkillCli(["--sync-watch", "--overwrite"], fakeHome)
     const mixed = await runSkillCli(["--sync-watch", "--sync", "--from", "gemini"], fakeHome)
 
     expect(named.stderr).toContain("--sync-watch does not accept a skill name.")
-    expect(noFrom.stderr).toContain("--sync-watch requires --from <agent>.")
+    expect(undirected.stderr).toContain("--overwrite has no side to favour")
     expect(mixed.stderr).toContain("mutually exclusive")
-    for (const run of [named, noFrom, mixed]) expect(run.exitCode).not.toBe(0)
+    for (const run of [named, undirected, mixed]) expect(run.exitCode).not.toBe(0)
   })
 
   test("SIGTERM stops a running watch with exit code 0", async () => {
