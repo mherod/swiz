@@ -145,6 +145,8 @@ export interface SkillResolutionContext {
    * when both sides changed — which makes edits resolvable between roots without git.
    */
   baseline?: SkillHistory
+  /** Target content as of the last sync, in target vocabulary (kept by two-way --sync-watch). */
+  targetBaseline?: SkillHistory
 }
 
 export interface SkillResolutionPlan {
@@ -347,6 +349,51 @@ async function sourceNewerWrite(
 const CONVERSION_OVERLAP_REASON =
   "source edits overlap lines that differ between agents only by tool names"
 
+/** Whether a side's bytes differ from its own snapshot at the last sync; null when unknown. */
+async function changedSinceSync(
+  snapshot: SkillHistory | undefined,
+  path: string,
+  bytes: Uint8Array
+): Promise<boolean | null> {
+  const recorded = snapshot ? (await snapshot.versions(path))[0] : undefined
+  return recorded ? recorded.blob !== gitBlobId(bytes) : null
+}
+
+/**
+ * With both sides' last-sync snapshots, the side that changed since then is newer — even
+ * when its new content matches an older commit. A revert to a committed version is a
+ * deliberate edit, and ordering by commit dates alone would undo it as a stale copy.
+ */
+async function resolveBySyncSnapshots(
+  context: SkillResolutionContext,
+  path: string,
+  source: FileSide,
+  target: FileSide
+): Promise<SkillFileResolution | null> {
+  const [sourceChanged, targetChanged] = await Promise.all([
+    changedSinceSync(context.baseline, path, source.bytes),
+    changedSinceSync(context.targetBaseline, path, target.bytes),
+  ])
+  if (sourceChanged === null || targetChanged === null || sourceChanged === targetChanged) {
+    return null
+  }
+  if (targetChanged) {
+    return {
+      kind: "target-newer",
+      path,
+      reason: "target changed since the last sync; source has not",
+    }
+  }
+  const write = await sourceNewerWrite(context, path, { source, target }, null)
+  if (!write) return { kind: "diverged", path, reason: CONVERSION_OVERLAP_REASON }
+  return {
+    kind: "source-newer",
+    path,
+    reason: "source changed since the last sync; target has not",
+    write,
+  }
+}
+
 /** Order the two sides by recorded commits, falling back to mtimes for unrecorded edits. */
 async function resolveByRecordedVersions(
   context: SkillResolutionContext,
@@ -520,6 +567,7 @@ async function resolveSharedFile(
     return { kind: "equivalent", path, converted: true }
   }
   return (
+    (await resolveBySyncSnapshots(context, path, source, target)) ??
     (await resolveByRecordedVersions(context, path, source, target)) ??
     (await resolveByHistoryStart(context, path, source, target)) ??
     (await resolveByMerge(context, path, source, target)) ?? {

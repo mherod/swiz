@@ -864,6 +864,7 @@ function createSkillContextFactory(
         )
       : undefined,
     baseline: baselines?.get(sourceSkillDir),
+    targetBaseline: baselines?.get(targetDir),
   })
 }
 
@@ -1113,10 +1114,51 @@ interface RootSyncSettings {
   baselines?: Map<string, SkillHistory>
   /** What each root held after the last pass, so deletions are carried rather than undone. */
   state: SkillSyncState
+  /** Roots judged reset (mass disappearance) and still being restored. */
+  resetRoots?: Set<string>
 }
 
 function resolvedFileSystem(settings: RootSyncSettings): SkillSyncFileSystem {
   return resolveSkillSyncFileSystem(settings.fileSystem)
+}
+
+/** More skills than this vanishing from one root at once reads as a reset, not deletions. */
+const MASS_DELETION_LIMIT = 5
+
+/**
+ * A root that is missing, or lost more than MASS_DELETION_LIMIT of the skills it held after
+ * the last pass, was most likely wiped, moved, or reinstalled. Its absences are not carried
+ * as deletions — the normal pass copies the skills back into it instead.
+ */
+async function looksReset(root: SkillSyncRoot, settings: RootSyncSettings): Promise<boolean> {
+  const missing = await countMissingRecordedSkills(root, settings)
+  settings.resetRoots ??= new Set()
+  // Once judged reset, a root stays so until every missing skill is back: restoring them
+  // one by one must not shrink the count under the limit and turn the rest into deletions.
+  if (settings.resetRoots.has(root.dir)) {
+    if (missing > 0) return true
+    settings.resetRoots.delete(root.dir)
+    return false
+  }
+  if (missing <= MASS_DELETION_LIMIT) return false
+  settings.resetRoots.add(root.dir)
+  console.log(
+    `  - not carrying deletions from ${root.id}: ${missing} skills are missing from ${displayPath(root.dir)} at once, which looks like a reset; restoring them there instead. To remove skills in bulk, stop the watch first and delete them from every root.`
+  )
+  return true
+}
+
+async function countMissingRecordedSkills(
+  root: SkillSyncRoot,
+  settings: RootSyncSettings
+): Promise<number> {
+  const recordedNames = Object.keys(settings.state.roots[root.dir] ?? {})
+  if (!existsSync(root.dir)) return recordedNames.length
+  let missing = 0
+  for (const name of recordedNames) {
+    if (!(await hasSkill(root, name))) missing++
+  }
+  return missing
 }
 
 /**
@@ -1135,15 +1177,16 @@ async function retireDeletedSkill(
   const deletedFrom = roots.filter((_, i) => !present[i] && recorded[i] !== undefined)
   const remaining = roots.filter((_, i) => present[i])
   if (deletedFrom.length === 0 || remaining.length === 0) return null
+  for (const root of deletedFrom) {
+    if (await looksReset(root, settings)) return null
+  }
   const deletedIds = deletedFrom.map((root) => root.id).join(", ")
-  for (const root of remaining) {
-    const before = settings.state.roots[root.dir]?.[name]
-    if ((await stampSkillDir(join(root.dir, name))) !== before) {
-      console.log(
-        `  - restoring ${name}: deleted from ${deletedIds}, but ${root.id} changed it since the last sync`
-      )
-      return null
-    }
+  const editedIn = await firstChangedSinceSync(name, remaining, settings)
+  if (editedIn) {
+    console.log(
+      `  - restoring ${name}: deleted from ${deletedIds}, but ${editedIn.id} changed it since the last sync`
+    )
+    return null
   }
   const fileSystem = resolvedFileSystem(settings)
   for (const root of remaining) {
@@ -1156,6 +1199,19 @@ async function retireDeletedSkill(
     )
   }
   return remaining.map(() => "removed" as const)
+}
+
+/** The first root whose copy of the skill differs from what it held after the last pass. */
+async function firstChangedSinceSync(
+  name: string,
+  roots: SkillSyncRoot[],
+  settings: RootSyncSettings
+): Promise<SkillSyncRoot | null> {
+  for (const root of roots) {
+    const recorded = settings.state.roots[root.dir]?.[name]
+    if ((await stampSkillDir(join(root.dir, name))) !== recorded) return root
+  }
+  return null
 }
 
 /** Record each root's copy after the pass; dry runs leave the state untouched. */

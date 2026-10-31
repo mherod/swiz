@@ -1132,6 +1132,39 @@ describe("swiz skill --sync-all", () => {
     expect(after.stdout).not.toContain(skillName)
   })
 
+  test("a root that loses many skills at once is restored, not mirrored as deletions", async () => {
+    const fakeHome = await createTempDir()
+    const args = ["--sync-all", "--agents", "claude,gemini,codex"]
+    const names = Array.from({ length: 7 }, (_, i) => `all-reset-${i}-xyz`)
+    for (const agent of ["claude", "gemini", "codex"]) {
+      for (const name of names)
+        await writeSkill(join(fakeHome, `.${agent}`, "skills", name), "same\n")
+    }
+    const syncFileSystem = {
+      trashDirectory: async () => {
+        throw new Error("a reset root must not trigger any trashing")
+      },
+    }
+    await runSkillCli(args, fakeHome, { syncFileSystem })
+    // e.g. a reinstall empties the Codex skills folder.
+    await rm(join(fakeHome, ".codex", "skills"), { recursive: true })
+
+    const { stdout, stderr, exitCode } = await runSkillCli(args, fakeHome, { syncFileSystem })
+
+    expect(stderr).toBe("")
+    expect(exitCode).toBe(0)
+    expect(stdout).toContain("not carrying deletions from codex: 7 skills are missing")
+    expect(stdout.match(/not carrying deletions/g)).toHaveLength(1)
+    for (const name of names) {
+      expect(await Bun.file(join(fakeHome, ".codex", "skills", name, "SKILL.md")).text()).toBe(
+        "same\n"
+      )
+      expect(await Bun.file(join(fakeHome, ".claude", "skills", name, "SKILL.md")).exists()).toBe(
+        true
+      )
+    }
+  })
+
   test("a deleted skill edited elsewhere since the last sync is restored, not removed", async () => {
     const fakeHome = await createTempDir()
     const skillName = "all-deleted-edited-xyz"
@@ -1310,6 +1343,40 @@ describe("swiz skill --sync-watch", () => {
     expect(propagated).toBe(true)
     expect(stdout).toContain(`updated codex→claude/${skillName} (1 updated)`)
     expect(stdout).toContain(`updated claude→gemini/${skillName} (1 updated)`)
+  })
+
+  test("two-way watch keeps a revert to the committed version instead of undoing it", async () => {
+    const fakeHome = await createTempDir()
+    const skillName = "watch-revert-xyz"
+    const claudeRoot = join(fakeHome, ".claude", "skills")
+    const claudePath = join(claudeRoot, skillName, "SKILL.md")
+    await writeSkill(join(claudeRoot, skillName), "version one\n")
+    await commitAll(claudeRoot, "v1", "2026-01-01T00:00:00Z")
+    // An uncommitted change reached every root before the watch started.
+    const paths = ["claude", "gemini", "codex"].map((agent) =>
+      join(fakeHome, `.${agent}`, "skills", skillName, "SKILL.md")
+    )
+    for (const path of paths) {
+      await writeSkill(join(path, ".."), "version two\n")
+      await setMtime(path, OLD_MTIME)
+    }
+
+    const watch = startSyncWatch(fakeHome, 150, ["--agents", "claude,gemini,codex"])
+    await Bun.sleep(500)
+    // Revert Claude's copy to HEAD, as a session cleaning up the change would.
+    await writeFile(claudePath, "version one\n")
+    const reverted = await waitFor(async () => {
+      const texts = await Promise.all(paths.map((path) => Bun.file(path).text()))
+      return texts.every((text) => text === "version one\n")
+    }, 5000)
+    await Bun.sleep(600)
+    const { stdout } = await watch.stop()
+
+    expect(reverted).toBe(true)
+    // Control: the stale "version two" copies must not have been copied back over it.
+    expect(await Bun.file(claudePath).text()).toBe("version one\n")
+    expect(stdout).toContain("source changed since the last sync; target has not")
+    expect(stdout).not.toContain(`updated gemini→claude/${skillName}`)
   })
 
   test("--sync-watch rejects a skill name, --overwrite without a direction, and other modes", async () => {
