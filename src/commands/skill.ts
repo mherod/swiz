@@ -6,6 +6,7 @@ import { AGENTS, type AgentDef, getAgent } from "../agents.ts"
 import { detectCurrentAgent } from "../detect.ts"
 import { getHomeDir } from "../home.ts"
 import { getProviderAdapter } from "../provider-adapters.ts"
+import { claimShutdownSignals } from "../shutdown-claim.ts"
 import {
   buildSkillAgentToolEnvironmentFooter,
   extractMandatedSkillTools,
@@ -27,7 +28,7 @@ import {
   unwrapInlineCommands,
 } from "../utils/skill-content.ts"
 import { convertSkillContent } from "../utils/skill-conversion.ts"
-import { lazySkillHistory } from "../utils/skill-git-history.ts"
+import { lazySkillHistory, type SkillHistory } from "../utils/skill-git-history.ts"
 import {
   collectSkillTreeEntries,
   createSkillReferenceHistory,
@@ -39,7 +40,9 @@ import {
   type SkillFileWrite,
   type SkillResolutionContext,
   type SkillTreeEntryKind,
+  snapshotSkillBaseline,
 } from "../utils/skill-sync-resolution.ts"
+import { DEFAULT_SKILL_SYNC_QUIET_MS, watchSkillSync } from "../utils/skill-sync-watch.ts"
 
 export { parseFrontmatterField, stripFrontmatter }
 
@@ -802,7 +805,11 @@ function vocabularyAgent(id: string): AgentDef {
  * Claude skills checkout, its history is consulted as a reference: a side's own
  * checkout may be a stale clone whose commits describe content it no longer holds.
  */
-function createSkillContextFactory(from: string, to: string): SkillContextFactory {
+function createSkillContextFactory(
+  from: string,
+  to: string,
+  baselines?: Map<string, SkillHistory>
+): SkillContextFactory {
   const source = vocabularyAgent(from)
   const target = vocabularyAgent(to)
   const vocabulary = createSkillVocabulary(source, target)
@@ -821,6 +828,7 @@ function createSkillContextFactory(from: string, to: string): SkillContextFactor
           { source, target }
         )
       : undefined,
+    baseline: baselines?.get(basename(targetDir)),
   })
 }
 
@@ -884,6 +892,106 @@ async function syncSkills(options: {
       `Failed to sync ${failures.length} skill(s):\n${failures.map((f) => `  - ${f}`).join("\n")}`
     )
   }
+}
+
+/** Highest-precedence source of one skill, or null when no source root defines it. */
+async function findSkillSource(skillsDirs: string[], name: string): Promise<SkillSource | null> {
+  const dirs: string[] = []
+  for (const dir of skillsDirs) {
+    if (await Bun.file(join(dir, name, "SKILL.md")).exists()) dirs.push(dir)
+  }
+  const [sourceDir, ...shadowedDirs] = dirs
+  return sourceDir ? { name, sourceDir, shadowedDirs } : null
+}
+
+/** Abort on SIGTERM, SIGINT, or the caller's signal; dispose removes the process listeners. */
+function watchStopSignal(callerSignal?: AbortSignal): {
+  signal: AbortSignal
+  dispose: () => void
+} {
+  const controller = new AbortController()
+  const stop = () => controller.abort()
+  // Keep the CLI's immediate-exit handler from cutting a skill swap short.
+  const releaseClaim = claimShutdownSignals()
+  process.on("SIGTERM", stop)
+  process.on("SIGINT", stop)
+  if (callerSignal?.aborted) stop()
+  callerSignal?.addEventListener("abort", stop, { once: true })
+  return {
+    signal: controller.signal,
+    dispose: () => {
+      process.off("SIGTERM", stop)
+      process.off("SIGINT", stop)
+      callerSignal?.removeEventListener("abort", stop)
+      releaseClaim()
+    },
+  }
+}
+
+interface SkillSyncWatchSettings {
+  quietMs?: number
+  sweepMs?: number
+  signal?: AbortSignal
+}
+
+// Long-running --sync-watch: each skill syncs (with the same per-file resolution as --sync)
+// only after it has been still on both sides for the quiet window.
+async function watchSyncSkills(options: {
+  from: string
+  to: string
+  dryRun: boolean
+  overwrite: boolean
+  fileSystem?: Partial<SkillSyncFileSystem>
+  watch: SkillSyncWatchSettings
+}): Promise<void> {
+  const { from, to, dryRun, overwrite, fileSystem } = options
+  const fromAgent = resolveForSync(from)
+  const toAgent = resolveForSync(to)
+  const fromSkillsDirs = sourceSkillDirs(from)
+  const toSkillsDir = primarySkillDir(to)
+  const quietMs = options.watch.quietMs ?? DEFAULT_SKILL_SYNC_QUIET_MS
+  const baselines = new Map<string, SkillHistory>()
+  if (!dryRun) await mkdir(toSkillsDir, { recursive: true })
+
+  console.log(
+    `Watching ${fromAgent.name} → ${toAgent.name} skills${dryRun ? " (dry run: no files will be changed)" : ""}.`
+  )
+  console.log(`Sources: ${fromSkillsDirs.map(displayPath).join(" > ")}`)
+  console.log(`Target: ${displayPath(toSkillsDir)}`)
+  console.log(
+    `Each skill syncs after ${quietMs / 1000}s with no changes on either side. Stop with Ctrl+C or SIGTERM.\n`
+  )
+
+  const syncOptions: SkillSyncOptions = {
+    targetRoot: toSkillsDir,
+    dryRun,
+    overwrite,
+    fileSystem,
+    createContext: createSkillContextFactory(from, to, baselines),
+  }
+  const stop = watchStopSignal(options.watch.signal)
+  try {
+    await watchSkillSync({
+      sourceRoots: fromSkillsDirs,
+      targetRoot: toSkillsDir,
+      quietMs,
+      sweepMs: options.watch.sweepMs ?? quietMs * 3,
+      signal: stop.signal,
+      listSkills: async () => (await discoverSkillSources(fromSkillsDirs)).map((s) => s.name),
+      syncSkill: async (name) => {
+        const source = await findSkillSource(fromSkillsDirs, name)
+        if (!source) return
+        const result = await syncSkillSource(source, syncOptions)
+        if (typeof result !== "string") console.log(`    ${result.failure}`)
+        // The source as just synced is the base for resolving the next round of edits.
+        baselines.set(name, await snapshotSkillBaseline(join(source.sourceDir, name)))
+      },
+      log: (message) => console.log(`  - ${message}`),
+    })
+  } finally {
+    stop.dispose()
+  }
+  console.log("\nStopped watching.")
 }
 
 // ─── Flag parsing and routing ───────────────────────────────────────────────
@@ -1054,15 +1162,11 @@ function extractFlagValue(args: string[], flag: string): string | null {
   return idx >= 0 ? (args[idx + 1] ?? null) : null
 }
 
-function validateTransferExclusivity(
-  sync: boolean,
-  syncGemini: boolean,
-  convert: boolean,
-  toCommand: boolean
-): void {
-  const flags = [sync, syncGemini, convert, toCommand].filter(Boolean).length
-  if (flags > 1) {
-    throw new Error("--sync, --sync-gemini, --convert, and --to-command are mutually exclusive.")
+function validateTransferExclusivity(selected: boolean[]): void {
+  if (selected.filter(Boolean).length > 1) {
+    throw new Error(
+      "--sync, --sync-gemini, --sync-watch, --convert, and --to-command are mutually exclusive."
+    )
   }
 }
 
@@ -1102,21 +1206,48 @@ async function handleSync(
   await syncSkills({ from, to, dryRun, overwrite, fileSystem })
 }
 
+async function handleSyncWatch(
+  args: string[],
+  dryRun: boolean,
+  overwrite: boolean,
+  options?: SkillCommandOptions
+): Promise<void> {
+  if (extractPositionals(args).length > 0)
+    throw new Error("--sync-watch does not accept a skill name.")
+  const from = extractFlagValue(args, "--from")
+  if (!from) throw new Error("--sync-watch requires --from <agent>.")
+  const to = extractFlagValue(args, "--to") ?? "claude"
+  await watchSyncSkills({
+    from,
+    to,
+    dryRun,
+    overwrite,
+    fileSystem: options?.syncFileSystem,
+    watch: {
+      quietMs: options?.watchQuietMs,
+      sweepMs: options?.watchSweepMs,
+      signal: options?.watchSignal,
+    },
+  })
+}
+
 async function handleSkillTransferArgs(
   args: string[],
-  fileSystem?: Partial<SkillSyncFileSystem>
+  options?: SkillCommandOptions
 ): Promise<boolean> {
   const sync = args.includes("--sync")
   const syncGemini = args.includes("--sync-gemini")
+  const syncWatch = args.includes("--sync-watch")
   const convert = args.includes("--convert")
   const toCommand = args.includes("--to-command")
-  if (!sync && !syncGemini && !convert && !toCommand) return false
-  validateTransferExclusivity(sync, syncGemini, convert, toCommand)
+  if (!sync && !syncGemini && !syncWatch && !convert && !toCommand) return false
+  validateTransferExclusivity([sync, syncGemini, syncWatch, convert, toCommand])
   const dryRun = args.includes("--dry-run")
   const overwrite = args.includes("--overwrite")
   if (convert) await handleConvert(args, dryRun, overwrite)
   else if (toCommand) await handleToCommand(args, dryRun, overwrite)
-  else await handleSync(args, syncGemini, dryRun, overwrite, fileSystem)
+  else if (syncWatch) await handleSyncWatch(args, dryRun, overwrite, options)
+  else await handleSync(args, syncGemini, dryRun, overwrite, options?.syncFileSystem)
   return true
 }
 
@@ -1125,13 +1256,17 @@ async function handleSkillTransferArgs(
 export interface SkillCommandOptions {
   expandInlineCommands?: typeof expandInlineCommands
   syncFileSystem?: Partial<SkillSyncFileSystem>
+  /** Test seams for --sync-watch; users always get the 20s quiet window and SIGTERM/SIGINT stop. */
+  watchQuietMs?: number
+  watchSweepMs?: number
+  watchSignal?: AbortSignal
 }
 
 export const skillCommand: Command<SkillCommandOptions> = {
   name: "skill",
   description: "Read, list, sync, and convert skills",
   usage:
-    "swiz skill [--raw] [--no-front-matter] [skill-name] | --sync --from <agent> [--to <agent>] [--dry-run] [--overwrite] | --sync-gemini [--dry-run] [--overwrite] | --convert --from <agent> --to <agent> [skill-name] [--dry-run] [--overwrite] | --to-command --from <agent> [skill-name] [--dry-run] [--overwrite]",
+    "swiz skill [--raw] [--no-front-matter] [skill-name] | --sync --from <agent> [--to <agent>] [--dry-run] [--overwrite] | --sync-gemini [--dry-run] [--overwrite] | --sync-watch --from <agent> [--to <agent>] [--dry-run] [--overwrite] | --convert --from <agent> --to <agent> [skill-name] [--dry-run] [--overwrite] | --to-command --from <agent> [skill-name] [--dry-run] [--overwrite]",
   options: [
     { flags: "<skill-name>", description: "Print the skill content (omit to list all skills)" },
     { flags: "--raw", description: "Skip inline command expansion (!`cmd` substitutions)" },
@@ -1145,6 +1280,11 @@ export const skillCommand: Command<SkillCommandOptions> = {
       flags: "--sync-gemini",
       description:
         "Alias for --sync --from gemini --to claude (copy ~/.gemini/skills into ~/.claude/skills)",
+    },
+    {
+      flags: "--sync-watch",
+      description:
+        "Keep running and sync --from <agent> to --to <agent> (default: claude) as skills change, with the same resolution as --sync. A skill syncs only after 20s with no changes on either side, so edits in progress are never copied half-written; runs until SIGTERM or Ctrl+C",
     },
     {
       flags: "--convert",
@@ -1177,12 +1317,12 @@ export const skillCommand: Command<SkillCommandOptions> = {
     },
   ],
   async run(args, options) {
-    const handled = await handleSkillTransferArgs(args, options?.syncFileSystem)
+    const handled = await handleSkillTransferArgs(args, options)
     if (handled) return
 
     if (args.includes("--dry-run") || args.includes("--overwrite")) {
       throw new Error(
-        "--dry-run and --overwrite are only valid with --sync, --sync-gemini, --convert, or --to-command."
+        "--dry-run and --overwrite are only valid with --sync, --sync-gemini, --sync-watch, --convert, or --to-command."
       )
     }
 

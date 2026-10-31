@@ -1,5 +1,7 @@
 #!/usr/bin/env bun
 
+import { shutdownSignalsClaimed } from "./src/shutdown-claim.ts"
+
 const CLI_PROCESS_STARTED_AT = performance.now()
 
 // Guard: require invocation via the globally linked `swiz` command.
@@ -28,7 +30,19 @@ if (!isSwizBinary && !isMcpStdioServer && !process.env.SWIZ_DIRECT) {
 }
 
 // Signal listeners for tidy exit and cleanup.
+let claimedSignalDeferred = false
 const handleSignal = async (signal: string) => {
+  // A command that claimed SIGINT/SIGTERM finishes its current step on the first one;
+  // a repeat still exits immediately.
+  if ((signal === "SIGINT" || signal === "SIGTERM") && shutdownSignalsClaimed()) {
+    if (!claimedSignalDeferred) {
+      claimedSignalDeferred = true
+      process.stderr.write(
+        `\nReceived ${signal}. Finishing the current step; send it again to exit now.\n`
+      )
+      return
+    }
+  }
   // Use stderr to avoid polluting stdout if the output is being piped.
   process.stderr.write(`\nReceived ${signal}. Cleaning up...\n`)
 

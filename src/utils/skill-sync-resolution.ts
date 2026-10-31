@@ -37,6 +37,29 @@ export async function collectSkillTreeEntries(
   return entries
 }
 
+/** Larger files are left out of a baseline snapshot; they resolve from git history alone. */
+const MAX_BASELINE_FILE_BYTES = 2 * 1024 * 1024
+
+/** In-memory "last sync" version of every file in a skill, for `SkillResolutionContext.baseline`. */
+export async function snapshotSkillBaseline(skillDir: string): Promise<SkillHistory> {
+  const versions = new Map<string, SkillFileVersion[]>()
+  const texts = new Map<string, string>()
+  const date = Date.now()
+  for (const [path, kind] of await collectSkillTreeEntries(skillDir)) {
+    if (kind !== "file") continue
+    const bytes = await Bun.file(join(skillDir, path)).bytes()
+    if (bytes.byteLength > MAX_BASELINE_FILE_BYTES) continue
+    const blob = gitBlobId(bytes)
+    versions.set(path, [{ sha: "last sync", date, blob }])
+    texts.set(blob, decode(bytes))
+  }
+  return {
+    versions: (path) => Promise.resolve(versions.get(path) ?? []),
+    removal: () => Promise.resolve(null),
+    readBlob: (blob) => Promise.resolve(texts.get(blob) ?? ""),
+  }
+}
+
 export interface SkillVocabulary {
   /** True when source and target use the same tool names. */
   identity: boolean
@@ -116,6 +139,12 @@ export interface SkillResolutionContext {
   targetHistory: SkillHistory
   vocabulary: SkillVocabulary
   reference?: SkillReferenceHistory
+  /**
+   * Source content as of the last sync, in source vocabulary (kept by --sync-watch).
+   * A target that still matches it holds no edits of its own, and it is the merge base
+   * when both sides changed — which makes edits resolvable between roots without git.
+   */
+  baseline?: SkillHistory
 }
 
 export interface SkillResolutionPlan {
@@ -154,8 +183,11 @@ function decode(bytes: Uint8Array): string {
   return new TextDecoder().decode(bytes)
 }
 
+const COMMIT_SHA_RE = /^[0-9a-f]{40}$/
+
 function describeVersion(version: { sha: string; date: number }): string {
-  return `${version.sha.slice(0, 7)} (${describeDay(version.date)})`
+  const id = COMMIT_SHA_RE.test(version.sha) ? version.sha.slice(0, 7) : version.sha
+  return `${id} (${describeDay(version.date)})`
 }
 
 function describeDay(epochMs: number): string {
@@ -206,6 +238,9 @@ function sourceCandidates(context: SkillResolutionContext): HistoryCandidate[] {
   if (reference) {
     candidates.push({ history: reference.history, inTarget: false, convert: reference.toSource })
   }
+  if (context.baseline) {
+    candidates.push({ history: context.baseline, inTarget: false, convert: null })
+  }
   return candidates
 }
 
@@ -222,6 +257,13 @@ function targetCandidates(context: SkillResolutionContext): HistoryCandidate[] {
   ]
   if (reference) {
     candidates.push({ history: reference.history, inTarget: false, convert: reference.toTarget })
+  }
+  if (context.baseline) {
+    candidates.push({
+      history: context.baseline,
+      inTarget: false,
+      convert: vocabulary.identity ? null : vocabulary.toTarget,
+    })
   }
   return candidates
 }
@@ -257,22 +299,53 @@ async function findRecordedVersion(
   return null
 }
 
+/** Text already in target vocabulary whose tool names would convert for the source side. */
+function isTargetVocabularyText(context: SkillResolutionContext, text: string): boolean {
+  return context.vocabulary.toTarget(text) === text && context.vocabulary.toSource(text) !== text
+}
+
+/**
+ * Carry a source edit into a target kept in its own vocabulary. Three-way merge with
+ * the target round-tripped through both conversions as base: only the edited lines
+ * change, and lines whose conversion is lossy (several task tools share one name in
+ * some agents) keep the target's original wording. Null when the two overlap.
+ */
+async function convertSourceEdit(
+  context: SkillResolutionContext,
+  source: FileSide,
+  target: FileSide
+): Promise<SkillFileWrite | null> {
+  const ours = decode(target.bytes)
+  const base = context.vocabulary.toTarget(context.vocabulary.toSource(ours))
+  const theirs = context.vocabulary.toTarget(decode(source.bytes))
+  const merged = await mergeText(ours, base, theirs)
+  return merged === null ? null : { content: merged }
+}
+
+/** Content that brings a newer source into the target; null when it cannot be done cleanly. */
 async function sourceNewerWrite(
   context: SkillResolutionContext,
   path: string,
-  source: FileSide,
-  matches: { source: HistoryMatch | null; target: HistoryMatch | null }
-): Promise<SkillFileWrite> {
+  sides: { source: FileSide; target: FileSide },
+  recordedSource: HistoryMatch | null
+): Promise<SkillFileWrite | null> {
+  const { source, target } = sides
   // The source is a converted copy of a recorded target version: restore those exact bytes.
-  if (matches.source?.inTarget && matches.source.converted) {
-    return { content: await context.targetHistory.readBlob(matches.source.version.blob) }
+  if (recordedSource?.inTarget && recordedSource.converted) {
+    return { content: await context.targetHistory.readBlob(recordedSource.version.blob) }
   }
-  // The target is a converted copy of the source: keep converting.
-  if (matches.target?.converted && isConvertible(path)) {
-    return { content: context.vocabulary.toTarget(decode(source.bytes)) }
+  if (
+    !context.vocabulary.identity &&
+    isConvertible(path) &&
+    isTargetVocabularyText(context, decode(target.bytes))
+  ) {
+    return await convertSourceEdit(context, source, target)
   }
   return { copyFrom: source.path }
 }
+
+const CONVERSION_OVERLAP_REASON =
+  "source edits overlap lines that differ between agents only by tool names"
 
 /** Order the two sides by recorded commits, falling back to mtimes for unrecorded edits. */
 async function resolveByRecordedVersions(
@@ -289,10 +362,8 @@ async function resolveByRecordedVersions(
   if (verdict.newer === "target") {
     return { kind: "target-newer", path, reason: verdict.reason, converted }
   }
-  const write = await sourceNewerWrite(context, path, source, {
-    source: sourceMatch,
-    target: targetMatch,
-  })
+  const write = await sourceNewerWrite(context, path, { source, target }, sourceMatch)
+  if (!write) return { kind: "diverged", path, reason: CONVERSION_OVERLAP_REASON }
   return { kind: "source-newer", path, reason: verdict.reason, write, converted }
 }
 
@@ -339,7 +410,9 @@ async function resolveByHistoryStart(
   const sourceStart = (await context.sourceHistory.versions(path)).at(-1)
   if (sourceStart && target.mtimeMs < sourceStart.date) {
     const reason = `target last changed ${describeDay(target.mtimeMs)}, before source history began at ${describeVersion(sourceStart)}`
-    return { kind: "source-newer", path, reason, write: { copyFrom: source.path } }
+    const write = await sourceNewerWrite(context, path, { source, target }, null)
+    if (!write) return { kind: "diverged", path, reason: CONVERSION_OVERLAP_REASON }
+    return { kind: "source-newer", path, reason, write }
   }
   return null
 }

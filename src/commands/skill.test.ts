@@ -1008,6 +1008,203 @@ describe("swiz skill --sync conflict resolution", () => {
   })
 })
 
+describe("swiz skill --sync converted-copy edits", () => {
+  test("an edit to a converted copy reaches the canonical target in target tool names", async () => {
+    const fakeHome = await createTempDir()
+    const skillName = "resolve-converted-edit-xyz"
+    const claude = getAgent("claude")!
+    const gemini = getAgent("gemini")!
+    const toGemini = (text: string) => convertSkillContent(text, claude, gemini, AGENTS).content
+    const claudeRoot = join(fakeHome, ".claude", "skills")
+    const claudeV1 = "Use TaskList first.\n\nKeep this paragraph.\n\nUse Bash to run it.\n"
+    await writeSkill(join(claudeRoot, skillName), claudeV1)
+    await commitAll(claudeRoot, "v1", "2026-01-01T00:00:00Z")
+    // Gemini holds the converted copy plus one new line written in its own tool names.
+    const geminiEdited = toGemini(claudeV1) + toGemini("Finish with Bash.\n")
+    expect(geminiEdited).toContain("run_shell_command")
+    await writeSkill(join(fakeHome, ".gemini", "skills", skillName), geminiEdited)
+
+    const { stdout, exitCode } = await runSkillCli(["--sync-gemini"], fakeHome)
+
+    expect(exitCode).toBe(0)
+    expect(stdout).toContain(`updated ${skillName} (1 updated)`)
+    // TaskList survives even though Gemini folds every task tool into one name.
+    expect(await Bun.file(join(claudeRoot, skillName, "SKILL.md")).text()).toBe(
+      `${claudeV1}Finish with Bash.\n`
+    )
+  })
+})
+
+// ─── swiz skill --sync-watch ─────────────────────────────────────────────────
+
+async function waitFor(check: () => Promise<boolean>, timeoutMs: number): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    if (await check()) return true
+    await Bun.sleep(20)
+  }
+  return await check()
+}
+
+/** Start a watch with a short quiet window; stop() aborts it and returns the captured run. */
+function startSyncWatch(fakeHome: string, quietMs: number, args = ["--from", "gemini"]) {
+  const controller = new AbortController()
+  const running = runSkillCli(["--sync-watch", ...args], fakeHome, {
+    watchQuietMs: quietMs,
+    watchSweepMs: 50,
+    watchSignal: controller.signal,
+  })
+  return {
+    stop: async () => {
+      controller.abort()
+      return await running
+    },
+  }
+}
+
+const OLD_MTIME = "2026-01-01T00:00:00Z"
+
+describe("swiz skill --sync-watch", () => {
+  test("a quiet skill syncs on start and the watch stops cleanly when signalled", async () => {
+    const fakeHome = await createTempDir()
+    const skillName = "watch-initial-xyz"
+    const sourceDir = join(fakeHome, ".gemini", "skills", skillName)
+    await writeSkill(sourceDir, "ready\n")
+    await setMtime(join(sourceDir, "SKILL.md"), OLD_MTIME)
+    const targetPath = join(fakeHome, ".claude", "skills", skillName, "SKILL.md")
+
+    const watch = startSyncWatch(fakeHome, 150)
+    const synced = await waitFor(() => Bun.file(targetPath).exists(), 5000)
+    const { stdout, exitCode } = await watch.stop()
+
+    expect(synced).toBe(true)
+    expect(exitCode).toBe(0)
+    expect(stdout).toContain("Watching Gemini CLI → Claude Code skills.")
+    expect(stdout).toContain(`copied ${skillName}`)
+    expect(stdout).toContain("Stopped watching.")
+    expect(await Bun.file(targetPath).text()).toBe("ready\n")
+  })
+
+  test("an edit in progress is held until the skill has been quiet, then synced in its final state", async () => {
+    const fakeHome = await createTempDir()
+    const skillName = "watch-burst-xyz"
+    const sourceDir = join(fakeHome, ".gemini", "skills", skillName)
+    const targetPath = join(fakeHome, ".claude", "skills", skillName, "SKILL.md")
+    await mkdir(join(fakeHome, ".gemini", "skills"), { recursive: true })
+    const watch = startSyncWatch(fakeHome, 400)
+
+    // Keep editing faster than the quiet window: nothing may be copied mid-burst.
+    for (let draft = 0; draft < 8; draft++) {
+      await writeSkill(sourceDir, `draft ${draft}\n`)
+      await Bun.sleep(100)
+      expect(await Bun.file(targetPath).exists()).toBe(false)
+    }
+    await writeSkill(sourceDir, "final\n")
+    const synced = await waitFor(() => Bun.file(targetPath).exists(), 5000)
+    const { stdout } = await watch.stop()
+
+    expect(synced).toBe(true)
+    expect(await Bun.file(targetPath).text()).toBe("final\n")
+    expect(stdout.match(new RegExp(`copied ${skillName}`, "g"))).toHaveLength(1)
+  })
+
+  test("the watch's own writes and settled skills are not synced again", async () => {
+    const fakeHome = await createTempDir()
+    const skillName = "watch-echo-xyz"
+    const sourceDir = join(fakeHome, ".gemini", "skills", skillName)
+    await writeSkill(sourceDir, "stable\n")
+    await setMtime(join(sourceDir, "SKILL.md"), OLD_MTIME)
+    const targetPath = join(fakeHome, ".claude", "skills", skillName, "SKILL.md")
+
+    const watch = startSyncWatch(fakeHome, 100)
+    await waitFor(() => Bun.file(targetPath).exists(), 5000)
+    // Several quiet windows and sweeps pass with nothing changing.
+    await Bun.sleep(800)
+    const { stdout } = await watch.stop()
+
+    expect(stdout.match(new RegExp(`copied ${skillName}`, "g"))).toHaveLength(1)
+    expect(stdout).not.toContain(`unchanged ${skillName}`)
+  })
+
+  test("a source edited after syncing propagates without git history", async () => {
+    const fakeHome = await createTempDir()
+    const skillName = "watch-propagate-xyz"
+    const sourceDir = join(fakeHome, ".gemini", "skills", skillName)
+    await writeSkill(sourceDir, "version one\n")
+    await setMtime(join(sourceDir, "SKILL.md"), OLD_MTIME)
+    const targetPath = join(fakeHome, ".claude", "skills", skillName, "SKILL.md")
+
+    const watch = startSyncWatch(fakeHome, 150)
+    await waitFor(() => Bun.file(targetPath).exists(), 5000)
+    await writeFile(join(sourceDir, "SKILL.md"), "version two\n")
+    const propagated = await waitFor(
+      async () => (await Bun.file(targetPath).text()) === "version two\n",
+      5000
+    )
+    const { stdout } = await watch.stop()
+
+    expect(propagated).toBe(true)
+    expect(stdout).toContain(`updated ${skillName} (1 updated)`)
+    expect(stdout).toContain("target matches last sync")
+  })
+
+  test("--sync-watch rejects a skill name, a missing --from, and other transfer modes", async () => {
+    const fakeHome = await createTempDir()
+    const named = await runSkillCli(["--sync-watch", "--from", "gemini", "one-skill"], fakeHome)
+    const noFrom = await runSkillCli(["--sync-watch"], fakeHome)
+    const mixed = await runSkillCli(["--sync-watch", "--sync", "--from", "gemini"], fakeHome)
+
+    expect(named.stderr).toContain("--sync-watch does not accept a skill name.")
+    expect(noFrom.stderr).toContain("--sync-watch requires --from <agent>.")
+    expect(mixed.stderr).toContain("mutually exclusive")
+    for (const run of [named, noFrom, mixed]) expect(run.exitCode).not.toBe(0)
+  })
+
+  test("SIGTERM stops a running watch with exit code 0", async () => {
+    const fakeHome = await createTempDir()
+    const tempCwd = await createTempDir()
+    await mkdir(join(fakeHome, ".gemini", "skills"), { recursive: true })
+    const proc = Bun.spawn(
+      ["bun", join(process.cwd(), "index.ts"), "skill", "--sync-watch", "--from", "gemini"],
+      {
+        cwd: tempCwd,
+        stdout: "pipe",
+        stderr: "pipe",
+        env: { ...process.env, HOME: fakeHome, SWIZ_DIRECT: "1", AI_TEST_NO_BACKEND: "1" },
+      }
+    )
+    const reader = proc.stdout.getReader()
+    const decoder = new TextDecoder()
+    let output = ""
+    const ready = await waitFor(async () => {
+      const { value, done } = await reader.read()
+      if (value) output += decoder.decode(value)
+      return done || output.includes("Stop with Ctrl+C or SIGTERM")
+    }, 15_000)
+    expect(ready).toBe(true)
+
+    proc.kill("SIGTERM")
+    const [rest, stderr] = await Promise.all([
+      (async () => {
+        let tail = ""
+        for (;;) {
+          const { value, done } = await reader.read()
+          if (value) tail += decoder.decode(value)
+          if (done) return tail
+        }
+      })(),
+      new Response(proc.stderr).text(),
+    ])
+    await proc.exited
+
+    // The CLI's immediate-exit handler defers to the watch instead of exiting with 143.
+    expect(stderr).toContain("Finishing the current step")
+    expect(stderr).not.toContain("Cleaning up")
+    expect(proc.exitCode).toBe(0)
+    expect(output + rest).toContain("Stopped watching.")
+  })
+})
+
 // ─── convertSkillContent unit tests ──────────────────────────────────────────
 
 describe("convertSkillContent", () => {
