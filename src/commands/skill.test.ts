@@ -1033,6 +1033,43 @@ describe("swiz skill --sync converted-copy edits", () => {
       `${claudeV1}Finish with Bash.\n`
     )
   })
+
+  test("--overwrite replaces a converted copy in target tool names, not raw source text", async () => {
+    const fakeHome = await createTempDir()
+    const skillName = "overwrite-converted-xyz"
+    const claude = getAgent("claude")!
+    const gemini = getAgent("gemini")!
+    const toGemini = (text: string) => convertSkillContent(text, claude, gemini, AGENTS).content
+    const claudeRoot = join(fakeHome, ".claude", "skills")
+    const geminiDir = join(fakeHome, ".gemini", "skills", skillName)
+    const base = "Use Bash first.\n\nKeep this paragraph.\n\nThen Read the output.\n"
+    await writeSkill(join(claudeRoot, skillName), base)
+    await commitAll(claudeRoot, "base", "2026-01-01T00:00:00Z")
+    const claudeEdited = base.replace("Keep this paragraph.", "Claude rewrote this with Bash.")
+    const notes = "Run Bash before Read.\n"
+    await writeSkill(join(claudeRoot, skillName), claudeEdited, { "references/notes.md": notes })
+    // Gemini keeps its converted copy and edits the same line: an unresolvable conflict.
+    await writeSkill(
+      geminiDir,
+      toGemini(base).replace("Keep this paragraph.", "Gemini rewrote this paragraph.")
+    )
+
+    const skipped = await runSkillCli(["--sync", "--from", "claude", "--to", "gemini"], fakeHome)
+    expect(skipped.stdout).toContain(`skipped ${skillName}`)
+
+    const { stdout, exitCode } = await runSkillCli(
+      ["--sync", "--from", "claude", "--to", "gemini", "--overwrite"],
+      fakeHome
+    )
+
+    expect(exitCode).toBe(0)
+    expect(stdout).toContain(`overwritten ${skillName}`)
+    expect(stdout).toContain(`converted ${skillName}/SKILL.md to target tool names`)
+    const skillText = await Bun.file(join(geminiDir, "SKILL.md")).text()
+    expect(skillText).toBe(toGemini(claudeEdited))
+    expect(skillText).not.toContain("Bash")
+    expect(await Bun.file(join(geminiDir, "references", "notes.md")).text()).toBe(toGemini(notes))
+  })
 })
 
 // ─── swiz skill --sync-all (direction resolved per file) ─────────────────────

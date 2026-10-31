@@ -650,6 +650,43 @@ async function convertAddedMarkdown(
   }
 }
 
+/** A target with markdown already in its own vocabulary is kept as a converted copy. */
+async function targetKeepsOwnVocabulary(
+  context: SkillResolutionContext,
+  targetEntries: Map<string, SkillTreeEntryKind>
+): Promise<boolean> {
+  for (const [path, kind] of targetEntries) {
+    if (kind !== "file" || !isConvertible(path)) continue
+    const text = await Bun.file(join(context.targetDir, path)).text()
+    if (isTargetVocabularyText(context, text)) return true
+  }
+  return false
+}
+
+/**
+ * Markdown for an --overwrite replacement, keyed by path. Forcing the source side must not
+ * copy its tool names into a target kept in another agent's vocabulary, so every source
+ * markdown file is converted; empty when no conversion applies.
+ */
+export async function convertOverwriteMarkdown(
+  context: SkillResolutionContext
+): Promise<Map<string, string>> {
+  const contents = new Map<string, string>()
+  if (context.vocabulary.identity) return contents
+  const [sourceEntries, targetEntries] = await Promise.all([
+    collectSkillTreeEntries(context.sourceDir),
+    collectSkillTreeEntries(context.targetDir),
+  ])
+  if (!(await targetKeepsOwnVocabulary(context, targetEntries))) return contents
+  for (const [path, kind] of sourceEntries) {
+    if (kind !== "file" || !isConvertible(path)) continue
+    const text = await Bun.file(join(context.sourceDir, path)).text()
+    const converted = context.vocabulary.toTarget(text)
+    if (converted !== text) contents.set(path, converted)
+  }
+  return contents
+}
+
 function planOutcome(files: SkillFileResolution[]): SkillResolutionPlan["outcome"] {
   if (files.some((file) => file.kind === "diverged")) return "conflict"
   if (files.some((file) => file.write)) return "update"

@@ -33,6 +33,7 @@ import { convertSkillContent } from "../utils/skill-conversion.ts"
 import { lazySkillHistory, type SkillHistory } from "../utils/skill-git-history.ts"
 import {
   collectSkillTreeEntries,
+  convertOverwriteMarkdown,
   createSkillReferenceHistory,
   createSkillVocabulary,
   describeSkillResolution,
@@ -778,15 +779,26 @@ async function settleConflict(
     printFileResolutions(name, files, ["diverged"])
     return "skipped"
   }
+  const converted = await convertOverwriteMarkdown(sync.createContext(sourceSkillDir, targetDir))
   if (!dryRun) {
     await replaceSkillDirectory(targetDir, {
       allowReplace: true,
       fileSystem,
-      stage: (replacementDir, fs) => fs.copyDirectory(sourceSkillDir, replacementDir),
+      stage: async (replacementDir, fs) => {
+        await fs.copyDirectory(sourceSkillDir, replacementDir)
+        for (const [path, content] of converted) {
+          await Bun.write(join(replacementDir, path), content)
+        }
+      },
     })
   }
   logSkillAction(label, true, dryRun, "copied", "copy")
   if (dryRun) printSkillTreeDiff(name, diff)
+  for (const path of [...converted.keys()].sort()) {
+    console.log(
+      `    - ${dryRun ? "would convert" : "converted"} ${name}/${path} to target tool names`
+    )
+  }
   return "overwritten"
 }
 
@@ -1850,7 +1862,7 @@ export const skillCommand: Command<SkillCommandOptions> = {
     {
       flags: "--overwrite",
       description:
-        "Allow overwriting existing target skills or commands (--sync only replaces targets with unresolved conflicts; identical, converted, and newer targets are never replaced)",
+        "Allow overwriting existing target skills or commands (--sync replaces the whole of any skill with an unresolved conflict — target-only files included — with the source, converting markdown into the target's tool names; identical, converted, and newer targets are never replaced. Preview with --dry-run)",
     },
   ],
   async run(args, options) {
