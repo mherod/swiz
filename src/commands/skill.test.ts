@@ -1100,6 +1100,69 @@ describe("swiz skill --sync-all", () => {
     expect(stdout).toContain("Roots: claude ~/.claude/skills | gemini ~/.gemini/skills\n")
   })
 
+  test("a skill deleted from one root is removed from the others instead of copied back", async () => {
+    const fakeHome = await createTempDir()
+    const skillName = "all-deleted-xyz"
+    const args = ["--sync-all", "--agents", "claude,gemini,codex"]
+    for (const agent of ["claude", "gemini", "codex"]) {
+      await writeSkill(join(fakeHome, `.${agent}`, "skills", skillName), "same\n")
+    }
+    const trashed: string[] = []
+    const syncFileSystem = {
+      async trashDirectory(path: string) {
+        trashed.push(path)
+        await rm(path, { recursive: true })
+        return true
+      },
+    }
+    await runSkillCli(args, fakeHome, { syncFileSystem })
+    await rm(join(fakeHome, ".codex", "skills", skillName), { recursive: true })
+
+    const { stdout, exitCode } = await runSkillCli(args, fakeHome, { syncFileSystem })
+    const after = await runSkillCli(args, fakeHome, { syncFileSystem })
+
+    expect(exitCode).toBe(0)
+    expect(stdout).toContain(`removed claude/${skillName} (deleted from codex)`)
+    expect(stdout).toContain(`removed gemini/${skillName} (deleted from codex)`)
+    expect(stdout).toContain("2 removed")
+    expect(stdout).not.toContain(`copied claude→codex/${skillName}`)
+    expect(trashed.sort()).toEqual(
+      ["claude", "gemini"].map((agent) => join(fakeHome, `.${agent}`, "skills", skillName))
+    )
+    expect(after.stdout).not.toContain(skillName)
+  })
+
+  test("a deleted skill edited elsewhere since the last sync is restored, not removed", async () => {
+    const fakeHome = await createTempDir()
+    const skillName = "all-deleted-edited-xyz"
+    const args = ["--sync-all", "--agents", "claude,gemini,codex"]
+    const claudeRoot = join(fakeHome, ".claude", "skills")
+    await writeSkill(join(claudeRoot, skillName), "version one\n")
+    await commitAll(claudeRoot, "v1", "2026-01-01T00:00:00Z")
+    for (const agent of ["gemini", "codex"]) {
+      const dir = join(fakeHome, `.${agent}`, "skills", skillName)
+      await writeSkill(dir, "version one\n")
+      await setMtime(join(dir, "SKILL.md"), OLD_MTIME)
+    }
+    const syncFileSystem = {
+      trashDirectory: async () => {
+        throw new Error("nothing should be trashed")
+      },
+    }
+    await runSkillCli(args, fakeHome, { syncFileSystem })
+    await rm(join(fakeHome, ".codex", "skills", skillName), { recursive: true })
+    await writeFile(join(fakeHome, ".gemini", "skills", skillName, "SKILL.md"), "version two\n")
+
+    const { stdout, exitCode } = await runSkillCli(args, fakeHome, { syncFileSystem })
+
+    expect(exitCode).toBe(0)
+    expect(stdout).toContain(
+      `restoring ${skillName}: deleted from codex, but gemini changed it since the last sync`
+    )
+    const codexPath = join(fakeHome, ".codex", "skills", skillName, "SKILL.md")
+    expect(await Bun.file(codexPath).text()).toBe("version two\n")
+  })
+
   test("--sync-all refuses a direction or --overwrite", async () => {
     const fakeHome = await createTempDir()
     const directed = await runSkillCli(["--sync-all", "--from", "gemini"], fakeHome)

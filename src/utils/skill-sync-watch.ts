@@ -81,6 +81,12 @@ async function treeStamp(
   return stamp
 }
 
+/** Identity of one skill directory's tree (paths, sizes, mtimes); "" when it is missing. */
+export async function stampSkillDir(skillDir: string): Promise<string> {
+  const { lines } = await treeStamp(skillDir)
+  return lines.length > 0 ? String(Bun.hash(lines.join("\n"))) : ""
+}
+
 export async function fingerprintSkill(
   sourceRoots: string[],
   targetRoot: string,

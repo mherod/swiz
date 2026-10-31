@@ -7,6 +7,7 @@ import { detectCurrentAgent } from "../detect.ts"
 import { getHomeDir } from "../home.ts"
 import { SWIZ_SKILL_SYNC_LABEL } from "../launch-agents.ts"
 import { getProviderAdapter } from "../provider-adapters.ts"
+import { defaultTrashPath } from "../session-data-delete.ts"
 import { claimShutdownSignals } from "../shutdown-claim.ts"
 import {
   buildSkillAgentToolEnvironmentFooter,
@@ -43,7 +44,17 @@ import {
   type SkillTreeEntryKind,
   snapshotSkillBaseline,
 } from "../utils/skill-sync-resolution.ts"
-import { DEFAULT_SKILL_SYNC_QUIET_MS, watchSkillSync } from "../utils/skill-sync-watch.ts"
+import {
+  loadSkillSyncState,
+  type SkillSyncState,
+  saveSkillSyncState,
+  skillSyncStatePath,
+} from "../utils/skill-sync-state.ts"
+import {
+  DEFAULT_SKILL_SYNC_QUIET_MS,
+  stampSkillDir,
+  watchSkillSync,
+} from "../utils/skill-sync-watch.ts"
 import type { LaunchAgentFileAction } from "./install/launch-agent-config.ts"
 import {
   installSkillSyncLaunchAgent,
@@ -441,14 +452,19 @@ async function convertSkills(options: {
   })
 }
 
+function emptySyncCounts(): Record<SkillSyncAction, number> {
+  return { copied: 0, updated: 0, overwritten: 0, unchanged: 0, skipped: 0, removed: 0 }
+}
+
 function printSyncSummary(
   counts: Record<SkillSyncAction, number>,
   failed: number,
   overwrite: boolean
 ): void {
-  const { copied, updated, overwritten, unchanged, skipped } = counts
+  const { copied, updated, overwritten, unchanged, skipped, removed } = counts
   console.log(
     `\nSummary: ${copied} copied, ${updated} updated, ${overwritten} overwritten, ${unchanged} unchanged, ${skipped} skipped` +
+      (removed > 0 ? `, ${removed} removed` : "") +
       (failed > 0 ? `, ${failed} failed` : "") +
       (!overwrite && skipped > 0
         ? " (use --overwrite to replace targets with unresolved conflicts)"
@@ -462,6 +478,8 @@ export interface SkillSyncFileSystem {
   isFile(path: string): Promise<boolean>
   moveDirectory(sourceDir: string, targetDir: string): Promise<void>
   removeDirectory(path: string): Promise<void>
+  /** Move a skill deleted elsewhere to the Trash; false when it could not be moved. */
+  trashDirectory(path: string): Promise<boolean>
 }
 
 const DEFAULT_SKILL_SYNC_FILE_SYSTEM: SkillSyncFileSystem = {
@@ -486,6 +504,9 @@ const DEFAULT_SKILL_SYNC_FILE_SYSTEM: SkillSyncFileSystem = {
   },
   async removeDirectory(path) {
     await rm(path, { recursive: true, force: true })
+  },
+  trashDirectory(path) {
+    return defaultTrashPath(path)
   },
 }
 
@@ -636,7 +657,7 @@ function printSkillTreeDiff(name: string, diff: SkillTreeDiff): void {
   for (const path of diff.removed) console.log(`    - would remove ${name}/${path}`)
 }
 
-type SkillSyncAction = "copied" | "updated" | "overwritten" | "unchanged" | "skipped"
+type SkillSyncAction = "copied" | "updated" | "overwritten" | "unchanged" | "skipped" | "removed"
 
 /** Builds the evidence context for one skill's source and target directories. */
 type SkillContextFactory = (sourceSkillDir: string, targetDir: string) => SkillResolutionContext
@@ -878,13 +899,7 @@ async function syncSkills(options: {
   console.log(`Sources: ${fromSkillsDirs.map(displayPath).join(" > ")}`)
   console.log(`Target: ${displayPath(toSkillsDir)}\n`)
 
-  const counts: Record<SkillSyncAction, number> = {
-    copied: 0,
-    updated: 0,
-    overwritten: 0,
-    unchanged: 0,
-    skipped: 0,
-  }
+  const counts = emptySyncCounts()
   const failures: string[] = []
   const createContext = createSkillContextFactory(from, to)
 
@@ -1056,9 +1071,15 @@ function resolveSyncRoots(agentsArg: string | null): SkillSyncRoot[] {
   return roots
 }
 
-async function listSkillsAcrossRoots(roots: SkillSyncRoot[]): Promise<string[]> {
+async function listSkillsAcrossRoots(
+  roots: SkillSyncRoot[],
+  state?: SkillSyncState
+): Promise<string[]> {
   const names = new Set<string>()
-  for (const root of roots) for (const name of await discoverSkillNames(root.dir)) names.add(name)
+  for (const root of roots) {
+    for (const name of await discoverSkillNames(root.dir)) names.add(name)
+    for (const name of Object.keys(state?.roots[root.dir] ?? {})) names.add(name)
+  }
   return [...names].sort()
 }
 
@@ -1090,6 +1111,67 @@ interface RootSyncSettings {
   fileSystem?: Partial<SkillSyncFileSystem>
   /** Per-skill-directory snapshots from the last pass (watch mode only). */
   baselines?: Map<string, SkillHistory>
+  /** What each root held after the last pass, so deletions are carried rather than undone. */
+  state: SkillSyncState
+}
+
+function resolvedFileSystem(settings: RootSyncSettings): SkillSyncFileSystem {
+  return resolveSkillSyncFileSystem(settings.fileSystem)
+}
+
+/**
+ * A skill missing from a root that held it after the last pass was deleted there. When
+ * every remaining copy is unchanged since that pass, carry the deletion (to the Trash);
+ * when any copy was edited since, the edit wins and the normal pass restores the skill.
+ * Returns the actions taken, or null when the skill should sync normally.
+ */
+async function retireDeletedSkill(
+  name: string,
+  roots: SkillSyncRoot[],
+  settings: RootSyncSettings
+): Promise<SkillSyncAction[] | null> {
+  const present = await Promise.all(roots.map((root) => hasSkill(root, name)))
+  const recorded = roots.map((root) => settings.state.roots[root.dir]?.[name])
+  const deletedFrom = roots.filter((_, i) => !present[i] && recorded[i] !== undefined)
+  const remaining = roots.filter((_, i) => present[i])
+  if (deletedFrom.length === 0 || remaining.length === 0) return null
+  const deletedIds = deletedFrom.map((root) => root.id).join(", ")
+  for (const root of remaining) {
+    const before = settings.state.roots[root.dir]?.[name]
+    if ((await stampSkillDir(join(root.dir, name))) !== before) {
+      console.log(
+        `  - restoring ${name}: deleted from ${deletedIds}, but ${root.id} changed it since the last sync`
+      )
+      return null
+    }
+  }
+  const fileSystem = resolvedFileSystem(settings)
+  for (const root of remaining) {
+    const skillDir = join(root.dir, name)
+    if (!settings.dryRun && !(await fileSystem.trashDirectory(skillDir))) {
+      throw new Error(`Could not move ${displayPath(skillDir)} to the Trash`)
+    }
+    console.log(
+      `  - ${settings.dryRun ? "would remove" : "removed"} ${root.id}/${name} (deleted from ${deletedIds})`
+    )
+  }
+  return remaining.map(() => "removed" as const)
+}
+
+/** Record each root's copy after the pass; dry runs leave the state untouched. */
+async function recordSkillState(
+  name: string,
+  roots: SkillSyncRoot[],
+  settings: RootSyncSettings
+): Promise<void> {
+  if (settings.dryRun) return
+  for (const root of roots) {
+    const stamp = await stampSkillDir(join(root.dir, name))
+    const entries = settings.state.roots[root.dir] ?? {}
+    settings.state.roots[root.dir] = entries
+    if (stamp) entries[name] = stamp
+    else delete entries[name]
+  }
 }
 
 async function copySkillAcross(
@@ -1151,12 +1233,22 @@ async function syncSkillAcrossRoots(
   settings: RootSyncSettings
 ): Promise<{ actions: SkillSyncAction[]; failures: string[] }> {
   const [hub, ...spokes] = roots as [SkillSyncRoot, ...SkillSyncRoot[]]
+  const actions: SkillSyncAction[] = []
+  const failures: string[] = []
+  try {
+    const removed = await retireDeletedSkill(name, roots, settings)
+    if (removed) {
+      await recordSkillState(name, roots, settings)
+      return { actions: removed, failures }
+    }
+  } catch (error) {
+    console.log(`  - failed to remove ${name}`)
+    return { actions, failures: [`${name}: ${messageFromUnknownError(error)}`] }
+  }
   const directions = [
     ...spokes.map((spoke) => ({ from: spoke, to: hub })),
     ...spokes.map((spoke) => ({ from: hub, to: spoke })),
   ]
-  const actions: SkillSyncAction[] = []
-  const failures: string[] = []
   for (const direction of directions) {
     const label = `${direction.from.id}→${direction.to.id}/${name}`
     try {
@@ -1167,6 +1259,7 @@ async function syncSkillAcrossRoots(
       failures.push(`${label}: ${messageFromUnknownError(error)}`)
     }
   }
+  await recordSkillState(name, roots, settings)
   if (settings.baselines) {
     // Every root as just settled is the merge base for the next round of edits.
     for (const root of roots) {
@@ -1198,19 +1291,22 @@ async function syncAllSkills(options: {
   console.log()
   if (!dryRun) for (const root of roots) await mkdir(root.dir, { recursive: true })
 
-  const counts: Record<SkillSyncAction, number> = {
-    copied: 0,
-    updated: 0,
-    overwritten: 0,
-    unchanged: 0,
-    skipped: 0,
-  }
+  const counts = emptySyncCounts()
   const failures: string[] = []
-  for (const name of await listSkillsAcrossRoots(roots)) {
-    const result = await syncSkillAcrossRoots(name, roots, { dryRun, quiet: false, fileSystem })
+  const statePath = skillSyncStatePath()
+  const settings: RootSyncSettings = {
+    dryRun,
+    quiet: false,
+    fileSystem,
+    state: await loadSkillSyncState(statePath),
+  }
+  // Skills the last pass saw are included so a deletion made since can be carried.
+  for (const name of await listSkillsAcrossRoots(roots, settings.state)) {
+    const result = await syncSkillAcrossRoots(name, roots, settings)
     for (const action of result.actions) counts[action]++
     failures.push(...result.failures)
   }
+  if (!dryRun) await saveSkillSyncState(statePath, settings.state)
   // Counts are per direction. Conflicts have no --overwrite remedy here: that needs a direction.
   printSyncSummary(counts, failures.length, true)
   if (failures.length > 0) {
@@ -1236,7 +1332,14 @@ async function watchAllSkills(options: {
     `Each skill syncs after ${quietMs / 1000}s with no changes in any root. Stop with Ctrl+C or SIGTERM.\n`
   )
 
-  const settings: RootSyncSettings = { dryRun, quiet: true, fileSystem, baselines: new Map() }
+  const statePath = skillSyncStatePath()
+  const settings: RootSyncSettings = {
+    dryRun,
+    quiet: true,
+    fileSystem,
+    baselines: new Map(),
+    state: await loadSkillSyncState(statePath),
+  }
   const stop = watchStopSignal(options.watch.signal)
   try {
     await watchSkillSync({
@@ -1245,10 +1348,11 @@ async function watchAllSkills(options: {
       quietMs,
       sweepMs: options.watch.sweepMs ?? quietMs * 3,
       signal: stop.signal,
-      listSkills: () => listSkillsAcrossRoots(roots),
+      listSkills: () => listSkillsAcrossRoots(roots, settings.state),
       syncSkill: async (name) => {
         const { failures } = await syncSkillAcrossRoots(name, roots, settings)
         for (const failure of failures) console.log(`    ${failure}`)
+        if (!dryRun) await saveSkillSyncState(statePath, settings.state)
       },
       log: (message) => console.log(`  - ${message}`),
     })
