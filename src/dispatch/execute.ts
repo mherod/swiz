@@ -761,8 +761,8 @@ async function applyStopContinuationPolicy(
   // Always replace inbound state: each stop gets a fresh device activity decision.
   ctx.payload._stopContinuationMode = mode
   if (mode === "all") return groups
-  // stop-non-default-branch stays so a merged-PR branch is always blocked; the
-  // hook limits itself to that check outside "all" mode.
+  // stop-non-default-branch stays so a merged-PR or no-open-PR branch is always
+  // blocked; the hook limits itself to those checks outside "all" mode.
   const allowed = new Set(["stop-git-status.ts", "stop-non-default-branch.ts"])
   if (mode === "delivery") allowed.add("stop-ship-checklist.ts")
   const retained = groups

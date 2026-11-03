@@ -456,7 +456,7 @@ For a remote PR head, fetch it normally, then use `git worktree add --detach <pa
 | `transcriptMonitorMaxConcurrentDispatches` / `transcript-monitor-max-concurrent-dispatches` | `0` | No | global, project | Cap concurrent transcript dispatches; `0` is unlimited | `2` |
 | `updateMemoryFooter` / `update-memory-footer` | `false` | No | global | Add memory-update guidance to stop footers | `true` |
 | `gitStatusGate` / `git-status-gate` | `true` | No | global | Block stop while the worktree is dirty | `true` |
-| `nonDefaultBranchGate` / `non-default-branch-gate` | `true` | No | global | Block stop with unmerged work on a non-default branch (a branch whose PR is already merged is always blocked) | `true` |
+| `nonDefaultBranchGate` / `non-default-branch-gate` | `true` | No | global | Block stop with unmerged work on a non-default branch (a branch with no open PR, or whose PR is already merged, is always blocked) | `true` |
 | `ci` | `true` | No | global, project | Enable CI awareness, polling, status display, and checks | `true` |
 | `changesRequestedGate` / `changes-requested-gate` | `true` | No | global | Block stop with unresolved changes-requested reviews | `true` |
 | `personalRepoIssuesGate` / `personal-repo-issues-gate` | `true` | No | global | Block stop on actionable issues in personal repositories | `true` |

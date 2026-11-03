@@ -344,7 +344,7 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
     docs: {
       description: "Block session stop when on a non-default branch with unmerged work",
       effectExplanation:
-        "When enabled, the stop hook checks if you're on a feature branch with unpushed or unmerged commits and blocks until the work is pushed or merged back to the default branch.",
+        "When enabled, the stop hook checks if you're on a feature branch with unpushed or unmerged commits and blocks until the work is pushed or merged back to the default branch. A branch with no open PR, or whose PR is already merged, is always blocked even when this is disabled.",
     },
   },
   {

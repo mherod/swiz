@@ -8,6 +8,7 @@ import {
   buildStandardFeatureBranchReason,
   buildTrunkModeOutput,
   evaluateStopNonDefaultBranch,
+  isBranchGateRelaxed,
 } from "./stop-non-default-branch.ts"
 
 async function enableTrunkMode(dir: string): Promise<void> {
@@ -272,6 +273,45 @@ describe("nonDefaultBranchGate setting", () => {
       _effectiveSettings: { nonDefaultBranchGate: true },
     } as never)
     expect(result).toHaveProperty("decision", "block")
+  })
+})
+
+describe("no open PR always blocks", () => {
+  const base = { session_id: "s", cwd: "/x", transcript_path: "" }
+  const noPr = { known: true, pr: null }
+  const openPr = { known: true, pr: { number: 7, mergeable: "MERGEABLE" } }
+  const unknown = { known: false, pr: null }
+  const relaxers = [
+    { ...base, _effectiveSettings: { nonDefaultBranchGate: false } },
+    { ...base, _stopContinuationMode: "commit" },
+    { ...base, _stopContinuationMode: "delivery" },
+  ] as never[]
+
+  test("gate off and restricted modes never relax a proven no-PR branch", () => {
+    for (const input of relaxers) expect(isBranchGateRelaxed(input, noPr)).toBe(false)
+  })
+
+  test("control: the same inputs relax a branch with an open PR", () => {
+    for (const input of relaxers) expect(isBranchGateRelaxed(input, openPr)).toBe(true)
+  })
+
+  test("control: unknown PR state keeps the gate setting authoritative", () => {
+    for (const input of relaxers) expect(isBranchGateRelaxed(input, unknown)).toBe(true)
+    expect(isBranchGateRelaxed(base as never, unknown)).toBe(false)
+  })
+
+  test("no-PR reason offers only open-PR or switch-back remediation", () => {
+    const reason = buildStandardFeatureBranchReason("feat/x", "main", null, null, {
+      known: true,
+      files: [],
+    })
+    expect(reason).toContain("No pull request is open for 'feat/x'")
+    expect(reason).toContain("1. Open a PR")
+    expect(reason).toContain("git push")
+    expect(reason).toContain("already finished")
+    expect(reason).toContain("git checkout main && git pull")
+    expect(reason).not.toContain("Continue work")
+    expect(reason).not.toContain("Switch tasks")
   })
 })
 

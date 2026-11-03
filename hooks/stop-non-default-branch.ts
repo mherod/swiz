@@ -4,6 +4,8 @@
 // Runs late in the manifest so higher-priority blockers (secrets, git state, CI) win first.
 //
 // A feature branch normally must be integrated or left from the default branch.
+// A branch with no open PR (or an already-merged one) always blocks, regardless of
+// nonDefaultBranchGate or the stop continuation mode: open a PR, or switch back.
 // A conflicting linked worktree is the preservation exception: once its work is
 // pushed to an open PR, forcing checkout or integration could make recovery harder.
 //
@@ -13,7 +15,6 @@ import {
   detectForkTopology,
   forkPrCreateCmd,
   forkPushCmd,
-  getOpenPrForBranch,
   ghJson,
   git,
   hasGhCli,
@@ -46,9 +47,20 @@ export interface MergedBranchPr {
 
 type ForkTopology = Awaited<ReturnType<typeof detectForkTopology>>
 
-async function getOpenBranchPr(branch: string, cwd: string): Promise<OpenBranchPr | null> {
-  if (!hasGhCli()) return null
-  return await getOpenPrForBranch<OpenBranchPr>(branch, cwd, "mergeable,number")
+/** `known: false` when gh is missing or the query failed — absence of a PR is unproven. */
+export interface OpenBranchPrState {
+  known: boolean
+  pr: OpenBranchPr | null
+}
+
+async function getOpenBranchPrState(branch: string, cwd: string): Promise<OpenBranchPrState> {
+  if (!hasGhCli() || !branch) return { known: false, pr: null }
+  const prs = await ghJson<OpenBranchPr[]>(
+    ["pr", "list", "--head", branch, "--state", "open", "--json", "mergeable,number"],
+    cwd
+  )
+  if (!Array.isArray(prs)) return { known: false, pr: null }
+  return { known: true, pr: prs[0] ?? null }
 }
 
 /** Most recent merged PR whose head is this branch, or null when none (or gh unavailable). */
@@ -167,20 +179,15 @@ export function buildStandardFeatureBranchReason(
     return reason
   }
 
-  reason += `The branch itself signals in-progress work. Possible next steps:\n\n`
-  reason += `1. Continue work: stay on '${branch}' and complete the task before stopping.\n`
+  reason += `No pull request is open for '${branch}'. Do one of the following before stopping:\n\n`
   const prCreateCmd = forkPrCreateCmd(defaultBranch, fork)
   const prOpenFallback = [
     `run: ${prCreateCmd} --fill`,
     `  # --fill uses branch name + commits to populate title/body automatically`,
   ].join("\n")
-  reason += `2. Open a PR: ${skillAdvice("pr-open", "use the /pr-open skill to create a pull request.", prOpenFallback)}\n`
-  const switchTasksFallback = [
-    `run: git checkout ${defaultBranch} && gh issue list --search "is:open label:ready"`,
-    `  # switch to default branch and pick up the next ready issue`,
-  ].join("\n")
-  reason += `3. Switch tasks: ${skillAdvice("work-on-issue", "use the /work-on-issue skill to pick up another issue.", switchTasksFallback)}\n`
-  reason += `4. Return to default: run \`git checkout ${defaultBranch}\` if the branch work is intentionally deferred.\n`
+  reason += `1. Open a PR: commit your work, push it (\`${forkPushCmd(branch, fork)}\`), then ${skillAdvice("pr-open", "use the /pr-open skill to create a pull request.", prOpenFallback)}\n`
+  reason += `2. If the branch work is already finished (merged or carried onto '${defaultBranch}'), switch back:\n`
+  reason += `   \`git checkout ${defaultBranch} && git pull\`\n`
   return reason
 }
 
@@ -228,17 +235,27 @@ export async function evaluateStopNonDefaultBranch(input: StopHookInput): Promis
   const hold = buildOwnershipHoldReason(peerHeldFiles)
   if (hold) return blockStopObj(hold)
 
-  const pr = await getOpenBranchPr(branch, cwd)
-  // The merged-PR block always runs; nonDefaultBranchGate only governs the rest.
+  const prState = await getOpenBranchPrState(branch, cwd)
+  const pr = prState.pr
+  // The merged-PR and no-open-PR blocks always run; nonDefaultBranchGate and the
+  // continuation mode only relax branches with an open PR (or unknown PR state).
   const mergedBlock = await resolveMergedPrBlock(branch, defaultBranch, pr, cwd)
   if (mergedBlock) return mergedBlock
-  if (!isNonDefaultBranchGateEnabled(input)) return {}
-  if (isRestrictedStopContinuation(input)) return {}
+  if (isBranchGateRelaxed(input, prState)) return {}
 
   return await evaluateUnmergedFeatureBranch(cwd, branch, defaultBranch, pr, peerHeldFiles)
 }
 
-/** Commit/delivery stop modes keep this hook only for the merged-PR block. */
+/**
+ * True when the gate setting or a restricted continuation mode may skip the block.
+ * A branch proven to have no open PR is never relaxed: open one, or switch back.
+ */
+export function isBranchGateRelaxed(input: StopHookInput, prState: OpenBranchPrState): boolean {
+  if (prState.known && !prState.pr) return false
+  return !isNonDefaultBranchGateEnabled(input) || isRestrictedStopContinuation(input)
+}
+
+/** Commit/delivery stop modes keep this hook only for the merged-PR and no-PR blocks. */
 function isRestrictedStopContinuation(input: StopHookInput): boolean {
   const mode = input._stopContinuationMode
   return mode === "commit" || mode === "delivery"
