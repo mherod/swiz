@@ -74,6 +74,21 @@ describe("cancelTasksOfUnseenSessions", () => {
     expect(audit).toContain("auto-cancelled")
   })
 
+  it("leaves tasks past the prune age to pruning instead of refreshing them", async () => {
+    const tasksDir = await makeTasksDir()
+    const threeDaysAgo = new Date(NOW_MS - 72 * HOUR_MS).toISOString()
+    const dir = await seedStore(tasksDir, "session-ancient", [
+      task("1", "pending", threeDaysAgo),
+      task("2", "pending", SEVEN_HOURS_AGO),
+    ])
+
+    const cancelled = await cancelTasksOfUnseenSessions({ tasksDir, nowMs: NOW_MS })
+
+    expect(cancelled.map((c) => c.taskId)).toEqual(["2"])
+    expect(await statusOf(dir, "1")).toBe("pending")
+    expect(await statusOf(dir, "2")).toBe("cancelled")
+  })
+
   it("keeps a session whose external sighting is recent", async () => {
     const tasksDir = await makeTasksDir()
     const dir = await seedStore(tasksDir, "session-live", [task("1", "pending", SEVEN_HOURS_AGO)])

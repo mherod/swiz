@@ -14,7 +14,8 @@
  *   only maintained from the swiz MCP task tools (see task-prune.ts).
  *
  * A record or session with no usable timestamp is kept: its age is unknown and
- * guessing would cancel live work. Every cancellation goes through
+ * guessing would cancel live work. A record already past STALE_TASK_PRUNE_AGE_MS
+ * is left to pruning, since cancelling it would refresh its age and delay deletion. Every cancellation goes through
  * `updateStatus`, so it is validated, audited and written through the cache.
  */
 
@@ -22,7 +23,10 @@ import { readdir } from "node:fs/promises"
 import { debugLog } from "../debug.ts"
 import { projectKeyFromCwd } from "../project-key.ts"
 import { createDefaultTaskStore } from "../task-roots.ts"
-import { UNSEEN_SESSION_TASK_CANCEL_AGE_MS } from "./task-governance-constants.ts"
+import {
+  STALE_TASK_PRUNE_AGE_MS,
+  UNSEEN_SESSION_TASK_CANCEL_AGE_MS,
+} from "./task-governance-constants.ts"
 import {
   isIncompleteTaskStatus,
   readTaskStore,
@@ -71,6 +75,20 @@ function newestTaskActivityMs(tasks: readonly Task[]): number | null {
   return maxKnown(tasks.map((task) => getTaskLastUpdatedMs(task)))
 }
 
+/**
+ * Open tasks this rule may cancel. A task already past the stale prune age is
+ * left for pruning: cancelling stamps a fresh `updatedAt`, which would rescue a
+ * dead row from deletion for another full prune window.
+ */
+function cancellableOpenTasks(tasks: readonly Task[], nowMs: number): Task[] {
+  const pruneCutoff = nowMs - STALE_TASK_PRUNE_AGE_MS
+  return tasks.filter((task) => {
+    if (!isIncompleteTaskStatus(task.status)) return false
+    const lastMs = getTaskLastUpdatedMs(task)
+    return lastMs !== null && lastMs >= pruneCutoff
+  })
+}
+
 async function cancelTasks(
   storeKey: TaskStoreKey,
   tasks: readonly Task[],
@@ -109,11 +127,9 @@ export async function cancelIdleProjectTasks(
   const cutoff = nowMs - (options.maxAgeMs ?? UNSEEN_SESSION_TASK_CANCEL_AGE_MS)
   const storeKey: TaskStoreKey = { kind: "project", key: projectKey }
   if (!isSafeSessionId(storeKey, tasksDir)) return []
-  const idle = (await readTaskStore(storeKey, tasksDir)).filter((task) => {
-    if (!isIncompleteTaskStatus(task.status)) return false
-    const lastMs = getTaskLastUpdatedMs(task)
-    return lastMs !== null && lastMs < cutoff
-  })
+  const idle = cancellableOpenTasks(await readTaskStore(storeKey, tasksDir), nowMs).filter(
+    (task) => (getTaskLastUpdatedMs(task) ?? cutoff) < cutoff
+  )
   if (idle.length === 0) return []
   const hours = Math.round((nowMs - cutoff) / 3_600_000)
   return cancelTasks(
@@ -139,6 +155,7 @@ function isProjectAddress(name: string, meta: StoreMeta): boolean {
 
 interface SweepContext {
   tasksDir: string
+  nowMs: number
   cutoffMs: number
   maxAgeMs: number
   sessionLastSeenMs?: SessionSightingLookup
@@ -173,7 +190,7 @@ async function sweepSessionStore(
   if (isProjectAddress(sessionId, meta)) return []
 
   const tasks = await readTaskStore(storeKey, ctx.tasksDir)
-  const open = tasks.filter((task) => isIncompleteTaskStatus(task.status))
+  const open = cancellableOpenTasks(tasks, ctx.nowMs)
   if (open.length === 0) return []
 
   const cwd = typeof meta?.cwd === "string" ? meta.cwd : undefined
@@ -196,10 +213,12 @@ export async function cancelTasksOfUnseenSessions(
 ): Promise<CancelledTaskRef[]> {
   const tasksDir = options.tasksDir ?? createDefaultTaskStore().tasksDir
   const maxAgeMs = options.maxAgeMs ?? UNSEEN_SESSION_TASK_CANCEL_AGE_MS
+  const nowMs = options.nowMs ?? Date.now()
   const ctx: SweepContext = {
     tasksDir,
     maxAgeMs,
-    cutoffMs: (options.nowMs ?? Date.now()) - maxAgeMs,
+    nowMs,
+    cutoffMs: nowMs - maxAgeMs,
     sessionLastSeenMs: options.sessionLastSeenMs,
   }
   const entries = await readdir(tasksDir, { withFileTypes: true }).catch(() => [])

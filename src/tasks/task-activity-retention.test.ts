@@ -9,6 +9,7 @@ import {
   OPEN_TASK_ABANDONED_CEILING_MS,
   OPEN_TASK_UPDATE_RECENCY_LIMIT_MS,
   STALE_TASK_PRUNE_AGE_MS,
+  UNSEEN_SESSION_TASK_CANCEL_AGE_MS,
 } from "./task-governance-constants.ts"
 import { pruneStaleCompletedTasks } from "./task-prune.ts"
 import { TaskStateCache } from "./task-state-cache.ts"
@@ -85,7 +86,8 @@ describe("task activity retention", () => {
     expect(STALE_TASK_PRUNE_AGE_MS).toBe(2 * 24 * 60 * 60_000)
     expect(COMPLETED_TASK_PRUNE_AGE_MS).toBe(15 * 60_000)
     expect(OPEN_TASK_UPDATE_RECENCY_LIMIT_MS).toBeLessThan(OPEN_TASK_ABANDONED_CEILING_MS)
-    expect(OPEN_TASK_ABANDONED_CEILING_MS).toBeLessThan(STALE_TASK_PRUNE_AGE_MS)
+    expect(OPEN_TASK_ABANDONED_CEILING_MS).toBeLessThan(UNSEEN_SESSION_TASK_CANCEL_AGE_MS)
+    expect(UNSEEN_SESSION_TASK_CANCEL_AGE_MS).toBeLessThan(STALE_TASK_PRUNE_AGE_MS)
   })
 
   it("preserves recently maintained records through leaf pruning", async () => {
