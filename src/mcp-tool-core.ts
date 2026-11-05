@@ -72,6 +72,7 @@ import {
   writeTaskUpdate,
 } from "./tasks/task-service.ts"
 import { readTaskStorePath } from "./tasks/task-store-layout.ts"
+import { cancelIdleProjectTasks } from "./tasks/unseen-session-task-cancel.ts"
 import { swizMcpRepliesLogPath } from "./temp-paths.ts"
 import { messageFromUnknownError } from "./utils/hook-json-helpers.ts"
 
@@ -187,7 +188,8 @@ async function runReplyTool(input: McpToolInput, cwd: string): Promise<McpToolRe
 // ─── Project-store read with pruning ────────────────────────────────────────
 
 /**
- * Read the project-keyed store, deleting completed tasks past the retention
+ * Read the project-keyed store, cancelling open tasks idle past
+ * UNSEEN_SESSION_TASK_CANCEL_AGE_MS, deleting completed tasks past the retention
  * age (COMPLETED_TASK_PRUNE_AGE_MS) and collapsing duplicate open tasks that
  * describe the same work. The MCP task tools are the one surface allowed to
  * maintain this store: a task mutation or query here is an explicit agent
@@ -201,6 +203,7 @@ export async function readProjectTasksWithPrune(
 ): Promise<Task[]> {
   const key: TaskStoreKey = { kind: "project", key: projectKey }
   if (!isSafeSessionId(key, tasksDir)) return []
+  await cancelIdleProjectTasks(projectKey, { tasksDir })
   const tasks = await readTaskStore(key, tasksDir)
   const dir = await readTaskStorePath(key, tasksDir)
   return pruneStaleCompletedTasks(dir, tasks, undefined, undefined, () =>

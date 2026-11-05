@@ -2,10 +2,12 @@
  * Task governance configuration thresholds and intervals.
  *
  * Open-task lifecycle invariant:
- * OPEN_TASK_UPDATE_RECENCY_LIMIT_MS < OPEN_TASK_ABANDONED_CEILING_MS < STALE_TASK_PRUNE_AGE_MS.
+ * OPEN_TASK_UPDATE_RECENCY_LIMIT_MS < OPEN_TASK_ABANDONED_CEILING_MS
+ *   < UNSEEN_SESSION_TASK_CANCEL_AGE_MS < STALE_TASK_PRUNE_AGE_MS.
  * Last activity comes from getTaskLastUpdatedMs: crossing the recency limit
- * blocks creation, crossing the abandoned ceiling stops blocking, and crossing
- * the stale prune age permits deletion. Completed retention is a separate rule
+ * blocks creation, crossing the abandoned ceiling stops blocking, crossing the
+ * unseen-session age cancels the task, and crossing the stale prune age permits
+ * deletion. Completed retention is a separate rule
  * based on completion time; duration warnings continue to measure time in progress.
  */
 
@@ -28,6 +30,16 @@ export const OPEN_TASK_UPDATE_RECENCY_LIMIT_MS = 10 * 60_000
  * reports it for cleanup instead.
  */
 export const OPEN_TASK_ABANDONED_CEILING_MS = 60 * 60_000
+
+/**
+ * Age past which open tasks of an unseen agent session are cancelled. Per-session
+ * stores cancel once the owning session has not been seen (live dispatch,
+ * transcript write, or any task write) for this long; the shared project store,
+ * whose records carry no session owner, cancels an open task once it has gone
+ * untouched for this long. Sits between the abandoned ceiling and the stale prune
+ * age, so a cancelled row stays visible for the prune window before deletion.
+ */
+export const UNSEEN_SESSION_TASK_CANCEL_AGE_MS = 6 * 60 * 60_000
 
 /**
  * Release valve. When this many creation attempts appear in the recent tool

@@ -51,6 +51,7 @@ import {
 } from "./daemon/snapshot.ts"
 import { startTranscriptMonitoring } from "./daemon/transcript-monitor-loop.ts"
 import type { ActiveHookDispatch } from "./daemon/types.ts"
+import { startUnseenSessionTaskSweep } from "./daemon/unseen-session-task-sweep.ts"
 import { UpstreamSyncRegistry } from "./daemon/upstream-sync.ts"
 import {
   buildSessionToolUsageStateFromCapturedCalls,
@@ -581,10 +582,12 @@ async function startDaemonProcess(_args: string[], port: number): Promise<void> 
 
   let isClosing = false
   let stopTranscriptMonitoring = () => {}
+  let stopUnseenSessionTaskSweep = () => {}
   const cleanup = async (reason: string, exitCode = 0) => {
     if (isClosing) return
     isClosing = true
     stopTranscriptMonitoring()
+    stopUnseenSessionTaskSweep()
     memoryMonitoring.stop()
     process.stderr.write(`\nClosing daemon components (${reason})... `)
     if (reason !== "exit") {
@@ -703,6 +706,20 @@ async function startDaemonProcess(_args: string[], port: number): Promise<void> 
     (error) => {
       stderrLog("monitoring loop exception", `Transcript monitor error: ${error}`)
       void logPseudoHook(`Error in monitor loop: ${error}`)
+    }
+  ).stop
+
+  stopUnseenSessionTaskSweep = startUnseenSessionTaskSweep(
+    {
+      liveLastSeenMs: (sessionId) => state.sessionActivity.get(sessionId)?.lastSeen,
+      onCancelled: (cancelled) => {
+        const refs = cancelled.map(({ taskId, subject }) => `#${taskId} ${subject}`).join("; ")
+        void logPseudoHook(`Auto-cancelled ${cancelled.length} task(s) of unseen sessions: ${refs}`)
+      },
+    },
+    undefined,
+    (error) => {
+      stderrLog("unseen session sweep", `Unseen-session task sweep error: ${error}`)
     }
   ).stop
 
