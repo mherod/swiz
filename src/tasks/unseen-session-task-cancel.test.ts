@@ -170,6 +170,33 @@ describe("cancelTasksOfUnseenSessions", () => {
   })
 })
 
+describe("cancelIdleProjectTasks — in-progress ceiling", () => {
+  it("cancels a long-running task even when notes keep it freshly written", async () => {
+    const tasksDir = await makeTasksDir()
+    const key = "-tmp-swiz-renewed"
+    const justNow = new Date(NOW_MS - 60_000).toISOString()
+    const renewed = {
+      ...task("p-1", "in_progress", justNow),
+      statusChangedAt: new Date(NOW_MS - 21 * HOUR_MS).toISOString(),
+      startedAt: NOW_MS - 21 * HOUR_MS,
+    }
+    const live = {
+      ...task("p-2", "in_progress", justNow),
+      statusChangedAt: new Date(NOW_MS - 2.5 * HOUR_MS).toISOString(),
+      startedAt: NOW_MS - 2.5 * HOUR_MS,
+    }
+    const dir = await seedStore(tasksDir, key, [renewed, live], { storeKind: "project" })
+
+    const cancelled = await cancelIdleProjectTasks(key, { tasksDir, nowMs: NOW_MS })
+
+    expect(cancelled.map((c) => c.taskId)).toEqual(["p-1"])
+    expect(await statusOf(dir, "p-1")).toBe("cancelled")
+    expect(await statusOf(dir, "p-2")).toBe("in_progress")
+    const audit = await readFile(join(dir, ".audit-log.jsonl"), "utf-8")
+    expect(audit).toContain("in progress for over 12h")
+  })
+})
+
 describe("cancelIdleProjectTasks", () => {
   it("cancels only open project tasks untouched for over six hours", async () => {
     const tasksDir = await makeTasksDir()

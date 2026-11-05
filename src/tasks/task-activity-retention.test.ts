@@ -103,7 +103,10 @@ describe("task activity retention", () => {
     const dir = join(tasksDir, key)
     await seed(dir, activityRecords(Date.now()))
     await expectSurvivors(dir, await readProjectTasksWithPrune(key, tasksDir))
-    expect((await Bun.file(join(dir, ".session-meta.json")).json()).openCount).toBe(6)
+    // #2 survives deletion but has been in_progress for three days: fresh notes no longer keep
+    // such a row open (STALE_IN_PROGRESS_CANCEL_AGE_MS), so the MCP read cancels it.
+    expect((await Bun.file(join(dir, "2.json")).json()).status).toBe("cancelled")
+    expect((await Bun.file(join(dir, ".session-meta.json")).json()).openCount).toBe(5)
   })
 
   it("preserves recently maintained records through session cache full loads", async () => {

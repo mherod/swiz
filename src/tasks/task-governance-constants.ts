@@ -42,6 +42,14 @@ export const OPEN_TASK_ABANDONED_CEILING_MS = 60 * 60_000
 export const UNSEEN_SESSION_TASK_CANCEL_AGE_MS = 6 * 60 * 60_000
 
 /**
+ * Time in progress past which a shared-list task is cancelled however recently
+ * it was written. Notes refresh `updatedAt`, so a row any session keeps
+ * annotating never goes idle; two unseen-session windows in progress without
+ * reaching a terminal status is not plausibly one live unit of work.
+ */
+export const STALE_IN_PROGRESS_CANCEL_AGE_MS = 2 * UNSEEN_SESSION_TASK_CANCEL_AGE_MS
+
+/**
  * Release valve. When this many creation attempts appear in the recent tool
  * window and the gate is still denying, the gate has stopped producing progress:
  * it releases once, loudly, rather than wedging a workflow whose remedy it cannot

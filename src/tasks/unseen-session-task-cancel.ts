@@ -24,6 +24,7 @@ import { debugLog } from "../debug.ts"
 import { projectKeyFromCwd } from "../project-key.ts"
 import { createDefaultTaskStore } from "../task-roots.ts"
 import {
+  STALE_IN_PROGRESS_CANCEL_AGE_MS,
   STALE_TASK_PRUNE_AGE_MS,
   UNSEEN_SESSION_TASK_CANCEL_AGE_MS,
 } from "./task-governance-constants.ts"
@@ -40,7 +41,7 @@ import {
   sessionStoreKey,
   type TaskStoreKey,
 } from "./task-store-path.ts"
-import { getTaskLastUpdatedMs } from "./task-timing.ts"
+import { getTaskCurrentDurationMs, getTaskLastUpdatedMs } from "./task-timing.ts"
 
 export interface CancelledTaskRef {
   storeKey: TaskStoreKey
@@ -114,31 +115,54 @@ async function cancelTasks(
   return cancelled
 }
 
+export interface IdleProjectSweepOptions
+  extends Omit<UnseenSessionSweepOptions, "sessionLastSeenMs"> {
+  /** In-progress time past which a task is cancelled even if recently written. */
+  inProgressMaxAgeMs?: number
+}
+
+const hoursOf = (ms: number) => Math.round(ms / 3_600_000)
+
 /**
- * Shared project store: cancel each open task untouched for longer than `maxAgeMs`.
- * Call only from the MCP task tools, which own maintenance of this store.
+ * Shared project store: cancel each open task untouched for longer than `maxAgeMs`,
+ * and each in_progress task running longer than `inProgressMaxAgeMs` however
+ * recently it was annotated. Call only from the MCP task tools, which own
+ * maintenance of this store.
  */
 export async function cancelIdleProjectTasks(
   projectKey: string,
-  options: Omit<UnseenSessionSweepOptions, "sessionLastSeenMs"> = {}
+  options: IdleProjectSweepOptions = {}
 ): Promise<CancelledTaskRef[]> {
   const tasksDir = options.tasksDir ?? createDefaultTaskStore().tasksDir
   const nowMs = options.nowMs ?? Date.now()
-  const cutoff = nowMs - (options.maxAgeMs ?? UNSEEN_SESSION_TASK_CANCEL_AGE_MS)
+  const maxAgeMs = options.maxAgeMs ?? UNSEEN_SESSION_TASK_CANCEL_AGE_MS
+  const inProgressMaxAgeMs = options.inProgressMaxAgeMs ?? STALE_IN_PROGRESS_CANCEL_AGE_MS
   const storeKey: TaskStoreKey = { kind: "project", key: projectKey }
   if (!isSafeSessionId(storeKey, tasksDir)) return []
-  const idle = cancellableOpenTasks(await readTaskStore(storeKey, tasksDir), nowMs).filter(
-    (task) => (getTaskLastUpdatedMs(task) ?? cutoff) < cutoff
+  const candidates = cancellableOpenTasks(await readTaskStore(storeKey, tasksDir), nowMs)
+  const idle = candidates.filter((task) => nowMs - (getTaskLastUpdatedMs(task) ?? nowMs) > maxAgeMs)
+  const overrun = candidates.filter(
+    (task) =>
+      !idle.includes(task) &&
+      task.status === "in_progress" &&
+      getTaskCurrentDurationMs(task, nowMs) > inProgressMaxAgeMs
   )
-  if (idle.length === 0) return []
-  const hours = Math.round((nowMs - cutoff) / 3_600_000)
-  return cancelTasks(
-    storeKey,
-    idle,
-    `auto-cancelled — untouched for over ${hours}h; its session is no longer active`,
-    tasksDir,
-    undefined
-  )
+  return [
+    ...(await cancelTasks(
+      storeKey,
+      idle,
+      `auto-cancelled — untouched for over ${hoursOf(maxAgeMs)}h; its session is no longer active`,
+      tasksDir,
+      undefined
+    )),
+    ...(await cancelTasks(
+      storeKey,
+      overrun,
+      `auto-cancelled — in progress for over ${hoursOf(inProgressMaxAgeMs)}h without reaching a terminal status`,
+      tasksDir,
+      undefined
+    )),
+  ]
 }
 
 type StoreMeta = Awaited<ReturnType<typeof readTaskStoreMeta>>
