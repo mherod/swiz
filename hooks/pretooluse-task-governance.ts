@@ -44,6 +44,10 @@ import {
   hasActiveSkillForHookPayload,
 } from "../src/skill-utils.ts"
 import { createTaskStoreForHookPayload } from "../src/task-roots.ts"
+import {
+  isTaskOwnedBySession,
+  readSessionOwnedTaskIds,
+} from "../src/tasks/session-task-ownership.ts"
 import { hasHealthyPendingTaskBuffer } from "../src/tasks/task-buffer-health.ts"
 import {
   isBlockedSwizTaskFilesCommand,
@@ -537,10 +541,20 @@ async function checkOpenTaskUpdateRecency(
 
     const allTasks = overlayEventState(await readTasksForInput(input, sessionId), sessionId)
     const nowMs = Date.now()
-    const { blocking, abandoned } = partitionStaleOpenTasks(
-      allTasks as unknown as OpenTaskRecency[],
+    const partitioned = partitionStaleOpenTasks(
+      allTasks as unknown as Array<OpenTaskRecency & { storeKey?: TaskStoreKey }>,
       nowMs
     )
+    // Only this session's rows can block: demanding a note on another session's row is what
+    // kept dead rows renewed. Foreign stale rows are still reported for cleanup.
+    const blocking = await ownedBySession(partitioned.blocking, {
+      sessionId,
+      transcriptPath: input?.transcript_path as string | undefined,
+    })
+    const abandoned = [
+      ...partitioned.abandoned,
+      ...partitioned.blocking.filter((task) => !blocking.includes(task)),
+    ]
     if (blocking.length === 0) return null
 
     const denials = await readStaleGateDenialCount(input)
@@ -782,11 +796,12 @@ async function checkInProgressCap(
   toolName: string,
   sessionId: string,
   cwd: string | undefined,
-  allTasks: Array<LongRunningTaskLike & { ownership?: string }>
+  allTasks: Array<LongRunningTaskLike & { ownership?: string; storeKey?: TaskStoreKey }>,
+  transcriptPath?: string
 ): Promise<SwizHookOutput | undefined> {
   const inProgressTasks = allTasks.filter((t) => t.status === "in_progress")
   if (!exceedsInProgressCap(inProgressTasks.length)) {
-    return checkLongRunningActiveTasks(toolName, allTasks)
+    return await checkLongRunningActiveTasks(toolName, allTasks, { sessionId, transcriptPath })
   }
   const taskList =
     inProgressTasks.map((t) => `  • #${t.id}: ${t.subject}${taskOwnershipSuffix(t)}`).join("\n") +
@@ -824,13 +839,37 @@ export function findLongRunningActiveTasks<T extends LongRunningTaskLike>(
   })
 }
 
-function checkLongRunningActiveTasks(
+interface TaskOwnerContext {
+  sessionId: string
+  transcriptPath?: string
+}
+
+/**
+ * Keep only the rows the current session owns. The refresh gate exists to keep a
+ * session's own active work honest; demanding a refresh of another session's row
+ * made every onlooker re-note it hourly, which kept dead rows alive forever.
+ */
+async function ownedBySession<T extends { id: string; storeKey?: TaskStoreKey }>(
+  tasks: readonly T[],
+  owner: TaskOwnerContext
+): Promise<T[]> {
+  const needsTranscript = tasks.some((task) => task.storeKey?.kind === "project")
+  const ownedIds = needsTranscript
+    ? await readSessionOwnedTaskIds(owner.transcriptPath)
+    : new Set<string>()
+  return tasks.filter((task) => isTaskOwnedBySession(task, owner.sessionId, ownedIds))
+}
+
+async function checkLongRunningActiveTasks(
   toolName: string,
-  allTasks: readonly LongRunningTaskLike[]
-): SwizHookOutput | undefined {
+  allTasks: readonly (LongRunningTaskLike & { storeKey?: TaskStoreKey })[],
+  owner?: TaskOwnerContext
+): Promise<SwizHookOutput | undefined> {
   if (!isShellTool(toolName)) return undefined
   const nowMs = Date.now()
-  const stale = findLongRunningActiveTasks(allTasks, nowMs)
+  const longRunning = findLongRunningActiveTasks(allTasks, nowMs)
+  if (longRunning.length === 0) return undefined
+  const stale = owner ? await ownedBySession(longRunning, owner) : longRunning
   if (stale.length === 0) return undefined
   const list = stale
     .map(
@@ -1337,15 +1376,20 @@ function runImmediateTaskStateChecks(context: TaskStateCheckContext): SwizHookOu
  * task left untouched past the refresh window stays stale however long the skill runs, and
  * TaskUpdate stays reachable during it. So the refresh gate survives the stand-down.
  */
-function allowSkillWorkflow(context: TaskStateCheckContext): SwizHookOutput {
-  return checkLongRunningActiveTasks(context.toolName, context.allTasks) ?? preToolUseAllow()
+async function allowSkillWorkflow(context: TaskStateCheckContext): Promise<SwizHookOutput> {
+  return (
+    (await checkLongRunningActiveTasks(context.toolName, context.allTasks, {
+      sessionId: context.sessionId,
+      transcriptPath: context.transcriptPath,
+    })) ?? preToolUseAllow()
+  )
 }
 
 async function runTaskStateChecks(context: TaskStateCheckContext): Promise<SwizHookOutput> {
   if (await nativeTaskToolsProvenAbsent(context.input)) return preToolUseAllow()
 
   // Escape hatch — see skillOwnsWorkflow.
-  if (await skillOwnsWorkflow(context.input, context.cwd)) return allowSkillWorkflow(context)
+  if (await skillOwnsWorkflow(context.input, context.cwd)) return await allowSkillWorkflow(context)
 
   const reconciliation = checkReconciliationRequired(context)
   if (reconciliation) return reconciliation
@@ -1365,7 +1409,8 @@ async function runTaskStateChecks(context: TaskStateCheckContext): Promise<SwizH
     context.toolName,
     context.sessionId,
     context.cwd,
-    context.allTasks
+    context.allTasks,
+    context.transcriptPath
   )
   if (capOutcome) return capOutcome
 

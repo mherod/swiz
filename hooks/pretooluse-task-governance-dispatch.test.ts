@@ -2,6 +2,7 @@ import { afterAll, describe, expect, test } from "bun:test"
 import { mkdir, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { projectKeyFromCwd } from "../src/project-key.ts"
 import { syncCodexUpdatePlanSnapshot } from "../src/tasks/codex-update-plan.ts"
 import {
   applyTaskListEvent,
@@ -589,6 +590,77 @@ describe("evaluateTaskCreatePath — open-task update recency", () => {
       Date.now()
     )
     expect(STALE_GATE_DENY_RE.test(message)).toBe(true)
+  })
+
+  // Another session's shared-list row must not block: demanding a note on it is what kept
+  // dead rows renewed (plugg-platform #0e3a-2714 was re-noted hourly by a non-owner).
+  async function seedStaleProjectRow(projectKey: string, id: string): Promise<void> {
+    await writeRawTaskFixture(TASK_HOME, projectKey, {
+      id,
+      subject: `Shared row ${id}`,
+      status: "in_progress",
+      updatedAt: new Date(Date.now() - OPEN_TASK_UPDATE_RECENCY_LIMIT_MS - 60_000).toISOString(),
+      statusChangedAt: new Date(
+        Date.now() - OPEN_TASK_UPDATE_RECENCY_LIMIT_MS - 60_000
+      ).toISOString(),
+    })
+  }
+
+  test("does not block creation on a stale shared-list row this session never owned", async () => {
+    const sessionId = uniqueSessionId("pgrep-dispatch-test-foreign")
+    const cwd = `/tmp/${uniqueSessionId("swiz-foreign-project")}`
+    const projectKey = projectKeyFromCwd(cwd)
+    try {
+      await seedStaleProjectRow(projectKey, "f00d-1")
+      const input = { tool_name: "TaskCreate", session_id: sessionId, cwd, _taskHome: TASK_HOME }
+      const result = await evaluateTaskCreatePath(input, { subject: "fix login bug" })
+      expect(decisionReason(result) ?? "").not.toContain("not been updated in over")
+    } finally {
+      await cleanupSession(projectKey)
+    }
+  })
+
+  test("control: still blocks on a stale shared-list row this session created", async () => {
+    const sessionId = uniqueSessionId("pgrep-dispatch-test-owned")
+    const cwd = `/tmp/${uniqueSessionId("swiz-owned-project")}`
+    const projectKey = projectKeyFromCwd(cwd)
+    const transcriptPath = join(TASK_HOME, `${sessionId}.jsonl`)
+    try {
+      await seedStaleProjectRow(projectKey, "f00d-2")
+      await Bun.write(
+        transcriptPath,
+        [
+          {
+            type: "assistant",
+            message: {
+              content: [{ type: "tool_use", id: "t1", name: "mcp__swiz__TaskCreate", input: {} }],
+            },
+          },
+          {
+            type: "user",
+            message: {
+              content: [
+                { type: "tool_result", tool_use_id: "t1", content: "Created #f00d-2 — Shared row" },
+              ],
+            },
+          },
+        ]
+          .map((line) => JSON.stringify(line))
+          .join("\n")
+      )
+      const input = {
+        tool_name: "TaskCreate",
+        session_id: sessionId,
+        cwd,
+        transcript_path: transcriptPath,
+        _taskHome: TASK_HOME,
+      }
+      const result = await evaluateTaskCreatePath(input, { subject: "fix login bug" })
+      expect(permissionDecision(result)).toBe("deny")
+      expect(decisionReason(result)).toContain("#f00d-2")
+    } finally {
+      await cleanupSession(projectKey)
+    }
   })
 
   // Control: the same seed, updated moments ago, must pass — proving the deny

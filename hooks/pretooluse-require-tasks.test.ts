@@ -3,6 +3,7 @@ import { mkdir, writeFile } from "node:fs/promises"
 import { join, resolve } from "node:path"
 import { AGENTS } from "../src/agents.ts"
 import { RETRY_ALLOWED_DENIAL_MARKER } from "../src/infractions.ts"
+import { projectKeyFromCwd } from "../src/project-key.ts"
 import { syncCodexUpdatePlanSnapshot } from "../src/tasks/codex-update-plan.ts"
 import { getSessionTasksDir } from "../src/tasks/task-recovery.ts"
 import { taskListSyncSentinelPath } from "../src/temp-paths.ts"
@@ -736,6 +737,72 @@ describe("pretooluse-require-tasks", () => {
       // The slow-task advisory still allows with context; only the refresh gate must not deny.
       expect(result.decision).not.toBe("deny")
       expect(result.reason ?? "").not.toContain("without a refresh")
+    })
+
+    async function seedForeignProjectTask(sessionId: string) {
+      const homeDir = await createTempHome()
+      const startedAt = Date.now() - 3 * HOUR_MS
+      const stamp = new Date(startedAt).toISOString()
+      await writeTask(homeDir, projectKeyFromCwd(PROJECT_ROOT), {
+        id: "abcd-1",
+        subject: "Another session's work",
+        status: "in_progress",
+        statusChangedAt: stamp,
+        startedAt,
+        updatedAt: new Date(Date.now() - 2 * HOUR_MS).toISOString(),
+      })
+      await writeTask(homeDir, sessionId, { id: "1", subject: "Own step", status: "in_progress" })
+      await writeTask(homeDir, sessionId, { id: "2", subject: "Next step", status: "pending" })
+      return homeDir
+    }
+
+    async function writeOwnershipTranscript(homeDir: string, createdId: string): Promise<string> {
+      const path = join(homeDir, "transcript.jsonl")
+      const lines = [
+        {
+          type: "assistant",
+          message: {
+            content: [{ type: "tool_use", id: "tu1", name: "mcp__swiz__TaskCreate", input: {} }],
+          },
+        },
+        {
+          type: "user",
+          message: {
+            content: [
+              {
+                type: "tool_result",
+                tool_use_id: "tu1",
+                content: [{ type: "text", text: `{"summary":"Created #${createdId} — work"}` }],
+              },
+            ],
+          },
+        },
+      ]
+      await writeFile(path, lines.map((line) => JSON.stringify(line)).join("\n"))
+      return path
+    }
+
+    test("does not demand a refresh of a shared-list task this session never owned", async () => {
+      const sessionId = `session-hour-old-foreign-${Date.now()}`
+      const homeDir = await seedForeignProjectTask(sessionId)
+      const result = await runHook({ homeDir, toolName: "Bash", sessionId, command: "bun test" })
+      expect(result.reason ?? "").not.toContain("without a refresh")
+    })
+
+    test("still demands a refresh of a shared-list task this session created", async () => {
+      const sessionId = `session-hour-old-owned-${Date.now()}`
+      const homeDir = await seedForeignProjectTask(sessionId)
+      const transcriptPath = await writeOwnershipTranscript(homeDir, "abcd-1")
+      const result = await runHook({
+        homeDir,
+        toolName: "Bash",
+        sessionId,
+        command: "bun test",
+        transcriptPath,
+      })
+      expect(result.decision).toBe("deny")
+      expect(result.reason).toContain("without a refresh")
+      expect(result.reason).toContain("Another session's work")
     })
 
     test("does not apply the hour-old gate to Edit", async () => {
