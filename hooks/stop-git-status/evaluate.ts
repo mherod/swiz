@@ -5,6 +5,8 @@
  * Exported for composition with stop-ship-checklist.
  */
 
+import { stat } from "node:fs/promises"
+import { resolve } from "node:path"
 import { formatActionPlan } from "../../src/action-plan.ts"
 import { git } from "../../src/git-helpers.ts"
 import type { SwizHookOutput } from "../../src/SwizHook.ts"
@@ -32,6 +34,17 @@ interface DetachedMainWorktree {
   commit: string
 }
 
+/** Which checkout is detached: the repository's main worktree, or the session's own worktree. */
+type DetachedWorktreeRole = "main" | "current"
+
+/** A git operation that legitimately detaches HEAD and must be finished, not switched away from. */
+type DetachedHeadOperation = "rebase" | "bisect"
+
+interface DetachedWorktree extends DetachedMainWorktree {
+  role: DetachedWorktreeRole
+  operation: DetachedHeadOperation | null
+}
+
 function parseDetachedMainWorktree(porcelain: string): DetachedMainWorktree | null {
   const mainWorktree = porcelain.split("\0\0", 1)[0]
   if (!mainWorktree) return null
@@ -46,7 +59,104 @@ function parseDetachedMainWorktree(porcelain: string): DetachedMainWorktree | nu
   return { path, commit }
 }
 
-async function collectDetachedMainWorktreeStop(
+/** The session's own worktree when its HEAD is detached (symbolic-ref fails, HEAD resolves). */
+async function findDetachedCurrentWorktree(cwd: string): Promise<DetachedMainWorktree | null> {
+  if (await git(["symbolic-ref", "-q", "HEAD"], cwd)) return null
+  const [commit, path] = await Promise.all([
+    git(["rev-parse", "--verify", "-q", "HEAD"], cwd),
+    git(["rev-parse", "--show-toplevel"], cwd),
+  ])
+  if (!commit || !path) return null
+  return { path, commit }
+}
+
+const OPERATION_MARKERS: ReadonlyArray<readonly [DetachedHeadOperation, string]> = [
+  ["rebase", "rebase-merge"],
+  ["rebase", "rebase-apply"],
+  ["bisect", "BISECT_LOG"],
+]
+
+/** Rebase and bisect state live in the per-worktree git dir, so resolve each marker there. */
+async function detectDetachedHeadOperation(
+  worktree: string
+): Promise<DetachedHeadOperation | null> {
+  for (const [operation, marker] of OPERATION_MARKERS) {
+    const markerPath = await git(["rev-parse", "--git-path", marker], worktree)
+    if (!markerPath) continue
+    const present = await stat(resolve(worktree, markerPath)).then(
+      () => true,
+      () => false
+    )
+    if (present) return operation
+  }
+  return null
+}
+
+async function findDetachedWorktree(cwd: string): Promise<DetachedWorktree | null> {
+  const main = parseDetachedMainWorktree(await git(["worktree", "list", "--porcelain", "-z"], cwd))
+  const state = main ?? (await findDetachedCurrentWorktree(cwd))
+  if (!state) return null
+  return {
+    ...state,
+    role: main ? "main" : "current",
+    operation: await detectDetachedHeadOperation(state.path),
+  }
+}
+
+function detachedRecoverySteps(state: DetachedWorktree): [string, string[]] {
+  const label = state.role === "main" ? "the main worktree" : "this worktree"
+  const open = `Open ${label} at ${state.path}`
+  if (state.operation === "rebase") {
+    return [
+      `Finish the rebase in progress in ${label}:`,
+      [
+        open,
+        "Resolve any conflicts, stage them, then: git rebase --continue",
+        "Or return to the original branch: git rebase --abort",
+        "Verify the result: git status --short --branch",
+      ],
+    ]
+  }
+  if (state.operation === "bisect") {
+    return [
+      `End the bisect in progress in ${label}:`,
+      [
+        open,
+        "Record the result you need, then: git bisect reset",
+        "Verify the result: git status --short --branch",
+      ],
+    ]
+  }
+  const shortCommit = state.commit.slice(0, 12)
+  return [
+    `Reattach ${label} HEAD:`,
+    [
+      open,
+      `If the detached commit must be preserved: git switch -c <branch> ${shortCommit}`,
+      "Otherwise switch to the intended existing branch: git switch <branch>",
+      "Verify the result: git status --short --branch",
+    ],
+  ]
+}
+
+function detachedSummary(state: DetachedWorktree): string {
+  const shortCommit = state.commit.slice(0, 12)
+  const operation = state.operation ? ` (${state.operation} in progress)` : ""
+  if (state.role === "main") {
+    return (
+      `The main Git worktree is on a detached HEAD at ${shortCommit}${operation}.\n\n` +
+      `Main worktree: ${state.path}\n\n` +
+      "Stop is blocked until the main worktree is attached to a branch."
+    )
+  }
+  return (
+    `The current Git worktree is on a detached HEAD at ${shortCommit}${operation}.\n\n` +
+    `Worktree: ${state.path}\n\n` +
+    "Stop is blocked until this worktree is attached to a branch."
+  )
+}
+
+async function collectDetachedWorktreeStop(
   input: StopHookInput
 ): Promise<GitWorkflowCollectResult | null> {
   const cwd = input.cwd
@@ -57,37 +167,21 @@ async function collectDetachedMainWorktreeStop(
       output: { ...blockStopObj(reason), reason },
     }
   }
-  const state = parseDetachedMainWorktree(await git(["worktree", "list", "--porcelain", "-z"], cwd))
+  const state = await findDetachedWorktree(cwd)
   if (!state) return null
 
-  const shortCommit = state.commit.slice(0, 12)
-  const summary =
-    `The main Git worktree is on a detached HEAD at ${shortCommit}.\n\n` +
-    `Main worktree: ${state.path}\n\n` +
-    "Stop is blocked until the main worktree is attached to a branch."
   const ownership = await resolvePeerHeldFiles(state.path, input.session_id)
   const hold = buildOwnershipHoldReason(ownership)
-  const steps = hold
-    ? [hold]
-    : [
-        "Reattach the main worktree HEAD:",
-        [
-          `Open the main worktree at ${state.path}`,
-          `If the detached commit must be preserved: git switch -c <branch> ${shortCommit}`,
-          "Otherwise switch to the intended existing branch: git switch <branch>",
-          "Verify the result: git status --short --branch",
-        ],
-      ]
 
   return {
     kind: "block",
-    summary,
-    steps,
+    summary: detachedSummary(state),
+    steps: hold ? [hold] : detachedRecoverySteps(state),
     willNeedPush: false,
     sessionId: input.session_id,
     cwd: state.path,
-    taskSubject: "Reattach main worktree HEAD",
-    taskDesc: `note: main worktree detached at ${state.commit}`,
+    taskSubject: state.role === "main" ? "Reattach main worktree HEAD" : "Reattach worktree HEAD",
+    taskDesc: `note: ${state.role === "main" ? "main " : ""}worktree ${state.path} detached at ${state.commit}`,
   }
 }
 
@@ -230,8 +324,8 @@ export async function collectGitWorkflowStop(
   deliveryOnly = false
 ): Promise<GitWorkflowCollectResult> {
   if (deliveryOnly) return await collectGitWorkflowStopAfterDetachedCheck(input, true)
-  const detachedMainWorktree = await collectDetachedMainWorktreeStop(input)
-  if (detachedMainWorktree) return detachedMainWorktree
+  const detachedWorktree = await collectDetachedWorktreeStop(input)
+  if (detachedWorktree) return detachedWorktree
   return await collectGitWorkflowStopAfterDetachedCheck(input)
 }
 
@@ -273,19 +367,19 @@ async function evaluateUncommittedChanges(input: StopHookInput): Promise<SwizHoo
   return blockStopObj(`${reason}\n\n${formatActionPlan(steps)}`)
 }
 
-async function evaluateDetachedMainWorktree(input: StopHookInput): Promise<SwizHookOutput | null> {
-  const detachedMainWorktree = await collectDetachedMainWorktreeStop(input)
-  if (detachedMainWorktree?.kind === "hookOutput") return detachedMainWorktree.output
-  if (detachedMainWorktree?.kind === "block") {
+async function evaluateDetachedWorktree(input: StopHookInput): Promise<SwizHookOutput | null> {
+  const detachedWorktree = await collectDetachedWorktreeStop(input)
+  if (detachedWorktree?.kind === "hookOutput") return detachedWorktree.output
+  if (detachedWorktree?.kind === "block") {
     await createSessionTask(
-      detachedMainWorktree.sessionId,
+      detachedWorktree.sessionId,
       "stop-git-workflow-task-created",
-      detachedMainWorktree.taskSubject,
-      detachedMainWorktree.taskDesc,
-      detachedMainWorktree.cwd
+      detachedWorktree.taskSubject,
+      detachedWorktree.taskDesc,
+      detachedWorktree.cwd
     )
     return blockStopObj(
-      `${detachedMainWorktree.summary}\n\n${formatActionPlan(detachedMainWorktree.steps)}`
+      `${detachedWorktree.summary}\n\n${formatActionPlan(detachedWorktree.steps)}`
     )
   }
   return null
@@ -295,7 +389,7 @@ async function evaluateFullGitWorkflow(
   input: StopHookInput,
   deliveryOnly: boolean
 ): Promise<SwizHookOutput> {
-  const detached = deliveryOnly ? null : await evaluateDetachedMainWorktree(input)
+  const detached = deliveryOnly ? null : await evaluateDetachedWorktree(input)
   if (detached) return detached
 
   const pushShortCircuit = await checkPushCooldownOrInFlight(input)

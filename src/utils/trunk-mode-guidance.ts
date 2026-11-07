@@ -23,8 +23,10 @@ export function trunkModeGuidance(defaultBranch?: string): { summary: string; wo
       `  git switch <existing-branch>\n` +
       `  git worktree add <path> <existing-branch>\n` +
       `For an existing PR, update its branch and PR; merge it when ready, then resume trunk work on \`${branch}\`.\n` +
-      `For review of a fetched remote PR head:\n` +
-      `  git worktree add --detach <path> refs/remotes/origin/<existing-PR-branch>\n` +
-      `Do not leave unpublished commits on a detached HEAD. Keep Git's dirty-checkout and ownership checks intact.`,
+      `For review of a remote PR branch, fetch it as a local branch, then add the worktree on it:\n` +
+      `  git fetch origin <existing-PR-branch>:<existing-PR-branch>\n` +
+      `  git worktree add <path> <existing-PR-branch>\n` +
+      `Worktrees must stay on a branch; stop is blocked while a worktree HEAD is detached. ` +
+      `Keep Git's dirty-checkout and ownership checks intact.`,
   }
 }

@@ -77,13 +77,69 @@ describe("stop-git-status detached main worktree", () => {
     expect(collected.kind).toBe("block")
   })
 
-  test("does not mistake a detached linked worktree for the main worktree", async () => {
+  test("blocks a clean detached linked worktree without blaming the main worktree", async () => {
     const { main, linked } = await createRepository()
+    const commit = await git(["rev-parse", "--short=12", "HEAD"], main)
     await git(["worktree", "add", "--detach", linked, "HEAD"], main)
+
+    const result = await runStopHook(linked)
+    const collected = await collectGitWorkflowStop({ cwd: linked, session_id: "self" })
+
+    expect(result.decision).toBe("block")
+    expect(result.reason).toContain("current Git worktree is on a detached HEAD")
+    expect(result.reason).toContain(`Worktree: ${await realpath(linked)}`)
+    expect(result.reason).toContain(commit)
+    expect(result.reason).toContain(`git switch -c <branch> ${commit}`)
+    expect(result.reason).not.toContain("main Git worktree")
+    expect(collected.kind).toBe("block")
+    if (collected.kind === "block") expect(collected.taskSubject).toBe("Reattach worktree HEAD")
+  })
+
+  test("control: a clean linked worktree on a branch does not block", async () => {
+    const { main, linked } = await createRepository()
+    await git(["worktree", "add", "-b", "feature/attached", linked], main)
 
     const result = await runStopHook(linked)
 
     expect(result.stdout).toBe("")
+  })
+
+  test("a detached worktree mid-rebase is told to finish the rebase, not switch", async () => {
+    const { main, linked } = await createRepository()
+    await git(["worktree", "add", "-b", "feature/rebase", linked], main)
+    await Bun.write(join(main, "conflict.txt"), "main\n")
+    await git(["add", "conflict.txt"], main)
+    await git(["commit", "-m", "main side"], main)
+    await Bun.write(join(linked, "conflict.txt"), "feature\n")
+    await git(["add", "conflict.txt"], linked)
+    await git(["commit", "-m", "feature side"], linked)
+    await expect(git(["rebase", "main"], linked)).rejects.toThrow()
+
+    const collected = await collectGitWorkflowStop({ cwd: linked, session_id: "self" })
+
+    expect(collected.kind).toBe("block")
+    const serialized = JSON.stringify(collected)
+    expect(serialized).toContain("rebase in progress")
+    expect(serialized).toContain("git rebase --continue")
+    expect(serialized).toContain("git rebase --abort")
+    expect(serialized).not.toContain("git switch")
+  })
+
+  test("a detached worktree mid-bisect is told to reset the bisect", async () => {
+    const { main } = await createRepository()
+    for (const message of ["second", "third", "fourth"]) {
+      await git(["commit", "--allow-empty", "-m", message], main)
+    }
+    await git(["bisect", "start", "HEAD", "HEAD~3"], main)
+    expect(await git(["symbolic-ref", "-q", "--short", "HEAD"], main).catch(() => "")).toBe("")
+
+    const collected = await collectGitWorkflowStop({ cwd: main, session_id: "self" })
+
+    expect(collected.kind).toBe("block")
+    const serialized = JSON.stringify(collected)
+    expect(serialized).toContain("bisect in progress")
+    expect(serialized).toContain("git bisect reset")
+    expect(serialized).not.toContain("git switch")
   })
 
   test("a missing session blocks detached recovery without a branch-switch command", async () => {

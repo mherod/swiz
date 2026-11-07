@@ -107,13 +107,14 @@ describe("pretooluse-trunk-mode-worktree-creation", () => {
       expect(reason).toContain("no git worktree was created")
       expect(reason).toContain("git switch <existing-branch>")
       expect(reason).toContain("git worktree add <path> <existing-branch>")
-      expect(reason).toContain("refs/remotes/origin/<existing-PR-branch>")
+      expect(reason).toContain("git fetch origin <existing-PR-branch>:<existing-PR-branch>")
+      expect(reason).not.toContain("worktree add --detach")
       expect(reason).toContain("commit on `main`")
       expect(reason).toContain("git push origin main")
       expect(reason).toContain("Do not create a feature branch or a new PR")
       expect(reason).toContain("Preserve unrelated or peer work before switching")
       expect(reason).toContain("For an existing PR, update its branch and PR")
-      expect(reason).toContain("Do not leave unpublished commits on a detached HEAD")
+      expect(reason).toContain("Worktrees must stay on a branch")
       expect(result.systemMessage).toContain(
         "implement, verify, commit and push new work directly on main"
       )
