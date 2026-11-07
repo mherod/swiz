@@ -1,9 +1,10 @@
 import { existsSync, realpathSync } from "node:fs"
 import { cp, lstat, mkdir, mkdtemp, readdir, readlink, rename, rm, stat } from "node:fs/promises"
-import { basename, dirname, join } from "node:path"
+import { basename, dirname, join, resolve } from "node:path"
 import { orderBy } from "lodash-es"
 import { AGENTS, type AgentDef, getAgent } from "../agents.ts"
 import { detectCurrentAgent } from "../detect.ts"
+import { findGitWorkTree } from "../git-helpers.ts"
 import { getHomeDir } from "../home.ts"
 import { SWIZ_SKILL_SYNC_LABEL } from "../launch-agents.ts"
 import { getProviderAdapter } from "../provider-adapters.ts"
@@ -16,6 +17,7 @@ import {
   findSkills,
   getAgentsSkillDir,
   getAgentsSkillDirs,
+  getLegacyAgentsSkillDir,
   getSkillToolAvailabilityWarning,
   parseFrontmatterField,
   stripFrontmatter,
@@ -165,9 +167,9 @@ function displayPath(path: string): string {
   return path.startsWith(home) ? `~${path.slice(home.length)}` : path
 }
 
-/** Positional (non-flag) args, excluding values consumed by --from/--to/--agents. */
+/** Positional (non-flag) args, excluding values consumed by transfer options. */
 function extractPositionals(args: string[]): string[] {
-  const flagsWithValue = new Set(["--from", "--to", "--agents"])
+  const flagsWithValue = new Set(["--from", "--to", "--agents", "--project"])
   return args.filter((a, i) => !a.startsWith("--") && !flagsWithValue.has(args[i - 1] ?? ""))
 }
 
@@ -892,25 +894,43 @@ function createSkillContextFactory(
   })
 }
 
-// New skills are copied with markdown converted to the target's tool names; existing targets are resolved per file.
-// Used by --sync --from <agent> and the --sync-gemini alias.
-async function syncSkills(options: {
+interface SkillTransferOptions {
   from: string
   to: string
   dryRun: boolean
   overwrite: boolean
   fileSystem?: Partial<SkillSyncFileSystem>
-}): Promise<void> {
+  project?: { root: string; name?: string; all: boolean }
+}
+
+async function resolveSkillTransfer(options: SkillTransferOptions) {
+  const { from, to } = options
+  const fromSkillsDirs = options.project ? userSkillDirs(from) : sourceSkillDirs(from)
+  const toSkillsDir = options.project
+    ? projectSkillDir(options.project.root, to)
+    : primarySkillDir(to)
+  const sources = await discoverSkillSources(fromSkillsDirs)
+  const orderedSkills = options.project
+    ? await selectProjectSkills(sources, toSkillsDir, options.project)
+    : sources
+  if (options.project) {
+    await validateProjectSyncPaths(toSkillsDir, orderedSkills)
+  }
+  return { fromSkillsDirs, toSkillsDir, orderedSkills }
+}
+
+// New skills are converted to the target's tool names; existing targets resolve per file.
+async function syncSkills(options: SkillTransferOptions): Promise<void> {
   const { from, to, dryRun, overwrite, fileSystem } = options
   const fromAgent = resolveForSync(from)
   const toAgent = resolveForSync(to)
-  const fromSkillsDirs = sourceSkillDirs(from)
-  const toSkillsDir = primarySkillDir(to)
-  const orderedSkills = await discoverSkillSources(fromSkillsDirs)
+  const { fromSkillsDirs, toSkillsDir, orderedSkills } = await resolveSkillTransfer(options)
 
   if (orderedSkills.length === 0) {
     console.log(
-      `No ${fromAgent.name} skills with SKILL.md found at ${fromSkillsDirs.map(displayPath).join(", ")}.`
+      options.project
+        ? "No matching user skills to sync into the project."
+        : `No ${fromAgent.name} skills with SKILL.md found at ${fromSkillsDirs.map(displayPath).join(", ")}.`
     )
     return
   }
@@ -946,6 +966,63 @@ async function syncSkills(options: {
       `Failed to sync ${failures.length} skill(s):\n${failures.map((f) => `  - ${f}`).join("\n")}`
     )
   }
+}
+
+/** Project imports must never pick up a project override as their user source. */
+function userSkillDirs(agent: string): string[] {
+  return agent === "agents"
+    ? [getAgentsSkillDir(), getLegacyAgentsSkillDir()]
+    : (getProviderAdapter(agent)?.getSkillDirs() ?? [primarySkillDir(agent)])
+}
+
+function projectSkillDir(root: string, agent: string): string {
+  return join(root, `.${agent === "antigravity" ? "gemini" : agent}`, "skills")
+}
+
+/** A project import must not write through links into user or unrelated directories. */
+async function validateProjectSyncPaths(targetRoot: string, sources: SkillSource[]): Promise<void> {
+  for (const path of [dirname(targetRoot), targetRoot]) {
+    const info = await lstat(path).catch((error) => {
+      if (error.code === "ENOENT") return null
+      throw error
+    })
+    if (info?.isSymbolicLink()) throw new Error(`Project sync does not support symlinks: ${path}`)
+  }
+  for (const source of sources) {
+    for (const path of [join(source.sourceDir, source.name), join(targetRoot, source.name)]) {
+      const info = await lstat(path).catch((error) => {
+        if (error.code === "ENOENT") return null
+        throw error
+      })
+      if (!info) continue
+      const entries = await collectSkillTreeEntries(path)
+      if (info.isSymbolicLink() || [...entries.values()].includes("symlink")) {
+        throw new Error(`Project sync does not support symlinked skill trees: ${path}`)
+      }
+    }
+  }
+}
+
+async function selectProjectSkills(
+  sources: SkillSource[],
+  targetRoot: string,
+  selection: { name?: string; all: boolean }
+): Promise<SkillSource[]> {
+  if (selection.name) {
+    const source = sources.find((entry) => entry.name === selection.name)
+    if (!source) throw new Error(`User skill not found: ${selection.name}.`)
+    return [source]
+  }
+  if (selection.all) return sources
+  const selected = new Set(await discoverSkillNames(targetRoot))
+  const available = new Set(sources.map((source) => source.name))
+  for (const name of selected) {
+    if (!available.has(name)) console.log(`  - kept ${name} (project-only; no user source)`)
+  }
+  if (selected.size === 0) {
+    console.log("No project skills selected. Pass a skill name or --all to import user skills.")
+  }
+  return sources.filter((source) => selected.has(source.name))
 }
 
 /** Highest-precedence source of one skill, or null when no source root defines it. */
@@ -1613,9 +1690,58 @@ function extractFlagValue(args: string[], flag: string): string | null {
 function validateTransferExclusivity(selected: boolean[]): void {
   if (selected.filter(Boolean).length > 1) {
     throw new Error(
-      "--sync, --sync-gemini, --sync-all, --sync-watch, --convert, and --to-command are mutually exclusive."
+      "--sync, --sync-project, --sync-gemini, --sync-all, --sync-watch, --convert, and --to-command are mutually exclusive."
     )
   }
+}
+
+function projectFlagValue(args: string[], flag: string): string | null {
+  const value = extractFlagValue(args, flag)
+  if (args.includes(flag) && (!value || value.startsWith("--"))) {
+    throw new Error(`${flag} requires a value.`)
+  }
+  return value
+}
+
+async function resolveSkillProject(args: string[]): Promise<string> {
+  const requestedRoot = projectFlagValue(args, "--project")
+  const root = requestedRoot ? resolve(requestedRoot) : findGitWorkTree(process.cwd())
+  if (!root || !(await stat(root)).isDirectory()) {
+    throw new Error(
+      "--sync-project requires a project directory; pass --project <path> outside a Git repository."
+    )
+  }
+  if (realpathSync(root) === realpathSync(getHomeDir())) {
+    throw new Error("The project directory must differ from the user home directory.")
+  }
+  return root
+}
+
+async function handleSyncProject(
+  args: string[],
+  fileSystem?: Partial<SkillSyncFileSystem>
+): Promise<void> {
+  const from = projectFlagValue(args, "--from")
+  if (!from) throw new Error("--sync-project requires --from <agent>.")
+  const to = projectFlagValue(args, "--to") ?? from
+  resolveForSync(from)
+  resolveForSync(to)
+  const root = await resolveSkillProject(args)
+  const names = extractPositionals(args)
+  if (names.length > 1 || (names.length > 0 && args.includes("--all"))) {
+    throw new Error("--sync-project accepts one skill name or --all, not both.")
+  }
+  if (["--agents", "--install", "--uninstall"].some((flag) => args.includes(flag))) {
+    throw new Error("--sync-project does not support --agents, --install, or --uninstall.")
+  }
+  await syncSkills({
+    from,
+    to,
+    dryRun: args.includes("--dry-run"),
+    overwrite: args.includes("--overwrite"),
+    fileSystem,
+    project: { root, name: names[0], all: args.includes("--all") },
+  })
 }
 
 async function handleConvert(args: string[], dryRun: boolean, overwrite: boolean): Promise<void> {
@@ -1776,23 +1902,32 @@ async function handleSkillTransferArgs(
   args: string[],
   options?: SkillCommandOptions
 ): Promise<boolean> {
+  validateProjectFlags(args)
   const sync = args.includes("--sync")
+  const syncProject = args.includes("--sync-project")
   const syncGemini = args.includes("--sync-gemini")
   const syncAll = args.includes("--sync-all")
   const syncWatch = args.includes("--sync-watch")
   const convert = args.includes("--convert")
   const toCommand = args.includes("--to-command")
-  const modes = [sync, syncGemini, syncAll, syncWatch, convert, toCommand]
+  const modes = [sync, syncProject, syncGemini, syncAll, syncWatch, convert, toCommand]
   if (!modes.some(Boolean)) return false
   validateTransferExclusivity(modes)
   const dryRun = args.includes("--dry-run")
   const overwrite = args.includes("--overwrite")
-  if (convert) await handleConvert(args, dryRun, overwrite)
+  if (syncProject) await handleSyncProject(args, options?.syncFileSystem)
+  else if (convert) await handleConvert(args, dryRun, overwrite)
   else if (toCommand) await handleToCommand(args, dryRun, overwrite)
   else if (syncWatch) await handleSyncWatch(args, dryRun, overwrite, options)
   else if (syncAll) await handleSyncAll(args, dryRun, overwrite, options?.syncFileSystem)
   else await handleSync(args, syncGemini, dryRun, overwrite, options?.syncFileSystem)
   return true
+}
+
+function validateProjectFlags(args: string[]): void {
+  if (!args.includes("--sync-project") && (args.includes("--project") || args.includes("--all"))) {
+    throw new Error("--project and --all are only valid with --sync-project.")
+  }
 }
 
 // ─── Command registration ───────────────────────────────────────────────────
@@ -1812,7 +1947,7 @@ export const skillCommand: Command<SkillCommandOptions> = {
   name: "skill",
   description: "Read, list, sync, and convert skills",
   usage:
-    "swiz skill [--raw] [--no-front-matter] [skill-name] | --sync --from <agent> [--to <agent>] [--dry-run] [--overwrite] | --sync-gemini [--dry-run] [--overwrite] | --sync-all [--agents <hub,agent,...>] [--dry-run] | --sync-watch [--agents <hub,agent,...>] [--dry-run] [--install|--uninstall] | --sync-watch --from <agent> [--to <agent>] [--dry-run] [--overwrite] | --convert --from <agent> --to <agent> [skill-name] [--dry-run] [--overwrite] | --to-command --from <agent> [skill-name] [--dry-run] [--overwrite]",
+    "swiz skill [--raw] [--no-front-matter] [skill-name] | --sync-project --from <agent> [--to <agent>] [--project <path>] [skill-name|--all] [--dry-run] [--overwrite] | --sync --from <agent> [--to <agent>] [--dry-run] [--overwrite] | --sync-gemini [--dry-run] [--overwrite] | --sync-all [--agents <hub,agent,...>] [--dry-run] | --sync-watch [--agents <hub,agent,...>] [--dry-run] [--install|--uninstall] | --sync-watch --from <agent> [--to <agent>] [--dry-run] [--overwrite] | --convert --from <agent> --to <agent> [skill-name] [--dry-run] [--overwrite] | --to-command --from <agent> [skill-name] [--dry-run] [--overwrite]",
   options: [
     { flags: "<skill-name>", description: "Print the skill content (omit to list all skills)" },
     { flags: "--raw", description: "Skip inline command expansion (!`cmd` substitutions)" },
@@ -1821,6 +1956,20 @@ export const skillCommand: Command<SkillCommandOptions> = {
       flags: "--sync",
       description:
         "Copy skills from --from <agent> to --to <agent> (default: claude). New skills are copied with their markdown converted into the target agent's tool names; existing targets are resolved per file from tool-name conversion, git history, and modification times — converted copies and newer targets are kept, stale targets are updated, divergent edits are three-way merged, and only unresolved conflicts are skipped",
+    },
+    {
+      flags: "--sync-project",
+      description:
+        "Sync user skills into a project: requires --from <agent>; --to defaults to the same agent. Refreshes only skills already in the project, preserving project-only skills. Pass a skill name to import one, or --all to import every user skill. Uses the same conversion and conflict resolution as --sync",
+    },
+    {
+      flags: "--project <path>",
+      description:
+        "Project directory for --sync-project (default: current Git worktree root). Targets <project>/.<agent>/skills; agents uses .agents/skills and antigravity uses .gemini/skills",
+    },
+    {
+      flags: "--all",
+      description: "With --sync-project: include user skills not yet installed in the project",
     },
     {
       flags: "--sync-gemini",
@@ -1859,12 +2008,12 @@ export const skillCommand: Command<SkillCommandOptions> = {
     {
       flags: "--from <agent>",
       description:
-        "Source agent ID (claude|cursor|gemini|codex|agents). The `agents` source is supported by --sync only and reads repository/user .agents/skills roots plus the legacy ~/.agents fallback.",
+        "Source agent ID (claude|cursor|gemini|codex|antigravity|agents). For agents, --sync reads project/user shared roots; --sync-project reads only ~/.agents/skills plus the legacy ~/.agents fallback.",
     },
     {
       flags: "--to <agent>",
       description:
-        "Target agent ID (claude|cursor|gemini|codex|agents). The `agents` target is supported by --sync only and writes to ~/.agents/skills/.",
+        "Target agent ID (claude|cursor|gemini|codex|antigravity|agents). --sync-project writes to project skill directories; other sync modes write to user skill directories.",
     },
     {
       flags: "--dry-run",
@@ -1887,7 +2036,7 @@ export const skillCommand: Command<SkillCommandOptions> = {
 
     if (args.includes("--dry-run") || args.includes("--overwrite")) {
       throw new Error(
-        "--dry-run and --overwrite are only valid with --sync, --sync-gemini, --sync-all, --sync-watch, --convert, or --to-command."
+        "--dry-run and --overwrite are only valid with --sync, --sync-project, --sync-gemini, --sync-all, --sync-watch, --convert, or --to-command."
       )
     }
 
