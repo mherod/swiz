@@ -1,6 +1,6 @@
 import { existsSync, realpathSync } from "node:fs"
 import { cp, lstat, mkdir, mkdtemp, readdir, readlink, rename, rm, stat } from "node:fs/promises"
-import { basename, dirname, join, resolve } from "node:path"
+import { basename, dirname, join, relative, resolve } from "node:path"
 import { orderBy } from "lodash-es"
 import { AGENTS, type AgentDef, getAgent } from "../agents.ts"
 import { detectCurrentAgent } from "../detect.ts"
@@ -33,6 +33,9 @@ import {
 } from "../utils/skill-content.ts"
 import { convertSkillContent } from "../utils/skill-conversion.ts"
 import { lazySkillHistory, type SkillHistory } from "../utils/skill-git-history.ts"
+import { projectSkillGroups } from "../utils/skill-project-dependencies.ts"
+import { protectProjectGuidance } from "../utils/skill-project-nuances.ts"
+import { withProjectSkillTransaction } from "../utils/skill-project-transaction.ts"
 import {
   collectSkillTreeEntries,
   convertOverwriteMarkdown,
@@ -688,6 +691,7 @@ const FILE_RESOLUTION_VERBS: Partial<Record<SkillFileResolutionKind, string>> = 
   added: "add",
   "target-newer": "keep",
   diverged: "conflict",
+  "project-kept": "keep",
 }
 
 function printFileResolutions(
@@ -746,7 +750,9 @@ function printConversions(name: string, converted: Map<string, string>, dryRun: 
 
 async function copyNewSkill(sync: SingleSkillSync): Promise<SkillSyncAction> {
   const { name, sourceSkillDir, targetDir, dryRun, overwrite, fileSystem } = sync
-  const converted = await convertSourceMarkdown(sync.createContext(sourceSkillDir, targetDir))
+  const context = sync.createContext(sourceSkillDir, targetDir)
+  if (await holdNewProjectSkill(context, name)) return "skipped"
+  const converted = await convertSourceMarkdown(context)
   if (!dryRun) {
     await replaceSkillDirectory(targetDir, {
       allowReplace: overwrite,
@@ -759,15 +765,44 @@ async function copyNewSkill(sync: SingleSkillSync): Promise<SkillSyncAction> {
   return "copied"
 }
 
+async function holdNewProjectSkill(
+  context: SkillResolutionContext,
+  name: string
+): Promise<boolean> {
+  if (!context.projectRoot) return false
+  const files: SkillFileResolution[] = []
+  for (const [path, kind] of await collectSkillTreeEntries(context.sourceDir)) {
+    if (kind === "file" && path.endsWith(".md")) {
+      files.push({ path, kind: "added", write: { copyFrom: join(context.sourceDir, path) } })
+    }
+  }
+  await protectProjectGuidance(files, context)
+  return reportProjectHold(name, files)
+}
+
+function reportProjectHold(name: string, files: SkillFileResolution[]): boolean {
+  if (!files.some((file) => file.kind === "project-kept")) return false
+  console.log(
+    `  - skipped ${name} (project guidance needs review; --overwrite does not bypass this)`
+  )
+  printFileResolutions(name, files, ["project-kept"])
+  return true
+}
+
 function reportResolvedUnchanged(
   name: string,
   files: SkillFileResolution[],
   quiet = false
 ): SkillSyncAction {
   if (quiet) return "unchanged"
-  const summary = describeSkillResolution(files, ["equivalent", "target-newer", "target-only"])
+  const summary = describeSkillResolution(files, [
+    "equivalent",
+    "target-newer",
+    "target-only",
+    "project-kept",
+  ])
   console.log(`  - unchanged ${name}${summary ? ` (${summary})` : ""}`)
-  printFileResolutions(name, files, ["target-newer"])
+  printFileResolutions(name, files, ["target-newer", "project-kept"])
   return "unchanged"
 }
 
@@ -785,7 +820,13 @@ async function applyResolvedUpdate(
   }
   const summary = describeSkillResolution(files, ["source-newer", "merged", "added"])
   console.log(`  - ${dryRun ? "would update" : "updated"} ${name} (${summary})`)
-  printFileResolutions(name, files, ["source-newer", "merged", "added", "target-newer"])
+  printFileResolutions(name, files, [
+    "source-newer",
+    "merged",
+    "added",
+    "target-newer",
+    "project-kept",
+  ])
   return "updated"
 }
 
@@ -797,9 +838,9 @@ async function settleConflict(
 ): Promise<SkillSyncAction> {
   const { name, sourceSkillDir, targetDir, dryRun, overwrite, fileSystem } = sync
   const label = `${name} (${describeSkillTreeDiff(diff)})`
-  if (!overwrite) {
+  if (!overwrite || files.some((file) => file.kind === "project-kept")) {
     console.log(`  - skipped ${name} (target differs: ${describeSkillTreeDiff(diff)})`)
-    printFileResolutions(name, files, ["diverged"])
+    printFileResolutions(name, files, ["diverged", "project-kept"])
     return "skipped"
   }
   const converted = await convertOverwriteMarkdown(sync.createContext(sourceSkillDir, targetDir))
@@ -825,6 +866,7 @@ async function syncSingleSkill(sync: SingleSkillSync): Promise<SkillSyncAction> 
     return "unchanged"
   }
   const plan = await planSkillResolution(sync.createContext(sourceSkillDir, targetDir))
+  if (reportProjectHold(name, plan.files)) return "skipped"
   if (plan.outcome === "unchanged") return reportResolvedUnchanged(name, plan.files, sync.quiet)
   if (plan.outcome === "update") return await applyResolvedUpdate(sync, plan.files)
   return await settleConflict(sync, plan.files, diff)
@@ -869,7 +911,8 @@ function vocabularyAgent(id: string): AgentDef {
 function createSkillContextFactory(
   from: string,
   to: string,
-  baselines?: Map<string, SkillHistory>
+  baselines?: Map<string, SkillHistory>,
+  projectRoot?: string
 ): SkillContextFactory {
   const source = vocabularyAgent(from)
   const target = vocabularyAgent(to)
@@ -877,6 +920,7 @@ function createSkillContextFactory(
   const referenceRoot = from === "claude" || to === "claude" ? null : primarySkillDir("claude")
   const reference = getAgent("claude")!
   return (sourceSkillDir, targetDir) => ({
+    projectRoot,
     sourceDir: sourceSkillDir,
     targetDir,
     sourceHistory: lazySkillHistory(sourceSkillDir),
@@ -914,9 +958,16 @@ async function resolveSkillTransfer(options: SkillTransferOptions) {
     ? await selectProjectSkills(sources, toSkillsDir, options.project)
     : sources
   if (options.project) {
-    await validateProjectSyncPaths(toSkillsDir, orderedSkills)
+    const groups = await projectSkillGroups(orderedSkills, sources, toSkillsDir)
+    await validateProjectSyncPaths(toSkillsDir, groups.flat())
+    return { fromSkillsDirs, toSkillsDir, orderedSkills, groups }
   }
-  return { fromSkillsDirs, toSkillsDir, orderedSkills }
+  return {
+    fromSkillsDirs,
+    toSkillsDir,
+    orderedSkills,
+    groups: orderedSkills.map((source) => [source]),
+  }
 }
 
 // New skills are converted to the target's tool names; existing targets resolve per file.
@@ -924,7 +975,7 @@ async function syncSkills(options: SkillTransferOptions): Promise<void> {
   const { from, to, dryRun, overwrite, fileSystem } = options
   const fromAgent = resolveForSync(from)
   const toAgent = resolveForSync(to)
-  const { fromSkillsDirs, toSkillsDir, orderedSkills } = await resolveSkillTransfer(options)
+  const { fromSkillsDirs, toSkillsDir, orderedSkills, groups } = await resolveSkillTransfer(options)
 
   if (orderedSkills.length === 0) {
     console.log(
@@ -946,25 +997,72 @@ async function syncSkills(options: SkillTransferOptions): Promise<void> {
 
   const counts = emptySyncCounts()
   const failures: string[] = []
-  const createContext = createSkillContextFactory(from, to)
+  const createContext = createSkillContextFactory(from, to, undefined, options.project?.root)
 
-  for (const source of orderedSkills) {
-    const result = await syncSkillSource(source, {
+  for (const group of groups) {
+    const results = await syncSkillGroup(group, {
       targetRoot: toSkillsDir,
       dryRun,
       overwrite,
       fileSystem,
       createContext,
     })
-    if (typeof result === "string") counts[result]++
-    else failures.push(result.failure)
+    accumulateGroupResults(results, counts, failures)
   }
 
-  printSyncSummary(counts, failures.length, overwrite)
+  printSyncSummary(counts, failures.length, overwrite || Boolean(options.project))
   if (failures.length > 0) {
     throw new Error(
       `Failed to sync ${failures.length} skill(s):\n${failures.map((f) => `  - ${f}`).join("\n")}`
     )
+  }
+}
+
+function accumulateGroupResults(
+  results: (SkillSyncAction | { failure: string })[],
+  counts: ReturnType<typeof emptySyncCounts>,
+  failures: string[]
+): void {
+  for (const result of results) {
+    if (typeof result === "string") counts[result]++
+    else failures.push(result.failure)
+  }
+}
+
+async function syncSkillGroup(
+  group: SkillSource[],
+  options: SkillSyncOptions
+): Promise<(SkillSyncAction | { failure: string })[]> {
+  if (group.length === 1) return [await syncSkillSource(group[0]!, options)]
+  console.log(`  Replacement group: ${group.map((source) => source.name).join(" -> ")}`)
+  const run = async (targetRoot: string) => {
+    const createContext: SkillContextFactory = (source, target) => ({
+      ...options.createContext(source, join(options.targetRoot, relative(targetRoot, target))),
+      targetDir: target,
+    })
+    const results: SkillSyncAction[] = []
+    for (const source of group) {
+      const result = await syncSkillSource(source, { ...options, targetRoot, createContext })
+      if (typeof result !== "string") throw new Error(result.failure)
+      if (result === "skipped")
+        throw new Error(`${source.name} needs review; replacement group not applied`)
+      results.push(result)
+    }
+    return results
+  }
+  try {
+    if (options.dryRun) return await run(options.targetRoot)
+    return await withProjectSkillTransaction(
+      options.targetRoot,
+      resolveSkillSyncFileSystem(options.fileSystem),
+      run
+    )
+  } catch (error) {
+    return [
+      {
+        failure: `Replacement group ${group.map((s) => s.name).join(", ")}: ${messageFromUnknownError(error)}`,
+      },
+    ]
   }
 }
 

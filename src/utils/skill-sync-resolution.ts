@@ -5,6 +5,7 @@ import { AGENTS, type AgentDef } from "../agents.ts"
 import { getGitClient } from "../git/client.ts"
 import { convertSkillContent } from "./skill-conversion.ts"
 import { gitBlobId, type SkillFileVersion, type SkillHistory } from "./skill-git-history.ts"
+import { protectProjectGuidance } from "./skill-project-nuances.ts"
 
 // ─── Skill sync conflict resolution ──────────────────────────────────────────
 //
@@ -106,6 +107,7 @@ export type SkillFileResolutionKind =
   | "added"
   | "merged"
   | "diverged"
+  | "project-kept"
 
 export interface SkillFileResolution {
   kind: SkillFileResolutionKind
@@ -133,6 +135,8 @@ export interface SkillReferenceHistory {
 }
 
 export interface SkillResolutionContext {
+  /** Enables conservative repository-anchor checks for user-to-project sync only. */
+  projectRoot?: string
   sourceDir: string
   targetDir: string
   sourceHistory: SkillHistory
@@ -714,6 +718,7 @@ export async function planSkillResolution(
     if (file) files.push(file)
   }
   await convertAddedMarkdown(context, files)
+  await protectProjectGuidance(files, context)
   return { files, outcome: planOutcome(files) }
 }
 
@@ -726,6 +731,7 @@ const RESOLUTION_LABELS: Record<SkillFileResolutionKind, string> = {
   added: "added",
   merged: "merged",
   diverged: "conflicting",
+  "project-kept": "held for project review",
 }
 
 /** e.g. "2 updated, 1 added" for the given kinds, in label order. */
