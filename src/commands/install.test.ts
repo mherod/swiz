@@ -298,6 +298,38 @@ describe("install --codex writes hooks", () => {
   })
 })
 
+describe("install --claude permission denies", () => {
+  it("adds the managed cd deny beside user entries and uninstall removes only it", async () => {
+    const home = await mkdtemp(join(tmpdir(), "swiz-install-claude-denies-"))
+    const settingsPath = join(home, ".claude", "settings.json")
+    await writeJson(settingsPath, {
+      permissions: { allow: ["Read"], deny: ["Bash(rm:*)"] },
+      userSetting: true,
+    })
+
+    for (let run = 0; run < 2; run++) {
+      expect((await runInstall(["--claude", "--hooks-only"], home)).exitCode).toBe(0)
+      const installed = await readJson<{ permissions: { allow: string[]; deny: string[] } }>(
+        settingsPath
+      )
+      expect(installed.permissions).toEqual({
+        allow: ["Read"],
+        deny: ["Bash(rm:*)", "Bash(cd:*)"],
+      })
+    }
+
+    expect((await runInstall(["--uninstall", "--claude"], home)).exitCode).toBe(0)
+    const removed = await readJson<{
+      permissions: { allow: string[]; deny: string[] }
+      userSetting?: boolean
+      hooks?: Record<string, unknown[]>
+    }>(settingsPath)
+    expect(removed.permissions).toEqual({ allow: ["Read"], deny: ["Bash(rm:*)"] })
+    expect(removed.userSetting).toBe(true)
+    expect(JSON.stringify(removed.hooks ?? {})).not.toContain("swiz dispatch")
+  })
+})
+
 describe("install --uninstall scope", () => {
   it("removes only Codex hooks when --codex scopes uninstall", async () => {
     const home = await mkdtemp(join(tmpdir(), "swiz-install-codex-scope-"))

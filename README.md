@@ -390,6 +390,7 @@ swiz install --dry-run    # line-by-line unified diff, no writes
 
 - **Codex hook settings and trust** — `swiz install --codex` writes `~/.codex/hooks.json`. Current clients use `features.hooks`; older versions may use `features.codex_hooks`. Check the running client's settings and review the hook definitions in `/hooks` where supported.
 - **Merge, not replace** — user-defined hooks (sound effects, agent hooks, inline scripts, etc.) are preserved. Only swiz-managed hooks are touched.
+- **Permission denies** — for Claude Code, install also adds a small set of `permissions.deny` entries (currently `Bash(cd:*)`), a backstop that holds even when the swiz hooks are not running. Existing deny entries are kept, and `swiz uninstall` removes only the entries swiz manages. The set stays deliberately narrow: only safety and sandboxing bans that the `pretooluse-banned-commands` hook already enforces unconditionally, with an obvious safer alternative. A settings deny cannot be overridden by an allow rule and shows the agent no guidance.
 - **Legacy replacement** — if you previously had hooks at `~/.claude/hooks/`, swiz detects and replaces them with the portable versions from the swiz project.
 - **Idempotent** — running install twice produces the same result. Old swiz hooks are stripped before new ones are added.
 - Dry run shows an LCS-based unified diff of exactly what would change, plus counts of hooks added/replaced/preserved.
@@ -398,7 +399,7 @@ swiz install --dry-run    # line-by-line unified diff, no writes
 
 ### `swiz uninstall`
 
-Remove only swiz-managed hooks from agent settings while preserving any user-defined hooks.
+Remove only swiz-managed hooks and permission-deny entries from agent settings while preserving any user-defined hooks and denies.
 
 ```bash
 swiz uninstall              # all agents

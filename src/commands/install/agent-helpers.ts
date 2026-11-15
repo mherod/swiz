@@ -7,6 +7,7 @@ import { formatUnifiedDiff } from "../../utils/diff-utils.ts"
 import { readFileText, readJsonFile } from "../../utils/file-utils.ts"
 import { collectCommands, mergeConfig } from "./config-helpers.ts"
 import { writeWithBackup } from "./file-helpers.ts"
+import { withSwizPermissionDenies } from "./permission-denies.ts"
 import { buildProposedAgentSettings, extractOldHooks } from "./settings-helpers.ts"
 
 const START = "<!-- swiz:stop-hooks:start -->"
@@ -210,7 +211,11 @@ export async function installAgent(agent: AgentDef, dryRun: boolean): Promise<vo
   const oldText = (await readFileText(agent.settingsPath)).trimEnd()
   const oldHooks = extractOldHooks(existing, agent)
   const config = mergeConfig(agent, oldHooks)
-  const newText = buildProposedAgentSettings(existing, agent, config)
+  const newText = buildProposedAgentSettings(
+    withSwizPermissionDenies(existing, agent),
+    agent,
+    config
+  )
 
   if (dryRun) {
     reportDryRunAgentInstall(agent, oldHooks, config, oldText, newText)

@@ -4,6 +4,7 @@ import { pauseSessionstartSelfHeal } from "../sessionstart-self-heal-state.ts"
 import { isManagedSwizCommand } from "../swiz-hook-commands.ts"
 import type { Command } from "../types.ts"
 import { syncGlobalStopHookRules } from "./install/agent-helpers.ts"
+import { withoutSwizPermissionDenies } from "./install/permission-denies.ts"
 
 function removeSwizHooks(obj: unknown): unknown {
   if (Array.isArray(obj)) {
@@ -43,6 +44,37 @@ function cleanEmptyEvents(hooks: Record<string, unknown[]>): Record<string, unkn
   return result
 }
 
+interface UninstallProposal {
+  proposed: Record<string, any>
+  hasHooks: boolean
+  hooksRemoved: number
+  deniesRemoved: number
+}
+
+/** Strip swiz hooks and swiz-managed permission denies from parsed agent settings. */
+function proposeUninstall(json: Record<string, any>, agent: AgentDef): UninstallProposal {
+  const rawHooks = agent.wrapsHooks ? json.hooks : json[agent.hooksKey]
+  const hooks = rawHooks && typeof rawHooks === "object" ? (rawHooks as Record<string, any>) : null
+  const hooksRemoved = hooks ? countSwizHooks(hooks) : 0
+
+  let withoutHooks: Record<string, any> = json
+  if (hooks && hooksRemoved > 0) {
+    const cleaned = cleanEmptyEvents(removeSwizHooks(hooks) as Record<string, unknown[]>)
+    withoutHooks = agent.wrapsHooks
+      ? { ...agent.wrapsHooks, hooks: cleaned }
+      : { ...json, [agent.hooksKey]: cleaned }
+  }
+  const { settings, removed } = withoutSwizPermissionDenies(withoutHooks, agent)
+  return { proposed: settings, hasHooks: !!hooks, hooksRemoved, deniesRemoved: removed }
+}
+
+function describeRemovals({ hooksRemoved, deniesRemoved }: UninstallProposal): string {
+  const parts: string[] = []
+  if (hooksRemoved > 0) parts.push(`${hooksRemoved} swiz hook(s)`)
+  if (deniesRemoved > 0) parts.push(`${deniesRemoved} swiz permission deny(s)`)
+  return parts.join(" and ")
+}
+
 async function uninstallAgent(agent: AgentDef, dryRun: boolean) {
   if (!agent.hooksConfigurable) {
     console.log(
@@ -57,33 +89,16 @@ async function uninstallAgent(agent: AgentDef, dryRun: boolean) {
     return
   }
 
-  const json = await file.json()
-  const hooks = agent.wrapsHooks ? json.hooks : json[agent.hooksKey]
-
-  if (!hooks || typeof hooks !== "object") {
-    console.log(`  ${BOLD}${agent.name}${RESET}: ${DIM}no hooks configured${RESET}\n`)
+  const proposal = proposeUninstall(await file.json(), agent)
+  const removals = describeRemovals(proposal)
+  if (!removals) {
+    const detail = proposal.hasHooks ? "no swiz hooks found" : "no hooks configured"
+    console.log(`  ${BOLD}${agent.name}${RESET}: ${DIM}${detail}${RESET}\n`)
     return
   }
 
-  const cleaned = cleanEmptyEvents(removeSwizHooks(hooks) as Record<string, unknown[]>)
-
-  let proposed: Record<string, any>
-  if (agent.wrapsHooks) {
-    proposed = { ...agent.wrapsHooks, hooks: cleaned }
-  } else {
-    proposed = { ...json, [agent.hooksKey]: cleaned }
-  }
-
-  const newText = JSON.stringify(proposed, null, 2)
-
-  const oldCount = countSwizHooks(hooks as Record<string, any>)
-
-  if (oldCount === 0) {
-    console.log(`  ${BOLD}${agent.name}${RESET}: ${DIM}no swiz hooks found${RESET}\n`)
-    return
-  }
-
-  console.log(`  ${BOLD}${agent.name}${RESET}: ${RED}removing ${oldCount} swiz hook(s)${RESET}`)
+  const newText = JSON.stringify(proposal.proposed, null, 2)
+  console.log(`  ${BOLD}${agent.name}${RESET}: ${RED}removing ${removals}${RESET}`)
 
   if (dryRun) {
     console.log(`    ${DIM}(dry run — no changes)${RESET}\n`)
