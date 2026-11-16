@@ -1464,6 +1464,8 @@ describe("swiz skill --sync-watch", () => {
     const fakeHome = await createTempDir()
     const tempCwd = await createTempDir()
     await mkdir(join(fakeHome, ".gemini", "skills"), { recursive: true })
+    // PROCESS_CONTRACT_TEST: signal handling needs a real process; SIGTERM must stop the watch
+    // loop and exit 0, which an in-process command runner cannot observe.
     const proc = Bun.spawn(
       ["bun", join(process.cwd(), "index.ts"), "skill", "--sync-watch", "--from", "gemini"],
       {
