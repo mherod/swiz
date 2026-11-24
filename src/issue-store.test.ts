@@ -11,6 +11,7 @@ import {
   type GitHubClient,
   getIssueStore,
   ghListToRestFallback,
+  ISSUE_STORE_RETENTION,
   IssueStore,
   type IssueStoreReader,
   replayPendingMutations,
@@ -2665,6 +2666,90 @@ describe("Store migration", () => {
       store.upsertCiStatuses("owner/repo", [{ sha: "abc", status: "completed" }])
       const ci = store.getCiStatus<{ status: string }>("owner/repo", "abc")
       expect(ci!.status).toBe("completed")
+    } finally {
+      store.close()
+    }
+  })
+})
+
+describe("IssueStore retention", () => {
+  const event = (id: number) => ({
+    id,
+    event: "labeled",
+    created_at: new Date(Date.UTC(2026, 0, 1) + id * 1000).toISOString(),
+    actor: { login: "alice" },
+    issue: { number: 1 },
+  })
+
+  test("maintain caps the event log per repo and overall, keeping the newest", () => {
+    const store = createStore()
+    try {
+      const { issueEventsPerRepo, issueEventsTotal } = ISSUE_STORE_RETENTION
+      const repos = Math.ceil(issueEventsTotal / issueEventsPerRepo) + 2
+      for (let repo = 0; repo < repos; repo++) {
+        store.appendIssueEvents(
+          `owner/repo-${repo}`,
+          Array.from({ length: issueEventsPerRepo + 5 }, (_, i) => event(repo * 10_000 + i))
+        )
+      }
+
+      // Control: nothing is trimmed until maintain runs.
+      expect(store.listIssueEvents("owner/repo-0", { limit: 10_000 })).toHaveLength(
+        issueEventsPerRepo + 5
+      )
+
+      const result = store.maintain()
+      expect(result.deletedRows).toBeGreaterThan(0)
+
+      const newestRepo = store.listIssueEvents<{ id: number }>(`owner/repo-${repos - 1}`, {
+        limit: 10_000,
+      })
+      expect(newestRepo).toHaveLength(issueEventsPerRepo)
+      expect(newestRepo[0]?.payload.id).toBe((repos - 1) * 10_000 + issueEventsPerRepo + 4)
+
+      let total = 0
+      for (let repo = 0; repo < repos; repo++) {
+        total += store.listIssueEvents(`owner/repo-${repo}`, { limit: 10_000 }).length
+      }
+      expect(total).toBe(issueEventsTotal)
+      // The overall cap drops the oldest repos first.
+      expect(store.listIssueEvents("owner/repo-0", { limit: 10_000 })).toHaveLength(0)
+    } finally {
+      store.close()
+    }
+  })
+
+  test("maintain expires stale cache and session rows but keeps recent ones", () => {
+    const store = createStore()
+    try {
+      const now = Date.now()
+      const old = now - ISSUE_STORE_RETENTION.staleRowMaxAgeMs - 1000
+      store.recordSessionEdit("proj", "old-session", "/a.ts", old)
+      store.recordSessionEdit("proj", "new-session", "/a.ts", now)
+      store.setHttpCache("owner/repo", "/fresh", "etag", "{}")
+
+      store.maintain(now)
+      expect(store.listSessionEdits("proj", "old-session")).toHaveLength(0)
+      expect(store.listSessionEdits("proj", "new-session")).toHaveLength(1)
+      expect(store.getHttpCache("owner/repo", "/fresh")).not.toBeNull()
+
+      store.maintain(now + ISSUE_STORE_RETENTION.httpCacheMaxAgeMs + 1000)
+      expect(store.getHttpCache("owner/repo", "/fresh")).toBeNull()
+    } finally {
+      store.close()
+    }
+  })
+
+  test("maintain shrinks the file once enough space is free", () => {
+    const store = createStore()
+    try {
+      const body = "x".repeat(40_000)
+      for (let i = 0; i < 600; i++) store.setHttpCache("owner/repo", `/endpoint/${i}`, "etag", body)
+      const before = store.maintain(Date.now() - 1000).bytes
+
+      const after = store.maintain(Date.now() + ISSUE_STORE_RETENTION.httpCacheMaxAgeMs + 1000)
+      expect(after.vacuumed).toBe(true)
+      expect(after.bytes).toBeLessThan(before / 4)
     } finally {
       store.close()
     }

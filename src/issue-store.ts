@@ -35,6 +35,37 @@ import type { RepositoryCapability } from "./repository-capability.ts"
 import { SessionEditObservationStore } from "./session-edit-observations.ts"
 import { SessionFileClaimStore } from "./session-file-claims.ts"
 
+// ─── Retention limits ───────────────────────────────────────────────────────
+
+const DAY_MS = 24 * 60 * 60 * 1000
+
+/**
+ * Size bounds for the shared database (target: well under 100MB on disk).
+ * Raw GitHub event payloads average ~10KB and ETag bodies ~30KB, so these two
+ * row caps are what keep the file small; the age limits tidy the rest.
+ */
+export const ISSUE_STORE_RETENTION = {
+  issueEventsPerRepo: 100,
+  issueEventsTotal: 1_000,
+  httpCacheRows: 300,
+  httpCacheMaxAgeMs: 7 * DAY_MS,
+  staleRowMaxAgeMs: 30 * DAY_MS,
+  finishedObservationMaxAgeMs: 7 * DAY_MS,
+  /** Only rewrite the file when at least this much would be reclaimed. */
+  vacuumMinFreeBytes: 8 * 1024 * 1024,
+} as const
+
+export const ISSUE_STORE_MAINTENANCE_INTERVAL_MS = 60 * 60 * 1000
+/** First pass waits for daemon startup to settle; the initial prune of a large file blocks briefly. */
+const ISSUE_STORE_MAINTENANCE_STARTUP_DELAY_MS = 60 * 1000
+
+export interface IssueStoreMaintenanceResult {
+  deletedRows: number
+  vacuumed: boolean
+  /** Database file size after the pass (pages × page size). */
+  bytes: number
+}
+
 // ─── Types ──────────────────────────────────────────────────────────────────
 
 export interface CachedIssue {
@@ -1315,6 +1346,75 @@ export class IssueStore {
     this.db.query("DELETE FROM http_cache").run()
   }
 
+  // ─── Retention ──────────────────────────────────────────────────────────
+
+  /**
+   * Bound the tables that only ever grow, then hand freed pages back to the
+   * filesystem. Everything pruned here is either re-fetchable from GitHub
+   * (event log, ETag cache, CI status) or session bookkeeping far older than
+   * any window that reads it, so a prune can cost a refetch but never data.
+   *
+   * VACUUM needs the database to itself; when another process is mid-read it
+   * fails with SQLITE_BUSY and is simply retried on the next pass.
+   */
+  maintain(now = Date.now()): IssueStoreMaintenanceResult {
+    const r = ISSUE_STORE_RETENTION
+    let deletedRows = 0
+    const run = (sql: string, ...params: (string | number)[]) => {
+      deletedRows += this.db.query(sql).run(...params).changes
+    }
+    this.db
+      .transaction(() => {
+        run(
+          `DELETE FROM issue_events WHERE (repo, event_id) IN (
+             SELECT repo, event_id FROM (
+               SELECT repo, event_id,
+                 ROW_NUMBER() OVER (PARTITION BY repo ORDER BY created_at DESC) AS rn
+               FROM issue_events
+             ) WHERE rn > ?
+           )`,
+          r.issueEventsPerRepo
+        )
+        run(
+          `DELETE FROM issue_events WHERE (repo, event_id) NOT IN (
+             SELECT repo, event_id FROM issue_events ORDER BY created_at DESC LIMIT ?
+           )`,
+          r.issueEventsTotal
+        )
+        run("DELETE FROM http_cache WHERE updated_at < ?", now - r.httpCacheMaxAgeMs)
+        run(
+          `DELETE FROM http_cache WHERE (repo, endpoint) NOT IN (
+             SELECT repo, endpoint FROM http_cache ORDER BY updated_at DESC LIMIT ?
+           )`,
+          r.httpCacheRows
+        )
+        const staleBefore = now - r.staleRowMaxAgeMs
+        run("DELETE FROM ci_status WHERE synced_at < ?", staleBefore)
+        run("DELETE FROM session_edits WHERE updated_at < ?", staleBefore)
+        run("DELETE FROM session_commits WHERE updated_at < ?", staleBefore)
+        run(
+          "DELETE FROM session_edit_observations WHERE finished_at IS NOT NULL AND finished_at < ?",
+          now - r.finishedObservationMaxAgeMs
+        )
+      })
+      .immediate()
+
+    const pragma = (name: string): number =>
+      Number(Object.values(this.db.query(`PRAGMA ${name}`).get() ?? { v: 0 })[0] ?? 0)
+    const pageSize = pragma("page_size")
+    let vacuumed = false
+    if (pragma("freelist_count") * pageSize >= r.vacuumMinFreeBytes) {
+      try {
+        this.db.exec("VACUUM")
+        this.db.exec("PRAGMA wal_checkpoint(TRUNCATE)")
+        vacuumed = true
+      } catch (err) {
+        debugLog(`[swiz] IssueStore vacuum deferred: ${err}`)
+      }
+    }
+    return { deletedRows, vacuumed, bytes: pragma("page_count") * pageSize }
+  }
+
   // ─── Lifecycle ──────────────────────────────────────────────────────────
 
   close(): void {
@@ -1572,6 +1672,36 @@ export function getIssueStore(dbPath?: string): IssueStore {
     }
   }
   return sharedStore
+}
+
+/**
+ * Prune and compact the shared database shortly after startup and then hourly.
+ * Failures (locked or unavailable database) are logged and retried next pass.
+ * Returns a stop function.
+ */
+export function startIssueStoreMaintenance(): () => void {
+  const runMaintenance = () => {
+    try {
+      const store = getIssueStore()
+      if (!(store instanceof IssueStore)) return
+      const result = store.maintain()
+      if (result.deletedRows > 0 || result.vacuumed) {
+        debugLog(
+          `[swiz] IssueStore maintenance: deleted ${result.deletedRows} rows, vacuumed=${result.vacuumed}, ${result.bytes} bytes`
+        )
+      }
+    } catch (err) {
+      debugLog(`[swiz] IssueStore maintenance failed: ${err}`)
+    }
+  }
+  const startup = setTimeout(runMaintenance, ISSUE_STORE_MAINTENANCE_STARTUP_DELAY_MS)
+  startup.unref()
+  const interval = setInterval(runMaintenance, ISSUE_STORE_MAINTENANCE_INTERVAL_MS)
+  interval.unref()
+  return () => {
+    clearTimeout(startup)
+    clearInterval(interval)
+  }
 }
 
 /** No-op IssueStore used when SQLite is unavailable. Returns empty results
