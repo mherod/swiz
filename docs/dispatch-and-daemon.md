@@ -139,7 +139,7 @@ Hooks should consume these via the helpers in `src/utils/daemon-git-state.ts` (`
 
 ### Hook-log retention
 
-The daemon owns a maintenance tick for `~/.swiz/hook-logs.jsonl`. Appenders and compaction share a cross-process lock, and compaction atomically preserves the newest valid records without adding work to the dispatch response path. Defaults are 32MB, 30 days, at least 10,000 records, and a five-minute maintenance interval. Override them with `SWIZ_HOOK_LOG_MAX_BYTES`, `SWIZ_HOOK_LOG_MAX_AGE_DAYS`, and `SWIZ_HOOK_LOG_MAINTENANCE_INTERVAL_MS`. `/metrics` exposes current bytes, retained records, append errors, and the latest maintenance result and duration.
+The daemon owns a maintenance tick for `~/.swiz/hook-logs.jsonl`. Appenders and compaction share a cross-process lock, and compaction atomically preserves the newest valid records without adding work to the dispatch response path. The file is pruned to the newest 2,000 records on a five-minute maintenance interval, and sooner whenever appends overshoot that ceiling by 25%. Override with `SWIZ_HOOK_LOG_MAX_RECORDS` and `SWIZ_HOOK_LOG_MAINTENANCE_INTERVAL_MS`; `SWIZ_HOOK_LOG_MAX_BYTES` (32MB) and `SWIZ_HOOK_LOG_MAX_AGE_DAYS` (30) only bite when the record ceiling is raised above 10,000. `/metrics` exposes current bytes, retained records, append errors, and the latest maintenance result and duration.
 
 ### Daemon-resident state and caches
 

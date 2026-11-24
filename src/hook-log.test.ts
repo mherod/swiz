@@ -56,8 +56,15 @@ describe("hook-log configuration", () => {
       logPath: "/logs/hooks.jsonl",
       maxAgeMs: DEFAULT_HOOK_LOG_MAX_AGE_MS,
       maxBytes: DEFAULT_HOOK_LOG_MAX_BYTES,
-      minRecords: MIN_HOOK_LOG_RECORDS,
+      minRecords: 2_000,
+      maxRecords: 2_000,
     })
+    expect(
+      resolveHookLogConfig("/logs/hooks.jsonl", { SWIZ_HOOK_LOG_MAX_RECORDS: "500" })
+    ).toMatchObject({ minRecords: 500, maxRecords: 500 })
+    expect(
+      resolveHookLogConfig("/logs/hooks.jsonl", { SWIZ_HOOK_LOG_MAX_RECORDS: "50000" })
+    ).toMatchObject({ minRecords: MIN_HOOK_LOG_RECORDS, maxRecords: 50_000 })
     expect(
       resolveHookLogConfig("/logs/hooks.jsonl", {
         SWIZ_HOOK_LOG_MAX_AGE_DAYS: "7",
@@ -68,6 +75,44 @@ describe("hook-log configuration", () => {
 })
 
 describe("HookLogStore", () => {
+  it("prunes to the newest maxRecords entries and re-prunes after appends overshoot", async () => {
+    const directory = await mkdtemp(join(TMP_ROOT, "swiz-hook-log-test-"))
+    testDirectories.push(directory)
+    const logPath = join(directory, "hook-logs.jsonl")
+    const store = new HookLogStore({
+      logPath,
+      maxAgeMs: DEFAULT_HOOK_LOG_MAX_AGE_MS,
+      maxBytes: DEFAULT_HOOK_LOG_MAX_BYTES,
+      minRecords: 20,
+      maxRecords: 20,
+    })
+    const now = Date.now()
+    // A read queues behind any prune that the preceding append scheduled.
+    const readHooks = async () => {
+      await store.read(1)
+      return splitJsonlLines(await Bun.file(logPath).text()).map(
+        (line) => (JSON.parse(line) as HookLogEntry).hook
+      )
+    }
+
+    await store.append(Array.from({ length: 50 }, (_, index) => entry(index, now)))
+    expect((await store.maintain(now)).retainedRecords).toBe(20)
+    const pruned = await readHooks()
+    expect(pruned).toHaveLength(20)
+    expect(pruned[0]).toBe("hook-30")
+    expect(pruned.at(-1)).toBe("hook-49")
+
+    // Control: staying under the 25% overshoot leaves the file alone.
+    await store.append([entry(50, now)])
+    expect(await readHooks()).toHaveLength(21)
+
+    // Crossing it queues a prune without an explicit maintain() call.
+    await store.append(Array.from({ length: 4 }, (_, index) => entry(51 + index, now)))
+    const repruned = await readHooks()
+    expect(repruned).toHaveLength(20)
+    expect(repruned.at(-1)).toBe("hook-54")
+  })
+
   it("aggregates hook outcomes, latency, payload size, and skip reasons", async () => {
     const { store } = await createStore()
     await store.append([

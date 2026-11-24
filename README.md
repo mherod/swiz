@@ -526,6 +526,7 @@ These are optional user-facing and operational overrides. Agent-injected detecti
 | `SWIZ_INCOMING_RETENTION_MS` | `600000` | No | Incoming-capture retention age | `SWIZ_INCOMING_RETENTION_MS=1800000` |
 | `SWIZ_INCOMING_MAX_BYTES` | `67108864` | No | Total incoming-capture byte cap | `SWIZ_INCOMING_MAX_BYTES=134217728` |
 | `SWIZ_INCOMING_JSONL_MAX_BYTES` | `4194304` | No | Per-event JSONL segment cap | `SWIZ_INCOMING_JSONL_MAX_BYTES=8388608` |
+| `SWIZ_HOOK_LOG_MAX_RECORDS` | `2000` | No | Hook-log record cap (newest kept) | `SWIZ_HOOK_LOG_MAX_RECORDS=5000` |
 | `SWIZ_HOOK_LOG_MAX_BYTES` | `33554432` | No | Hook-log byte cap | `SWIZ_HOOK_LOG_MAX_BYTES=67108864` |
 | `SWIZ_HOOK_LOG_MAX_AGE_DAYS` | `30` | No | Hook-log retention age | `SWIZ_HOOK_LOG_MAX_AGE_DAYS=14` |
 | `SWIZ_HOOK_LOG_MAINTENANCE_INTERVAL_MS` | `300000` | No | Hook-log compaction interval | `SWIZ_HOOK_LOG_MAINTENANCE_INTERVAL_MS=600000` |

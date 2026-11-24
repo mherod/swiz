@@ -2,8 +2,9 @@
  * Structured JSONL logging for hook dispatch events.
  *
  * Appends and maintenance share a cross-process lock. The daemon periodically
- * compacts the active file to configurable byte and age limits while retaining
- * at least the most recent 10,000 valid records.
+ * compacts the active file to the most recent 2,000 valid records
+ * (`SWIZ_HOOK_LOG_MAX_RECORDS`), on its interval and whenever appends overshoot
+ * that ceiling by 25%. Byte and age limits still apply to hand-built configs.
  */
 
 import { appendFile, mkdir } from "node:fs/promises"
@@ -42,6 +43,10 @@ export interface HookLogEntry {
 }
 
 export const MIN_HOOK_LOG_RECORDS = 10_000
+/** Hard ceiling on retained records; every append rewrites lock state, so the file stays small. */
+export const DEFAULT_HOOK_LOG_MAX_RECORDS = 2_000
+/** Appends may overshoot the ceiling by this ratio before a prune is queued, so pruning is batched. */
+const HOOK_LOG_RECORD_TRIGGER_RATIO = 1.25
 export const DEFAULT_HOOK_LOG_MAX_BYTES = 32 * 1024 * 1024
 export const DEFAULT_HOOK_LOG_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000
 export const DEFAULT_HOOK_LOG_MAINTENANCE_INTERVAL_MS = 5 * 60 * 1000
@@ -54,6 +59,8 @@ export interface HookLogConfig {
   maxBytes: number
   maxAgeMs: number
   minRecords: number
+  /** Keep at most this many of the newest records. Omitted = no record ceiling. */
+  maxRecords?: number
 }
 
 export interface HookLogMetrics {
@@ -100,11 +107,14 @@ export function resolveHookLogConfig(
   env: Record<string, string | undefined> = process.env
 ): HookLogConfig {
   const maxAgeDays = positiveInteger(env.SWIZ_HOOK_LOG_MAX_AGE_DAYS, 30)
+  const maxRecords = positiveInteger(env.SWIZ_HOOK_LOG_MAX_RECORDS, DEFAULT_HOOK_LOG_MAX_RECORDS)
   return {
     logPath,
     maxBytes: positiveInteger(env.SWIZ_HOOK_LOG_MAX_BYTES, DEFAULT_HOOK_LOG_MAX_BYTES),
     maxAgeMs: maxAgeDays * 24 * 60 * 60 * 1000,
-    minRecords: MIN_HOOK_LOG_RECORDS,
+    // The guaranteed floor can never exceed the ceiling.
+    minRecords: Math.min(MIN_HOOK_LOG_RECORDS, maxRecords),
+    maxRecords,
   }
 }
 
@@ -135,6 +145,7 @@ function selectRetainedLines(
   let retainedBytes = 0
 
   for (let index = records.length - 1; index >= 0; index--) {
+    if (config.maxRecords !== undefined && retained.length >= config.maxRecords) break
     const record = records[index]!
     const mandatory = retained.length < config.minRecords
     const recent = record.timestampMs >= cutoffMs
@@ -263,7 +274,12 @@ export class HookLogStore {
 
   private scheduleMaintenanceIfNeeded(): void {
     const triggerBytes = this.config.maxBytes * HOOK_LOG_MAINTENANCE_TRIGGER_RATIO
-    if (this.metrics.currentBytes < triggerBytes || this.maintenanceQueued) return
+    const overBytes = this.metrics.currentBytes >= triggerBytes
+    // retainedRecords is only trustworthy once a maintenance pass has counted the file.
+    const overRecords =
+      this.config.maxRecords !== undefined &&
+      this.metrics.retainedRecords >= this.config.maxRecords * HOOK_LOG_RECORD_TRIGGER_RATIO
+    if ((!overBytes && !overRecords) || this.maintenanceQueued) return
     this.maintenanceQueued = true
     void this.maintain().finally(() => {
       this.maintenanceQueued = false
