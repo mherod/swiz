@@ -30,7 +30,7 @@ import {
 } from "../tool-matchers.ts"
 import { hasNonEmptyHookOutput, messageFromUnknownError } from "../utils/hook-json-helpers.ts"
 import { getHookSpecificOutput } from "../utils/hook-specific-output.ts"
-import { collectProcessOutput } from "../utils/process-utils.ts"
+import { spawnWithTimeout } from "../utils/process-utils.ts"
 import { isWithinCooldown, markHookCooldown } from "./filters.ts"
 import { getWorkerPool } from "./worker-pool.ts"
 import {
@@ -40,6 +40,7 @@ import {
   extractPayloadCwd,
   extractPayloadSessionId,
   HOOKS_DIR,
+  resolveHookTimeoutSec,
   SIGKILL_GRACE_MS,
 } from "./worker-types.ts"
 
@@ -286,58 +287,11 @@ export interface HookRunResult {
 }
 
 function getConfiguredTimeoutSec(timeoutSec?: number): number {
-  const baseTimeoutSec = timeoutSec ?? DEFAULT_TIMEOUT
+  const baseTimeoutSec = resolveHookTimeoutSec(timeoutSec)
   const testTimeoutSec = process.env.SWIZ_TEST_HOOK_TIMEOUT_SEC
     ? parseInt(process.env.SWIZ_TEST_HOOK_TIMEOUT_SEC, 10)
     : 0
   return Math.max(baseTimeoutSec, testTimeoutSec)
-}
-
-interface TimeoutState {
-  timer: ReturnType<typeof setTimeout>
-  sigkillTimer: ReturnType<typeof setTimeout> | undefined
-  timedOut: boolean
-}
-
-function setupTimeoutHandling(
-  proc: ReturnType<typeof Bun.spawn>,
-  file: string,
-  configuredTimeoutSec: number
-): TimeoutState {
-  const state: TimeoutState = { timer: undefined!, sigkillTimer: undefined, timedOut: false }
-  state.timer = setTimeout(() => {
-    state.timedOut = true
-    log(`   ⏱ TIMEOUT (${configuredTimeoutSec}s) — SIGTERM ${file}`)
-    proc.kill("SIGTERM")
-    state.sigkillTimer = setTimeout(() => {
-      log(`   ⏱ SIGKILL escalation — ${file} did not exit after SIGTERM`)
-      proc.kill("SIGKILL")
-    }, SIGKILL_GRACE_MS)
-  }, configuredTimeoutSec * 1000)
-  return state
-}
-
-function setupAbortListener(
-  proc: ReturnType<typeof Bun.spawn>,
-  file: string,
-  signal?: AbortSignal
-): { onAbort: () => void; cleanup: () => void } {
-  let sigkillTimer: ReturnType<typeof setTimeout> | undefined
-  const onAbort = () => {
-    log(`   ⊘ ABORTED ${file} (another hook denied)`)
-    proc.kill("SIGTERM")
-    sigkillTimer = setTimeout(() => {
-      proc.kill("SIGKILL")
-    }, SIGKILL_GRACE_MS)
-  }
-  signal?.addEventListener("abort", onAbort, { once: true })
-  return {
-    onAbort,
-    cleanup: () => {
-      signal?.removeEventListener("abort", onAbort)
-      if (sigkillTimer) clearTimeout(sigkillTimer)
-    },
-  }
 }
 
 function logHookOutput(trimmed: string, exitCode: number | null, stderrTrimmed: string): void {
@@ -454,57 +408,50 @@ export async function runHook(
   // If already aborted before we even spawn, return immediately.
   if (signal?.aborted) {
     const now = Date.now()
-    return buildAbortedResult(file, now, now, timeoutSec ?? DEFAULT_TIMEOUT, null)
+    return buildAbortedResult(file, now, now, getConfiguredTimeoutSec(timeoutSec), null)
   }
 
   const { cmd, cwd: spawnCwd, env: spawnEnv } = resolveSpawnOptions(file, payloadStr, spawnCtx)
   const startTime = Date.now()
   const configuredTimeoutSec = getConfiguredTimeoutSec(timeoutSec)
 
-  const proc = Bun.spawn(cmd, {
-    stdin: "pipe",
-    stdout: "pipe",
-    stderr: "pipe",
+  // Each hook runs in its own process group so a timeout or abort takes its
+  // descendants (git, gh, test runners) down with it instead of orphaning them.
+  const result = await spawnWithTimeout(cmd, {
     cwd: spawnCwd,
     env: spawnEnv,
+    stdin: payloadStr,
+    timeoutMs: configuredTimeoutSec * 1000,
+    signal,
+    killProcessGroup: true,
+    sigkillGraceMs: SIGKILL_GRACE_MS,
   })
 
-  await proc.stdin.write(payloadStr)
-  await proc.stdin.end()
-
-  let aborted = false
-
-  const timeoutState = setupTimeoutHandling(proc, file, configuredTimeoutSec)
-  const abortHandler = setupAbortListener(proc, file, signal)
-
-  signal?.addEventListener(
-    "abort",
-    () => {
-      aborted = true
-    },
-    { once: true }
-  )
-
-  const { stdout: output, stderr } = await collectProcessOutput(proc)
-
-  clearTimeout(timeoutState.timer)
-  if (timeoutState.sigkillTimer) clearTimeout(timeoutState.sigkillTimer)
-  abortHandler.cleanup()
-
   const endTime = Date.now()
-  const exitCode = proc.exitCode
-  const trimmed = output.trim()
-  const stderrTrimmed = stderr.trim()
+  const exitCode = result.exitCode
+  const trimmed = result.stdout.trim()
+  const stderrTrimmed = result.stderr.trim()
+
+  if (result.timedOut) {
+    log(`   ⏱ TIMEOUT (${configuredTimeoutSec}s) — terminated ${file} and its process group`)
+  }
+  if (result.aborted) log(`   ⊘ ABORTED ${file} (another hook denied)`)
+  if (result.killEscalated) {
+    log(`   ⏱ SIGKILL escalation — ${file} did not exit after SIGTERM`)
+  }
+  if (result.outputAbandoned) {
+    log(`   ⏱ ${file} left its output pipes open after SIGKILL — output dropped`)
+  }
 
   logHookOutput(trimmed, exitCode, stderrTrimmed)
 
   // If aborted, treat as a clean skip — don't classify output from a killed process.
-  if (aborted) {
+  if (result.aborted) {
     return buildAbortedResult(file, startTime, endTime, configuredTimeoutSec, exitCode ?? null)
   }
 
   const { parsed, status } = classifyHookOutput({
-    timedOut: timeoutState.timedOut,
+    timedOut: result.timedOut,
     trimmed,
     exitCode,
   })
@@ -551,7 +498,7 @@ function createSkippedExecution(
   skipReason: SkipReason
 ): HookExecution {
   const now = Date.now()
-  const timeoutSec = getHookTimeout(hook) ?? DEFAULT_TIMEOUT
+  const timeoutSec = getConfiguredTimeoutSec(getHookTimeout(hook))
   return {
     file: hookIdentifier(hook),
     ...(matcher && { matcher }),
@@ -735,16 +682,39 @@ async function runInlineHook(
 ): Promise<HookRunResult> {
   if (signal?.aborted) {
     const now = Date.now()
-    return buildAbortedResult(hook.name, now, now, hook.timeout ?? DEFAULT_TIMEOUT, null)
+    return buildAbortedResult(hook.name, now, now, getConfiguredTimeoutSec(hook.timeout), null)
   }
 
   const startTime = Date.now()
   const configuredTimeoutSec = getConfiguredTimeoutSec(hook.timeout)
-  const { parsed, status, stderrSnippet } = await executeInlineHookWithErrorHandling(
-    hook,
-    payloadStr,
-    { signal, timeoutMs: configuredTimeoutSec * 1000 }
-  )
+  const timeoutMs = configuredTimeoutSec * 1000
+
+  // In-process code cannot be killed, so the timeout is enforced by abandoning
+  // the run and aborting its signal — hooks that pass `context.signal` to their
+  // subprocesses get those terminated too.
+  // The combined signal keeps following the dispatch signal after the hook
+  // returns, so work a hook left running is still cancelled by a later abort.
+  const controller = new AbortController()
+  const hookSignal = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const timedOut = new Promise<"timeout">((resolve) => {
+    timer = setTimeout(() => {
+      controller.abort(new Error(`${hook.name} exceeded its ${configuredTimeoutSec}s timeout`))
+      resolve("timeout")
+    }, timeoutMs)
+  })
+  const run = executeInlineHookWithErrorHandling(hook, payloadStr, {
+    signal: hookSignal,
+    timeoutMs,
+  })
+  const outcome = await Promise.race([run, timedOut])
+  clearTimeout(timer)
+  if (outcome === "timeout") {
+    run.catch(() => {})
+    log(`   ⏱ TIMEOUT (${configuredTimeoutSec}s) — inline ${hook.name} abandoned, abort signalled`)
+  }
+  const { parsed, status, stderrSnippet }: Awaited<typeof run> =
+    outcome === "timeout" ? { parsed: null, status: "timeout", stderrSnippet: "" } : outcome
   const endTime = Date.now()
 
   return {
@@ -816,7 +786,7 @@ function createAbortedExecution(
   hook: HookDef,
   now: number = Date.now()
 ): HookExecution {
-  const timeoutSec = getHookTimeout(hook) ?? DEFAULT_TIMEOUT
+  const timeoutSec = getConfiguredTimeoutSec(getHookTimeout(hook))
   return {
     file: id,
     startTime: now,
@@ -917,7 +887,7 @@ function scheduleAsyncHookEntry(
     return
   }
 
-  const timeout = hook.timeout ?? DEFAULT_TIMEOUT
+  const timeout = resolveHookTimeoutSec(hook.timeout)
   if (daemonContext && pool) {
     log(`   → ${id} [async, daemon-awaited]`)
     const p = pool

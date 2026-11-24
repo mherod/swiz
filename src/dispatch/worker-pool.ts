@@ -6,8 +6,14 @@
 import { randomUUID } from "node:crypto"
 import { join } from "node:path"
 import { debugLog } from "../debug.ts"
+import { signalProcessGroup } from "../utils/process-utils.ts"
 import type { HookExecution } from "./engine.ts"
-import type { ErrorResult, RunHookMessage } from "./worker-types.ts"
+import {
+  type ErrorResult,
+  type HookStartedMessage,
+  type RunHookMessage,
+  resolveHookTimeoutSec,
+} from "./worker-types.ts"
 
 /** Grace period added to the hook's own timeout for supervisor-level enforcement (seconds).
  *  Accounts for worker startup, message passing, and SIGKILL escalation time. */
@@ -49,7 +55,7 @@ interface HookResult {
   execution: HookExecution
 }
 
-type WorkerMessage = HookResult | ErrorResult
+type WorkerMessage = HookResult | ErrorResult | HookStartedMessage
 
 interface QueuedHook {
   id: string
@@ -57,6 +63,8 @@ interface QueuedHook {
   payloadStr: string
   timeoutSec?: number
   queuedAt: number
+  /** Hook subprocess pid (its own process-group leader), reported by the worker. */
+  pid?: number
   /** Filled when the job is assigned to a worker (for error recovery). */
   workerIndex?: number
   /** Supervisor-level timeout timer — fires if worker doesn't respond in time. */
@@ -151,7 +159,32 @@ export class WorkerPool {
     }
   }
 
+  /**
+   * Terminating a worker thread does not stop the hook it spawned. Kill that
+   * hook's process group first so no hook outlives its supervisor.
+   */
+  private killHookProcess(hook: QueuedHook): void {
+    if (hook.pid === undefined) return
+    if (signalProcessGroup(hook.pid, "SIGKILL")) {
+      debugLog(`Worker pool: killed process group ${hook.pid} for ${hook.file}`)
+      return
+    }
+    try {
+      process.kill(hook.pid, "SIGKILL")
+      debugLog(`Worker pool: killed process ${hook.pid} for ${hook.file}`)
+    } catch {
+      // Already exited.
+    }
+  }
+
   private handleWorkerMessage(msg: WorkerMessage, workerIndex: number): void {
+    if (msg.type === "hook-started") {
+      // Progress note only — the worker is still busy with this job.
+      const running = this.pendingMessages.get(msg.id)
+      if (running) running.pid = msg.pid
+      return
+    }
+
     this.workerBusy[workerIndex] = false
 
     const pending = this.pendingMessages.get(msg.id)
@@ -224,11 +257,15 @@ export class WorkerPool {
 
         // Start supervisor timeout — if the worker doesn't respond within
         // hookTimeout + grace, reject the promise and free the worker slot.
-        const supervisorMs = Math.max(1, ((hook.timeoutSec ?? 10) + this.supervisorGraceSec) * 1000)
+        const supervisorMs = Math.max(
+          1,
+          (resolveHookTimeoutSec(hook.timeoutSec) + this.supervisorGraceSec) * 1000
+        )
         hook.supervisorTimer = setTimeout(() => {
           if (!this.pendingMessages.has(hook.id)) return // already resolved
           this.pendingMessages.delete(hook.id)
           this.workerBusy[idleIndex] = false
+          this.killHookProcess(hook)
           debugLog(`Worker pool: supervisor timeout for ${hook.file} (${supervisorMs}ms)`)
           hook.reject(
             new Error(
@@ -341,6 +378,7 @@ export class WorkerPool {
           if (hook.supervisorTimer) clearTimeout(hook.supervisorTimer)
           this.workerBusy[hook.workerIndex] = false
           debugLog(`Worker pool: abort signal — terminating worker ${hook.workerIndex} for ${file}`)
+          this.killHookProcess(hook)
           this.replaceWorker(hook.workerIndex)
           const now = Date.now()
           resolve({

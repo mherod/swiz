@@ -96,7 +96,7 @@ export async function runHook(
 ```
 
 - **Spawn**: `bun hooks/<file>.ts` (TypeScript) or `hooks/<file>` (executable). Payload is written to stdin.
-- **Timeout**: `DEFAULT_TIMEOUT = 10s`. Override per hook via `HookDef.timeout`. On timeout, the process is killed and status is set to `"timeout"`.
+- **Timeout**: `DEFAULT_TIMEOUT = 5s`, and every hook is capped at `HOOK_TIMEOUT_CAP_SEC = 5s` (`resolveHookTimeoutSec` in `src/dispatch/worker-types.ts`); a larger `HookDef.timeout` is clamped. `SWIZ_HOOK_TIMEOUT_CAP_SEC` raises the cap deliberately. Each subprocess hook runs in its own process group: on timeout the whole group gets SIGTERM, then SIGKILL after 3s, and output is abandoned 1s later if a stray descendant still holds the pipes. Inline hooks are abandoned at the deadline and their `context.signal` is aborted. Status is set to `"timeout"`.
 - **Output**: stdout is captured and parsed as JSON. stderr is captured for logging. Up to 500 chars of each are stored in the `HookExecution` as `stdoutSnippet`/`stderrSnippet`.
 - **Logging**: each run is appended to `/tmp/swiz-dispatch.log` with timing and status.
 - **Slow hook threshold**: hooks taking > `SLOW_HOOK_THRESHOLD_MS = 3000ms` are logged with a warning and their status is set to `"slow"`.

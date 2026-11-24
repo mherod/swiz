@@ -3,6 +3,7 @@ import qualityHook from "../../hooks/stop-quality-checks.ts"
 import type { HookGroup } from "../manifest.ts"
 import { runEntry } from "./engine.ts"
 import { stopCollectionTimeoutMs } from "./strategy-base.ts"
+import { HOOK_TIMEOUT_CAP_SEC, resolveHookTimeoutSec } from "./worker-types.ts"
 
 describe("quality-check dispatch budgets", () => {
   test("collects a synchronous quality result through its declared deadline", () => {
@@ -25,8 +26,10 @@ describe("quality-check dispatch budgets", () => {
     ).toBe(10_000)
   })
 
-  test("passes the effective timeout and live cancellation signal to inline hooks", async () => {
+  test("passes the capped timeout and live cancellation signal to inline hooks", async () => {
     const controller = new AbortController()
+    const cappedMs = resolveHookTimeoutSec(120) * 1000
+    expect(cappedMs).toBe(HOOK_TIMEOUT_CAP_SEC * 1000)
     const result = await runEntry(
       {
         matcher: undefined,
@@ -36,8 +39,9 @@ describe("quality-check dispatch budgets", () => {
             event: "stop",
             timeout: 120,
             async run(_input, context) {
-              expect(context?.timeoutMs).toBe(120_000)
-              expect(context?.signal).toBe(controller.signal)
+              expect(context?.timeoutMs).toBe(cappedMs)
+              // Control: the signal is live, not already aborted, before the dispatch cancels.
+              expect(context?.signal?.aborted).toBe(false)
               controller.abort()
               expect(context?.signal?.aborted).toBe(true)
               return { decision: "block", reason: "Verification cancelled; unverified" }

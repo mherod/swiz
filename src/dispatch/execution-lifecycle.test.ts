@@ -432,8 +432,11 @@ describe("strategy pipeline failure cleanup", () => {
         expect(hookAborted).toHaveBeenCalledTimes(1)
         expect(added).toHaveBeenCalledTimes(1)
         expect(removed).toHaveBeenCalledWith("abort", added.mock.calls[0]![1])
-        expect(timers).toHaveBeenCalledTimes(1)
-        expect(cleared).toHaveBeenCalledWith(timers.mock.results[0]!.value)
+        // One collection timer plus the inline hook's own timeout; both must be released.
+        expect(timers).toHaveBeenCalledTimes(2)
+        for (const timer of timers.mock.results) {
+          expect(cleared).toHaveBeenCalledWith(timer.value)
+        }
       } finally {
         for (const timer of timers.mock.results) {
           if (timer.type === "return") clearTimeout(timer.value)

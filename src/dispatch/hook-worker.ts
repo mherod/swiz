@@ -6,15 +6,17 @@
 import { join } from "node:path"
 import { merge } from "lodash-es"
 import { messageFromUnknownError } from "../utils/hook-json-helpers.ts"
+import { spawnWithTimeout } from "../utils/process-utils.ts"
 import type { HookExecution } from "./engine.ts"
 import {
   classifyHookOutput,
-  DEFAULT_TIMEOUT,
   type ErrorResult,
   extractCallerEnv,
   extractPayloadCwd,
   HOOKS_DIR,
+  type HookStartedMessage,
   type RunHookMessage,
+  resolveHookTimeoutSec,
   SIGKILL_GRACE_MS,
 } from "./worker-types.ts"
 
@@ -36,7 +38,7 @@ async function runHookInWorker(
 ): Promise<HookResult | ErrorResult> {
   const cmd = file.endsWith(".ts") ? ["bun", join(HOOKS_DIR, file)] : [join(HOOKS_DIR, file)]
   const startTime = Date.now()
-  const baseTimeoutSec = timeoutSec ?? DEFAULT_TIMEOUT
+  const baseTimeoutSec = resolveHookTimeoutSec(timeoutSec)
 
   try {
     // Merge caller's environment from the enriched payload so daemon-spawned
@@ -45,45 +47,30 @@ async function runHookInWorker(
     const env = callerEnv ? merge({}, process.env, callerEnv) : undefined
     const spawnCwd = extractPayloadCwd(payloadStr)
 
-    const proc = Bun.spawn(cmd, {
-      stdin: "pipe",
-      stdout: "pipe",
-      stderr: "pipe",
+    // Not detached: with a process-group child, worker-pool.test.ts dies with
+    // SIGTERM (exit 143) in this Worker-thread path, cause not yet isolated.
+    // Until it is, only the hook process itself is signalled here; the main
+    // thread path (engine.runHook) does kill the whole group.
+    // The pid is reported so the pool can kill the hook if this worker dies.
+    const result = await spawnWithTimeout(cmd, {
       cwd: spawnCwd,
       env,
+      stdin: payloadStr,
+      timeoutMs: baseTimeoutSec * 1000,
+      sigkillGraceMs: SIGKILL_GRACE_MS,
+      onSpawn: (pid) => self.postMessage({ id, type: "hook-started", pid }),
     })
 
-    // Write payload and close stdin
-    await proc.stdin.write(payloadStr)
-    await proc.stdin.end()
-
-    // Set up timeout with SIGKILL escalation
-    let timedOut = false
-    let sigkillTimer: ReturnType<typeof setTimeout> | undefined
-    const timer = setTimeout(() => {
-      timedOut = true
-      proc.kill("SIGTERM")
-      // Escalate to SIGKILL if the process doesn't exit after grace period.
-      sigkillTimer = setTimeout(() => {
-        proc.kill("SIGKILL")
-      }, SIGKILL_GRACE_MS)
-    }, baseTimeoutSec * 1000)
-
-    // Wait for completion
-    const [output, stderr] = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-    ])
-    await proc.exited
-    clearTimeout(timer)
-    if (sigkillTimer) clearTimeout(sigkillTimer)
-
     const endTime = Date.now()
-    const exitCode = proc.exitCode
-    const trimmed = output.trim()
-    const stderrTrimmed = stderr.trim()
+    const exitCode = result.exitCode
+    const trimmed = result.stdout.trim()
+    const stderrTrimmed = result.stderr.trim()
 
-    const { parsed, status } = classifyHookOutput({ timedOut, trimmed, exitCode })
+    const { parsed, status } = classifyHookOutput({
+      timedOut: result.timedOut,
+      trimmed,
+      exitCode,
+    })
 
     return {
       id,
@@ -118,7 +105,7 @@ if (Bun.isMainThread) {
 
 declare const self: {
   addEventListener: (type: string, listener: (event: MessageEvent) => void) => void
-  postMessage: (data: HookResult | ErrorResult) => void
+  postMessage: (data: HookResult | ErrorResult | HookStartedMessage) => void
 }
 
 self.addEventListener("message", (event: MessageEvent) => {

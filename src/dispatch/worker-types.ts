@@ -11,9 +11,25 @@ import type { HookStatus } from "./engine.ts"
 // ─── Shared constants ──────────────────────────────────────────────────────
 
 export const HOOKS_DIR = join(import.meta.dir, "..", "..", "hooks")
-export const DEFAULT_TIMEOUT = 10 // seconds
+export const DEFAULT_TIMEOUT = 5 // seconds
+/**
+ * Hard ceiling on any single hook's run time (seconds). A manifest `timeout`
+ * above this is clamped, so one stuck hook cannot stall a dispatch.
+ * `SWIZ_HOOK_TIMEOUT_CAP_SEC` overrides the ceiling for a deliberate exception.
+ */
+export const HOOK_TIMEOUT_CAP_SEC = 5
 /** Grace period before escalating SIGTERM → SIGKILL on timed-out hooks (ms). */
 export const SIGKILL_GRACE_MS = 3_000
+
+/** Effective per-hook timeout: the hook's own value (or the default), never above the cap. */
+export function resolveHookTimeoutSec(
+  timeoutSec?: number,
+  env: Record<string, string | undefined> = process.env
+): number {
+  const override = Number.parseFloat(env.SWIZ_HOOK_TIMEOUT_CAP_SEC ?? "")
+  const capSec = Number.isFinite(override) && override > 0 ? override : HOOK_TIMEOUT_CAP_SEC
+  return Math.min(timeoutSec ?? DEFAULT_TIMEOUT, capSec)
+}
 
 // ─── Message types ─────────────────────────────────────────────────────────
 
@@ -23,6 +39,13 @@ export interface RunHookMessage {
   file: string
   payloadStr: string
   timeoutSec?: number
+}
+
+/** Sent by a worker once the hook subprocess exists, so the pool can kill it if the worker dies. */
+export interface HookStartedMessage {
+  id: string
+  type: "hook-started"
+  pid: number
 }
 
 export interface ErrorResult {
