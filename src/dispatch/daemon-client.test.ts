@@ -223,7 +223,8 @@ describe("dispatch fallback policy", () => {
       expect(policy.timeoutMs).toBeLessThan(dispatchTimeoutSeconds(event) * 1000)
     }
     expect(daemonDispatchPolicy("unknownEvent")).toEqual({
-      timeoutMs: 42_000,
+      // An unlisted event gets the same 8s budget as every listed one.
+      timeoutMs: 8_000 + HOOK_CONTEXT_HUMANISE_TIMEOUT_MS - 3_000,
       timeoutFallback: "allow",
     })
   })

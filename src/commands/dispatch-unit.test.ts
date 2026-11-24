@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import { daemonDispatchPolicy } from "../dispatch/daemon-client.ts"
 import { filterPrMergeModeHooks, resolvePrMergeActive } from "../dispatch/index.ts"
+import { resolveHookTimeoutSec } from "../dispatch/worker-types.ts"
 import { hookIdentifier, isInlineHookDef, bundledHookManifest as manifest } from "../manifest.ts"
 
 describe("dispatch.ts unit tests", () => {
@@ -380,7 +381,10 @@ describe("dispatch.ts unit tests", () => {
           if (!steeringHooks.has(hookIdentifier(hook))) continue
           const timeout = isInlineHookDef(hook) ? hook.hook.timeout : hook.timeout
           expect(timeout).toBeGreaterThan(30)
-          expect(daemonDispatchPolicy(group.event).timeoutMs).toBeGreaterThan(timeout! * 1000)
+          // The declared budget is clamped at run time; the transport deadline must cover that.
+          expect(daemonDispatchPolicy(group.event).timeoutMs).toBeGreaterThan(
+            resolveHookTimeoutSec(timeout) * 1000
+          )
         }
       }
       const longTimeouts = manifest

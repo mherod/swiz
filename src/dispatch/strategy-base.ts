@@ -14,7 +14,6 @@ import {
 import type { HookExecution } from "./engine.ts"
 import {
   buildSpawnContext,
-  DEFAULT_TIMEOUT,
   flatSyncHooks,
   getHookTimeout,
   launchAsyncHooks,
@@ -26,6 +25,7 @@ import { injectProjectStateProvenance } from "./state-provenance.ts"
 import { isStopLikeDispatchEvent, normalizeStopDispatchResponseInPlace } from "./stop-response.ts"
 import { DISPATCH_TIMEOUTS } from "./timeouts.ts"
 import type { DispatchStage } from "./timing.ts"
+import { resolveHookTimeoutSec } from "./worker-types.ts"
 
 /** Context passed to each hook execution strategy. */
 export interface HookStrategyContext {
@@ -51,10 +51,10 @@ export interface HookExecutionStrategy<T = Record<string, any>> {
 
 type HookResult = { execution: HookExecution; parsed: Record<string, any> | null }
 
-/** Let synchronous Stop checks use their declared budgets, within the event cap. */
+/** Let synchronous Stop checks use their (capped) budgets, within the event cap. */
 export function stopCollectionTimeoutMs(groups: HookGroup[], minimumMs: number): number {
   const budgets = flatSyncHooks(groups).map(
-    ({ hook }) => (getHookTimeout(hook) ?? DEFAULT_TIMEOUT) * 1000
+    ({ hook }) => resolveHookTimeoutSec(getHookTimeout(hook)) * 1000
   )
   return Math.min(DISPATCH_TIMEOUTS.stop! * 1000, Math.max(minimumMs, ...budgets))
 }

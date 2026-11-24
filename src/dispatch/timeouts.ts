@@ -5,27 +5,38 @@
  * bootstrap can read the canonical budgets without loading the manifest and
  * every hook module on the daemon-success path.
  */
+/**
+ * One budget for every event: the 5s per-hook cap plus the 3s SIGTERM→SIGKILL
+ * grace (`HOOK_TIMEOUT_CAP_SEC` + `SIGKILL_GRACE_MS` in worker-types.ts). Hooks
+ * run concurrently, so nothing can usefully take longer. The dispatch client
+ * enforces this from its own process, which a busy daemon thread cannot delay,
+ * and on expiry the daemon aborts the dispatch and kills its hook processes.
+ */
+export const DISPATCH_BUDGET_SEC = 8
+
 export const DISPATCH_TIMEOUTS: Readonly<Record<string, number>> = {
-  stop: 180,
-  // Steering can spend 30s rewriting; pre-tool feedback can first spend 15s refining.
-  preToolUse: 60,
-  postToolUse: 45,
-  postToolUseFailure: 10,
-  sessionStart: 20,
-  preCompact: 15,
-  postCompact: 10,
-  permissionRequest: 10,
-  taskCreated: 10,
-  taskCompleted: 10,
-  userPromptSubmit: 15,
-  preCommit: 30,
-  commitMsg: 10,
-  prePush: 30,
+  stop: DISPATCH_BUDGET_SEC,
+  preToolUse: DISPATCH_BUDGET_SEC,
+  postToolUse: DISPATCH_BUDGET_SEC,
+  postToolUseFailure: DISPATCH_BUDGET_SEC,
+  sessionStart: DISPATCH_BUDGET_SEC,
+  preCompact: DISPATCH_BUDGET_SEC,
+  postCompact: DISPATCH_BUDGET_SEC,
+  permissionRequest: DISPATCH_BUDGET_SEC,
+  taskCreated: DISPATCH_BUDGET_SEC,
+  taskCompleted: DISPATCH_BUDGET_SEC,
+  userPromptSubmit: DISPATCH_BUDGET_SEC,
+  preCommit: DISPATCH_BUDGET_SEC,
+  commitMsg: DISPATCH_BUDGET_SEC,
+  prePush: DISPATCH_BUDGET_SEC,
 }
 
 export const HOOK_CONTEXT_HUMANISE_TIMEOUT_MS = 15_000
 
 /** Reserve the full rewrite budget in transport and installed agent deadlines. */
 export function dispatchTimeoutSeconds(canonicalEvent: string): number {
-  return (DISPATCH_TIMEOUTS[canonicalEvent] ?? 30) + HOOK_CONTEXT_HUMANISE_TIMEOUT_MS / 1000
+  return (
+    (DISPATCH_TIMEOUTS[canonicalEvent] ?? DISPATCH_BUDGET_SEC) +
+    HOOK_CONTEXT_HUMANISE_TIMEOUT_MS / 1000
+  )
 }

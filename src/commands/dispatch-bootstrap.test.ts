@@ -21,7 +21,10 @@ describe("daemonClientTimeoutMs", () => {
   })
 
   test("userPromptSubmit reserves 15s for humanising with 3s agent headroom", () => {
-    expect(daemonClientTimeoutMs("userPromptSubmit")).toBe(27_000)
+    expect(daemonClientTimeoutMs("userPromptSubmit")).toBe(
+      DISPATCH_TIMEOUTS.userPromptSubmit! * 1000 + 15_000 - 3_000
+    )
+    expect(daemonClientTimeoutMs("userPromptSubmit")).toBe(20_000)
   })
 })
 
