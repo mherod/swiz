@@ -21,6 +21,7 @@ import type {
   TranscriptIndexCache,
 } from "./runtime-cache.ts"
 import { createMetrics, serializeMetrics } from "./runtime-cache.ts"
+import { getRuntimeTelemetry } from "./runtime-telemetry.ts"
 import type { SessionDataCache } from "./session-data.ts"
 
 export interface MetricsRoutesContext {
@@ -100,6 +101,9 @@ export async function handleMetricsRoute(url: URL, ctx: MetricsRoutesContext): P
     caches: cacheMetrics,
     hookLogs: getHookLogMetrics(),
     workerPool: getWorkerPoolMetrics(),
+    // Event-loop lag and CPU share of the daemon thread: the difference between
+    // "a hook is slow" and "everything waited because the thread was busy".
+    runtime: getRuntimeTelemetry(),
     // Mirrored from /cache/status. Watcher registration is the only evidence that a project's
     // git state is actually being observed, and looking for it in /metrics — the obvious place —
     // and finding nothing reads as "not watching" rather than "wrong endpoint" (#807).

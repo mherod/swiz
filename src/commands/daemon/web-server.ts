@@ -29,6 +29,7 @@ import {
   handleMetricsRoute,
 } from "./metrics-routes.ts"
 import { handleProcessAgents, handleProcessKill, handleSessionDelete } from "./process-routes.ts"
+import { handleCpuProfileRoute } from "./runtime-telemetry.ts"
 import { handleSessionRoutes } from "./session-routes.ts"
 import { handleSettingsRoutes } from "./settings-routes.ts"
 import {
@@ -231,6 +232,7 @@ const TOP_ROUTE_TABLE: Record<string, TopRouteHandler> = {
   "GET /dispatch/active": (_req, url, ctx) =>
     handleDispatchActive(url, buildDispatchRoutesContext(ctx)),
   "GET /metrics": (_req, url, ctx) => handleMetricsRoute(url, buildMetricsRoutesContext(ctx)),
+  "GET /debug/cpu-profile": (_req, url) => handleCpuProfileRoute(url),
   "POST /mcp/tool": (req) => handleMcpToolRoute(req),
   "GET /api/hook-logs": (_req, url) => handleHookLogs(url),
   "GET /api/gh-rate-limit": () => handleGhRateLimit(),

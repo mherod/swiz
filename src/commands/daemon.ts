@@ -42,6 +42,7 @@ import {
   RepositoryCapabilityCache,
   TranscriptIndexCache,
 } from "./daemon/runtime-cache.ts"
+import { startRuntimeTelemetry } from "./daemon/runtime-telemetry.ts"
 import { sessionDataCache } from "./daemon/session-data.ts"
 import { sessionToolCallPersistenceQueue } from "./daemon/session-tool-call-persistence.ts"
 import {
@@ -581,6 +582,7 @@ async function startDaemonProcess(_args: string[], port: number): Promise<void> 
   )
   const stopHookLogMaintenance = startHookLogMaintenance()
   const stopIssueStoreMaintenance = startIssueStoreMaintenance()
+  const stopRuntimeTelemetry = startRuntimeTelemetry()
 
   let isClosing = false
   let stopTranscriptMonitoring = () => {}
@@ -606,6 +608,7 @@ async function startDaemonProcess(_args: string[], port: number): Promise<void> 
     process.stderr.write("Worker runtime... ")
     stopHookLogMaintenance()
     stopIssueStoreMaintenance()
+    stopRuntimeTelemetry()
     process.stderr.write("Hook logs... ")
     caches.taskStateCache.close()
     caches.lifecycleTaskRegistry.clear()
