@@ -4,7 +4,7 @@ import { join } from "node:path"
 import { clearCaches } from "@typescript-eslint/parser"
 import { ESLint } from "eslint"
 import { useTempDir } from "../src/utils/test-utils.ts"
-import { createTypeFingerprint } from "./lint-eslint.ts"
+import { createTypeFingerprint, filterLintableChangedFiles } from "./lint-eslint.ts"
 
 const tmp = useTempDir("swiz-eslint-cache-")
 const tseslintModule = join(import.meta.dir, "../node_modules/typescript-eslint/dist/index.js")
@@ -109,5 +109,25 @@ describe("ESLint dependency cache", () => {
     const root = await fixture()
     await Bun.write(join(root, "tsconfig.json"), '{"compilerOptions":{"target":"invalid"}}')
     await expect(createTypeFingerprint(root)).rejects.toThrow()
+  })
+
+  test("filters changed files to non-ignored lintable targets within root", () => {
+    const root = "/repo"
+    const filtered = filterLintableChangedFiles(root, [
+      "/repo/src/app.ts",
+      "/repo/hooks/check.tsx",
+      "/repo/scripts/tool.mjs",
+      "/repo/src/types.d.ts",
+      "/repo/README.md",
+      "/repo/dist/bundle.js",
+      "/repo/node_modules/pkg/index.js",
+      "/repo/.swiz/cache.ts",
+      "/outside/other.ts",
+    ])
+    expect(filtered).toEqual([
+      "/repo/src/app.ts",
+      "/repo/hooks/check.tsx",
+      "/repo/scripts/tool.mjs",
+    ])
   })
 })

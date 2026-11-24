@@ -253,6 +253,39 @@ describe("lefthook pre-commit e2e: execution order", () => {
     const [firstCmd] = lines[0]!.split(" ")
     expect(firstCmd).toBe("lint") // lint's priority 1 ran before disk-space's priority 2
   })
+
+  test("piped pre-commit skips typecheck when lint fails", async () => {
+    const dir = await createTempGitRepo()
+    const logFile = join(dir, "order.log")
+
+    await writeFile(join(dir, "lint.sh"), `#!/bin/sh\necho "lint" >> "${logFile}"\nexit 1\n`)
+    await writeFile(
+      join(dir, "typecheck.sh"),
+      `#!/bin/sh\necho "typecheck" >> "${logFile}"\nexit 0\n`
+    )
+    Bun.spawnSync(["chmod", "+x", join(dir, "lint.sh"), join(dir, "typecheck.sh")])
+
+    await writeFile(
+      join(dir, "lefthook.yml"),
+      [
+        "pre-commit:",
+        "  piped: true",
+        "  commands:",
+        "    lint:",
+        "      priority: 1",
+        "      run: sh lint.sh",
+        "    typecheck:",
+        "      priority: 2",
+        "      run: sh typecheck.sh",
+      ].join("\n")
+    )
+
+    const { exitCode } = await runLefthook(dir)
+    expect(exitCode).not.toBe(0)
+
+    const log = (await Bun.file(logFile).text()).trim().split("\n").filter(Boolean)
+    expect(log).toEqual(["lint"])
+  })
 })
 
 // ─── File-placement guard ─────────────────────────────────────────────────────

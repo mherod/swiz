@@ -12,7 +12,7 @@
     "test": "PATH=\"${npm_execpath%/*}:$PATH\" \"$npm_execpath\" run scripts/run-test-batches.ts",
     "test:vitest": "bun --bun vitest",
     "test:bun": "PATH=\"${npm_execpath%/*}:$PATH\" \"$npm_execpath\" run scripts/run-test-batches.ts",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "bun run scripts/typecheck.ts",
     "lint": "biome check . && bun run lint:eslint",
     "lint:eslint": "bun run scripts/lint-eslint.ts",
     "benchmark:dispatch": "bun run scripts/benchmark-hook-dispatch.ts",

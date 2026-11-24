@@ -4,10 +4,12 @@ skip:
   - rebase
 
 pre-commit:
+  piped: true
   commands:
     # Shared checkouts must never hide or stash another session's working-tree changes.
     # lint-staged fixes staged files; `bun run lint` verifies the whole tree (same as CI).
     lint:
+      priority: 1
       glob: "*.{ts,tsx,js,jsx,mjs,cjs,json}"
       run: bunx lint-staged --no-stash --no-hide-partially-staged && bun run lint
       stage_fixed: true
@@ -15,27 +17,32 @@ pre-commit:
         - merge
         - rebase
     typecheck:
+      priority: 2
       glob: "*.ts"
-      run: bunx tsc --noEmit
+      run: bun run typecheck
       skip:
         - merge
         - rebase
     similar:
+      priority: 3
       run: command -v resect >/dev/null 2>&1 || exit 0; resect similar . --threshold=0.94 --strict --skip-same-file --same-name-only --min-lines=8
       skip:
         - merge
         - rebase
     memory:
+      priority: 4
       run: SWIZ_DIRECT=1 swiz memory --strict
       skip:
         - merge
         - rebase
     swiz-precommit:
+      priority: 5
       run: echo '{"cwd":"'$(pwd)'"}' | SWIZ_DIRECT=1 swiz dispatch preCommit
       skip:
         - merge
         - rebase
     daemon-restart:
+      priority: 6
       run: SWIZ_DIRECT=1 swiz daemon --restart
       skip:
         - merge

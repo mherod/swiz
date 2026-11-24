@@ -252,6 +252,57 @@ clearTimeout(deadline)
       "a file prevents telemetry directory creation"
     )
   })
+
+  test.each([
+    ["lint", "typecheck"],
+    ["typecheck", "lint"],
+  ] as const)(
+    "aborts %s sibling immediately when %s fails",
+    async (failingKind, slowKind) => {
+      const cwd = await qualityFixture(`
+const kind = process.argv.at(-1)
+if (kind === ${JSON.stringify(failingKind)}) {
+  process.stderr.write("src/broken.ts:1:1 intended " + kind + " failure\\n")
+  process.exitCode = 1
+} else {
+  await Bun.sleep(60_000)
+  await Bun.write("slow-finished.txt", "unexpected")
+}
+`)
+      await Bun.write(
+        join(cwd, "package.json"),
+        JSON.stringify({
+          packageManager: "bun@1.3.14",
+          scripts: {
+            lint: "bun check.ts lint",
+            typecheck: "bun check.ts typecheck",
+          },
+        })
+      )
+
+      const startedAt = performance.now()
+      const result = await evaluateStopQualityChecks({
+        cwd,
+        session_id: `quality-fail-fast-${failingKind}`,
+        _effectiveSettings: { qualityChecksGate: true, trunkMode: true },
+      })
+      const elapsedMs = performance.now() - startedAt
+
+      expect(elapsedMs).toBeLessThan(5_000)
+      expect(result).toMatchObject({ decision: "block" })
+      const reason = "reason" in result ? result.reason : ""
+      expect(reason).toContain(`\`bun run ${failingKind}\` failed`)
+      expect(reason).toContain(`intended ${failingKind} failure`)
+      expect(reason).not.toContain("Verification was cancelled")
+      expect(reason).not.toContain(`\`bun run ${slowKind}\``)
+      expect(await Bun.file(join(cwd, "slow-finished.txt")).exists()).toBe(false)
+      await expectRecordedDuration(cwd, failingKind, "failed")
+      expect(await Bun.file(join(cwd, ".swiz", `${slowKind}-execution-stats.json`)).exists()).toBe(
+        false
+      )
+    },
+    10_000
+  )
 })
 
 describe("stop-quality-checks: project package manager", () => {
@@ -283,6 +334,10 @@ describe("stop-quality-checks: project package manager", () => {
       `const script = process.argv.at(-1)
 await Bun.write("ran-" + script + ".json", JSON.stringify({ cwd: process.cwd(), bun: Bun.version }))
 if (script === "lint") {
+  const deadline = Date.now() + 3_000
+  while (!(await Bun.file("ran-typecheck.json").exists()) && Date.now() < deadline) {
+    await Bun.sleep(5)
+  }
   process.stderr.write("project-check.ts:1:1 intended Bun lint failure\\n")
   process.exitCode = 1
 }

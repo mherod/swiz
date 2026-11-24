@@ -1,5 +1,25 @@
-import { join, resolve } from "node:path"
+import { join, relative, resolve } from "node:path"
 import ts from "typescript"
+import { listChangedFiles } from "./changed-files.ts"
+
+const LINTABLE_EXT_RE = /\.(?:ts|tsx|js|jsx|mjs|cjs)$/
+const IGNORED_PREFIX_RE = /^(?:node_modules|\.swiz|coverage|dist)(?:\/|\\)/
+export const MAX_FAST_PREPASS_FILES = 50
+
+/** Filter changed file paths down to existing, non-ignored ESLint targets within `root`. */
+export function filterLintableChangedFiles(root: string, files: readonly string[]): string[] {
+  const normalizedRoot = resolve(root)
+  const result: string[] = []
+  for (const filePath of files) {
+    const abs = resolve(normalizedRoot, filePath)
+    const rel = relative(normalizedRoot, abs)
+    if (!rel || rel.startsWith("..")) continue
+    if (!LINTABLE_EXT_RE.test(rel) || rel.endsWith(".d.ts")) continue
+    if (IGNORED_PREFIX_RE.test(rel)) continue
+    result.push(abs)
+  }
+  return result
+}
 
 /** Include imported declarations so cached consumers cannot retain stale type diagnostics. */
 export async function createTypeFingerprint(root: string): Promise<string> {
@@ -39,32 +59,74 @@ export async function createTypeFingerprint(root: string): Promise<string> {
   return hash.digest("hex")
 }
 
-async function main(): Promise<void> {
-  const root = resolve(import.meta.dir, "..")
-  const args = process.argv.slice(2)
-  /** Custom CLI options and rule profiling always perform a fresh lint. */
-  const cache = args.length === 0 && !process.env.TIMING
-  const fingerprint = cache ? await createTypeFingerprint(root) : ""
-  /** Release the temporary dependency graph before ESLint builds its own type checker. */
-  Bun.gc(true)
+function spawnEslint(
+  root: string,
+  targetsAndArgs: string[],
+  env: Record<string, string | undefined>
+): Promise<number> {
   const proc = Bun.spawn(
     [
       process.execPath,
       join(root, "node_modules", "eslint", "bin", "eslint.js"),
-      ".",
       "--max-warnings=0",
-      ...args,
-      ...(cache ? ["--cache", "--cache-strategy=content"] : ["--no-cache"]),
+      ...targetsAndArgs,
     ],
     {
       cwd: root,
-      env: { ...process.env, SWIZ_ESLINT_TYPE_FINGERPRINT: fingerprint },
+      env,
       stdin: "inherit",
       stdout: "inherit",
       stderr: "inherit",
     }
   )
-  process.exitCode = await proc.exited
+  return proc.exited
+}
+
+function parseLintCliArgs(args: string[]): { failFast: boolean; eslintArgs: string[] } {
+  let failFast = true
+  const eslintArgs: string[] = []
+  for (const arg of args) {
+    if (arg === "--all" || arg === "--no-fail-fast") {
+      failFast = false
+    } else {
+      eslintArgs.push(arg)
+    }
+  }
+  return { failFast, eslintArgs }
+}
+
+async function main(): Promise<void> {
+  const root = resolve(import.meta.dir, "..")
+  const { failFast, eslintArgs } = parseLintCliArgs(process.argv.slice(2))
+  /** Custom CLI options and rule profiling always perform a fresh lint. */
+  const cache = eslintArgs.length === 0 && !process.env.TIMING
+
+  if (failFast && cache) {
+    const changed = filterLintableChangedFiles(root, listChangedFiles(root))
+    if (changed.length > 0 && changed.length <= MAX_FAST_PREPASS_FILES) {
+      const prepassCode = await spawnEslint(
+        root,
+        ["--no-cache", "--no-warn-ignored", ...changed],
+        process.env
+      )
+      if (prepassCode !== 0) {
+        process.stderr.write(
+          "Stopped after failing changed file(s) (fail-fast). Run `bun run lint:eslint -- --all` for all errors.\n"
+        )
+        process.exitCode = prepassCode
+        return
+      }
+    }
+  }
+
+  const fingerprint = cache ? await createTypeFingerprint(root) : ""
+  /** Release the temporary dependency graph before ESLint builds its own type checker. */
+  Bun.gc(true)
+  process.exitCode = await spawnEslint(
+    root,
+    [".", ...eslintArgs, ...(cache ? ["--cache", "--cache-strategy=content"] : ["--no-cache"])],
+    { ...process.env, SWIZ_ESLINT_TYPE_FINGERPRINT: fingerprint }
+  )
 }
 
 if (import.meta.main) {

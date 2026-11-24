@@ -525,6 +525,22 @@ describe("lefthook.yml hook-order and invariant guards", () => {
     expect(command).toContain("--no-stash")
     expect(command).toContain("--no-hide-partially-staged")
   })
+
+  test("pre-commit fails fast with piped execution and prioritized lint/typecheck", async () => {
+    const raw = await Bun.file("lefthook.yml").text()
+    const config = parseYaml(raw) as LefthookConfig & {
+      "pre-commit"?: {
+        piped?: boolean
+        commands?: Record<string, { priority?: number; run?: string }>
+      }
+    }
+    expect(config["pre-commit"]?.piped).toBe(true)
+    const lintPriority = config["pre-commit"]?.commands?.lint?.priority
+    const typecheckPriority = config["pre-commit"]?.commands?.typecheck?.priority
+    expect(lintPriority).toBeDefined()
+    expect(typecheckPriority).toBeDefined()
+    expect(lintPriority!).toBeLessThan(typecheckPriority!)
+  })
 })
 
 // ═══════════════════════════════════════════════════════════════════════════════

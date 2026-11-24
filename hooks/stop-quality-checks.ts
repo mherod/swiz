@@ -55,6 +55,13 @@ export interface QualityCheckResult {
   status: "passed" | "failed" | "timeout" | "unavailable"
   command: string
   output: string
+  abortedByFailFast?: boolean
+}
+
+const FAIL_FAST_ABORT_REASON = Symbol("quality-check-fail-fast")
+
+function isFailFastAbort(signal?: AbortSignal): boolean {
+  return signal?.aborted === true && signal.reason === FAIL_FAST_ABORT_REASON
 }
 
 export interface QualityCheckBudget {
@@ -94,6 +101,7 @@ export async function runQualityScript(
   }
   const startedAt = performance.now()
   let result: QualityCheckResult
+  let failFastAborted = false
   try {
     const execution = await spawnWithTimeout([pm, "run", scriptName], {
       cwd,
@@ -101,6 +109,7 @@ export async function runQualityScript(
       signal: budget.signal,
       killProcessGroup: true,
     })
+    failFastAborted = execution.aborted === true && isFailFastAbort(budget.signal)
     result = classifyQualityExecution(execution, command, budgets)
   } catch (error) {
     result = {
@@ -109,14 +118,16 @@ export async function runQualityScript(
       output: `Could not execute the check: ${error instanceof Error ? error.message : String(error)}`,
     }
   }
-  await recordExecutionDuration({
-    cwd,
-    kind,
-    durationMs: performance.now() - startedAt,
-    source: "stop-hook",
-    outcome: result.status,
-  })
-  return result
+  if (!failFastAborted) {
+    await recordExecutionDuration({
+      cwd,
+      kind,
+      durationMs: performance.now() - startedAt,
+      source: "stop-hook",
+      outcome: result.status,
+    })
+  }
+  return failFastAborted ? { ...result, abortedByFailFast: true } : result
 }
 
 export function classifyQualityExecution(
@@ -298,6 +309,28 @@ async function buildQualityBlockReason(
   ])}`
 }
 
+async function runQualityScriptsFailFast(
+  pm: string,
+  scripts: Array<{ name: string; kind: "lint" | "typecheck" }>,
+  cwd: string,
+  budget: QualityCheckBudget
+): Promise<QualityCheckResult[]> {
+  const failFast = new AbortController()
+  const signal = budget.signal ? AbortSignal.any([budget.signal, failFast.signal]) : failFast.signal
+  const checkBudget: QualityCheckBudget = { ...budget, signal }
+
+  const results = await Promise.all(
+    scripts.map(async ({ name, kind }) => {
+      const result = await runQualityScript(pm, name, cwd, checkBudget, kind)
+      if (result.status === "failed" && !failFast.signal.aborted) {
+        failFast.abort(FAIL_FAST_ABORT_REASON)
+      }
+      return result
+    })
+  )
+  return results.filter((result) => !result.abortedByFailFast)
+}
+
 async function collectQualityResults(
   resolved: { lint: string | null; typecheck: string | null },
   cwd: string,
@@ -322,9 +355,7 @@ async function collectQualityResults(
     return name === null ? [] : [{ name, kind }]
   })
   const budget = qualityCheckBudget(context, Date.now() - startedAt)
-  const results = await Promise.all(
-    scripts.map(({ name, kind }) => runQualityScript(pm, name, cwd, budget, kind))
-  )
+  const results = await runQualityScriptsFailFast(pm, scripts, cwd, budget)
   return results.map((result) => ({
     ...result,
     output: `${result.output}\nSelection: ${pm}; root: ${selection.root}; evidence: ${selection.source}; command cwd: ${cwd}`,

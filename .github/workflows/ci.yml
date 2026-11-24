@@ -69,11 +69,18 @@ jobs:
         env:
           LEFTHOOK: 0
 
-      - name: Lint
-        run: bun run lint
+      - name: Biome check
+        run: bunx biome check .
 
       - name: Typecheck
-        run: bunx tsc --noEmit
+        env:
+          CI_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: bun run typecheck
+
+      - name: ESLint
+        env:
+          CI_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: bun run lint:eslint
 
       - name: Determine test scope
         id: test-scope
