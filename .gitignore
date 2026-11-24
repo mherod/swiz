@@ -5,6 +5,9 @@ package-lock.json
 # IDE
 .cursor
 
+# Codex local MCP config (machine-specific, not shared)
+/.codex/config.toml
+
 # Claude Code local settings (machine-specific, not shared)
 .claude/settings.local.json
 .claude/scheduled_tasks.lock
