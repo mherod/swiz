@@ -16,6 +16,7 @@ import {
   tryDaemonDispatch,
 } from "../dispatch/daemon-client.ts"
 import { ensureDispatchId } from "../dispatch/dispatch-id.ts"
+import { gitHookBlockReason } from "../dispatch/git-hook-events.ts"
 import {
   flushIncomingDispatchCaptures,
   scheduleIncomingDispatchCapture,
@@ -123,11 +124,22 @@ async function backfillPayload(payload: Record<string, any>): Promise<void> {
   trackInferred(payload, "cwd")
 }
 
+/**
+ * Git only reads a hook's exit status, so a block on a git-hook event is spelled out on stderr
+ * and the caller must exit non-zero. Agent events are untouched: they act on the JSON response.
+ */
+function reportGitHookBlock(canonicalEvent: string, response: unknown): boolean {
+  const reason = gitHookBlockReason(canonicalEvent, response)
+  if (reason === null) return false
+  process.stderr.write(`swiz ${canonicalEvent} blocked this git operation:\n${reason}\n`)
+  return true
+}
+
 async function executeLocalFallback(
   canonicalEvent: string,
   hookEventName: string,
   payload: Record<string, any>
-): Promise<void> {
+): Promise<Record<string, any>> {
   const [
     { CONFIGURABLE_AGENTS },
     dispatchModule,
@@ -145,6 +157,7 @@ async function executeLocalFallback(
   ])
   manifestModule.validateDispatchRoutes(dispatchModule.DISPATCH_ROUTES, CONFIGURABLE_AGENTS)
   const payloadStr = JSON.stringify(payload)
+  let response: Record<string, any> = {}
   await engine.withLogBuffer(async () => {
     const result = await executeModule.executeDispatch({
       canonicalEvent,
@@ -152,6 +165,7 @@ async function executeLocalFallback(
       payloadStr,
       preParsedPayload: payload,
     })
+    response = result.response
     if (result.timing.hookCount > 0 || Object.keys(result.response).length > 0) {
       engine.writeResponse(
         dispatchModule.parseValidatedAgentDispatchWireJson(
@@ -163,6 +177,7 @@ async function executeLocalFallback(
       )
     }
   })
+  return response
 }
 
 /**
@@ -170,23 +185,23 @@ async function executeLocalFallback(
  * daemon that is down or restarting turns every hook call into an unbounded
  * local run of the whole manifest, which is exactly when the machine is
  * already struggling. On expiry the call is allowed, like a daemon timeout.
+ *
+ * Returns the local response, or null when the budget expired first.
  */
 async function runLocalFallbackWithinBudget(
   canonicalEvent: string,
   hookEventName: string,
   payload: Record<string, any>
-): Promise<void> {
+): Promise<Record<string, any> | null> {
   const budgetMs = daemonClientTimeoutMs(canonicalEvent)
   let timer: ReturnType<typeof setTimeout> | undefined
-  const expired = new Promise<"expired">((resolve) => {
-    timer = setTimeout(() => resolve("expired"), budgetMs)
+  const expired = new Promise<null>((resolve) => {
+    timer = setTimeout(() => resolve(null), budgetMs)
   })
-  const local = executeLocalFallback(canonicalEvent, hookEventName, payload).then(
-    () => "done" as const
-  )
+  const local = executeLocalFallback(canonicalEvent, hookEventName, payload)
   const outcome = await Promise.race([local, expired])
   clearTimeout(timer)
-  if (outcome === "done") return
+  if (outcome !== null) return outcome
   // The caller exits next, so the abandoned run cannot write a second response.
   local.catch(() => {})
   process.stderr.write(
@@ -194,6 +209,7 @@ async function runLocalFallbackWithinBudget(
   )
   const { didWriteDispatchResponse } = await import("../dispatch/cli-output.ts")
   if (!didWriteDispatchResponse()) process.stdout.write("{}\n")
+  return null
 }
 
 async function failOpen(
@@ -300,6 +316,7 @@ export async function runThinDispatch(
       process.stdout.write(
         `${JSON.stringify(sanitizeHookOutputForCurrentAgent(result.response))}\n`
       )
+      if (reportGitHookBlock(canonicalEvent, result.response)) process.exitCode = 1
       return
     }
     if (
@@ -315,8 +332,8 @@ export async function runThinDispatch(
       return
     }
 
-    await runLocalFallbackWithinBudget(canonicalEvent, hookEventName, payload)
-    process.exit(0)
+    const localResponse = await runLocalFallbackWithinBudget(canonicalEvent, hookEventName, payload)
+    process.exit(reportGitHookBlock(canonicalEvent, localResponse) ? 1 : 0)
   } catch (err) {
     await flushIncomingDispatchCaptures()
     await failOpen(canonicalEvent, hookEventName, err)

@@ -53,6 +53,7 @@ import {
   parseValidatedAgentDispatchWireJson,
 } from "./dispatch-zod-surfaces.ts"
 import { applyDispatchEnv, type HookExecution, isDeny } from "./engine.ts"
+import { GIT_HOOK_EVENTS } from "./git-hook-events.ts"
 import {
   applyHookSettingFilters,
   countHooks,
@@ -835,7 +836,7 @@ async function shouldSkipMcpToolDispatch(ctx: DispatchContext): Promise<boolean>
 }
 
 /** Events that form the push/commit safety floor — never relaxed for subagents. */
-const SUBAGENT_FLOOR_EVENTS = new Set(["preCommit", "commitMsg", "prePush"])
+const SUBAGENT_FLOOR_EVENTS = GIT_HOOK_EVENTS
 
 async function shouldSkipSubagentDispatch(ctx: DispatchContext): Promise<boolean> {
   if (ctx.canonicalEvent === "preToolUse" && isBannedBrowserTool(ctx.toolName ?? "")) return false
