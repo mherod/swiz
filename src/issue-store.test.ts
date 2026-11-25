@@ -945,8 +945,9 @@ describe("syncUpstreamState", () => {
     const originalSpawn = Bun.spawn
     const ghFetchCalls: string[][] = []
 
-    // Record any gh fetch spawned by the default client. git() uses spawnOriginal
-    // (unaffected by this mock), so getRepoSlug still resolves the real origin.
+    // Record any gh fetch spawned by the default client. The git client binds the real
+    // spawn in the test preload (unaffected by this mock), so getRepoSlug still resolves
+    // the real origin.
     // @ts-expect-error - Mocking Bun.spawn
     Bun.spawn = (args: string[]) => {
       if (args[0] === "gh") ghFetchCalls.push(args)
@@ -957,6 +958,9 @@ describe("syncUpstreamState", () => {
       // process.cwd() is the swiz checkout (origin mherod/swiz); target a different repo.
       const result = await syncUpstreamState("attacker/other-repo", process.cwd(), { store })
 
+      // The guard itself fired: without this, a git query that fails under the mock
+      // reads as "no origin" and the sync proceeds.
+      expect(result.refused?.targetRepo).toBe("attacker/other-repo")
       // No fetch was issued and nothing was written under the mismatched key.
       expect(ghFetchCalls).toHaveLength(0)
       expect(result.issues.upserted).toBe(0)
