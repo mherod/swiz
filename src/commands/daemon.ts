@@ -42,7 +42,7 @@ import {
   RepositoryCapabilityCache,
   TranscriptIndexCache,
 } from "./daemon/runtime-cache.ts"
-import { startRuntimeTelemetry } from "./daemon/runtime-telemetry.ts"
+import { startRuntimeTelemetry, startStartupProfile } from "./daemon/runtime-telemetry.ts"
 import { sessionDataCache } from "./daemon/session-data.ts"
 import { sessionToolCallPersistenceQueue } from "./daemon/session-tool-call-persistence.ts"
 import {
@@ -583,6 +583,7 @@ async function startDaemonProcess(_args: string[], port: number): Promise<void> 
   const stopHookLogMaintenance = startHookLogMaintenance()
   const stopIssueStoreMaintenance = startIssueStoreMaintenance()
   const stopRuntimeTelemetry = startRuntimeTelemetry()
+  startStartupProfile()
 
   let isClosing = false
   let stopTranscriptMonitoring = () => {}

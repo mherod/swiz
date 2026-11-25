@@ -8,7 +8,10 @@
  * - event-loop lag: how late a fixed-interval timer fires. Lag is time during
  *   which no dispatch, hook, or timeout could run.
  * - CPU share: how much of each window the process spent on CPU.
- * - on-demand JS profile: which functions the thread was running.
+ * - on-demand JS profile: which functions the thread was running
+ *   (`GET /debug/cpu-profile?seconds=N&traces=N`).
+ * - startup profile: the same, taken automatically over the first 90 seconds of
+ *   every start and kept in memory (`GET /debug/startup-profile`).
  */
 
 import { profile } from "bun:jsc"
@@ -177,40 +180,73 @@ export interface CpuProfileResult {
   stackTraces: string[]
 }
 
+const UNKNOWN_PROFILE_LINE = 0xffffffff
+
+function describeProfileFrame(frame: unknown): string {
+  const { name, sourceURL, line } = (frame ?? {}) as Record<string, unknown>
+  const label = typeof name === "string" && name !== "" ? name : "(anonymous)"
+  const file = typeof sourceURL === "string" ? sourceURL.split("/").slice(-2).join("/") : ""
+  if (!file) return label
+  const at = typeof line === "number" && line < UNKNOWN_PROFILE_LINE ? `:${line}` : ""
+  return `${label} (${file}${at})`
+}
+
+/**
+ * Collapse sampled stacks into the most frequent call chains, innermost frame first.
+ *
+ * The runtime reports `{ interval, traces: [{ frames }], sources }`; the function table alone
+ * names a hot built-in such as `spawnSync` without saying which swiz code called it.
+ */
+export function summariseStackTraces(raw: unknown, depth = 12): string[] {
+  const traces = (raw as { traces?: unknown } | null)?.traces
+  if (!Array.isArray(traces)) return []
+  const counts = new Map<string, number>()
+  for (const trace of traces) {
+    const frames = (trace as { frames?: unknown } | null)?.frames
+    if (!Array.isArray(frames)) continue
+    const chain = frames.slice(0, depth).map(describeProfileFrame).join("\n    <- ")
+    counts.set(chain, (counts.get(chain) ?? 0) + 1)
+  }
+  return [...counts]
+    .sort((a, b) => b[1] - a[1])
+    .map(([chain, samples]) => `${samples} samples\n    ${chain}`)
+}
+
+function normaliseStackTraces(raw: unknown): string[] {
+  if (Array.isArray(raw)) return raw.map(String)
+  if (raw !== null && typeof raw === "object") return summariseStackTraces(raw)
+  return String(raw ?? "")
+    .split(/\n\s*\n/)
+    .filter((trace) => trace.trim().length > 0)
+}
+
 /**
  * Sample the daemon's JavaScript thread for `seconds` and report the hottest
  * functions. One profile at a time: overlapping samplers would distort each other.
  */
 export async function captureCpuProfile(seconds: number): Promise<CpuProfileResult | null> {
-  if (profileInFlight) return null
   const bounded = Math.min(MAX_PROFILE_SECONDS, Math.max(1, Math.round(seconds) || 1))
+  return await runProfile(bounded, PROFILE_SAMPLE_INTERVAL_US)
+}
+
+async function runProfile(seconds: number, intervalUs: number): Promise<CpuProfileResult | null> {
+  if (profileInFlight) return null
   profileInFlight = true
   try {
-    const result = await profile(() => Bun.sleep(bounded * 1000), PROFILE_SAMPLE_INTERVAL_US)
-    // bun-types declares string[], but the runtime has returned a single string.
-    const rawTraces: unknown = result.stackTraces
-    const stackTraces = Array.isArray(rawTraces)
-      ? rawTraces.map(String)
-      : String(rawTraces ?? "")
-          .split(/\n\s*\n/)
-          .filter((trace) => trace.trim().length > 0)
+    const result = await profile(() => Bun.sleep(seconds * 1000), intervalUs)
+    // bun-types declares string[]; the runtime returns an object of sampled frames.
     return {
-      seconds: bounded,
+      seconds,
       functions: String(result.functions ?? ""),
       bytecodes: String(result.bytecodes ?? ""),
-      stackTraces,
+      stackTraces: normaliseStackTraces(result.stackTraces),
     }
   } finally {
     profileInFlight = false
   }
 }
 
-/** `GET /debug/cpu-profile?seconds=10` — plain-text summary of where the thread spent its time. */
-export async function handleCpuProfileRoute(url: URL): Promise<Response> {
-  const seconds = Number.parseInt(url.searchParams.get("seconds") ?? "10", 10)
-  const result = await captureCpuProfile(seconds)
-  if (!result) return new Response("A profile is already running.\n", { status: 409 })
-  const traces = Number.parseInt(url.searchParams.get("traces") ?? "15", 10)
+function formatProfile(result: CpuProfileResult, traces: number): string {
   const body = [
     `Profiled ${result.seconds}s`,
     result.functions,
@@ -218,5 +254,64 @@ export async function handleCpuProfileRoute(url: URL): Promise<Response> {
     "Stack traces of the hottest functions:",
     ...result.stackTraces.slice(0, Math.max(0, traces)),
   ].join("\n\n")
-  return new Response(`${body}\n`, { headers: { "content-type": "text/plain; charset=utf-8" } })
+  return `${body}\n`
+}
+
+const PLAIN_TEXT = { "content-type": "text/plain; charset=utf-8" }
+
+/** `GET /debug/cpu-profile?seconds=10` — plain-text summary of where the thread spent its time. */
+export async function handleCpuProfileRoute(url: URL): Promise<Response> {
+  const seconds = Number.parseInt(url.searchParams.get("seconds") ?? "10", 10)
+  const result = await captureCpuProfile(seconds)
+  if (!result) return new Response("A profile is already running.\n", { status: 409 })
+  const traces = Number.parseInt(url.searchParams.get("traces") ?? "15", 10)
+  return new Response(formatProfile(result, traces), { headers: PLAIN_TEXT })
+}
+
+export const STARTUP_PROFILE_SECONDS = 90
+/** Coarser than the on-demand profile because this one runs on every start. */
+const STARTUP_PROFILE_SAMPLE_INTERVAL_US = 5_000
+const STARTUP_PROFILE_TRACES = 30
+
+type StartupProfileState =
+  | { status: "running"; startedAtMs: number; seconds: number }
+  | { status: "done"; text: string }
+  | { status: "failed"; reason: string }
+
+let startupProfile: StartupProfileState | null = null
+
+/**
+ * Profile the first `seconds` of the daemon's life and keep the summary in memory.
+ *
+ * A restart is when the thread stalls longest, and an on-demand profile cannot be requested
+ * during those stalls because the request itself waits behind them. The daemon restarts on
+ * every source edit and every commit, so this is also the state hooks most often meet.
+ */
+export function startStartupProfile(seconds = STARTUP_PROFILE_SECONDS): void {
+  if (profileInFlight) return
+  startupProfile = { status: "running", startedAtMs: Date.now(), seconds }
+  void runProfile(seconds, STARTUP_PROFILE_SAMPLE_INTERVAL_US).then(
+    (result) => {
+      startupProfile = result
+        ? { status: "done", text: formatProfile(result, STARTUP_PROFILE_TRACES) }
+        : { status: "failed", reason: "another profile was already running" }
+    },
+    (error) => {
+      startupProfile = { status: "failed", reason: String(error) }
+    }
+  )
+}
+
+/** `GET /debug/startup-profile` — what the thread was doing while the daemon started. */
+export function handleStartupProfileRoute(): Response {
+  const current = startupProfile
+  if (!current) return new Response("No startup profile was taken.\n", { status: 404 })
+  if (current.status === "done") return new Response(current.text, { headers: PLAIN_TEXT })
+  if (current.status === "failed") {
+    return new Response(`Startup profile failed: ${current.reason}\n`, { status: 500 })
+  }
+  const remaining = Math.ceil(current.seconds - (Date.now() - current.startedAtMs) / 1000)
+  return new Response(`Startup profile still running; about ${Math.max(0, remaining)}s left.\n`, {
+    status: 202,
+  })
 }

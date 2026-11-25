@@ -4,8 +4,61 @@ import {
   EventLoopLagRecorder,
   getRuntimeTelemetry,
   handleCpuProfileRoute,
+  handleStartupProfileRoute,
   startRuntimeTelemetry,
+  startStartupProfile,
+  summariseStackTraces,
 } from "./runtime-telemetry.ts"
+
+describe("startup profile", () => {
+  test("is reported as running, then served from memory", async () => {
+    startStartupProfile(1)
+    const running = handleStartupProfileRoute()
+    expect(running.status).toBe(202)
+    expect(await running.text()).toContain("still running")
+
+    const deadline = Date.now() + 10_000
+    while (handleStartupProfileRoute().status === 202 && Date.now() < deadline) {
+      await Bun.sleep(50)
+    }
+    const done = handleStartupProfileRoute()
+    expect(done.status).toBe(200)
+    expect(await done.text()).toContain("Profiled 1s")
+  }, 15_000)
+})
+
+describe("summariseStackTraces", () => {
+  const frame = (name: string, sourceURL?: string, line = 0xffffffff) => ({ name, sourceURL, line })
+  const viaTaskStore = {
+    frames: [
+      frame("spawnSync"),
+      frame("getParentProcessCommand", "/repo/src/agent-paths.ts", 82),
+      frame("createDefaultTaskStore", "/repo/src/task-roots.ts", 104),
+    ],
+  }
+  const other = { frames: [frame("parse"), frame("", "/repo/src/tasks/task-repository.ts", 763)] }
+
+  test("ranks call chains by samples and names the callers of a built-in", () => {
+    const summary = summariseStackTraces({
+      interval: 0.001,
+      traces: [viaTaskStore, other, viaTaskStore],
+    })
+    expect(summary).toHaveLength(2)
+    expect(summary[0]).toStartWith("2 samples")
+    expect(summary[0]).toContain(
+      "spawnSync\n    <- getParentProcessCommand (src/agent-paths.ts:82)"
+    )
+    expect(summary[0]).toContain("createDefaultTaskStore (src/task-roots.ts:104)")
+    expect(summary[1]).toContain("(anonymous) (tasks/task-repository.ts:763)")
+  })
+
+  test("returns nothing for shapes it does not recognise", () => {
+    expect(summariseStackTraces(null)).toEqual([])
+    expect(summariseStackTraces("a string")).toEqual([])
+    expect(summariseStackTraces({ traces: "nope" })).toEqual([])
+    expect(summariseStackTraces({ traces: [{ frames: null }] })).toEqual([])
+  })
+})
 
 describe("EventLoopLagRecorder", () => {
   test("reports percentiles and counts only real stalls", () => {
