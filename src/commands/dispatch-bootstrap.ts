@@ -165,6 +165,37 @@ async function executeLocalFallback(
   })
 }
 
+/**
+ * Local execution has the same deadline as the daemon path. Without one, a
+ * daemon that is down or restarting turns every hook call into an unbounded
+ * local run of the whole manifest, which is exactly when the machine is
+ * already struggling. On expiry the call is allowed, like a daemon timeout.
+ */
+async function runLocalFallbackWithinBudget(
+  canonicalEvent: string,
+  hookEventName: string,
+  payload: Record<string, any>
+): Promise<void> {
+  const budgetMs = daemonClientTimeoutMs(canonicalEvent)
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const expired = new Promise<"expired">((resolve) => {
+    timer = setTimeout(() => resolve("expired"), budgetMs)
+  })
+  const local = executeLocalFallback(canonicalEvent, hookEventName, payload).then(
+    () => "done" as const
+  )
+  const outcome = await Promise.race([local, expired])
+  clearTimeout(timer)
+  if (outcome === "done") return
+  // The caller exits next, so the abandoned run cannot write a second response.
+  local.catch(() => {})
+  process.stderr.write(
+    `swiz local dispatch for ${canonicalEvent} exceeded ${budgetMs}ms; allowing without waiting further\n`
+  )
+  const { didWriteDispatchResponse } = await import("../dispatch/cli-output.ts")
+  if (!didWriteDispatchResponse()) process.stdout.write("{}\n")
+}
+
 async function failOpen(
   canonicalEvent: string,
   hookEventName: string,
@@ -276,13 +307,15 @@ export async function runThinDispatch(
       daemonDispatchPolicy(canonicalEvent).timeoutFallback === "allow"
     ) {
       process.stderr.write(
-        `swiz daemon did not answer ${canonicalEvent} within ${daemonClientTimeoutMs(canonicalEvent)}ms; allowing without local re-run\n`
+        result.skipped
+          ? `swiz daemon timed out on a recent dispatch; skipping it for ${canonicalEvent} and allowing without local re-run\n`
+          : `swiz daemon did not answer ${canonicalEvent} within ${daemonClientTimeoutMs(canonicalEvent)}ms; allowing without local re-run\n`
       )
       process.stdout.write("{}\n")
       return
     }
 
-    await executeLocalFallback(canonicalEvent, hookEventName, payload)
+    await runLocalFallbackWithinBudget(canonicalEvent, hookEventName, payload)
     process.exit(0)
   } catch (err) {
     await flushIncomingDispatchCaptures()

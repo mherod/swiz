@@ -13,7 +13,16 @@ import type { UpstreamSyncRegistry } from "./upstream-sync.ts"
 import { transcriptWatchPathsForProject } from "./utils.ts"
 
 export const PROJECT_IDLE_EVICTION_MS = 3 * 60 * 1000
-export const MAX_WATCHED_PROJECTS = 2
+/**
+ * Upper bound on concurrently registered projects. It must sit above the number
+ * of projects that are active at once: registering a project past the limit
+ * evicts another, which drops that project's caches and starts a fresh upstream
+ * sync for the newcomer. At 2, six concurrent agent sessions evicted each other
+ * on almost every dispatch (4,800 evictions in one log) and the rebuilds
+ * saturated the daemon thread. Idle projects still leave after
+ * `PROJECT_IDLE_EVICTION_MS`, so this is a ceiling, not the steady state.
+ */
+export const MAX_WATCHED_PROJECTS = 16
 const SNAPSHOT_KEY_SEPARATOR = "\x00"
 
 export function snapshotCacheKey(cwd: string, sessionId: string | null | undefined): string {
@@ -65,6 +74,8 @@ interface ProjectLifecycleOptions {
   /** History caches can be replaced without opening workers or reading transcripts in tests. */
   invalidateHistory?: (cwd: string) => void
   transcriptWatchPaths?: typeof transcriptWatchPathsForProject
+  /** Override the registration ceiling (tests exercise eviction with a small one). */
+  maxWatchedProjects?: number
 }
 
 function invalidateProjectHistory(cwd: string): void {
@@ -81,6 +92,7 @@ class ProjectLifecycle implements ProjectWatcherManager {
   private readonly projectCaches: ProjectCache[]
   private readonly invalidateHistory: (cwd: string) => void
   private readonly transcriptWatchPaths: typeof transcriptWatchPathsForProject
+  private readonly maxWatchedProjects: number
   private closed = false
 
   constructor(
@@ -100,6 +112,7 @@ class ProjectLifecycle implements ProjectWatcherManager {
     this.projectCaches = [...this.globalCaches, caches.transcriptIndex, caches.cooldownRegistry]
     this.invalidateHistory = options.invalidateHistory ?? invalidateProjectHistory
     this.transcriptWatchPaths = options.transcriptWatchPaths ?? transcriptWatchPathsForProject
+    this.maxWatchedProjects = Math.max(1, options.maxWatchedProjects ?? MAX_WATCHED_PROJECTS)
     this.registerGlobalWatchers()
   }
 
@@ -168,7 +181,7 @@ class ProjectLifecycle implements ProjectWatcherManager {
   }
 
   private evictOldestProject(): void {
-    if (this.registeredProjects.size < MAX_WATCHED_PROJECTS) return
+    if (this.registeredProjects.size < this.maxWatchedProjects) return
     let oldestCwd: string | undefined
     let oldestTime = Infinity
     for (const cwd of this.registeredProjects) {

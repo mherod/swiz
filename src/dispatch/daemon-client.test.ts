@@ -1,5 +1,9 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
+import { mkdtemp, rm } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import {
+  DAEMON_CIRCUIT_OPEN_MS,
   daemonDispatchPolicy,
   enrichDispatchPayload,
   resetDaemonBackoff,
@@ -227,6 +231,98 @@ describe("dispatch fallback policy", () => {
       timeoutMs: 8_000 + HOOK_CONTEXT_HUMANISE_TIMEOUT_MS - 3_000,
       timeoutFallback: "allow",
     })
+  })
+})
+
+describe("daemon circuit breaker", () => {
+  const dirs: string[] = []
+  const circuit = async () => {
+    const dir = await mkdtemp(join(tmpdir(), "swiz-daemon-circuit-test-"))
+    dirs.push(dir)
+    return join(dir, "circuit")
+  }
+  /** Never answers; rejects when the client deadline aborts the request. */
+  const hang = (_url: string, init: RequestInit): Promise<Response> =>
+    new Promise((_, reject) => {
+      init.signal?.addEventListener("abort", () => reject(new Error("aborted")), { once: true })
+    })
+  const ok = async (): Promise<Response> => Response.json({ systemMessage: "ok" })
+  let savedNoDaemon: string | undefined
+
+  beforeEach(() => {
+    // These tests exercise the transport itself, so neither a test-wide daemon
+    // opt-out nor an earlier test's in-memory backoff may short-circuit it.
+    savedNoDaemon = process.env.SWIZ_NO_DAEMON
+    delete process.env.SWIZ_NO_DAEMON
+    resetDaemonBackoff()
+  })
+
+  afterEach(async () => {
+    if (savedNoDaemon === undefined) delete process.env.SWIZ_NO_DAEMON
+    else process.env.SWIZ_NO_DAEMON = savedNoDaemon
+    resetDaemonBackoff()
+    await Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })))
+  })
+
+  test("a timeout opens the breaker so the next dispatch never contacts the daemon", async () => {
+    const circuitPath = await circuit()
+    const first = await tryDaemonDispatch("preToolUse", "PreToolUse", "{}", {
+      fetch: hang,
+      timeoutMs: 20,
+      circuitPath,
+    })
+    expect(first).toEqual({ kind: "timeout" })
+    expect(Number(await Bun.file(circuitPath).text())).toBeGreaterThan(0)
+
+    // A fresh process has no in-memory backoff; only the shared marker stops it.
+    resetDaemonBackoff()
+    let contacted = 0
+    const second = await tryDaemonDispatch("preToolUse", "PreToolUse", "{}", {
+      fetch: async () => {
+        contacted += 1
+        return ok()
+      },
+      circuitPath,
+    })
+    expect(second).toEqual({ kind: "timeout", skipped: true })
+    expect(contacted).toBe(0)
+  })
+
+  test("after the window one probe goes through and a healthy answer closes the breaker", async () => {
+    const circuitPath = await circuit()
+    await Bun.write(circuitPath, String(Date.now() - DAEMON_CIRCUIT_OPEN_MS - 1_000))
+
+    const probe = await tryDaemonDispatch("preToolUse", "PreToolUse", "{}", {
+      fetch: ok,
+      circuitPath,
+    })
+    expect(probe).toEqual({ kind: "response", response: { systemMessage: "ok" } })
+    expect(await Bun.file(circuitPath).text()).toBe("0")
+
+    const next = await tryDaemonDispatch("preToolUse", "PreToolUse", "{}", {
+      fetch: ok,
+      circuitPath,
+    })
+    expect(next.kind).toBe("response")
+  })
+
+  test("a probe that hangs re-arms the breaker for the whole window", async () => {
+    const circuitPath = await circuit()
+    const expired = Date.now() - DAEMON_CIRCUIT_OPEN_MS - 1_000
+    await Bun.write(circuitPath, String(expired))
+
+    const probe = await tryDaemonDispatch("preToolUse", "PreToolUse", "{}", {
+      fetch: hang,
+      timeoutMs: 20,
+      circuitPath,
+    })
+    expect(probe).toEqual({ kind: "timeout" })
+    expect(Number(await Bun.file(circuitPath).text())).toBeGreaterThan(expired + 1_000)
+  })
+
+  test("control: without a marker path an injected transport is never skipped", async () => {
+    const result = await tryDaemonDispatch("preToolUse", "PreToolUse", "{}", { fetch: ok })
+    expect(result.kind).toBe("response")
   })
 })
 

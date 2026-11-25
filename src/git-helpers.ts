@@ -10,7 +10,7 @@ import { dirname, join, resolve } from "node:path"
 import { resolveSpawnCwd } from "./cwd.ts"
 import { currentEnv } from "./gh-rate-limit"
 import { acquireGhSlot, observeGhApiIncludeOutput } from "./gh-rate-limit.ts"
-import { getGitClient } from "./git/client.ts"
+import { type GitRunOptions, getGitClient } from "./git/client.ts"
 import { getHomeDirOrNull } from "./home.ts"
 import { swizGhCacheDir } from "./temp-paths.ts"
 
@@ -29,10 +29,70 @@ export function joinGitPath(repoRoot: string, ...segments: string[]): string {
   return join(repoRoot, GIT_DIR_NAME, ...segments)
 }
 
+/**
+ * Simultaneous git query processes. Hooks fan out dozens of queries per
+ * dispatch; unbounded, a burst from several agent sessions exhausts process
+ * slots. Waiting for a slot is asynchronous, so the cap never blocks the event
+ * loop.
+ */
+export const MAX_CONCURRENT_GIT_QUERIES = 8
+/** A query that outlives this gives its slot back so a hung git cannot starve the rest. */
+const GIT_QUERY_SLOT_TIMEOUT_MS = 30_000
+
+let activeGitQueries = 0
+const gitQueryWaiters: Array<() => void> = []
+
+async function acquireGitQuerySlot(): Promise<void> {
+  if (activeGitQueries < MAX_CONCURRENT_GIT_QUERIES) {
+    activeGitQueries += 1
+    return
+  }
+  await new Promise<void>((resolve) => gitQueryWaiters.push(resolve))
+}
+
+function releaseGitQuerySlot(): void {
+  const next = gitQueryWaiters.shift()
+  // Hand the slot straight to the next waiter; only an idle slot is returned to the pool.
+  if (next) next()
+  else activeGitQueries -= 1
+}
+
+/**
+ * Run one git query without blocking the event loop.
+ *
+ * These helpers used to spawn git synchronously behind an `async` signature. In
+ * the daemon that froze the only JavaScript thread for the whole run of every
+ * git process: no other dispatch could progress and no timeout timer could
+ * fire. A query that fails to start or outlives the slot timeout throws.
+ */
+async function runGitQuery(
+  args: string[],
+  options: GitRunOptions
+): Promise<{ stdout: string; stderr: string; exitCode: number }> {
+  await acquireGitQuerySlot()
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    const timedOut = new Promise<never>((_, reject) => {
+      timer = setTimeout(
+        () => reject(new Error(`git ${args[0] ?? ""} exceeded ${GIT_QUERY_SLOT_TIMEOUT_MS}ms`)),
+        GIT_QUERY_SLOT_TIMEOUT_MS
+      )
+      timer.unref?.()
+    })
+    const running = getGitClient().run(args, options)
+    // If the timeout wins, a later failure of the abandoned run must not go unhandled.
+    running.catch(() => {})
+    return await Promise.race([running, timedOut])
+  } finally {
+    clearTimeout(timer)
+    releaseGitQuerySlot()
+  }
+}
+
 /** Run a git command and return trimmed stdout. Returns "" on failure. */
 export async function git(args: string[], cwd: string): Promise<string> {
   try {
-    const proc = getGitClient().runSync(args, { cwd })
+    const proc = await runGitQuery(args, { cwd })
     return proc.exitCode === 0 ? proc.stdout.trim() : ""
   } catch {
     return ""
@@ -60,7 +120,7 @@ export interface GitAttempt {
  */
 export async function gitAttempt(args: string[], cwd: string): Promise<GitAttempt> {
   try {
-    const proc = getGitClient().runSync(args, { cwd })
+    const proc = await runGitQuery(args, { cwd })
     const exitCode = proc.exitCode
     return {
       ran: exitCode === 0 || exitCode === 1,
@@ -700,9 +760,9 @@ function parseStatusV2Lines(out: string): StatusCounts {
   return counts
 }
 
-function gitSpawnSyncLines(args: string[], workTree: string): string {
+async function gitQueryLines(args: string[], workTree: string): Promise<string> {
   try {
-    const proc = getGitClient().runSync(args, { cwd: workTree, stderr: "ignore" })
+    const proc = await runGitQuery(args, { cwd: workTree, stderr: "ignore" })
     if (proc.exitCode !== 0) return ""
     return proc.stdout.trim()
   } catch {
@@ -722,7 +782,7 @@ export async function getGitBranchStatus(cwd: string): Promise<GitBranchStatus |
   }
   if (!branch) return null
 
-  const statusOut = gitSpawnSyncLines(
+  const statusOut = await gitQueryLines(
     ["--no-optional-locks", "status", "--porcelain=2", "--branch"],
     gitPaths.workTree
   )
@@ -742,14 +802,14 @@ export async function getGitBranchStatus(cwd: string): Promise<GitBranchStatus |
       upstream: null,
       upstreamAbSeen: false,
     }
-    const fallbackOut = gitSpawnSyncLines(
+    const fallbackOut = await gitQueryLines(
       ["--no-optional-locks", "status", "--porcelain"],
       gitPaths.workTree
     )
     changedFallback = fallbackOut ? fallbackOut.split("\n").length : 0
   }
 
-  const stashOut = gitSpawnSyncLines(["stash", "list", "--format=%gd"], gitPaths.workTree)
+  const stashOut = await gitQueryLines(["stash", "list", "--format=%gd"], gitPaths.workTree)
   const stash = stashOut ? stashOut.split("\n").length : 0
   const { upstreamAbSeen, upstream, ...restCounts } = counts
   const ahead = upstream

@@ -86,6 +86,8 @@ function fixture() {
         invalidations.push(`history:${cwd}`)
       },
       transcriptWatchPaths: (cwd) => [{ path: `${cwd}/transcripts`, label: `transcripts:${cwd}` }],
+      // A small ceiling so capacity eviction is reachable with three projects.
+      maxWatchedProjects: 2,
     }
   )
   return {

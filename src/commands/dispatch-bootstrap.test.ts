@@ -20,11 +20,13 @@ describe("daemonClientTimeoutMs", () => {
     }
   })
 
-  test("userPromptSubmit reserves 15s for humanising with 3s agent headroom", () => {
+  test("the client waits exactly the event budget: rewrite reserve cancels agent headroom", () => {
     expect(daemonClientTimeoutMs("userPromptSubmit")).toBe(
-      DISPATCH_TIMEOUTS.userPromptSubmit! * 1000 + 15_000 - 3_000
+      DISPATCH_TIMEOUTS.userPromptSubmit! * 1000 + 3_000 - 3_000
     )
-    expect(daemonClientTimeoutMs("userPromptSubmit")).toBe(20_000)
+    for (const event of Object.keys(DISPATCH_TIMEOUTS)) {
+      expect(daemonClientTimeoutMs(event)).toBe(8_000)
+    }
   })
 })
 

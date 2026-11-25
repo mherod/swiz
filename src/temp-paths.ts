@@ -15,6 +15,15 @@ export function swizDispatchLogPath(): string {
   return `${TMP_ROOT}/swiz-dispatch.log`
 }
 
+/**
+ * Cross-process circuit-breaker marker for the daemon on `port`. A dispatch
+ * client that times out writes the time here so later clients skip the daemon
+ * instead of each waiting out the same hang.
+ */
+export function swizDaemonCircuitPath(port: number): string {
+  return `${TMP_ROOT}/swiz-daemon-circuit-${port}`
+}
+
 export function swizHookCooldownPath(key: string): string {
   return `${TMP_ROOT}/swiz-hook-cooldown-${key}.timestamp`
 }

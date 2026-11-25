@@ -1,9 +1,18 @@
 /** Lightweight transport shared by both CLI entry points; no manifest or engine imports. */
+import { swizDaemonCircuitPath } from "../temp-paths.ts"
 import { detectTerminal } from "../utils/terminal-detection.ts"
 import { dispatchTimeoutSeconds } from "./timeouts.ts"
 
 const BACKOFF_MS = 30_000
 let lastDaemonFailureAt = 0
+
+/**
+ * How long every dispatch client skips a daemon that failed to answer in time.
+ * Each hook call is a fresh process, so without a shared marker every call
+ * would wait out the same hang; with it, one call pays and the rest pass
+ * straight through until a single probe finds the daemon healthy again.
+ */
+export const DAEMON_CIRCUIT_OPEN_MS = 30_000
 
 export function resetDaemonBackoff(): void {
   lastDaemonFailureAt = 0
@@ -29,7 +38,19 @@ export function daemonClientTimeoutMs(canonicalEvent: string): number {
 export type DaemonDispatchResult =
   | { kind: "response"; response: Record<string, any> }
   | { kind: "unavailable" }
-  | { kind: "timeout" }
+  /** `skipped`: the breaker was open, so the daemon was not contacted at all. */
+  | { kind: "timeout"; skipped?: boolean }
+
+export interface DaemonDispatchOptions {
+  timeoutMs?: number
+  fetch?: (url: string, init: RequestInit) => Promise<Response>
+  /**
+   * Breaker marker file. Defaults to the shared per-port marker; `null` disables
+   * the breaker. An injected `fetch` is not the shared daemon, so it only uses a
+   * breaker when a path is given explicitly.
+   */
+  circuitPath?: string | null
+}
 
 function daemonUnavailable(): boolean {
   return (
@@ -49,16 +70,62 @@ function normalizeDaemonResponse(value: unknown): Record<string, any> {
     : {}
 }
 
-export async function tryDaemonDispatch(
+// ─── Cross-process circuit breaker ─────────────────────────────────────────
+
+function resolveCircuitPath(options: DaemonDispatchOptions): string | null {
+  if (options.circuitPath !== undefined) return options.circuitPath
+  if (options.fetch || process.env.SWIZ_DAEMON_CIRCUIT === "0") return null
+  return swizDaemonCircuitPath(daemonPort())
+}
+
+async function readCircuitOpenedAt(path: string): Promise<number> {
+  try {
+    const openedAt = Number.parseInt(await Bun.file(path).text(), 10)
+    return Number.isFinite(openedAt) && openedAt > 0 ? openedAt : 0
+  } catch {
+    // No marker: the breaker has never tripped.
+    return 0
+  }
+}
+
+async function writeCircuit(path: string, openedAt: number): Promise<void> {
+  try {
+    await Bun.write(path, String(openedAt))
+  } catch {
+    // The breaker is an optimisation; without it every dispatch simply probes.
+  }
+}
+
+/**
+ * `open`: skip the daemon. `probing`: the window elapsed and this dispatch is
+ * the one that tests the daemon; the marker is re-armed first so concurrent
+ * dispatches keep skipping instead of all probing a daemon that is still hung.
+ */
+async function enterCircuit(path: string): Promise<"closed" | "open" | "probing"> {
+  const now = Date.now()
+  const openedAt = await readCircuitOpenedAt(path)
+  // A marker from the future (clock change) must not hold the breaker open.
+  if (openedAt === 0 || openedAt > now) return "closed"
+  if (now - openedAt < DAEMON_CIRCUIT_OPEN_MS) return "open"
+  await writeCircuit(path, now)
+  return "probing"
+}
+
+async function settleCircuit(
+  path: string,
+  probing: boolean,
+  kind: DaemonDispatchResult["kind"]
+): Promise<void> {
+  if (kind === "timeout") await writeCircuit(path, Date.now())
+  else if (probing) await writeCircuit(path, 0)
+}
+
+async function requestDaemonDispatch(
   canonicalEvent: string,
   hookEventName: string,
   payloadStr: string,
-  options: {
-    timeoutMs?: number
-    fetch?: (url: string, init: RequestInit) => Promise<Response>
-  } = {}
+  options: DaemonDispatchOptions
 ): Promise<DaemonDispatchResult> {
-  if (daemonUnavailable()) return { kind: "unavailable" }
   const controller = new AbortController()
   const timer = setTimeout(
     () => controller.abort(),
@@ -90,6 +157,21 @@ export async function tryDaemonDispatch(
   } finally {
     clearTimeout(timer)
   }
+}
+
+export async function tryDaemonDispatch(
+  canonicalEvent: string,
+  hookEventName: string,
+  payloadStr: string,
+  options: DaemonDispatchOptions = {}
+): Promise<DaemonDispatchResult> {
+  if (daemonUnavailable()) return { kind: "unavailable" }
+  const circuitPath = resolveCircuitPath(options)
+  const circuit = circuitPath ? await enterCircuit(circuitPath) : "closed"
+  if (circuit === "open") return { kind: "timeout", skipped: true }
+  const result = await requestDaemonDispatch(canonicalEvent, hookEventName, payloadStr, options)
+  if (circuitPath) await settleCircuit(circuitPath, circuit === "probing", result.kind)
+  return result
 }
 
 const ENV_PATTERNS = [

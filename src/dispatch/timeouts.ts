@@ -31,7 +31,13 @@ export const DISPATCH_TIMEOUTS: Readonly<Record<string, number>> = {
   prePush: DISPATCH_BUDGET_SEC,
 }
 
-export const HOOK_CONTEXT_HUMANISE_TIMEOUT_MS = 15_000
+/**
+ * Optional rewrite of hook messages. It runs after the hooks and inside the
+ * same dispatch, so it must fit the client deadline: 5s hook cap + 3s here =
+ * the 8s the client waits. On expiry the original text is returned unchanged,
+ * so a denial is never lost to a slow rewrite.
+ */
+export const HOOK_CONTEXT_HUMANISE_TIMEOUT_MS = 3_000
 
 /** Reserve the full rewrite budget in transport and installed agent deadlines. */
 export function dispatchTimeoutSeconds(canonicalEvent: string): number {

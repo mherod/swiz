@@ -383,7 +383,10 @@ function buildCanonicalTasklistStaleMessage(r: Req<"canonical-tasklist-stale">):
     `Cause: ${measured}; this gate needs one within the last ${windowMinutes} minutes. ` +
     "It checks sync age only, so changing the number of tasks does not clear it.\n\n" +
     formatTranslatedActionPlan([TASKLIST_STABILITY_STEP, retryAfterTaskList(r.toolName)]) +
-    `\nIf this block re-fires immediately after a TaskList call, the sync record is not being written — ` +
+    `\nIf TaskList itself fails because the tool is unavailable (task server disconnected or tool ` +
+    `missing), retry this call once: the task gates stand down while the latest task-tool call ` +
+    `ended in a tool-unavailable error.` +
+    `\nIf this block re-fires immediately after a successful TaskList call, the sync record is not being written — ` +
     `treat it as a hook fault and use the /re-assess skill instead of retrying.`
   )
 }

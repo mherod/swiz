@@ -1033,6 +1033,59 @@ async function checkCanonicalTaskListSync(
   )
 }
 
+export const TASK_TOOLS_UNREACHABLE_NOTE =
+  "Task gates released: the most recent task-tool call in this session failed because the tool " +
+  "is unavailable (its server is disconnected or the tool is missing), so the task update these " +
+  "gates ask for cannot be made right now. They are standing down rather than blocking every " +
+  "command. Reconnect the task tools (for example the swiz MCP server) to restore task tracking."
+
+/** Any provider's task tool: `TaskList`, `mcp__swiz__TaskUpdate`, … */
+const ANY_TASK_TOOL_RE = /(?:^|__)Task(?:List|Create|Update|Get)$/
+/**
+ * Result text of a call that never reached a task tool. A gate denial is deliberately not
+ * matched: being told "no" by governance is not evidence that the tools are unreachable.
+ */
+export const TASK_TOOL_UNAVAILABLE_RE =
+  /No such tool available|MCP server\b.{0,80}\bdisconnected|Connection closed|tool\b.{0,40}\bnot (?:available|found)/i
+
+/**
+ * True when the remedy every task gate prescribes was just tried and could not run: the most
+ * recent task-tool call in the trailing window failed with a tool-unavailable error. A later
+ * successful task call clears it, and a session that never attempted a task tool is not
+ * released — ignoring a gate is not the same as being unable to satisfy it.
+ */
+export function taskToolsUnreachable(
+  outcomes: readonly ToolCallOutcome[],
+  windowSize: number = OPEN_TASK_GATE_RELEASE_WINDOW
+): boolean {
+  const lastTaskCall = outcomes
+    .slice(-Math.max(0, windowSize))
+    .filter((outcome) => ANY_TASK_TOOL_RE.test(outcome.name))
+    .at(-1)
+  return (
+    lastTaskCall !== undefined &&
+    !lastTaskCall.success &&
+    TASK_TOOL_UNAVAILABLE_RE.test(lastTaskCall.resultText)
+  )
+}
+
+/** Transcript-derived; false when no transcript is reachable, so the gates keep enforcing. */
+async function taskToolsUnreachableRecently(input: Record<string, any>): Promise<boolean> {
+  try {
+    const transcriptPath = typeof input?.transcript_path === "string" ? input.transcript_path : ""
+    const lines = await resolveSessionLines(input, transcriptPath)
+    if (!lines || lines.length === 0) return false
+    return taskToolsUnreachable(collectToolCallOutcomes(lines))
+  } catch {
+    return false
+  }
+}
+
+function isPreToolUseDenial(outcome: SwizHookOutput): boolean {
+  const specific = (outcome as Record<string, any> | undefined)?.hookSpecificOutput
+  return specific?.permissionDecision === "deny"
+}
+
 async function hasRecentTaskListEvidence(input: Record<string, any>): Promise<boolean> {
   try {
     const recentTools = await getRecentlyUsedToolsForCurrentSession(input)
@@ -1385,7 +1438,20 @@ async function allowSkillWorkflow(context: TaskStateCheckContext): Promise<SwizH
   )
 }
 
+/**
+ * Every denial from the checks below prescribes a task-tool call. When the task tools exist
+ * but cannot be reached (their server disconnected mid-session), that remedy is impossible and
+ * the denial would block Bash for the rest of the session. The transcript is only consulted
+ * once a check has decided to deny, so the common path pays nothing for this.
+ */
 async function runTaskStateChecks(context: TaskStateCheckContext): Promise<SwizHookOutput> {
+  const outcome = await runEnforcedTaskStateChecks(context)
+  if (!isPreToolUseDenial(outcome)) return outcome
+  if (!(await taskToolsUnreachableRecently(context.input))) return outcome
+  return preToolUseAllowWithContext(TASK_TOOLS_UNREACHABLE_NOTE, TASK_TOOLS_UNREACHABLE_NOTE)
+}
+
+async function runEnforcedTaskStateChecks(context: TaskStateCheckContext): Promise<SwizHookOutput> {
   if (await nativeTaskToolsProvenAbsent(context.input)) return preToolUseAllow()
 
   // Escape hatch — see skillOwnsWorkflow.

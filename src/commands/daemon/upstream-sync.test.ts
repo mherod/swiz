@@ -556,7 +556,8 @@ describe("UpstreamSyncRegistry lifecycle", () => {
     const { registerProjectWatchers } = setupWatchers(
       caches,
       mockTranscriptMonitor,
-      state.projectLastSeen
+      state.projectLastSeen,
+      { maxWatchedProjects: 2 }
     )
 
     try {
@@ -574,7 +575,7 @@ describe("UpstreamSyncRegistry lifecycle", () => {
       state.projectLastSeen.set(p1.root, 1000)
       state.projectLastSeen.set(p2.root, 2000)
 
-      // Register 3rd project (exceeding MAX_WATCHED_PROJECTS = 2)
+      // Register 3rd project (exceeding the ceiling of 2 set above)
       state.touchProject(p3.root)
       registerProjectWatchers(p3.root)
 
