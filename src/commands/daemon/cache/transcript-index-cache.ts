@@ -4,6 +4,7 @@ import {
   collectSessionToolUsage,
   computeSummaryFromSessionLines,
   createEmptySummaryAccumulator,
+  isSessionBoundaryLine,
   type SummaryAccumulator,
   type TranscriptSummary,
 } from "../../../transcript-summary.ts"
@@ -150,21 +151,12 @@ function splitSessionLinesAfterLatestSystem(text: string): {
   const lines = splitJsonlLines(text)
   let latestSystemIndex = -1
   for (let index = 0; index < lines.length; index++) {
-    if (isSessionBoundary(lines[index]!)) latestSystemIndex = index
+    if (isSessionBoundaryLine(lines[index]!)) latestSystemIndex = index
   }
   return {
     sessionLines: latestSystemIndex === -1 ? lines : lines.slice(latestSystemIndex + 1),
     sawSystem: latestSystemIndex !== -1,
   }
-}
-
-function isSessionBoundary(line: string): boolean {
-  const entry = tryParseJsonLine(line) as { type?: string; payload?: { type?: string } } | undefined
-  return (
-    entry?.type === "system" ||
-    entry?.type === "compacted" ||
-    (entry?.type === "event_msg" && entry.payload?.type === "context_compacted")
-  )
 }
 
 export class TranscriptIndexCache {
@@ -290,7 +282,7 @@ export class TranscriptIndexCache {
         let sessionLines = existing.index.summary.sessionLines
         let blockedIds = existing.index.blockedToolUseIds
         for (const line of update.lines) {
-          if (isSessionBoundary(line)) {
+          if (isSessionBoundaryLine(line)) {
             accumulator = createEmptySummaryAccumulator()
             sessionLines = []
             blockedIds = []

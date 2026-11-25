@@ -151,9 +151,12 @@ const SUCCESSFUL_TEST_PATTERNS = [
 const DOCS_ONLY_PATTERNS = [/\.md$/i, /README/i, /CHANGELOG/i, /docs\//i, /\.mdx$/i]
 
 /** Extract ISO timestamp from transcript JSONL entry. */
+function timestampFromEntry(entry: unknown): string | null {
+  return (entry as { timestamp?: string } | undefined)?.timestamp ?? null
+}
+
 function extractTimestamp(line: string): string | null {
-  const entry = tryParseJsonLine(line) as { timestamp?: string } | undefined
-  return entry?.timestamp ?? null
+  return timestampFromEntry(tryParseJsonLine(line))
 }
 
 /** Count successful test/build runs in bash output. */
@@ -214,7 +217,7 @@ function filterSessionLines(allLines: string[]): { sessionLines: string[]; sawSy
   for (let i = allLines.length - 1; i >= 0; i--) {
     const raw = allLines[i]
     if (!raw?.trim()) continue
-    if (isSessionBoundary(raw)) {
+    if (isSessionBoundaryLine(raw)) {
       sessionStartIdx = i + 1
       break
     }
@@ -225,7 +228,19 @@ function filterSessionLines(allLines: string[]): { sessionLines: string[]; sawSy
   }
 }
 
-function isSessionBoundary(line: string): boolean {
+/** A boundary entry carries one of these values as a JSON string, whatever the spacing. */
+const SESSION_BOUNDARY_MARKERS = ['"system"', '"compacted"', '"context_compacted"'] as const
+
+/**
+ * Whether a transcript line starts a new session window (a system or compaction entry).
+ *
+ * Callers scan a whole transcript tail for the last boundary and repeat the scan each time the
+ * tail is widened. Parsing every line for that kept the daemon's thread in the JSON parser, so a
+ * line is only parsed when it contains one of the marker values; a substring check rejects the
+ * rest.
+ */
+export function isSessionBoundaryLine(line: string): boolean {
+  if (!SESSION_BOUNDARY_MARKERS.some((marker) => line.includes(marker))) return false
   const parsed = tryParseJsonLine(line) as
     | { type?: string; payload?: { type?: string } }
     | undefined
@@ -319,11 +334,14 @@ function extractCodexToolBlock(entry: ParsedToolEntry | undefined): ToolBlock[] 
   ]
 }
 
-function parseAssistantToolBlocks(line: string): ToolBlock[] {
-  const entry = tryParseJsonLine(line) as ParsedToolEntry | undefined
+function toolBlocksFromEntry(entry: ParsedToolEntry | undefined): ToolBlock[] {
   if (entry?.type !== "assistant") return extractCodexToolBlock(entry)
   const content = entry.message?.content
   return Array.isArray(content) ? content : []
+}
+
+function parseAssistantToolBlocks(line: string): ToolBlock[] {
+  return toolBlocksFromEntry(tryParseJsonLine(line) as ParsedToolEntry | undefined)
 }
 
 interface ToolResultEntry {
@@ -719,8 +737,7 @@ function extractCodexUserSkillExpansion(entry: ParsedTranscriptEntry): string[] 
   return extractSkillNamesFromUserText(extractTextFromUserMessage(entry.payload.content))
 }
 
-function extractUserSkillExpansions(line: string): string[] {
-  const entry = tryParseJsonLine(line) as ParsedTranscriptEntry | undefined
+function skillExpansionsFromEntry(entry: ParsedTranscriptEntry | undefined): string[] {
   switch (entry?.type) {
     case "queue-operation":
       return extractQueuedSkillExpansion(entry)
@@ -744,11 +761,16 @@ export function collectSessionToolUsage(
   for (const rawLine of sessionLines) {
     const line = rawLine ?? ""
     if (!line.trim()) continue
-    for (const block of parseAssistantToolBlocks(line)) {
+    // One parse per line: this runs over whole transcripts on the daemon's thread.
+    const entry = tryParseJsonLine(line)
+    for (const block of toolBlocksFromEntry(entry as ParsedToolEntry | undefined)) {
       processToolBlock(block, acc)
     }
-    appendSkillInvocations(extractUserSkillExpansions(line), acc)
-    const ts = extractTimestamp(line)
+    appendSkillInvocations(
+      skillExpansionsFromEntry(entry as ParsedTranscriptEntry | undefined),
+      acc
+    )
+    const ts = timestampFromEntry(entry)
     if (ts) {
       if (!acc.firstTimestamp) acc.firstTimestamp = ts
       acc.lastTimestamp = ts
@@ -772,7 +794,7 @@ export function collectCurrentSessionUsageEvents(
     // window means "last N user turns" rather than "last N raw JSONL lines"
     // (attachments, ai-title, and queue-operation entries shouldn't burn turns).
     if (isUserTurnEntry(entry)) turnIndex++
-    events.push(...collectUsageEventsForLine(line, turnIndex))
+    events.push(...collectUsageEventsForEntry(entry, turnIndex))
   }
   return events
 }
@@ -784,13 +806,14 @@ function isUserTurnEntry(
   return entry?.type === "event_msg" && entry.payload?.type === "user_message"
 }
 
-function collectUsageEventsForLine(line: string, turnIndex: number): CurrentSessionUsageEvent[] {
+/** Takes the already-parsed entry: the caller's loop runs over whole transcripts. */
+function collectUsageEventsForEntry(entry: unknown, turnIndex: number): CurrentSessionUsageEvent[] {
   const events: CurrentSessionUsageEvent[] = []
-  const timestamp = extractTimestamp(line)
-  for (const block of parseAssistantToolBlocks(line)) {
+  const timestamp = timestampFromEntry(entry)
+  for (const block of toolBlocksFromEntry(entry as ParsedToolEntry | undefined)) {
     events.push(...collectToolUsageEventsFromBlock(block, turnIndex, timestamp))
   }
-  for (const skill of extractUserSkillExpansions(line)) {
+  for (const skill of skillExpansionsFromEntry(entry as ParsedTranscriptEntry | undefined)) {
     events.push({ kind: "skill", value: skill, turnIndex, timestamp, source: "user" })
   }
   return events
