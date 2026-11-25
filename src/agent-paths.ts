@@ -73,17 +73,37 @@ export function getAgentSettingsSearchPaths(
 
 // ─── Agent detection utilities ───────────────────────────────────────────────
 
-/**
- * Get the command that started the current process.
- * Used to detect agent context when environment variables aren't set.
- */
-function getParentProcessCommand(): string {
+function readParentProcessCommand(ppid: number): string {
   try {
-    const proc = Bun.spawnSync(["ps", "-p", String(process.ppid), "-o", "command="])
+    const proc = Bun.spawnSync(["ps", "-p", String(ppid), "-o", "command="])
     return new TextDecoder().decode(proc.stdout).trim()
   } catch {
     return ""
   }
+}
+
+let parentProcessCommand: { ppid: number; command: string } | null = null
+
+/**
+ * Get the command that started the current process.
+ * Used to detect agent context when environment variables aren't set.
+ *
+ * Reading it runs `ps` synchronously, and a parent's command line cannot change while this
+ * process lives, so it is read once per parent. The daemon never matches on environment
+ * (launchd starts it clean), so every task-store, skill and tool-name lookup used to reach this
+ * fallback and block the only JavaScript thread on a fresh `ps`, hundreds of times per dispatch.
+ */
+function getParentProcessCommand(): string {
+  const ppid = process.ppid
+  if (parentProcessCommand?.ppid !== ppid) {
+    parentProcessCommand = { ppid, command: readParentProcessCommand(ppid) }
+  }
+  return parentProcessCommand.command
+}
+
+/** Forget the cached parent command so a test can observe the next lookup. */
+export function resetParentProcessCommandCacheForTests(): void {
+  parentProcessCommand = null
 }
 
 /**
