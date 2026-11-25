@@ -12,7 +12,11 @@ import { WorkerTranscriptMonitor } from "./cache/worker-transcript-monitor.ts"
 import { MemoryPressureMonitor } from "./memory-pressure.ts"
 import { applyDaemonMemoryPressure } from "./memory-relief.ts"
 import { SessionToolCallPersistenceQueue } from "./session-tool-call-persistence.ts"
-import { type DaemonWebServerContext, startDaemonWebServer } from "./web-server.ts"
+import {
+  DAEMON_BIND_HOSTNAME,
+  type DaemonWebServerContext,
+  startDaemonWebServer,
+} from "./web-server.ts"
 
 test("pressure relief preserves disk data and pending durable writes", async () => {
   const dir = await mkdtemp(join(tmpdir(), "swiz-memory-relief-"))
@@ -95,6 +99,23 @@ test("health and memory HTTP routes bypass expensive pruning during pressure", a
     expect(response.headers.get("cache-control")).toBe("no-store")
     const history = await fetch(new URL("/sessions/messages", server.url), { method: "POST" })
     expect(history.status).toBe(503)
+  } finally {
+    await server.stop(true)
+  }
+})
+
+test("the daemon web server listens on the loopback interface only", async () => {
+  // It stops agents, deletes sessions and runs hooks without authentication, so a
+  // listener on every interface would hand that to any device on the network.
+  expect(DAEMON_BIND_HOSTNAME).toBe("127.0.0.1")
+  const ctx = { port: 0, globalMetrics: createMetrics() } as unknown as DaemonWebServerContext
+  const server = startDaemonWebServer(ctx)
+  try {
+    expect(new URL(String(server.url)).hostname).toBe("127.0.0.1")
+    const health = await fetch(new URL("/health", server.url), {
+      signal: AbortSignal.timeout(1000),
+    })
+    expect(await health.text()).toBe("ok")
   } finally {
     await server.stop(true)
   }

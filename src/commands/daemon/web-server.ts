@@ -288,9 +288,17 @@ async function handleFetchRoutes(
   return new Response("Not Found", { status: 404 })
 }
 
+/**
+ * The daemon stops agent processes, deletes sessions and runs hooks on request, with no
+ * authentication, so it must only be reachable from this machine. Without an explicit hostname
+ * Bun listens on every network interface. Every swiz client already calls 127.0.0.1.
+ */
+export const DAEMON_BIND_HOSTNAME = "127.0.0.1"
+
 export function startDaemonWebServer(ctx: DaemonWebServerContext): DaemonWebServerHandle {
   const notFound = () => new Response("Not Found", { status: 404 })
   const server = Bun.serve({
+    hostname: DAEMON_BIND_HOSTNAME,
     port: ctx.port,
     routes: {
       "/health": new Response("ok", {
