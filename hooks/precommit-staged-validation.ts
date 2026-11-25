@@ -17,7 +17,16 @@ import {
 } from "./pretooluse-no-home-paths.ts"
 
 const CONFLICT_MARKER_RE = /^[<>=]{7}( |$)/
-const FOCUSED_TEST_RE = /\b(describe\.only|it\.only|test\.only|fdescribe|fit)\b/
+/**
+ * A focused test is always a call (`fit(`, `test.only(`, `it.only.each(`). Requiring the call
+ * keeps the English word "fit" in a comment from being reported as one.
+ */
+const FOCUSED_TEST_RE = /\b(?:describe\.only|it\.only|test\.only|fdescribe|fit)(?:\.\w+)*[(`]/
+
+export function isFocusedTestLine(line: string): boolean {
+  return FOCUSED_TEST_RE.test(line)
+}
+
 const STAGED_SOURCE_RE = /\.(ts|tsx|js|jsx|mjs|cjs)$/
 /** Files excluded from focused test scanning — hook/test files legitimately reference these patterns. */
 const FOCUSED_TEST_EXCLUDE_RE = /^hooks\/|\.test\.(ts|tsx|js|jsx)$|__tests__\//
@@ -61,7 +70,7 @@ function scanDiff(diff: string): Finding[] {
     if (
       STAGED_SOURCE_RE.test(currentFile) &&
       !FOCUSED_TEST_EXCLUDE_RE.test(currentFile) &&
-      FOCUSED_TEST_RE.test(addedLine)
+      isFocusedTestLine(addedLine)
     ) {
       findings.push({
         file: currentFile,

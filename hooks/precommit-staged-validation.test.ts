@@ -3,7 +3,35 @@ import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { getGitClient } from "../src/git/client.ts"
-import { evaluatePrecommitStagedValidation } from "./precommit-staged-validation.ts"
+import {
+  evaluatePrecommitStagedValidation,
+  isFocusedTestLine,
+} from "./precommit-staged-validation.ts"
+
+describe("focused test detection", () => {
+  test("reports focused test calls", () => {
+    for (const line of [
+      '  fit("runs alone", () => {})',
+      '  test.only("runs alone", () => {})',
+      '  it.only.each([1, 2])("case %d", () => {})',
+      '  describe.only("suite", () => {})',
+      '  fdescribe("suite", () => {})',
+    ]) {
+      expect(isFocusedTestLine(line)).toBe(true)
+    }
+  })
+
+  test("ignores the word in prose and in longer identifiers", () => {
+    for (const line of [
+      " * same dispatch, so it must fit the client deadline: 5s hook cap + 3s here =",
+      "// the payload does not fit. Trim it first.",
+      "const benefit = outfit(profit)",
+      '  test("only runs once", () => {})',
+    ]) {
+      expect(isFocusedTestLine(line)).toBe(false)
+    }
+  })
+})
 
 describe("precommit-staged-validation repository capability", () => {
   const tempDirs: string[] = []
