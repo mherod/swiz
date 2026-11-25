@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test"
 import { join } from "node:path"
 import { useTempDir } from "../utils/test-utils.ts"
+import { DAEMON_BIND_HOSTNAME } from "./daemon/web-server.ts"
 import { normalizeDaemonArgs, validateDaemonArgs } from "./daemon.ts"
 
 // PROCESS_CONTRACT_TEST: a daemon started on an occupied port exits non-zero with a startup diagnostic.
@@ -46,7 +47,14 @@ describe("daemon startup failure", () => {
   // PROCESS_CONTRACT_TEST: startup must exit non-zero without lingering when its port is occupied.
   it("exits non-zero instead of idling when the port is taken", async () => {
     const cwd = await temp.create()
-    const blocker = Bun.serve({ port: 0, fetch: () => new Response("x") })
+    // Occupy the address the daemon itself binds, as a second daemon would. A listener on
+    // every interface does not conflict with a loopback-only bind on macOS, so it would let
+    // the daemon start and this test would wait out its timer.
+    const blocker = Bun.serve({
+      hostname: DAEMON_BIND_HOSTNAME,
+      port: 0,
+      fetch: () => new Response("x"),
+    })
     try {
       const proc = Bun.spawn(["bun", indexPath, "daemon", "--port", String(blocker.port)], {
         cwd,
