@@ -2,6 +2,7 @@
  * Metrics and observability route handlers for the daemon web server.
  * Extracted from web-server.ts (issue #685) to keep routing code focused.
  */
+import { readSharedDaemonCircuitState } from "../../dispatch/daemon-client.ts"
 import { getWorkerPoolMetrics } from "../../dispatch/worker-pool.ts"
 import { getGhRateLimitStats } from "../../gh-rate-limit.ts"
 import { getHookLogMetrics, readHookLogs } from "../../hook-log.ts"
@@ -104,6 +105,9 @@ export async function handleMetricsRoute(url: URL, ctx: MetricsRoutesContext): P
     // Event-loop lag and CPU share of the daemon thread: the difference between
     // "a hook is slow" and "everything waited because the thread was busy".
     runtime: getRuntimeTelemetry(),
+    // The dispatch clients' shared breaker: how often it has opened and for how long in
+    // total. While it is open, agent tool hooks from every session are let through unchecked.
+    breaker: await readSharedDaemonCircuitState(),
     // Mirrored from /cache/status. Watcher registration is the only evidence that a project's
     // git state is actually being observed, and looking for it in /metrics — the obvious place —
     // and finding nothing reads as "not watching" rather than "wrong endpoint" (#807).

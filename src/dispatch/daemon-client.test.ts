@@ -4,11 +4,14 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import {
   DAEMON_CIRCUIT_OPEN_MS,
+  DAEMON_CIRCUIT_TRIP_THRESHOLD,
   daemonDispatchPolicy,
   enrichDispatchPayload,
+  readDaemonCircuitState,
   resetDaemonBackoff,
   tryDaemonDispatch,
 } from "./daemon-client.ts"
+import { GIT_HOOK_EVENTS } from "./git-hook-events.ts"
 import {
   DISPATCH_TIMEOUTS,
   dispatchTimeoutSeconds,
@@ -218,11 +221,18 @@ describe("dispatch fallback policy", () => {
     expect(daemonDispatchPolicy("subagentStop").timeoutFallback).toBe("local")
   })
 
+  test("git hooks retain local checks after timeout", () => {
+    // A slow daemon must not let a commit or push skip its checks.
+    for (const event of GIT_HOOK_EVENTS) {
+      expect(daemonDispatchPolicy(event).timeoutFallback).toBe("local")
+    }
+  })
+
   test("other events allow after timeout with client headroom", () => {
     for (const [event, seconds] of Object.entries(DISPATCH_TIMEOUTS)) {
       if (event === "stop") continue
       const policy = daemonDispatchPolicy(event)
-      expect(policy.timeoutFallback).toBe("allow")
+      expect(policy.timeoutFallback).toBe(GIT_HOOK_EVENTS.has(event) ? "local" : "allow")
       expect(policy.timeoutMs).toBe(seconds * 1000 - 3000 + HOOK_CONTEXT_HUMANISE_TIMEOUT_MS)
       expect(policy.timeoutMs).toBeLessThan(dispatchTimeoutSeconds(event) * 1000)
     }
@@ -264,32 +274,91 @@ describe("daemon circuit breaker", () => {
     await Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })))
   })
 
-  test("a timeout opens the breaker so the next dispatch never contacts the daemon", async () => {
-    const circuitPath = await circuit()
-    const first = await tryDaemonDispatch("preToolUse", "PreToolUse", "{}", {
-      fetch: hang,
+  /** One dispatch as a fresh process would make it: no in-memory backoff carried over. */
+  const dispatch = async (
+    circuitPath: string,
+    fetch: (url: string, init: RequestInit) => Promise<Response>
+  ) => {
+    resetDaemonBackoff()
+    return await tryDaemonDispatch("preToolUse", "PreToolUse", "{}", {
+      fetch,
       timeoutMs: 20,
       circuitPath,
     })
-    expect(first).toEqual({ kind: "timeout" })
-    expect(Number(await Bun.file(circuitPath).text())).toBeGreaterThan(0)
+  }
 
-    // A fresh process has no in-memory backoff; only the shared marker stops it.
-    resetDaemonBackoff()
-    let contacted = 0
-    const second = await tryDaemonDispatch("preToolUse", "PreToolUse", "{}", {
-      fetch: async () => {
-        contacted += 1
-        return ok()
-      },
-      circuitPath,
+  test("one slow dispatch does not open the breaker", async () => {
+    const circuitPath = await circuit()
+    expect(await dispatch(circuitPath, hang)).toEqual({ kind: "timeout" })
+    expect(await readDaemonCircuitState(circuitPath)).toMatchObject({
+      openedAt: 0,
+      consecutiveTimeouts: 1,
+      trips: 0,
     })
-    expect(second).toEqual({ kind: "timeout", skipped: true })
+
+    // The next dispatch still reaches the daemon, so its checks still run.
+    let contacted = 0
+    const next = await dispatch(circuitPath, async () => {
+      contacted += 1
+      return ok()
+    })
+    expect(next.kind).toBe("response")
+    expect(contacted).toBe(1)
+  })
+
+  test("consecutive timeouts open it, and the next dispatch never contacts the daemon", async () => {
+    const circuitPath = await circuit()
+    for (let i = 0; i < DAEMON_CIRCUIT_TRIP_THRESHOLD; i++) {
+      expect(await dispatch(circuitPath, hang)).toEqual({ kind: "timeout" })
+    }
+    const opened = await readDaemonCircuitState(circuitPath)
+    expect(opened.openedAt).toBeGreaterThan(0)
+    expect(opened.trips).toBe(1)
+    expect(opened.lastTripAt).toBe(opened.openedAt)
+
+    let contacted = 0
+    const skipped = await dispatch(circuitPath, async () => {
+      contacted += 1
+      return ok()
+    })
+    expect(skipped).toEqual({ kind: "timeout", skipped: true })
     expect(contacted).toBe(0)
+  })
+
+  test("an answer between two timeouts resets the count", async () => {
+    const circuitPath = await circuit()
+    await dispatch(circuitPath, hang)
+    expect((await dispatch(circuitPath, ok)).kind).toBe("response")
+    expect((await readDaemonCircuitState(circuitPath)).consecutiveTimeouts).toBe(0)
+    await dispatch(circuitPath, hang)
+
+    const state = await readDaemonCircuitState(circuitPath)
+    expect(state).toMatchObject({ openedAt: 0, consecutiveTimeouts: 1, trips: 0 })
+  })
+
+  test("closing records how long tool hooks went unchecked", async () => {
+    const circuitPath = await circuit()
+    const trippedAt = Date.now() - DAEMON_CIRCUIT_OPEN_MS - 5_000
+    await Bun.write(
+      circuitPath,
+      JSON.stringify({
+        openedAt: trippedAt,
+        consecutiveTimeouts: 2,
+        trips: 3,
+        lastTripAt: trippedAt,
+        openMsTotal: 1_000,
+      })
+    )
+    expect((await dispatch(circuitPath, ok)).kind).toBe("response")
+
+    const closed = await readDaemonCircuitState(circuitPath)
+    expect(closed).toMatchObject({ openedAt: 0, consecutiveTimeouts: 0, trips: 3 })
+    expect(closed.openMsTotal).toBeGreaterThanOrEqual(1_000 + DAEMON_CIRCUIT_OPEN_MS + 5_000)
   })
 
   test("after the window one probe goes through and a healthy answer closes the breaker", async () => {
     const circuitPath = await circuit()
+    // The earlier marker format, a bare timestamp, must still be honoured.
     await Bun.write(circuitPath, String(Date.now() - DAEMON_CIRCUIT_OPEN_MS - 1_000))
 
     const probe = await tryDaemonDispatch("preToolUse", "PreToolUse", "{}", {
@@ -297,7 +366,7 @@ describe("daemon circuit breaker", () => {
       circuitPath,
     })
     expect(probe).toEqual({ kind: "response", response: { systemMessage: "ok" } })
-    expect(await Bun.file(circuitPath).text()).toBe("0")
+    expect((await readDaemonCircuitState(circuitPath)).openedAt).toBe(0)
 
     const next = await tryDaemonDispatch("preToolUse", "PreToolUse", "{}", {
       fetch: ok,
@@ -317,7 +386,7 @@ describe("daemon circuit breaker", () => {
       circuitPath,
     })
     expect(probe).toEqual({ kind: "timeout" })
-    expect(Number(await Bun.file(circuitPath).text())).toBeGreaterThan(expired + 1_000)
+    expect((await readDaemonCircuitState(circuitPath)).openedAt).toBeGreaterThan(expired + 1_000)
   })
 
   test("control: without a marker path an injected transport is never skipped", async () => {

@@ -1,6 +1,7 @@
 /** Lightweight transport shared by both CLI entry points; no manifest or engine imports. */
 import { swizDaemonCircuitPath } from "../temp-paths.ts"
 import { detectTerminal } from "../utils/terminal-detection.ts"
+import { GIT_HOOK_EVENTS } from "./git-hook-events.ts"
 import { dispatchTimeoutSeconds } from "./timeouts.ts"
 
 const BACKOFF_MS = 30_000
@@ -14,20 +15,36 @@ let lastDaemonFailureAt = 0
  */
 export const DAEMON_CIRCUIT_OPEN_MS = 30_000
 
+/**
+ * Timeouts in a row, with no answer between them, before the breaker opens.
+ * An open breaker lets every session's tool hooks through unchecked, so one
+ * slow dispatch on a busy machine must not open it; a hung daemon produces
+ * the second timeout within one client deadline.
+ */
+export const DAEMON_CIRCUIT_TRIP_THRESHOLD = 2
+
 export function resetDaemonBackoff(): void {
   lastDaemonFailureAt = 0
 }
 
-/** Stop retains its local checks on transport timeout; other hooks avoid a second execution. */
+/**
+ * Stop and git hooks keep their checks on a transport timeout by running
+ * locally: a stop decision and the commit and push floor must not be skipped
+ * because the daemon was slow. Agent tool hooks are allowed instead, which
+ * avoids a second execution inside the agent's own hook deadline.
+ */
 export function daemonDispatchPolicy(canonicalEvent: string): {
   timeoutMs: number
   timeoutFallback: "local" | "allow"
 } {
   const budgetMs = dispatchTimeoutSeconds(canonicalEvent) * 1000
-  const stop = canonicalEvent === "stop" || canonicalEvent === "subagentStop"
+  const keepsChecks =
+    canonicalEvent === "stop" ||
+    canonicalEvent === "subagentStop" ||
+    GIT_HOOK_EVENTS.has(canonicalEvent)
   return {
     timeoutMs: Math.max(1000, budgetMs - 3000),
-    timeoutFallback: stop ? "local" : "allow",
+    timeoutFallback: keepsChecks ? "local" : "allow",
   }
 }
 
@@ -78,22 +95,69 @@ function resolveCircuitPath(options: DaemonDispatchOptions): string | null {
   return swizDaemonCircuitPath(daemonPort())
 }
 
-async function readCircuitOpenedAt(path: string): Promise<number> {
+export interface DaemonCircuitState {
+  /** When the breaker opened or was last re-armed; 0 while closed. */
+  openedAt: number
+  /** Timeouts in a row since the daemon last answered. */
+  consecutiveTimeouts: number
+  /** Times the breaker has opened. */
+  trips: number
+  /** When it last opened. */
+  lastTripAt: number
+  /** Total time it has spent open, during which tool hooks ran unchecked. */
+  openMsTotal: number
+}
+
+const CLOSED_CIRCUIT: DaemonCircuitState = {
+  openedAt: 0,
+  consecutiveTimeouts: 0,
+  trips: 0,
+  lastTripAt: 0,
+  openMsTotal: 0,
+}
+
+function positive(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 0
+}
+
+/** Read the marker. A bare timestamp, the earlier format, is still understood. */
+export async function readDaemonCircuitState(path: string): Promise<DaemonCircuitState> {
   try {
-    const openedAt = Number.parseInt(await Bun.file(path).text(), 10)
-    return Number.isFinite(openedAt) && openedAt > 0 ? openedAt : 0
+    const raw: unknown = JSON.parse(await Bun.file(path).text())
+    if (typeof raw === "number") return { ...CLOSED_CIRCUIT, openedAt: positive(raw) }
+    const record = (raw ?? {}) as Record<string, unknown>
+    return {
+      openedAt: positive(record.openedAt),
+      consecutiveTimeouts: positive(record.consecutiveTimeouts),
+      trips: positive(record.trips),
+      lastTripAt: positive(record.lastTripAt),
+      openMsTotal: positive(record.openMsTotal),
+    }
   } catch {
     // No marker: the breaker has never tripped.
-    return 0
+    return { ...CLOSED_CIRCUIT }
   }
 }
 
-async function writeCircuit(path: string, openedAt: number): Promise<void> {
+/** Breaker state for the daemon this process would dispatch to. */
+export async function readSharedDaemonCircuitState(): Promise<DaemonCircuitState> {
+  return await readDaemonCircuitState(swizDaemonCircuitPath(daemonPort()))
+}
+
+async function writeCircuit(path: string, state: DaemonCircuitState): Promise<void> {
   try {
-    await Bun.write(path, String(openedAt))
+    await Bun.write(path, JSON.stringify(state))
   } catch {
     // The breaker is an optimisation; without it every dispatch simply probes.
   }
+}
+
+type CircuitMode = "closed" | "open" | "probing"
+
+interface CircuitEntry {
+  mode: CircuitMode
+  /** True when a healthy answer has something to clear. */
+  dirty: boolean
 }
 
 /**
@@ -101,23 +165,54 @@ async function writeCircuit(path: string, openedAt: number): Promise<void> {
  * the one that tests the daemon; the marker is re-armed first so concurrent
  * dispatches keep skipping instead of all probing a daemon that is still hung.
  */
-async function enterCircuit(path: string): Promise<"closed" | "open" | "probing"> {
+async function enterCircuit(path: string): Promise<CircuitEntry> {
   const now = Date.now()
-  const openedAt = await readCircuitOpenedAt(path)
+  const state = await readDaemonCircuitState(path)
   // A marker from the future (clock change) must not hold the breaker open.
-  if (openedAt === 0 || openedAt > now) return "closed"
-  if (now - openedAt < DAEMON_CIRCUIT_OPEN_MS) return "open"
-  await writeCircuit(path, now)
-  return "probing"
+  if (state.openedAt === 0 || state.openedAt > now) {
+    return { mode: "closed", dirty: state.consecutiveTimeouts > 0 || state.openedAt > 0 }
+  }
+  if (now - state.openedAt < DAEMON_CIRCUIT_OPEN_MS) return { mode: "open", dirty: true }
+  await writeCircuit(path, { ...state, openedAt: now })
+  return { mode: "probing", dirty: true }
+}
+
+function afterTimeout(state: DaemonCircuitState, mode: CircuitMode): DaemonCircuitState {
+  const now = Date.now()
+  const consecutiveTimeouts = state.consecutiveTimeouts + 1
+  // A failed probe keeps the breaker open for another whole window.
+  if (mode === "probing") return { ...state, openedAt: now, consecutiveTimeouts }
+  const alreadyOpen = state.openedAt > 0 && state.openedAt <= now
+  if (alreadyOpen || consecutiveTimeouts < DAEMON_CIRCUIT_TRIP_THRESHOLD) {
+    return { ...state, consecutiveTimeouts }
+  }
+  return { ...state, openedAt: now, consecutiveTimeouts, trips: state.trips + 1, lastTripAt: now }
+}
+
+function afterAnswer(state: DaemonCircuitState): DaemonCircuitState {
+  const wasOpen = state.openedAt > 0 && state.lastTripAt > 0
+  const openMs = wasOpen ? Math.max(0, Date.now() - state.lastTripAt) : 0
+  return {
+    ...state,
+    openedAt: 0,
+    consecutiveTimeouts: 0,
+    openMsTotal: state.openMsTotal + openMs,
+  }
 }
 
 async function settleCircuit(
   path: string,
-  probing: boolean,
+  entry: CircuitEntry,
   kind: DaemonDispatchResult["kind"]
 ): Promise<void> {
-  if (kind === "timeout") await writeCircuit(path, Date.now())
-  else if (probing) await writeCircuit(path, 0)
+  // The common case, a healthy answer with nothing recorded, costs no write.
+  if (kind !== "timeout" && !entry.dirty) return
+  // Re-read so concurrent dispatches add to each other's counts.
+  const state = await readDaemonCircuitState(path)
+  await writeCircuit(
+    path,
+    kind === "timeout" ? afterTimeout(state, entry.mode) : afterAnswer(state)
+  )
 }
 
 async function requestDaemonDispatch(
@@ -167,10 +262,10 @@ export async function tryDaemonDispatch(
 ): Promise<DaemonDispatchResult> {
   if (daemonUnavailable()) return { kind: "unavailable" }
   const circuitPath = resolveCircuitPath(options)
-  const circuit = circuitPath ? await enterCircuit(circuitPath) : "closed"
-  if (circuit === "open") return { kind: "timeout", skipped: true }
+  const entry = circuitPath ? await enterCircuit(circuitPath) : null
+  if (entry?.mode === "open") return { kind: "timeout", skipped: true }
   const result = await requestDaemonDispatch(canonicalEvent, hookEventName, payloadStr, options)
-  if (circuitPath) await settleCircuit(circuitPath, circuit === "probing", result.kind)
+  if (circuitPath && entry) await settleCircuit(circuitPath, entry, result.kind)
   return result
 }
 
