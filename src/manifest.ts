@@ -80,6 +80,7 @@ import pretooluseIssueWorkflowGate from "../hooks/pretooluse-issue-workflow-gate
 import pretoolusJsonValidation from "../hooks/pretooluse-json-validation.ts"
 import pretooluseLargeFiles from "../hooks/pretooluse-large-files.ts"
 import pretooluseLongSleep from "../hooks/pretooluse-long-sleep.ts"
+import pretooluseLowDiskSpace from "../hooks/pretooluse-low-disk-space.ts"
 import pretooluseMainBranchScopeGate from "../hooks/pretooluse-main-branch-scope-gate.ts"
 import pretoolUseManiOrderValidation from "../hooks/pretooluse-manifest-order-validation.ts"
 import pretooluseMeasureLintTime from "../hooks/pretooluse-measure-lint-time.ts"
@@ -408,6 +409,7 @@ export const bundledHookManifest: HookGroup[] = [
       { hook: pretooluseGitIndexLock },
       { hook: pretooluseGitFlowIntegrationBaseGate },
       { hook: pretooluseNoNpm },
+      { hook: pretooluseLowDiskSpace },
       { hook: pretooluseNoGitChecks },
       { hook: pretooluseNoHomePaths },
       { hook: pretooluseBunTestConcurrent },
