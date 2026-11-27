@@ -79,6 +79,12 @@ tools, and enabled/trusted hooks. Exercise a normal hook event and inspect its
 result. `swiz status` reports standalone settings; it is not proof that the
 host loaded or trusted a plugin.
 
+The plugin includes skills for each part of setup and maintenance.
+
+- Set up Swiz or migrate existing registrations with [swiz-install](skills/swiz-install/SKILL.md).
+- Check missing skills, MCP tools, or hooks with [swiz-plugin-doctor](skills/swiz-plugin-doctor/SKILL.md).
+- Refresh an existing installation with [swiz-plugin-update](skills/swiz-plugin-update/SKILL.md).
+
 Disable/uninstall through the host's plugin manager and restart sessions.
 This removes plugin-owned capabilities, not separately installed registrations,
 the linked CLI, or Swiz task/settings data. To return to standalone mode,

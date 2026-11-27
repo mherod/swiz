@@ -79,7 +79,14 @@ describe("dual host plugin package", () => {
       expect(names.has(frontmatter.name)).toBe(false)
       names.add(frontmatter.name)
     }
-    expect(names.size).toBe(17)
+    expect([...names]).toEqual(
+      expect.arrayContaining([
+        "swiz-install",
+        "swiz-plugin-doctor",
+        "swiz-plugin-update",
+        "swiz-uninstall",
+      ])
+    )
   })
 
   test.each([

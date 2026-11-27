@@ -350,7 +350,7 @@ from failed tools using the matching pre-tool observation.
 
 ## Plugin Marketplace
 
-The `swiz-core` package supports Claude Code and Codex with 17 shared skills,
+The `swiz-core` package supports Claude Code and Codex with shared skills,
 the Swiz MCP task server, and separate hook configurations generated from the
 canonical manifest. It requires Bun and a linked `swiz` CLI on the host's PATH.
 
@@ -368,7 +368,9 @@ codex plugin marketplace add mherod/swiz
 Restart the session after installation. In Codex, review and trust the plugin
 definitions in `/hooks`. If Swiz is already installed through standalone
 settings, migrate those registrations before enabling the plugin to avoid
-running hooks twice. The plugin's setup skill guides this migration.
+running hooks twice. Use `swiz-install` for setup and migration,
+`swiz-plugin-doctor` to diagnose missing capabilities, and
+`swiz-plugin-update` to refresh an existing install.
 
 See the [plugin guide](plugins/swiz-core/README.md) for prerequisites, local
 development, host limitations, migration, verification, and removal.
