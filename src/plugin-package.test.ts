@@ -82,6 +82,7 @@ describe("dual host plugin package", () => {
     expect([...names]).toEqual(
       expect.arrayContaining([
         "swiz-install",
+        "swiz-manage-mcp",
         "swiz-plugin-doctor",
         "swiz-plugin-update",
         "swiz-uninstall",

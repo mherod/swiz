@@ -90,6 +90,17 @@ This removes plugin-owned capabilities, not separately installed registrations,
 the linked CLI, or Swiz task/settings data. To return to standalone mode,
 disable the plugin first, then run `swiz install --claude` or `--codex`.
 
+## Manage MCP across harnesses
+
+Use `swiz manage mcp list` to inventory user-level registrations and run
+`swiz manage mcp list --project` from a project root to check that layer.
+Use the host's MCP or plugin manager for its effective server list and
+plugin-provided connections.
+
+Pass explicit host flags and preview edits with `--dry-run`. The bundled
+skill also covers validation, directed merges, portable sync, and checking
+that the host loaded the change. [swiz-manage-mcp](skills/swiz-manage-mcp/SKILL.md)
+
 ## Maintenance
 
 Hook files contain one dispatcher per supported host event. Swiz retains its

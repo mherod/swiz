@@ -372,6 +372,9 @@ running hooks twice. Use `swiz-install` for setup and migration,
 `swiz-plugin-doctor` to diagnose missing capabilities, and
 `swiz-plugin-update` to refresh an existing install.
 
+Use `swiz-manage-mcp` to review or change saved MCP registrations across
+agent harnesses.
+
 See the [plugin guide](plugins/swiz-core/README.md) for prerequisites, local
 development, host limitations, migration, verification, and removal.
 
@@ -942,9 +945,13 @@ swiz plugins uninstall <name>               # remove a plugin
 Manage shared swiz resources across agents — currently MCP server configuration.
 
 ```bash
-swiz manage mcp list                        # list MCP servers across target agents
-swiz manage mcp add|remove|validate|merge   # edit MCP server configuration
+swiz manage mcp list
+swiz manage mcp validate --codex
+swiz manage mcp sync --codex --cursor --dry-run
 ```
+
+See [MCP configuration management](docs/mcp-management.md) for supported
+scopes, editing commands, and portability rules.
 
 ### `swiz mcp`
 

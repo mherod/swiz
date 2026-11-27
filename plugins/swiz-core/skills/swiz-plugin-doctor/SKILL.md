@@ -15,7 +15,9 @@ read-only checks and use the smallest repair that addresses what you find.
   in the host's execution environment. A desktop host may have a different
   PATH from an interactive shell. Check whether the host loaded the bundled
   Swiz MCP server and lists `TaskList`. When the host can invoke the tool,
-  use `TaskList` as a read-only check of the connection.
+  use `TaskList` as a read-only check of the connection. For an inventory of
+  saved registrations or to check other servers, use
+  [swiz-manage-mcp](../swiz-manage-mcp/SKILL.md).
 - **Hooks.** In Codex, check `/hooks` or desktop Settings > Hooks for the
   bundled definitions and their trust state. Have the user review changed
   definitions. Trigger a harmless tool call in the target session and look

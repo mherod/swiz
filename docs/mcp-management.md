@@ -8,30 +8,41 @@ Junie, AI, Antigravity CLI and Codex. Antigravity accepts `--antigravity`
 or `--agy`; Codex uses `--codex`; Windsurf uses `--windsurf`.
 
 ```sh
+swiz manage mcp list
 swiz manage mcp list --agy
-swiz manage mcp add example --command bun --arg x --arg example-mcp --agy
-swiz manage mcp show example --antigravity
+swiz manage mcp list --project
 swiz manage mcp validate --agy
-swiz manage mcp remove example --agy
-swiz manage mcp add example --command bun --agy --project
-swiz manage mcp install --windsurf
-swiz manage mcp uninstall --cursor --project
-swiz install --mcp
-swiz install --antigravity --dry-run
-swiz install --antigravity
+swiz manage mcp add example --command /absolute/path/to/server --arg --stdio --agy --dry-run
+swiz manage mcp add example --url https://example.invalid/mcp --codex --project --dry-run
+swiz manage mcp remove example --agy --dry-run
 ```
 
-| Agent | Global MCP file | Project MCP file |
-| --- | --- | --- |
-| Antigravity CLI | `~/.gemini/config/mcp_config.json` | `.agents/mcp_config.json` |
-| Codex | `~/.codex/config.toml` | `.codex/config.toml` |
-| Claude Desktop | `~/Library/Application Support/Claude/claude_desktop_config.json` | *(global only)* |
-| Cursor | `~/.cursor/mcp.json` | `.cursor/mcp.json` |
-| Windsurf | `~/.codeium/windsurf/mcp_config.json` | `.codeium/windsurf/mcp_config.json` |
+| Agent | Flag | User-level MCP file | Project MCP file |
+| --- | --- | --- | --- |
+| Antigravity CLI | `--agy` | `~/.gemini/config/mcp_config.json` | `.agents/mcp_config.json` |
+| Codex | `--codex` | `~/.codex/config.toml` | `.codex/config.toml` |
+| Claude Code | `--claude` | `~/.claude.json` | `.mcp.json` |
+| Claude Desktop | `--claude-desktop` | `~/Library/Application Support/Claude/claude_desktop_config.json` | User-level only |
+| Cursor | `--cursor` | `~/.cursor/mcp.json` | `.cursor/mcp.json` |
+| Gemini CLI | `--gemini` | `~/.gemini/settings.json` | `.vscode/mcp.json` |
+| Junie | `--junie` | `~/.junie/mcp/mcp.json` | `.junie/mcp/mcp.json` |
+| AI | `--ai` | `~/.ai/mcp/mcp.json` | `.ai/mcp/mcp.json` |
+| Windsurf | `--windsurf` | `~/.codeium/windsurf/mcp_config.json` | `.codeium/windsurf/mcp_config.json` |
 
 Antigravity MCP files are separate from its hooks configuration. JSON targets
-use `mcpServers`; Codex uses TOML `mcp_servers`. Project paths are relative to
-the command's working directory. Claude Desktop has no project target.
+use `mcpServers`. Codex uses TOML `mcp_servers`. Project paths are relative to
+the command's working directory.
+
+Use target flags for additions and removals. Without them, these commands
+target all supported files in the selected scope. `add` replaces a definition
+with the same name. Use `--dry-run` to preview the files before applying.
+
+`list` includes saved disabled entries, and `validate` checks configuration
+shape and bare commands on PATH. Check configured executable paths, HTTP
+connections, and authentication separately. The host's effective server list
+also accounts for sources such as plugins, managed settings, and alternate
+profiles. `list` can print full URLs and `show` can print arguments and
+environment values, so keep raw output local.
 
 ## Installing and Uninstalling Swiz MCP Server
 
@@ -41,6 +52,9 @@ Swiz provides dedicated actions to install or remove the Swiz MCP server without
 - `swiz manage mcp uninstall [--targets...] [--project] [--dry-run]` removes the Swiz MCP server from agent MCP configurations.
 - `swiz install --mcp` (or `--mcp-only`) installs only the MCP server across detected agents, leaving hooks and LaunchAgents untouched.
 - `swiz install --uninstall --mcp` removes only the MCP server without stripping other settings.
+
+For a host that loads the bundled Swiz MCP server, manage that registration
+in the host's plugin manager. See the [plugin guide](../plugins/swiz-core/README.md).
 
 ## Synchronizing agents
 
@@ -56,23 +70,27 @@ swiz manage mcp merge --from codex --agy --project --dry-run
 Without target flags, sync includes agents detected by the shared installed-agent
 detector and agents with an MCP file in the selected scope. Explicit flags select
 the participants, including targets whose files do not exist yet. Sync takes the
-union without deleting servers. Equivalent definitions converge without rewriting
-files. Conflicting same-name definitions fail before any write; use directed
-`merge --from <agent>` to select a winner. Multiple merge sources retain the CLI's
-registry order, with later sources winning; select one source for unambiguous resolution.
+union of enabled definitions and keeps disabled entries local. Equivalent
+definitions converge without rewriting files. Conflicting same-name definitions
+fail before any write. Use directed `merge --from <agent>` to choose the
+definition for a name. Multiple merge sources follow the CLI's registry order,
+with later sources winning.
 
-Sync and transfers involving Codex or Antigravity support portable stdio `command`, `args` and
-string-valued `env` definitions, accepting optional `type: "stdio"`. HTTP/OAuth,
-agent-specific settings and unsupported fields cause a preflight error rather
-than being silently discarded or copied with different semantics. Configure those
-servers separately. Environment values are copied when explicitly syncing; preview
-and conflict messages show counts and names without printing those values.
+Sync and merges involving Codex or Antigravity accept portable stdio `command`,
+`args`, and string-valued `env` definitions, with optional `type: "stdio"`.
+They also accept simple HTTP endpoint definitions with optional string `headers`.
+Swiz translates `url` to Antigravity's `serverUrl` and back. Configure
+host-specific OAuth and unsupported fields in the owning host. With
+`sync --skip-non-portable`, an incompatible name keeps its existing definition
+in every target. Portable values, including environment values and headers,
+are copied to the target files. Preview and conflict messages show counts or
+names without printing those values.
 
 All source/target configs and proposed serializations are checked before writing.
 Malformed configurations abort. Changed files receive a `.bak` backup, and a
 detected concurrent edit aborts that write. A later filesystem failure can leave
-earlier targets updated; the operation is not a multi-file transaction. Retry
-after resolving the failure. `--dry-run` writes neither configs nor backups.
+earlier targets updated. Reread the selected targets before retrying after a
+failure. `--dry-run` writes neither configs nor backups.
 
 Codex edits preserve unrelated TOML settings and check the complete parsed result
 before writing. MCP table formatting/comments may normalize; the original file is
